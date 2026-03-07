@@ -31,7 +31,7 @@ async function AccountPage(props: Params) {
       <div className="mx-auto max-w-4xl px-4 py-6">
         <PlanManagement
           accountId={account.id}
-          currentPlan={account.vex_plan ?? 'free'}
+          currentPlan={(account.vex_plan ?? 'free') as 'free' | 'starter' | 'pro' | 'team' | 'enterprise'}
           currentOverrides={
             account.vex_plan_overrides as Record<string, number> | null
           }
