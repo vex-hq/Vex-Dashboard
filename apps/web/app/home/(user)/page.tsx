@@ -43,6 +43,8 @@ async function UserHomePage() {
 
   // Should never reach here, but just in case
   redirect('/home/addworkspace');
+
+  return null;
 }
 
 export default withI18n(UserHomePage);

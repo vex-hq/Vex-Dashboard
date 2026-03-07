@@ -23,10 +23,11 @@ import {
 import { updateAccountPlan } from '../_lib/update-plan.action';
 
 const PLANS = ['free', 'starter', 'pro', 'team', 'enterprise'] as const;
+type Plan = (typeof PLANS)[number];
 
 interface PlanManagementProps {
   accountId: string;
-  currentPlan: string;
+  currentPlan: Plan;
   currentOverrides: Record<string, number> | null;
 }
 
@@ -35,7 +36,7 @@ export function PlanManagement({
   currentPlan,
   currentOverrides,
 }: PlanManagementProps) {
-  const [plan, setPlan] = useState(currentPlan);
+  const [plan, setPlan] = useState<Plan>(currentPlan);
   const [overrides, setOverrides] = useState<Record<string, string>>(
     currentOverrides
       ? Object.fromEntries(
@@ -91,7 +92,7 @@ export function PlanManagement({
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label>Plan</Label>
-          <Select value={plan} onValueChange={setPlan}>
+          <Select value={plan} onValueChange={(v) => setPlan(v as Plan)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
