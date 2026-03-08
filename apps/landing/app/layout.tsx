@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     description:
       "Detect when your AI agent's behavior silently changes in production. Before your customers notice.",
     url: 'https://tryvex.dev',
-    images: [{ url: '/images/og-image.png', width: 800, height: 800 }],
+    images: [{ url: '/images/og-image.png', width: 1200, height: 630 }],
     siteName: 'Vex',
     type: 'website',
   },
