@@ -23,6 +23,12 @@ export function SiteHeader() {
               Quick Start
             </a>
             <Link
+              href="/live"
+              className="text-sm text-emerald-400 transition-colors hover:text-emerald-300"
+            >
+              Live Demo
+            </Link>
+            <Link
               href="/blog"
               className="text-sm text-[#a2a2a2] transition-colors hover:text-white"
             >
