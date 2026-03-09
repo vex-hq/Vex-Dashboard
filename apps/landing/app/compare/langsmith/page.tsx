@@ -86,7 +86,7 @@ export default function CompareLangSmith() {
               Runtime reliability layer. Monitors agent behavior continuously,
               detects drift from learned baselines, and auto-corrects
               hallucinations before they reach users. Works with any framework.
-              Open source (Apache 2.0).
+              Fully open source.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">

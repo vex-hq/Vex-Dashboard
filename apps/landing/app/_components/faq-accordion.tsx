@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     q: 'Is Vex open source?',
-    a: 'Yes. Vex is fully open source under the Apache 2.0 license. Both the Python SDK and TypeScript SDK are available on GitHub.',
+    a: 'Yes. Vex is fully open source. The SDKs (Python, TypeScript) are Apache 2.0. The core engine and dashboard are AGPLv3. Everything is on GitHub.',
   },
   {
     q: 'Does Vex add latency?',

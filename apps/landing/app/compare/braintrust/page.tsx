@@ -93,7 +93,7 @@ export default function CompareBraintrust() {
               Runtime reliability layer. Verifies every agent output in
               real-time against hallucination, drift, schema, and coherence
               checks. Auto-corrects failing outputs with a 3-layer cascade
-              before they reach users. Open source (Apache 2.0).
+              before they reach users. Fully open source.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">

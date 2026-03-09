@@ -52,6 +52,3 @@ export const SCENARIOS: Scenario[] = [
     expectedAction: 'pass',
   },
 ];
-
-export const VEX_API_URL = 'https://api.tryvex.dev/v1/verify';
-export const VEX_DEMO_KEY = process.env.NEXT_PUBLIC_VEX_DEMO_KEY ?? '';

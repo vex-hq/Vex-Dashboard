@@ -126,7 +126,7 @@ const faqs = [
   {
     question: 'Is Vex open source?',
     answer:
-      'Yes. The Vex SDK and core engine are open source under the Apache 2.0 license. The managed platform (app.tryvex.dev) provides hosted infrastructure, dashboards, and additional features on top of the open-source foundation.',
+      'Yes. Vex is fully open source. The SDKs (Python, TypeScript) are Apache 2.0. The core engine and dashboard are AGPLv3. The managed platform (app.tryvex.dev) provides hosted infrastructure and zero-ops on top of the open-source foundation.',
   },
 ];
 

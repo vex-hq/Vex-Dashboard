@@ -2,8 +2,8 @@
 
 import { useCallback, useState } from 'react';
 
-import { VEX_API_URL, VEX_DEMO_KEY } from './scenarios';
 import type { Scenario } from './scenarios';
+import { verifyAction } from './verify-action';
 
 export interface CheckResult {
   check_type: string;
@@ -44,29 +44,11 @@ export function useVerify() {
     setState({ status: 'loading' });
 
     try {
-      const response = await fetch(VEX_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Vex-Key': VEX_DEMO_KEY,
-        },
-        body: JSON.stringify({
-          agent_id: 'demo-support-bot',
-          task: 'Answer customer support questions about company refund policy',
-          output: scenario.agentOutput,
-          ground_truth: scenario.groundTruth,
-          metadata: {
-            correction: scenario.correction,
-            transparency: 'transparent',
-          },
-        }),
+      const data: VerifyResult = await verifyAction({
+        agentOutput: scenario.agentOutput,
+        groundTruth: scenario.groundTruth,
+        correction: scenario.correction,
       });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data: VerifyResult = await response.json();
       setState({ status: 'success', data });
     } catch (err) {
       setState({
