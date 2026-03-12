@@ -101,7 +101,7 @@ export interface ChecklistPage {
     }[];
     regulatoryNotes: {
       heading: string;
-      notes: string[];
+      notes: (string | { rule: string; note: string })[];
     };
     cta: {
       heading: string;

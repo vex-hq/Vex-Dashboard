@@ -90,12 +90,19 @@ export function ChecklistRenderer({ checklist }: { checklist: ChecklistPage }) {
       <div className="mb-10 rounded-xl border border-orange-500/20 bg-orange-500/5 p-6">
         <h2 className="mb-3 text-lg font-bold text-white">{content.regulatoryNotes.heading}</h2>
         <ul className="grid gap-2">
-          {content.regulatoryNotes.notes.map((note, i) => (
-            <li key={i} className="flex gap-2 text-sm text-[#a2a2a2]">
-              <span className="text-orange-400">&#9888;</span>
-              {note}
-            </li>
-          ))}
+          {content.regulatoryNotes.notes.map((note, i) => {
+            const text = typeof note === 'string' ? note : (note as { rule?: string; note?: string }).note ?? (note as { rule?: string }).rule ?? '';
+            const rule = typeof note === 'string' ? undefined : (note as { rule?: string }).rule;
+            return (
+              <li key={i} className="flex gap-2 text-sm text-[#a2a2a2]">
+                <span className="text-orange-400">&#9888;</span>
+                <div>
+                  {rule && <span className="font-medium text-white">{rule}: </span>}
+                  {text}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
