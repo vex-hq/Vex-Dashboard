@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "content" / "pseo"
 TAXONOMY_DIR = CONTENT_DIR / "taxonomy"
 
-DEFAULT_MODEL = "Claude Sonnet 4.6"
+DEFAULT_MODEL = "xai/grok-4.1-fast-non-reasoning"
 MAX_CONCURRENT = 50
 SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
 
