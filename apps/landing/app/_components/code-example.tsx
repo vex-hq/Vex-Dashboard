@@ -73,13 +73,13 @@ function TypeScriptCode() {
       console.<span className="text-blue-400">log</span>(result.action);
       {'     '}
       <span className="text-neutral-500">
-        // &quot;pass&quot; | &quot;flag&quot; | &quot;block&quot;
+        {'// "pass" | "flag" | "block"'}
       </span>
       {'\n'}
       console.<span className="text-blue-400">
         log
       </span>(result.confidence);{' '}
-      <span className="text-neutral-500">// 0.92</span>
+      <span className="text-neutral-500">{'// 0.92'}</span>
     </pre>
   );
 }
