@@ -1,11 +1,18 @@
 import type { Metadata } from 'next';
 
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
 import { ProblemGuideRenderer } from '~/_components/pseo/problem-guide-renderer';
 import { RelatedPages } from '~/_components/pseo/related-pages';
-import { getAllProblemGuides, getProblemGuideBySlug } from '~/lib/pseo/content';
+
+import {
+  getAllProblemFrameworkGuides,
+  getAllProblemGuides,
+  getFrameworks,
+  getProblemGuideBySlug,
+} from '~/lib/pseo/content';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -76,6 +83,38 @@ export default async function ProblemGuidePage({ params }: Props) {
           </h1>
           <ProblemGuideRenderer guide={guide} />
           <RelatedPages pages={related} heading="More Guides" />
+
+          {(() => {
+            const pfGuides = getAllProblemFrameworkGuides().filter(
+              (g) => g.meta.problem === slug,
+            );
+            if (pfGuides.length === 0) return null;
+
+            const frameworks = getFrameworks();
+            const fwMap = new Map(frameworks.map((f) => [f.slug, f.name]));
+
+            return (
+              <div className="mt-16 border-t border-[#252525] pt-12">
+                <h2 className="mb-6 text-xl font-bold text-white">
+                  Framework-Specific Guides
+                </h2>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {pfGuides.map((g) => (
+                    <Link
+                      key={g.meta.framework}
+                      href={`/learn/${slug}/${g.meta.framework}`}
+                      className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                    >
+                      {guide.seo.title} in{' '}
+                      <span className="text-emerald-400">
+                        {fwMap.get(g.meta.framework) ?? g.meta.framework}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </>

@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
-import { getAllProblemGuides } from '~/lib/pseo/content';
+import {
+  getAllProblemFrameworkGuides,
+  getAllProblemGuides,
+} from '~/lib/pseo/content';
 
 export const metadata: Metadata = {
   title: 'AI Agent Problem Guides — Vex',
@@ -12,6 +15,7 @@ export const metadata: Metadata = {
 
 export default function LearnIndexPage() {
   const guides = getAllProblemGuides();
+  const frameworkGuides = getAllProblemFrameworkGuides();
 
   return (
     <div className="container py-24">
@@ -46,6 +50,19 @@ export default function LearnIndexPage() {
               </p>
             </Link>
           ))}
+        </div>
+      )}
+
+      {frameworkGuides.length > 0 && (
+        <div className="mt-20">
+          <h2 className="mb-3 text-2xl font-bold text-white">
+            Framework-Specific Guides
+          </h2>
+          <p className="max-w-[520px] text-[15px] leading-relaxed text-[#a2a2a2]">
+            {frameworkGuides.length} framework-specific versions are available
+            with tailored detection code, fix snippets, and Vex integration
+            steps. Browse them from each problem guide page above.
+          </p>
         </div>
       )}
     </div>

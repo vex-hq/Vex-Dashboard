@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
-import { getAllGuides, getFrameworks } from '~/lib/pseo/content';
+import {
+  getAllFrameworkIndustryGuides,
+  getAllFrameworkUseCaseGuides,
+  getAllGuides,
+  getFrameworks,
+} from '~/lib/pseo/content';
 
 export const metadata: Metadata = {
   title: 'Framework Guides — Vex',
@@ -13,6 +18,8 @@ export const metadata: Metadata = {
 export default function GuidesIndexPage() {
   const guides = getAllGuides();
   const frameworks = getFrameworks();
+  const useCaseGuides = getAllFrameworkUseCaseGuides();
+  const industryGuides = getAllFrameworkIndustryGuides();
 
   const frameworkMap = new Map(frameworks.map((f) => [f.slug, f]));
 
@@ -66,6 +73,71 @@ export default function GuidesIndexPage() {
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {useCaseGuides.length > 0 && (
+        <div className="mt-20">
+          <h2 className="mb-3 text-2xl font-bold text-white">
+            Framework × Use Case Guides
+          </h2>
+          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-[#a2a2a2]">
+            {useCaseGuides.length} guides covering how to build specific use
+            cases with each framework, including architecture patterns and Vex
+            integration.
+          </p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {frameworks.map((fw) => {
+              const count = useCaseGuides.filter(
+                (g) => g.meta.framework === fw.slug,
+              ).length;
+              if (count === 0) return null;
+              return (
+                <Link
+                  key={fw.slug}
+                  href={`/guides/${fw.slug}`}
+                  className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                >
+                  <span className="font-medium text-white">{fw.name}</span>
+                  <span className="ml-2 text-sm text-[#a2a2a2]">
+                    {count} use case {count === 1 ? 'guide' : 'guides'}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {industryGuides.length > 0 && (
+        <div className="mt-16">
+          <h2 className="mb-3 text-2xl font-bold text-white">
+            Framework × Industry Guides
+          </h2>
+          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-[#a2a2a2]">
+            {industryGuides.length} guides covering industry-specific compliance
+            requirements and guardrail configurations for each framework.
+          </p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {frameworks.map((fw) => {
+              const count = industryGuides.filter(
+                (g) => g.meta.framework === fw.slug,
+              ).length;
+              if (count === 0) return null;
+              return (
+                <Link
+                  key={fw.slug}
+                  href={`/guides/${fw.slug}`}
+                  className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                >
+                  <span className="font-medium text-white">{fw.name}</span>
+                  <span className="ml-2 text-sm text-[#a2a2a2]">
+                    {count} industry {count === 1 ? 'guide' : 'guides'}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -4,7 +4,10 @@ import { getAllPosts } from '~/lib/blog';
 import {
   getAllChecklists,
   getAllConceptComparisons,
+  getAllFrameworkIndustryGuides,
+  getAllFrameworkUseCaseGuides,
   getAllGuides,
+  getAllProblemFrameworkGuides,
   getAllProblemGuides,
 } from '~/lib/pseo/content';
 
@@ -39,6 +42,27 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   const problemGuides = getAllProblemGuides().map((g) => ({
     url: `https://tryvex.dev/learn/${g.meta.slug}`,
+    lastModified: new Date(g.meta.generatedAt),
+    changeFrequency: 'monthly' as const,
+    priority: 0.6,
+  }));
+
+  const frameworkUseCaseGuides = getAllFrameworkUseCaseGuides().map((g) => ({
+    url: `https://tryvex.dev/guides/${g.meta.framework}/${g.meta.useCase}`,
+    lastModified: new Date(g.meta.generatedAt),
+    changeFrequency: 'monthly' as const,
+    priority: 0.6,
+  }));
+
+  const frameworkIndustryGuides = getAllFrameworkIndustryGuides().map((g) => ({
+    url: `https://tryvex.dev/guides/${g.meta.framework}/${g.meta.industry}`,
+    lastModified: new Date(g.meta.generatedAt),
+    changeFrequency: 'monthly' as const,
+    priority: 0.6,
+  }));
+
+  const problemFrameworkGuides = getAllProblemFrameworkGuides().map((g) => ({
+    url: `https://tryvex.dev/learn/${g.meta.problem}/${g.meta.framework}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.6,
@@ -86,6 +110,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...checklists,
     ...conceptComparisons,
     ...problemGuides,
+    ...frameworkUseCaseGuides,
+    ...frameworkIndustryGuides,
+    ...problemFrameworkGuides,
     {
       url: 'https://tryvex.dev/tools/agent-health-score',
       lastModified: new Date(),

@@ -1,11 +1,21 @@
 import type { Metadata } from 'next';
 
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
 import { GuideRenderer } from '~/_components/pseo/guide-renderer';
 import { RelatedPages } from '~/_components/pseo/related-pages';
-import { getAllGuides, getGuideBySlug, getFrameworks } from '~/lib/pseo/content';
+
+import {
+  getAllFrameworkIndustryGuides,
+  getAllFrameworkUseCaseGuides,
+  getAllGuides,
+  getFrameworks,
+  getGuideBySlug,
+  getIndustries,
+  getUseCases,
+} from '~/lib/pseo/content';
 
 interface Props {
   params: Promise<{ framework: string }>;
@@ -95,6 +105,71 @@ export default async function GuidePage({ params }: Props) {
           )}
           <GuideRenderer guide={guide} />
           <RelatedPages pages={related} heading="More Framework Guides" />
+
+          {(() => {
+            const useCaseGuides = getAllFrameworkUseCaseGuides().filter(
+              (g) => g.meta.framework === framework,
+            );
+            const industryGuides = getAllFrameworkIndustryGuides().filter(
+              (g) => g.meta.framework === framework,
+            );
+            const useCases = getUseCases();
+            const industries = getIndustries();
+            const ucMap = new Map(useCases.map((uc) => [uc.slug, uc.name]));
+            const indMap = new Map(industries.map((i) => [i.slug, i.name]));
+
+            if (useCaseGuides.length === 0 && industryGuides.length === 0) {
+              return null;
+            }
+
+            return (
+              <div className="mt-16 border-t border-[#252525] pt-12">
+                {useCaseGuides.length > 0 && (
+                  <div className="mb-12">
+                    <h2 className="mb-6 text-xl font-bold text-white">
+                      {meta?.name ?? framework} Use Case Guides
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {useCaseGuides.map((g) => (
+                        <Link
+                          key={g.meta.useCase}
+                          href={`/guides/${framework}/${g.meta.useCase}`}
+                          className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                        >
+                          Building{' '}
+                          <span className="text-emerald-400">
+                            {ucMap.get(g.meta.useCase) ?? g.meta.useCase}
+                          </span>{' '}
+                          with {meta?.name ?? framework}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {industryGuides.length > 0 && (
+                  <div>
+                    <h2 className="mb-6 text-xl font-bold text-white">
+                      {meta?.name ?? framework} Industry Guides
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {industryGuides.map((g) => (
+                        <Link
+                          key={g.meta.industry}
+                          href={`/guides/${framework}/${g.meta.industry}`}
+                          className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                        >
+                          {meta?.name ?? framework} Guardrails for{' '}
+                          <span className="text-emerald-400">
+                            {indMap.get(g.meta.industry) ?? g.meta.industry}
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </>
