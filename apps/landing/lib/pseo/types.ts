@@ -224,3 +224,141 @@ export interface ProblemGuide {
     };
   };
 }
+
+// === Taxonomy: Problems ===
+
+export interface ProblemMeta {
+  slug: string;
+  title: string;
+  category: string;
+}
+
+// === Cross-Product Schemas ===
+
+export interface FrameworkUseCaseGuide {
+  meta: {
+    framework: string;
+    useCase: string;
+    generatedAt: string;
+  };
+  seo: {
+    title: string;
+    description: string;
+    keywords: string[];
+  };
+  content: {
+    intro: string;
+    architectureOverview: {
+      heading: string;
+      description: string;
+      diagram: string;
+    };
+    risks: {
+      name: string;
+      description: string;
+      severity: 'critical' | 'high' | 'medium';
+      mitigation: string;
+    }[];
+    implementation: {
+      title: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    }[];
+    vexIntegration: {
+      title: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    }[];
+    cta: {
+      heading: string;
+      description: string;
+    };
+  };
+}
+
+export interface FrameworkIndustryGuide {
+  meta: {
+    framework: string;
+    industry: string;
+    generatedAt: string;
+  };
+  seo: {
+    title: string;
+    description: string;
+    keywords: string[];
+  };
+  content: {
+    intro: string;
+    complianceRequirements: {
+      regulation: string;
+      description: string;
+      howVexHelps: string;
+    }[];
+    industryRisks: {
+      name: string;
+      description: string;
+      severity: 'critical' | 'high' | 'medium';
+      example: string;
+    }[];
+    implementation: {
+      title: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    }[];
+    caseStudyScenario: {
+      heading: string;
+      scenario: string;
+      outcome: string;
+    };
+    cta: {
+      heading: string;
+      description: string;
+    };
+  };
+}
+
+export interface ProblemFrameworkGuide {
+  meta: {
+    problem: string;
+    framework: string;
+    generatedAt: string;
+  };
+  seo: {
+    title: string;
+    description: string;
+    keywords: string[];
+  };
+  content: {
+    intro: string;
+    howItManifests: {
+      scenario: string;
+      symptom: string;
+      impact: string;
+    }[];
+    detection: {
+      name: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    }[];
+    fixes: {
+      name: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    }[];
+    vexAutomation: {
+      heading: string;
+      description: string;
+      code: string;
+      language: 'python' | 'typescript';
+    };
+    cta: {
+      heading: string;
+      description: string;
+    };
+  };
+}
