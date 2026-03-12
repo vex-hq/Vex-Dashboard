@@ -5,9 +5,13 @@ import type {
   ChecklistPage,
   ConceptComparison,
   FrameworkGuide,
+  FrameworkIndustryGuide,
   FrameworkMeta,
+  FrameworkUseCaseGuide,
   IndustryMeta,
+  ProblemFrameworkGuide,
   ProblemGuide,
+  ProblemMeta,
   ToolComparison,
   UseCaseMeta,
 } from './types';
@@ -39,6 +43,10 @@ export function getUseCases(): UseCaseMeta[] {
 
 export function getIndustries(): IndustryMeta[] {
   return readJson<IndustryMeta[]>(path.join(PSEO_DIR, 'taxonomy', 'industries.json'));
+}
+
+export function getProblems(): ProblemMeta[] {
+  return readJson<ProblemMeta[]>(path.join(PSEO_DIR, 'taxonomy', 'problems.json'));
 }
 
 // --- Content ---
@@ -91,4 +99,40 @@ export function getProblemGuideBySlug(slug: string): ProblemGuide | undefined {
   const filePath = path.join(PSEO_DIR, 'problem-guides', `${slug}.json`);
   if (!fs.existsSync(filePath)) return undefined;
   return readJson<ProblemGuide>(filePath);
+}
+
+// --- Cross-product: Framework x Use Case ---
+
+export function getAllFrameworkUseCaseGuides(): FrameworkUseCaseGuide[] {
+  return readAllJson<FrameworkUseCaseGuide>(path.join(PSEO_DIR, 'guides', 'cross'));
+}
+
+export function getFrameworkUseCaseGuide(framework: string, useCase: string): FrameworkUseCaseGuide | undefined {
+  const filePath = path.join(PSEO_DIR, 'guides', 'cross', `${framework}-${useCase}.json`);
+  if (!fs.existsSync(filePath)) return undefined;
+  return readJson<FrameworkUseCaseGuide>(filePath);
+}
+
+// --- Cross-product: Framework x Industry ---
+
+export function getAllFrameworkIndustryGuides(): FrameworkIndustryGuide[] {
+  return readAllJson<FrameworkIndustryGuide>(path.join(PSEO_DIR, 'guides', 'industry'));
+}
+
+export function getFrameworkIndustryGuide(framework: string, industry: string): FrameworkIndustryGuide | undefined {
+  const filePath = path.join(PSEO_DIR, 'guides', 'industry', `${framework}-${industry}.json`);
+  if (!fs.existsSync(filePath)) return undefined;
+  return readJson<FrameworkIndustryGuide>(filePath);
+}
+
+// --- Cross-product: Problem x Framework ---
+
+export function getAllProblemFrameworkGuides(): ProblemFrameworkGuide[] {
+  return readAllJson<ProblemFrameworkGuide>(path.join(PSEO_DIR, 'problem-guides', 'cross'));
+}
+
+export function getProblemFrameworkGuide(problem: string, framework: string): ProblemFrameworkGuide | undefined {
+  const filePath = path.join(PSEO_DIR, 'problem-guides', 'cross', `${problem}-${framework}.json`);
+  if (!fs.existsSync(filePath)) return undefined;
+  return readJson<ProblemFrameworkGuide>(filePath);
 }
