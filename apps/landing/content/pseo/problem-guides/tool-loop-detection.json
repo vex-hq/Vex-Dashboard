@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "slug": "tool-loop-detection",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents",
+    "description": "Complete guide to tool loop detection in ai agents. Learn detection methods, fixes, and best practices for production AI agents.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "AI agent reliability",
+      "agent monitoring"
+    ]
+  },
+  "content": {
+    "intro": "Tool loops occur when an AI agent repeatedly invokes the same tool or sequence of tools without making meaningful progress toward its goal, consuming resources and often failing to complete tasks. This failure mode is particularly insidious because the agent appears to be working — it's actively calling tools and processing results — but is stuck in a cycle that never resolves. Left undetected, tool loops can exhaust API rate limits, inflate costs, and leave end users waiting indefinitely for responses that never arrive.",
+    "whatIsIt": {
+      "heading": "What Is Tool Loop Detection in AI Agents?",
+      "explanation": "A tool loop happens when an AI agent enters a repetitive execution pattern, calling the same tool (or set of tools) with identical or near-identical inputs across multiple reasoning steps. This typically occurs because the agent misinterprets a tool's output, fails to update its internal state after a tool call, or encounters an ambiguous goal that causes it to re-evaluate and re-invoke the same action. Unlike an infinite loop in traditional software, tool loops in agents are probabilistic — the agent may eventually escape, but often only after dozens of redundant calls.\n\nThe root causes are varied. An agent might loop because a tool returns an error it doesn't know how to handle, so it retries indefinitely. It might loop because the LLM's reasoning step concludes that the same action is still needed after seeing the result of that action — a sign of poor context integration or a flawed system prompt. In multi-agent architectures, loops can span agent boundaries, where Agent A delegates to Agent B, which delegates back to Agent A, creating a circular dependency that neither agent can break.\n\nTool loop detection is the practice of instrumenting your agent runtime to identify these patterns in real time and intervene before they cause harm. Detection strategies range from simple call-count thresholds to sophisticated semantic similarity checks that compare tool inputs across steps. Effective detection must balance sensitivity (catching real loops early) against specificity (not interrupting legitimate repetitive workflows, like polling a status endpoint until a job completes).",
+      "examples": [
+        {
+          "scenario": "A research agent is asked to summarize a webpage. The fetch_url tool returns a 403 Forbidden error. The agent's reasoning step concludes it should try fetching the URL again, producing the same 403 error, and loops 47 times before hitting the session token limit.",
+          "consequence": "The task never completes, the user receives a timeout error after several minutes, and the agent consumes the entire context window with redundant tool call records, making debugging difficult."
+        },
+        {
+          "scenario": "A coding agent uses a search_codebase tool to find a function definition, then a read_file tool to inspect it. The read_file output is ambiguous, so the agent decides to search again with the same query, then reads the same file again, cycling between the two tools indefinitely.",
+          "consequence": "API costs spike as hundreds of tool calls are made. The agent never produces the code change it was asked to make, and the developer is billed for a failed task."
+        },
+        {
+          "scenario": "In a multi-agent customer support system, a triage agent routes a complex billing question to a billing specialist agent. The billing agent determines the issue requires account verification and routes back to the triage agent, which re-routes to billing, creating a ping-pong loop between the two agents.",
+          "consequence": "The customer's query is never answered. Both agents consume compute resources continuously, and the loop only terminates when an external timeout kills the session, leaving no useful output."
+        },
+        {
+          "scenario": "A data analysis agent calls a run_sql_query tool to fetch records, receives an empty result set, and interprets this as meaning the query needs to be retried rather than that no data exists. It calls the same query in a loop, occasionally modifying a LIMIT clause but never changing the WHERE conditions that produce zero results.",
+          "consequence": "The database receives hundreds of identical queries, degrading performance for other users. The agent eventually exhausts its step budget and returns an unhelpful 'could not retrieve data' message."
+        }
+      ]
+    },
+    "howToDetect": {
+      "heading": "How to Detect It",
+      "methods": [
+        {
+          "name": "Call Frequency Threshold Monitoring",
+          "description": "Track the number of times each unique tool is called within a single agent session or reasoning chain. If any tool exceeds a configurable threshold (e.g., called more than 5 times in a single task), flag the session as a potential loop. This is the simplest detection method and catches the most obvious loops — repeated retries of a failing tool — with minimal overhead. The threshold should be tuned per tool: a polling tool might legitimately be called 20 times, while a fetch_document tool should rarely be called more than twice for the same task.",
+          "effectiveness": "medium"
+        },
+        {
+          "name": "Input Fingerprint Deduplication",
+          "description": "Hash the inputs (tool name + serialized arguments) of every tool call and store them in a session-scoped set. Before executing any tool call, check whether an identical fingerprint has been seen before in the current session. If a duplicate is detected, the agent is about to make an identical call it has already made — a strong signal of a loop. This method is highly precise for exact loops but misses near-duplicate loops where arguments vary slightly (e.g., incrementing a page number that never changes the result).",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Semantic Similarity Analysis of Tool Sequences",
+          "description": "Embed the sequence of recent tool calls (tool name + arguments + result summary) into a vector space and compute cosine similarity between the current window of N steps and the previous window of N steps. A similarity score above a threshold (e.g., 0.92) indicates the agent is repeating a pattern of behavior without meaningful variation. This method catches near-duplicate loops and multi-tool cycles that simple deduplication misses, but requires an embedding model and adds latency to each reasoning step.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Progress Signal Monitoring",
+          "description": "Define task-specific progress signals — measurable indicators that the agent is moving toward its goal — and monitor whether these signals change between tool calls. For example, in a file-editing task, progress signals might include the number of unique files read, the number of edits made, or the number of subtasks marked complete. If N consecutive tool calls produce no change in any progress signal, the agent is likely looping. This method requires more upfront configuration but produces the most actionable alerts because it distinguishes between 'stuck' and 'legitimately slow' agents.",
+          "effectiveness": "high"
+        }
+      ]
+    },
+    "howToFix": {
+      "heading": "How to Fix It",
+      "strategies": [
+        {
+          "name": "Implement a Tool Call Deduplication Guard",
+          "description": "Wrap your tool execution layer with a guard that tracks call fingerprints and blocks or warns on duplicate calls within a session. This acts as a circuit breaker, preventing the agent from executing a tool call it has already made and forcing it to reconsider its approach.",
+          "code": "import hashlib\nimport json\nfrom functools import wraps\nfrom typing import Any, Callable, Dict, Optional\n\nclass ToolLoopGuard:\n    def __init__(self, max_duplicate_calls: int = 2, max_total_calls: int = 50):\n        self.call_fingerprints: Dict[str, int] = {}\n        self.total_calls = 0\n        self.max_duplicate_calls = max_duplicate_calls\n        self.max_total_calls = max_total_calls\n\n    def _fingerprint(self, tool_name: str, kwargs: dict) -> str:\n        payload = json.dumps({\"tool\": tool_name, \"args\": kwargs}, sort_keys=True)\n        return hashlib.sha256(payload.encode()).hexdigest()\n\n    def check_and_record(self, tool_name: str, kwargs: dict) -> Optional[str]:\n        \"\"\"Returns an error message if the call should be blocked, else None.\"\"\"\n        self.total_calls += 1\n        if self.total_calls > self.max_total_calls:\n            return f\"Tool call budget exceeded ({self.max_total_calls} calls). Task aborted to prevent runaway execution.\"\n\n        fp = self._fingerprint(tool_name, kwargs)\n        count = self.call_fingerprints.get(fp, 0) + 1\n        self.call_fingerprints[fp] = count\n\n        if count > self.max_duplicate_calls:\n            return (\n                f\"Duplicate tool call detected: '{tool_name}' has been called with \"\n                f\"identical arguments {count} times. This indicates a reasoning loop. \"\n                f\"You must try a different approach or conclude that this action cannot \"\n                f\"produce new information.\"\n            )\n        return None\n\n    def reset(self):\n        self.call_fingerprints.clear()\n        self.total_calls = 0\n\n\ndef with_loop_guard(guard: ToolLoopGuard):\n    \"\"\"Decorator to wrap tool functions with loop detection.\"\"\"\n    def decorator(func: Callable) -> Callable:\n        @wraps(func)\n        def wrapper(*args, **kwargs) -> Any:\n            error = guard.check_and_record(func.__name__, kwargs)\n            if error:\n                # Return the error as a tool result so the LLM can reason about it\n                return {\"error\": error, \"status\": \"blocked_by_loop_guard\"}\n            return func(*args, **kwargs)\n        return wrapper\n    return decorator\n\n\n# Usage example\nguard = ToolLoopGuard(max_duplicate_calls=2, max_total_calls=30)\n\n@with_loop_guard(guard)\ndef fetch_url(url: str) -> dict:\n    # ... actual implementation\n    return {\"content\": \"...\"}\n\n@with_loop_guard(guard)\ndef search_codebase(query: str) -> dict:\n    # ... actual implementation\n    return {\"results\": []}\n",
+          "language": "python"
+        },
+        {
+          "name": "Inject Loop-Awareness into the System Prompt",
+          "description": "Modify the agent's system prompt to explicitly instruct it on how to handle repeated failures and recognize when it is looping. LLMs respond well to explicit instructions about meta-cognitive behaviors like self-monitoring. This is a low-cost fix that reduces loop frequency without requiring infrastructure changes.",
+          "code": "LOOP_AWARE_SYSTEM_PROMPT = \"\"\"\nYou are a helpful AI assistant with access to tools. Follow these rules strictly:\n\n## Anti-Loop Rules\n1. **Never call the same tool with the same arguments twice.** If a tool call did not \n   produce useful results, calling it again will not help. Instead, try a different \n   tool, modify your approach, or conclude that the information is unavailable.\n\n2. **Treat errors as final for the current approach.** If a tool returns an error \n   (e.g., 404, 403, timeout), do not retry the same call. Either use a fallback \n   strategy or inform the user that this approach failed.\n\n3. **Track your progress explicitly.** Before each tool call, ask yourself: \n   'What new information will this give me that I don't already have?' \n   If the answer is 'nothing new', do not make the call.\n\n4. **Recognize when to stop.** If you have made more than 3 attempts to accomplish \n   a subtask without success, stop and report what you tried and why it failed. \n   Do not continue attempting indefinitely.\n\n5. **Avoid circular delegation.** If you are routing a task to another agent or \n   tool, do not route it back to a component that has already handled it.\n\"\"\"\n\n# Inject into your agent initialization\ndef create_agent_with_loop_awareness(base_system_prompt: str) -> str:\n    return LOOP_AWARE_SYSTEM_PROMPT + \"\\n\\n## Your Task Instructions\\n\" + base_system_prompt\n",
+          "language": "python"
+        },
+        {
+          "name": "Implement a Step Budget with Graceful Degradation",
+          "description": "Enforce a hard limit on the number of reasoning steps or tool calls per task, and implement graceful degradation logic that returns partial results when the budget is exhausted rather than failing silently. This ensures loops always terminate and users receive actionable feedback.",
+          "code": "from dataclasses import dataclass, field\nfrom typing import Any, List, Optional\nimport time\n\n@dataclass\nclass AgentStep:\n    step_number: int\n    tool_name: str\n    tool_args: dict\n    tool_result: Any\n    timestamp: float = field(default_factory=time.time)\n\nclass BudgetedAgentRunner:\n    def __init__(\n        self,\n        agent,\n        max_steps: int = 20,\n        max_duration_seconds: float = 120.0\n    ):\n        self.agent = agent\n        self.max_steps = max_steps\n        self.max_duration_seconds = max_duration_seconds\n        self.steps: List[AgentStep] = []\n        self.start_time: Optional[float] = None\n\n    def _is_budget_exceeded(self) -> Optional[str]:\n        if len(self.steps) >= self.max_steps:\n            return f\"Step budget exhausted after {self.max_steps} steps.\"\n        elapsed = time.time() - self.start_time\n        if elapsed > self.max_duration_seconds:\n            return f\"Time budget exhausted after {elapsed:.1f}s.\"\n        return None\n\n    def _generate_partial_result(self, task: str, reason: str) -> dict:\n        \"\"\"Produce a useful partial result when the budget is exceeded.\"\"\"\n        completed_tools = list({s.tool_name for s in self.steps})\n        last_results = [\n            {\"tool\": s.tool_name, \"result\": s.tool_result}\n            for s in self.steps[-3:]  # Last 3 steps for context\n        ]\n        return {\n            \"status\": \"incomplete\",\n            \"reason\": reason,\n            \"task\": task,\n            \"steps_taken\": len(self.steps),\n            \"tools_used\": completed_tools,\n            \"last_results\": last_results,\n            \"recommendation\": (\n                \"The agent exceeded its execution budget. This may indicate a tool loop \"\n                \"or an overly complex task. Review the tools_used list for repeated patterns.\"\n            )\n        }\n\n    def run(self, task: str) -> dict:\n        self.start_time = time.time()\n        self.steps = []\n\n        for step_num in range(self.max_steps + 1):\n            budget_error = self._is_budget_exceeded()\n            if budget_error:\n                return self._generate_partial_result(task, budget_error)\n\n            # Get next action from agent\n            action = self.agent.get_next_action(task, self.steps)\n\n            if action.is_final_answer:\n                return {\"status\": \"complete\", \"result\": action.answer, \"steps_taken\": step_num}\n\n            # Execute tool\n            result = self.agent.execute_tool(action.tool_name, action.tool_args)\n            self.steps.append(AgentStep(\n                step_number=step_num,\n                tool_name=action.tool_name,\n                tool_args=action.tool_args,\n                tool_result=result\n            ))\n\n        return self._generate_partial_result(task, \"Max steps reached\")\n",
+          "language": "python"
+        },
+        {
+          "name": "Add Real-Time Loop Detection with Automatic Intervention",
+          "description": "Build a monitoring layer that analyzes the rolling window of recent tool calls to detect loop patterns and automatically injects corrective context into the agent's next reasoning step. This is the most robust fix because it catches loops that slip past simpler guards and provides the agent with specific guidance on how to escape.",
+          "code": "from collections import deque\nfrom typing import Deque, List, Tuple\nimport json\n\nclass LoopPattern:\n    def __init__(self, tool_name: str, args_hash: str, count: int):\n        self.tool_name = tool_name\n        self.args_hash = args_hash\n        self.count = count\n\nclass RealTimeLoopDetector:\n    def __init__(self, window_size: int = 6, repeat_threshold: int = 2):\n        self.window_size = window_size\n        self.repeat_threshold = repeat_threshold\n        self.call_window: Deque[Tuple[str, str]] = deque(maxlen=window_size)\n\n    def _hash_args(self, args: dict) -> str:\n        return json.dumps(args, sort_keys=True)\n\n    def record_call(self, tool_name: str, args: dict):\n        self.call_window.append((tool_name, self._hash_args(args)))\n\n    def detect_loops(self) -> List[LoopPattern]:\n        \"\"\"Analyze the current window for loop patterns.\"\"\"\n        patterns = []\n        call_counts: dict = {}\n\n        for tool_name, args_hash in self.call_window:\n            key = (tool_name, args_hash)\n            call_counts[key] = call_counts.get(key, 0) + 1\n\n        for (tool_name, args_hash), count in call_counts.items():\n            if count >= self.repeat_threshold:\n                patterns.append(LoopPattern(tool_name, args_hash, count))\n\n        return patterns\n\n    def generate_intervention_message(self, patterns: List[LoopPattern]) -> str:\n        \"\"\"Generate a message to inject into the agent's context to break the loop.\"\"\"\n        if not patterns:\n            return \"\"\n\n        tool_names = [p.tool_name for p in patterns]\n        message = (\n            f\"[SYSTEM LOOP DETECTION ALERT] The following tools have been called \"\n            f\"repeatedly with the same arguments in the last {self.window_size} steps: \"\n            f\"{', '.join(tool_names)}. \"\n            f\"This indicates you are in a reasoning loop. \"\n            f\"You MUST take one of the following actions:\\n\"\n            f\"1. Use a completely different tool to approach the problem.\\n\"\n            f\"2. Modify your goal decomposition — the current subtask may be unsolvable.\\n\"\n            f\"3. Return a partial answer explaining what you attempted and why it failed.\\n\"\n            f\"Do NOT call {tool_names[0]} again with the same arguments.\"\n        )\n        return message\n\n\nclass LoopAwareAgentOrchestrator:\n    def __init__(self, agent, detector: RealTimeLoopDetector):\n        self.agent = agent\n        self.detector = detector\n\n    def run_step(self, task: str, history: list) -> dict:\n        # Check for loops before getting next action\n        loop_patterns = self.detector.detect_loops()\n        intervention = self.detector.generate_intervention_message(loop_patterns)\n\n        # Inject intervention into context if loops detected\n        augmented_history = history.copy()\n        if intervention:\n            augmented_history.append({\n                \"role\": \"system\",\n                \"content\": intervention\n            })\n\n        # Get next action with loop-aware context\n        action = self.agent.get_next_action(task, augmented_history)\n\n        # Record the call for future loop detection\n        if not action.is_final_answer:\n            self.detector.record_call(action.tool_name, action.tool_args)\n\n        return action\n",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Design Tools to Return Unambiguous Terminal States",
+          "description": "Many tool loops are caused by tools that return ambiguous results — empty arrays, null values, or generic error messages — that the agent interprets as 'try again' rather than 'this is the final answer.' Design your tools to return explicit terminal state indicators: a 'found: false' field when a search returns no results, a 'retryable: false' field on permanent errors, and a 'data_exhausted: true' field when pagination reaches the end. When the agent receives unambiguous signals, it is far less likely to retry unnecessarily."
+        },
+        {
+          "title": "Use Per-Tool Call Budgets, Not Just Global Budgets",
+          "description": "A global step budget of 20 calls is useful, but a single looping tool can consume all 20 steps before other tools get a chance to run. Assign per-tool call budgets that reflect each tool's expected usage pattern in your specific workflows. A web_search tool might have a budget of 5 calls per task, while a read_file tool might have 10. Per-tool budgets catch loops earlier and preserve budget for other tools that might actually make progress."
+        },
+        {
+          "title": "Log Full Tool Call Sequences for Post-Mortem Analysis",
+          "description": "When a loop is detected and interrupted, log the complete sequence of tool calls — including inputs, outputs, and the agent's reasoning text between calls — to a structured observability store. This data is invaluable for understanding why the loop occurred: Was it a bad tool design? A flawed system prompt? A specific input pattern that triggers looping behavior? Without detailed logs, you are debugging blind. Tools like Vex can automatically capture and analyze these sequences to surface root causes."
+        },
+        {
+          "title": "Test Agents Against Known Loop-Inducing Inputs",
+          "description": "Build a regression test suite that includes inputs specifically designed to trigger loops: tasks with no valid solution, tasks that require tools that will always fail in your test environment, and tasks with ambiguous success criteria. Run these tests against every agent version before deployment. A loop that takes 5 minutes to manifest in production can be detected in milliseconds in a test environment with a tight step budget. Treat loop-inducing inputs as first-class test cases alongside happy-path scenarios."
+        },
+        {
+          "title": "Implement Exponential Backoff for Legitimately Retryable Tools",
+          "description": "Some tools — like polling a job status endpoint or waiting for an async operation — are legitimately called multiple times. Distinguish these from looping tools by implementing explicit retry logic with exponential backoff and a maximum retry count, rather than letting the agent decide to retry. Wrap retryable tools in a managed retry decorator that enforces backoff and a hard retry limit, and have the tool return a 'max_retries_exceeded' status when the limit is hit. This removes the retry decision from the agent's reasoning loop entirely, eliminating a major source of unintentional loops."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Vex monitors your AI agents in real time, automatically detecting tool loop patterns, injecting corrective interventions, and providing full call-sequence replay so you can eliminate loops before they reach production."
+    }
+  }
+}

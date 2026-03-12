@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to CrewAI Agents",
+    "description": "Learn how to add runtime guardrails to CrewAI agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "CrewAI guardrails",
+      "CrewAI monitoring",
+      "CrewAI hallucination detection",
+      "Vex CrewAI",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "CrewAI's multi-agent architecture enables powerful collaboration between autonomous agents, but also introduces compounding failure risks — a single hallucinated tool output or delegated task misinterpretation can cascade silently across your entire crew. Without runtime guardrails, production CrewAI deployments are vulnerable to delegation loops, role drift, and inconsistent outputs that are difficult to trace back to their source. Vex integrates directly into CrewAI's task callback system to give you real-time observability and reliability enforcement at every step of agent execution.",
+    "whyGuardrails": {
+      "heading": "Why CrewAI Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Cascading Agent Failures",
+          "explanation": "In CrewAI, agents pass outputs to one another as inputs for subsequent tasks. A single fabricated or malformed output from one agent becomes the ground truth for the next, meaning errors compound exponentially rather than failing fast and visibly."
+        },
+        {
+          "title": "Opaque Delegation Chains",
+          "explanation": "When a CrewAI agent delegates a subtask to another crew member via the DelegateWorkToCoworker tool, the delegation chain can become circular or infinite without an external observer enforcing termination and loop-detection logic."
+        },
+        {
+          "title": "Role and Objective Drift",
+          "explanation": "CrewAI agents are initialized with a role, goal, and backstory that shape their behavior, but LLM context drift can cause agents to gradually reinterpret their objectives mid-task, especially in long-running crews with many sequential tasks."
+        },
+        {
+          "title": "No Built-in Output Validation",
+          "explanation": "CrewAI does not natively validate that an agent's output conforms to the expected schema or quality bar before passing it downstream. Vex fills this gap by asserting structural and semantic correctness at each task boundary."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common CrewAI Failure Modes",
+      "failures": [
+        {
+          "name": "Agent Delegation Loop",
+          "description": "Two or more agents repeatedly delegate the same task back and forth using the DelegateWorkToCoworker tool, consuming tokens and time without producing a final output.",
+          "severity": "critical",
+          "example": "A Researcher agent delegates 'summarize findings' to a Writer agent, which delegates 'verify facts' back to the Researcher, creating an infinite loop that exhausts the max_iter limit and returns an empty result."
+        },
+        {
+          "name": "Hallucinated Tool Output Propagation",
+          "description": "An agent fabricates the result of a tool call — such as a web search or API response — and passes the invented data as a verified fact to downstream agents who treat it as ground truth.",
+          "severity": "critical",
+          "example": "A DataFetcher agent hallucinates a stock price of $142.50 from a tool call that actually failed, and the Analyst agent builds a full investment report based on the fabricated figure."
+        },
+        {
+          "name": "Task Objective Drift",
+          "description": "An agent gradually reinterprets its assigned task description over multiple reasoning steps, producing output that satisfies a subtly different objective than what was originally specified.",
+          "severity": "high",
+          "example": "A task assigned as 'write a neutral product comparison' is reinterpreted by the agent as 'write a persuasive recommendation' after several chain-of-thought steps, violating the crew's editorial guidelines."
+        },
+        {
+          "name": "Inconsistent Role Behavior",
+          "description": "The same agent role produces outputs of wildly varying quality, format, or depth across different crew runs, making downstream processing unreliable and breaking structured pipelines.",
+          "severity": "high",
+          "example": "A QA Engineer agent returns a detailed JSON test report on one run and a single-sentence summary on the next, causing the CI integration agent to fail parsing on inconsistent runs."
+        },
+        {
+          "name": "Silent Max Iteration Exhaustion",
+          "description": "An agent hits its max_iter limit without completing its task and returns a partial or empty output without raising an exception, causing downstream agents to operate on incomplete data.",
+          "severity": "medium",
+          "example": "A ResearchAgent set to max_iter=5 exhausts its iterations trying to parse a complex webpage and silently returns an empty string, which the SummaryAgent then summarizes as 'No information was found.'"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with CrewAI",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both crewai and vex-sdk, then initialize the Vex client with your API key. The Vex client will be used to create a step callback that wraps each agent task execution.",
+          "code": "pip install crewai vex-sdk\n\n# In your Python file\nimport os\nfrom vex_sdk import VexClient\n\nvex = VexClient(\n    api_key=os.environ[\"VEX_API_KEY\"],\n    project=\"my-crewai-project\",\n    environment=\"production\"\n)",
+          "language": "python"
+        },
+        {
+          "title": "Create a Vex Step Callback for Task Monitoring",
+          "description": "Define a callback function that conforms to CrewAI's step_callback signature. This function receives a AgentFinish or AgentAction object after each agent reasoning step and forwards it to Vex for validation and observability.",
+          "code": "from crewai import Agent, Task, Crew\nfrom crewai.agents.agent_builder.base_agent_executor_mixin import CrewAgentExecutorMixin\nfrom langchain_core.agents import AgentFinish, AgentAction\nfrom vex_sdk import VexClient, CheckOptions\nfrom typing import Union\n\nvex = VexClient(api_key=os.environ[\"VEX_API_KEY\"], project=\"crewai-demo\")\n\ndef vex_step_callback(\n    agent_output: Union[AgentFinish, AgentAction],\n    agent_name: str = \"unknown\"\n) -> None:\n    \"\"\"\n    CrewAI step_callback receives the agent's intermediate output\n    after each reasoning step. We forward this to Vex for real-time checks.\n    \"\"\"\n    if isinstance(agent_output, AgentFinish):\n        output_text = agent_output.return_values.get(\"output\", \"\")\n        check_type = \"task_completion\"\n    elif isinstance(agent_output, AgentAction):\n        output_text = f\"Tool: {agent_output.tool} | Input: {agent_output.tool_input}\"\n        check_type = \"tool_call\"\n    else:\n        output_text = str(agent_output)\n        check_type = \"intermediate_step\"\n\n    result = vex.check(\n        content=output_text,\n        options=CheckOptions(\n            checks=[\"hallucination\", \"task_drift\", \"delegation_loop\"],\n            metadata={\n                \"agent\": agent_name,\n                \"step_type\": check_type\n            }\n        )\n    )\n\n    if result.flagged:\n        raise RuntimeError(\n            f\"Vex flagged agent '{agent_name}' output: {result.reason}\"\n        )",
+          "language": "python"
+        },
+        {
+          "title": "Attach the Callback to Each CrewAI Agent",
+          "description": "Pass the vex_step_callback to each Agent's step_callback parameter. Use a lambda or functools.partial to bind the agent's role name so Vex can attribute issues to the correct crew member in its dashboard.",
+          "code": "from crewai import Agent, Task, Crew, Process\nfrom functools import partial\nfrom langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model=\"gpt-4o\", temperature=0.2)\n\n# Bind agent name to the callback for attribution in Vex dashboard\nresearcher_callback = partial(vex_step_callback, agent_name=\"Senior Researcher\")\nwriter_callback = partial(vex_step_callback, agent_name=\"Content Writer\")\nreviewer_callback = partial(vex_step_callback, agent_name=\"Quality Reviewer\")\n\nresearcher = Agent(\n    role=\"Senior Researcher\",\n    goal=\"Find accurate, up-to-date information on the given topic\",\n    backstory=\"You are an expert researcher with 10 years of experience in fact-checking.\",\n    llm=llm,\n    verbose=True,\n    max_iter=10,\n    step_callback=researcher_callback\n)\n\nwriter = Agent(\n    role=\"Content Writer\",\n    goal=\"Transform research findings into clear, engaging written content\",\n    backstory=\"You are a skilled technical writer who specializes in accurate reporting.\",\n    llm=llm,\n    verbose=True,\n    max_iter=8,\n    step_callback=writer_callback\n)\n\nreviewer = Agent(\n    role=\"Quality Reviewer\",\n    goal=\"Verify factual accuracy and ensure output meets quality standards\",\n    backstory=\"You are a meticulous editor who catches errors and inconsistencies.\",\n    llm=llm,\n    verbose=True,\n    max_iter=5,\n    step_callback=reviewer_callback\n)",
+          "language": "python"
+        },
+        {
+          "title": "Assemble the Crew and Run with Full Vex Observability",
+          "description": "Create your Tasks and Crew as normal. Vex will now intercept every agent reasoning step, validate tool calls and outputs in real time, and surface issues in the Vex dashboard with full agent attribution and task context.",
+          "code": "from crewai import Task, Crew, Process\n\nresearch_task = Task(\n    description=\"Research the latest developments in quantum computing from 2024. Focus on practical applications and breakthroughs. Return a structured summary with sources.\",\n    expected_output=\"A structured JSON object with keys: 'summary', 'key_breakthroughs', 'sources', 'confidence_score'\",\n    agent=researcher\n)\n\nwriting_task = Task(\n    description=\"Using the research provided, write a 500-word technical blog post. Do not add information not present in the research. Maintain a neutral, informative tone.\",\n    expected_output=\"A 500-word blog post in markdown format with a title, introduction, body, and conclusion.\",\n    agent=writer,\n    context=[research_task]  # Explicitly pass research output as context\n)\n\nreview_task = Task(\n    description=\"Review the blog post for factual accuracy against the original research. Flag any claims not supported by the source material.\",\n    expected_output=\"A review report with 'approved' (bool), 'issues' (list of strings), and 'final_content' (the approved or corrected post).\",\n    agent=reviewer,\n    context=[research_task, writing_task]\n)\n\ncrew = Crew(\n    agents=[researcher, writer, reviewer],\n    tasks=[research_task, writing_task, review_task],\n    process=Process.sequential,\n    verbose=True\n)\n\ntry:\n    result = crew.kickoff()\n    print(\"Crew completed successfully.\")\n    print(result)\nexcept RuntimeError as e:\n    # Vex flagged a critical issue during execution\n    print(f\"Crew halted by Vex guardrail: {e}\")\n    vex.report_crew_failure(\n        crew_id=\"quantum-research-crew\",\n        error=str(e)\n    )",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Bind Agent Role Names to Every Callback",
+          "description": "Always use functools.partial or a closure to bind the agent's role string to the step_callback. This ensures that when Vex flags an issue, the dashboard shows exactly which crew member — Researcher, Writer, or Reviewer — produced the problematic output, rather than attributing all issues to an anonymous callback."
+        },
+        {
+          "title": "Set Explicit expected_output on Every Task",
+          "description": "CrewAI's Task.expected_output field is your contract with the agent. Always define it with a specific format (e.g., 'a JSON object with keys X, Y, Z') and configure Vex's schema validation check to assert the output matches this contract before it is passed to the next task's context."
+        },
+        {
+          "title": "Use max_iter Limits Alongside Vex Loop Detection",
+          "description": "Set a conservative max_iter on each Agent (e.g., max_iter=10 for complex agents, max_iter=5 for simple ones) as a hard backstop, and enable Vex's delegation_loop check to catch circular delegation patterns before the iteration limit is reached. Defense in depth prevents both silent exhaustion and runaway token spend."
+        },
+        {
+          "title": "Isolate Tool Call Validation from Completion Validation",
+          "description": "In your step_callback, distinguish between AgentAction (tool call in progress) and AgentFinish (task complete) and apply different Vex check profiles to each. Tool calls should be checked for hallucinated inputs and prompt injection, while task completions should be checked for output schema conformance and objective drift."
+        },
+        {
+          "title": "Log Crew Context Windows to Vex for Drift Analysis",
+          "description": "When passing context between tasks using Task.context, log the full context payload to Vex alongside each step. This allows Vex to detect when an agent's output diverges from the original task description over time, enabling post-hoc analysis of objective drift across multi-step crew runs."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your CrewAI Agents",
+      "description": "Add Vex to your CrewAI project in under 10 minutes and get real-time guardrails, delegation loop detection, and per-agent observability across every crew run — sign up at vex.ai to get your API key."
+    }
+  }
+}

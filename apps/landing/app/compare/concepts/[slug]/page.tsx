@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 
 import { notFound } from 'next/navigation';
 
-import { Breadcrumbs } from '~/app/_components/pseo/breadcrumbs';
-import { ConceptComparisonRenderer } from '~/app/_components/pseo/concept-comparison-renderer';
-import { RelatedPages } from '~/app/_components/pseo/related-pages';
+import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
+import { ConceptComparisonRenderer } from '~/_components/pseo/concept-comparison-renderer';
+import { RelatedPages } from '~/_components/pseo/related-pages';
 import { getAllConceptComparisons, getConceptComparisonBySlug } from '~/lib/pseo/content';
 
 interface Props {

@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to DSPy Agents",
+    "description": "Learn how to add runtime guardrails to DSPy agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "DSPy guardrails",
+      "DSPy monitoring",
+      "DSPy hallucination detection",
+      "Vex DSPy",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "DSPy's programmatic approach to LLMs — compiling optimized prompts and chaining modules like Predict, ChainOfThought, and ReAct — introduces subtle reliability risks that static testing cannot catch. When optimized pipelines run in production, overfitted prompts, silent assertion failures, and unexpected module composition effects can silently degrade output quality without raising exceptions. Vex wraps your DSPy module forward() calls to continuously verify outputs against behavioral contracts, catching regressions before they reach users.",
+    "whyGuardrails": {
+      "heading": "Why DSPy Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Compiled Prompts Are Opaque",
+          "explanation": "After running a DSPy optimizer like BootstrapFewShot or MIPRO, the compiled prompt contains few-shot demonstrations and instructions that are difficult to audit manually. A prompt that scores well on your dev set may encode spurious correlations that fail silently on out-of-distribution inputs in production."
+        },
+        {
+          "title": "Module Composition Amplifies Errors",
+          "explanation": "DSPy pipelines chain modules — a Retrieve feeding a ChainOfThought feeding a Predict — so an off-distribution output from one module propagates and compounds through downstream modules. Without per-module verification, the root cause of a final output failure is nearly impossible to trace."
+        },
+        {
+          "title": "dspy.Assert and dspy.Suggest Are Not Enough",
+          "explanation": "DSPy's built-in assertion primitives retry at training time but do not provide structured observability or alerting at inference time. A violated assertion in production either raises an unhandled exception or is silently bypassed, neither of which gives you the monitoring signal you need."
+        },
+        {
+          "title": "Optimizer Regressions Are Hard to Detect",
+          "explanation": "Re-running BootstrapFewShot or BayesianSignatureOptimizer after adding new training data can silently regress behavior on previously passing cases. Without a verification layer that runs on every inference call, you have no continuous signal that a newly compiled program has degraded."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common DSPy Failure Modes",
+      "failures": [
+        {
+          "name": "Optimized Prompt Overfitting",
+          "description": "BootstrapFewShot selects demonstrations that maximize metric score on a small training set. The compiled program memorizes surface patterns from those examples and fails to generalize, producing confident but wrong outputs on inputs that differ even slightly from the training distribution.",
+          "severity": "critical",
+          "example": "A compiled QA module trained on Wikipedia-style questions returns hallucinated citations when asked about recent events, because all its few-shot demos involved static factual lookups."
+        },
+        {
+          "name": "ChainOfThought Reasoning Drift",
+          "description": "dspy.ChainOfThought generates a rationale field before the final answer. The model can produce a logically coherent-sounding rationale that leads to an incorrect conclusion, and because the rationale looks plausible, downstream modules and human reviewers accept the wrong answer without scrutiny.",
+          "severity": "critical",
+          "example": "A ChainOfThought module reasoning about a multi-step math problem produces a rationale that correctly identifies the formula but applies it to the wrong variable, yielding a confident wrong numeric answer."
+        },
+        {
+          "name": "Silent Assertion Bypass at Inference",
+          "description": "dspy.Assert constraints defined during program development are enforced during compilation retries but can be configured to pass silently in inference mode. A module that should only return one of a fixed set of labels may return an out-of-vocabulary string with no exception raised.",
+          "severity": "high",
+          "example": "A sentiment classifier built with dspy.Assert(prediction.sentiment in ['positive','negative','neutral']) silently returns 'mixed' at inference time when the assertion handler is set to warn rather than raise."
+        },
+        {
+          "name": "Retrieve Module Returning Irrelevant Context",
+          "description": "dspy.Retrieve fetches passages based on embedding similarity, but similarity does not guarantee relevance to the specific reasoning task. When retrieved context is off-topic, downstream ChainOfThought or Predict modules hallucinate answers grounded in the irrelevant passage rather than admitting uncertainty.",
+          "severity": "high",
+          "example": "A RAG pipeline using dspy.Retrieve retrieves a passage about a company's 2019 annual report when asked about 2023 financials, and the downstream Predict module fabricates 2023 numbers by extrapolating from the stale context."
+        },
+        {
+          "name": "Module Composition Output Distribution Shift",
+          "description": "When multiple DSPy modules are composed in a Pipeline class, the output type and format expected by module N+1 is implicitly defined by module N's signature. A change to an upstream module's output field name or format breaks the downstream module's input parsing without raising a Python exception.",
+          "severity": "medium",
+          "example": "An upstream Summarize module is recompiled and begins returning a 'summary' field instead of 'passage_summary', causing the downstream Classify module to receive an empty string and return a default label for every input."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with DSPy",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both dspy and the Vex SDK, then initialize the Vex client with your API key. Configure it once at application startup so all subsequent verification calls share the same client context.",
+          "code": "pip install dspy vex-sdk\n\n# In your application entrypoint\nimport dspy\nimport vex\n\n# Initialize Vex client\nvex_client = vex.Client(\n    api_key=\"your-vex-api-key\",\n    project=\"dspy-production-pipeline\",\n    environment=\"production\"\n)\n\n# Configure DSPy as usual\nlm = dspy.LM(\"openai/gpt-4o\", api_key=\"your-openai-key\")\ndspy.configure(lm=lm)",
+          "language": "python"
+        },
+        {
+          "title": "Wrap a DSPy Module's forward() with vex.verify()",
+          "description": "Subclass your DSPy module and wrap the forward() method with vex.verify(). Pass the module name, input, and output so Vex can track behavior over time and evaluate it against your defined contracts.",
+          "code": "import dspy\nimport vex\n\nclass VerifiedChainOfThought(dspy.Module):\n    def __init__(self, signature):\n        super().__init__()\n        self.cot = dspy.ChainOfThought(signature)\n        self.vex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n    def forward(self, **kwargs):\n        prediction = self.cot(**kwargs)\n\n        # Wrap the output with Vex verification\n        verification = self.vex_client.verify(\n            module=\"ChainOfThought\",\n            inputs=kwargs,\n            outputs={\n                \"rationale\": prediction.rationale,\n                \"answer\": prediction.answer\n            },\n            contracts=[\n                vex.Contract(\n                    name=\"answer_non_empty\",\n                    rule=lambda o: len(o[\"answer\"].strip()) > 0\n                ),\n                vex.Contract(\n                    name=\"rationale_precedes_answer\",\n                    rule=lambda o: len(o[\"rationale\"]) > 10\n                )\n            ]\n        )\n\n        if not verification.passed:\n            raise vex.VerificationError(\n                f\"ChainOfThought verification failed: {verification.violations}\"\n            )\n\n        return prediction\n\n# Usage\nqa = VerifiedChainOfThought(\"question -> answer\")\nresult = qa(question=\"What is the capital of France?\")",
+          "language": "python"
+        },
+        {
+          "title": "Verify a Multi-Module DSPy Pipeline",
+          "description": "For composed pipelines, add per-module verification at each stage so you can pinpoint which module in the chain produced an unexpected output. This example shows a RAG pipeline with Retrieve and ChainOfThought modules each individually verified.",
+          "code": "import dspy\nimport vex\n\nclass VerifiedRAGPipeline(dspy.Module):\n    def __init__(self, num_passages=3):\n        super().__init__()\n        self.retrieve = dspy.Retrieve(k=num_passages)\n        self.generate = dspy.ChainOfThought(\"context, question -> answer\")\n        self.vex = vex.Client(api_key=\"your-vex-api-key\")\n\n    def forward(self, question: str):\n        # Verify retrieval step\n        passages = self.retrieve(question)\n        self.vex.verify(\n            module=\"Retrieve\",\n            inputs={\"question\": question},\n            outputs={\"passages\": passages.passages},\n            contracts=[\n                vex.Contract(\n                    name=\"passages_non_empty\",\n                    rule=lambda o: len(o[\"passages\"]) > 0\n                ),\n                vex.Contract(\n                    name=\"passages_min_length\",\n                    rule=lambda o: all(len(p) > 20 for p in o[\"passages\"])\n                )\n            ]\n        )\n\n        context = \" \".join(passages.passages)\n\n        # Verify generation step\n        prediction = self.generate(context=context, question=question)\n        result = self.vex.verify(\n            module=\"ChainOfThought\",\n            inputs={\"context\": context, \"question\": question},\n            outputs={\n                \"rationale\": prediction.rationale,\n                \"answer\": prediction.answer\n            },\n            contracts=[\n                vex.Contract(\n                    name=\"answer_grounded_in_context\",\n                    rule=lambda o: len(o[\"answer\"]) > 0\n                ),\n                vex.Contract(\n                    name=\"no_refusal_pattern\",\n                    rule=lambda o: \"I cannot\" not in o[\"answer\"]\n                        and \"I don't know\" not in o[\"answer\"]\n                )\n            ]\n        )\n\n        if not result.passed:\n            # Log violation and return safe fallback\n            print(f\"[Vex] Pipeline violation: {result.violations}\")\n            return dspy.Prediction(answer=\"Verification failed — please retry.\")\n\n        return prediction\n\nrag = VerifiedRAGPipeline(num_passages=3)\nresponse = rag(question=\"What were the key findings in the 2023 earnings report?\")",
+          "language": "python"
+        },
+        {
+          "title": "Monitor Compiled Program Regressions After Optimization",
+          "description": "After running a DSPy optimizer, use Vex's evaluation harness to run your compiled program against a held-out test set and assert that verification pass rates meet your threshold before deploying the new compiled weights.",
+          "code": "import dspy\nfrom dspy.teleprompt import BootstrapFewShot\nimport vex\n\n# Define your metric\ndef exact_match(example, prediction, trace=None):\n    return example.answer.lower() == prediction.answer.lower()\n\n# Compile your program\nbase_program = VerifiedRAGPipeline(num_passages=3)\noptimizer = BootstrapFewShot(metric=exact_match, max_bootstrapped_demos=4)\ncompiled_program = optimizer.compile(base_program, trainset=trainset)\n\n# After compilation, run Vex regression evaluation\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\nevaluation = vex_client.evaluate(\n    program_id=\"rag-pipeline-v2\",\n    test_cases=[\n        vex.TestCase(\n            inputs={\"question\": ex.question},\n            expected={\"answer\": ex.answer}\n        )\n        for ex in devset\n    ],\n    runner=lambda inputs: compiled_program(**inputs),\n    contracts=[\n        vex.Contract(\n            name=\"answer_non_empty\",\n            rule=lambda o: len(o.get(\"answer\", \"\").strip()) > 0\n        ),\n        vex.Contract(\n            name=\"answer_format_valid\",\n            rule=lambda o: not o[\"answer\"].startswith(\"Error\")\n        )\n    ],\n    pass_threshold=0.95  # Require 95% contract pass rate to approve deployment\n)\n\nif evaluation.passed:\n    print(f\"Compiled program approved: {evaluation.pass_rate:.1%} pass rate\")\n    compiled_program.save(\"compiled_rag_v2.json\")\nelse:\n    print(f\"Compiled program REJECTED: {evaluation.pass_rate:.1%} pass rate\")\n    print(f\"Failing contracts: {evaluation.failing_contracts}\")",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Verify at Every Module Boundary, Not Just Pipeline Output",
+          "description": "DSPy pipelines fail silently when an intermediate module returns an unexpected format. Wrap each dspy.Predict, dspy.ChainOfThought, and dspy.Retrieve call individually with vex.verify() so you get a precise failure location rather than a confusing final output. This is especially important for pipelines with more than two chained modules."
+        },
+        {
+          "title": "Define Contracts Before Running the Optimizer",
+          "description": "Write your vex.Contract rules before calling BootstrapFewShot or MIPRO so that the contracts reflect your true behavioral requirements, not the behavior of the compiled program. Contracts written after optimization tend to be descriptive rather than prescriptive and will not catch regressions in future compilation runs."
+        },
+        {
+          "title": "Use Vex Evaluation as a Compilation Gate",
+          "description": "Treat vex_client.evaluate() as a required step in your DSPy compilation workflow. Set a pass_threshold (e.g., 0.95) and block deployment of a newly compiled program if it does not meet the threshold. This prevents optimizer regressions from silently reaching production when you add new training data or change your metric."
+        },
+        {
+          "title": "Capture the Rationale Field in ChainOfThought Contracts",
+          "description": "When using dspy.ChainOfThought, always include the rationale field in your vex.verify() outputs and write contracts that check for rationale quality (minimum length, absence of contradiction markers, presence of key reasoning steps). A plausible-sounding but short rationale is a strong signal that the model is guessing rather than reasoning."
+        },
+        {
+          "title": "Tag Verifications with Optimizer Version and Compilation Timestamp",
+          "description": "Pass metadata to vex.verify() that identifies which compiled program version produced the output, for example vex_client.verify(..., metadata={'compiled_version': 'v3', 'optimizer': 'BootstrapFewShot', 'compiled_at': '2024-01-15'}). This lets you correlate verification pass rate trends in the Vex dashboard directly with specific compilation runs and quickly identify which optimizer run introduced a regression."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your DSPy Agents",
+      "description": "Add vex.verify() to your DSPy modules today and get continuous behavioral contracts, regression detection across compilation runs, and per-module observability — so your optimized pipelines stay reliable in production."
+    }
+  }
+}

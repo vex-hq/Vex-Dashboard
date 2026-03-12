@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Haystack Agents",
+    "description": "Learn how to add runtime guardrails to Haystack agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Haystack guardrails",
+      "Haystack monitoring",
+      "Haystack hallucination detection",
+      "Vex Haystack",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Haystack's composable pipeline architecture makes it easy to build sophisticated RAG and LLM applications, but each component boundary is a potential failure point where type mismatches, silent errors, or hallucinations can propagate undetected into production. Without observability and guardrails, a misconfigured retriever or a generator that ignores retrieved context can silently degrade user experience at scale. Vex integrates directly as a native Haystack component, giving you real-time reliability monitoring at every stage of your pipeline.",
+    "whyGuardrails": {
+      "heading": "Why Haystack Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Component Output Contracts Are Not Enforced at Runtime",
+          "explanation": "Haystack pipelines connect components via typed sockets, but runtime type mismatches between a custom component's output and the next component's expected input can cause cryptic failures or silent data corruption. Guardrails catch these contract violations before they cascade downstream."
+        },
+        {
+          "title": "Retriever Quality Directly Determines Answer Quality",
+          "explanation": "A BM25Retriever or EmbeddingRetriever returning low-relevance documents will cause the generator to either hallucinate or produce confidently wrong answers. Without scoring the retrieval step independently, you have no signal that the root cause is upstream of the LLM."
+        },
+        {
+          "title": "Generators Can Ignore Retrieved Context",
+          "explanation": "Even with a well-functioning retriever, models like GPT-4 or Mistral may answer from parametric memory rather than the provided documents. Vex detects faithfulness drift — when generated answers are not grounded in the retrieved context passed to the PromptBuilder."
+        },
+        {
+          "title": "Custom Components Swallow Exceptions Silently",
+          "explanation": "Custom Haystack components that implement the @component decorator can raise exceptions that get caught and logged but don't halt the pipeline, allowing corrupted or empty outputs to flow through. Guardrails provide an explicit failure surface with alerting."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Haystack Failure Modes",
+      "failures": [
+        {
+          "name": "Pipeline Component Output Type Mismatch",
+          "description": "A custom component declares an output socket with type List[Document] but returns a plain list of dicts, causing the downstream component to fail or silently receive malformed data.",
+          "severity": "critical",
+          "example": "@component\nclass MyRetriever:\n    @component.output_types(documents=List[Document])\n    def run(self, query: str):\n        # Bug: returns dicts instead of Document objects\n        return {'documents': [{'content': 'text'}]}  # Should be Document(content='text')"
+        },
+        {
+          "name": "Retriever Returning Irrelevant Documents",
+          "description": "The EmbeddingRetriever or BM25Retriever returns documents with low semantic similarity to the query, either due to a stale embedding index or poor chunking strategy, leading to off-topic generated answers.",
+          "severity": "high",
+          "example": "# Retriever returns top_k=5 but all documents have cosine similarity < 0.3\npipeline.run({'retriever': {'query': 'What is the refund policy?'}})\n# Returns documents about shipping, not refunds — generator hallucinates the answer"
+        },
+        {
+          "name": "Generator Hallucinating Beyond Retrieved Context",
+          "description": "The OpenAIGenerator or HuggingFaceLocalGenerator produces answers that contradict or extend beyond the documents passed via PromptBuilder, fabricating citations or statistics not present in the retrieved context.",
+          "severity": "critical",
+          "example": "# PromptBuilder receives 3 documents about Q1 revenue\n# Generator outputs: 'Q2 revenue was $4.2M' — a fact not in any retrieved document\nprompt_builder = PromptBuilder(template='Answer based on: {{documents}}\\nQuestion: {{query}}')\n# No faithfulness check means this hallucination reaches the user"
+        },
+        {
+          "name": "Custom Component Errors Silently Swallowed",
+          "description": "A custom preprocessing component raises a ValueError for malformed input, but the pipeline's error handling logs the exception and passes an empty output to the next component, which then produces a nonsensical response.",
+          "severity": "high",
+          "example": "@component\nclass TextCleaner:\n    @component.output_types(cleaned_text=str)\n    def run(self, text: str):\n        if not text:\n            raise ValueError('Empty input')  # This may be caught silently\n        return {'cleaned_text': text.strip()}\n# Downstream PromptBuilder receives '' and generates a response to an empty prompt"
+        },
+        {
+          "name": "Embedding Model Dimension Mismatch After Model Swap",
+          "description": "After upgrading the embedding model from text-embedding-ada-002 (1536 dims) to text-embedding-3-small (1536 dims) or a different model, the vector store index dimensions no longer match, causing retrieval to return garbage results without raising an explicit error.",
+          "severity": "critical",
+          "example": "# Old index built with sentence-transformers/all-MiniLM-L6-v2 (384 dims)\n# New embedder uses text-embedding-ada-002 (1536 dims)\ndocument_store = InMemoryDocumentStore()\n# Queries silently return wrong documents — no dimension validation at query time"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Haystack",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both haystack-ai and vex-sdk, then initialize the Vex client with your API key. The Vex client will be used inside a custom Haystack component that wraps your pipeline's critical checkpoints.",
+          "code": "# Install dependencies\n# pip install haystack-ai vex-sdk\n\nimport os\nfrom vex_sdk import Vex\nfrom haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryBM25Retriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.components.builders import PromptBuilder\nfrom haystack.document_stores.in_memory import InMemoryDocumentStore\n\n# Initialize Vex client\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Initialize your document store\ndocument_store = InMemoryDocumentStore()\nprint('Vex client initialized successfully')",
+          "language": "python"
+        },
+        {
+          "title": "Build a VexGuardrail Custom Haystack Component",
+          "description": "Create a custom Haystack component using the @component decorator that wraps Vex reliability checks. This component sits between your retriever and generator, validating document relevance and catching potential hallucination conditions before the prompt is built.",
+          "code": "from haystack import component, Document\nfrom haystack.core.component.types import Variadic\nfrom typing import List, Optional\nfrom vex_sdk import Vex, CheckResult\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n@component\nclass VexRetrievalGuardrail:\n    \"\"\"\n    A Haystack component that validates retriever output using Vex\n    before passing documents to the PromptBuilder.\n    \"\"\"\n\n    def __init__(self, vex_client: Vex, min_relevance_score: float = 0.5, pipeline_name: str = 'haystack-rag'):\n        self.vex = vex_client\n        self.min_relevance_score = min_relevance_score\n        self.pipeline_name = pipeline_name\n\n    @component.output_types(\n        documents=List[Document],\n        filtered_count=int,\n        guardrail_passed=bool\n    )\n    def run(self, documents: List[Document], query: str) -> dict:\n        if not documents:\n            logger.warning('VexGuardrail: No documents received from retriever')\n            # Report empty retrieval to Vex\n            self.vex.report_event(\n                pipeline=self.pipeline_name,\n                event_type='empty_retrieval',\n                metadata={'query': query, 'document_count': 0}\n            )\n            return {'documents': [], 'filtered_count': 0, 'guardrail_passed': False}\n\n        # Run Vex reliability check on retrieved documents\n        check_result: CheckResult = self.vex.check(\n            pipeline=self.pipeline_name,\n            step='retrieval_validation',\n            inputs={\n                'query': query,\n                'documents': [{'content': doc.content, 'score': doc.score} for doc in documents]\n            },\n            checks=[\n                {'type': 'retrieval_relevance', 'threshold': self.min_relevance_score},\n                {'type': 'document_count', 'min': 1}\n            ]\n        )\n\n        # Filter documents below relevance threshold\n        filtered_docs = [\n            doc for doc in documents\n            if doc.score is None or doc.score >= self.min_relevance_score\n        ]\n\n        if not check_result.passed:\n            logger.error(f'VexGuardrail: Retrieval check failed — {check_result.reason}')\n\n        return {\n            'documents': filtered_docs,\n            'filtered_count': len(documents) - len(filtered_docs),\n            'guardrail_passed': check_result.passed\n        }",
+          "language": "python"
+        },
+        {
+          "title": "Add a Post-Generation Faithfulness Guard Component",
+          "description": "Create a second Vex-powered component that validates the generator's output against the retrieved documents, detecting hallucinations where the answer contains claims not supported by the context passed to the PromptBuilder.",
+          "code": "from haystack import component, Document\nfrom typing import List\nfrom vex_sdk import Vex\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n@component\nclass VexFaithfulnessGuardrail:\n    \"\"\"\n    Post-generation component that checks if the LLM answer\n    is grounded in the retrieved documents using Vex.\n    \"\"\"\n\n    def __init__(self, vex_client: Vex, pipeline_name: str = 'haystack-rag', block_on_failure: bool = False):\n        self.vex = vex_client\n        self.pipeline_name = pipeline_name\n        self.block_on_failure = block_on_failure\n\n    @component.output_types(\n        replies=List[str],\n        faithfulness_score=float,\n        is_faithful=bool\n    )\n    def run(self, replies: List[str], documents: List[Document], query: str) -> dict:\n        answer = replies[0] if replies else ''\n        context = ' '.join([doc.content for doc in documents if doc.content])\n\n        # Run Vex faithfulness check\n        check_result = self.vex.check(\n            pipeline=self.pipeline_name,\n            step='faithfulness_validation',\n            inputs={\n                'query': query,\n                'answer': answer,\n                'context': context\n            },\n            checks=[\n                {'type': 'faithfulness', 'threshold': 0.7},\n                {'type': 'no_hallucination'}\n            ]\n        )\n\n        faithfulness_score = check_result.scores.get('faithfulness', 1.0)\n        is_faithful = check_result.passed\n\n        if not is_faithful:\n            logger.warning(\n                f'VexGuardrail: Faithfulness check failed. Score: {faithfulness_score:.2f}. '\n                f'Reason: {check_result.reason}'\n            )\n            self.vex.report_event(\n                pipeline=self.pipeline_name,\n                event_type='hallucination_detected',\n                metadata={\n                    'query': query,\n                    'answer': answer,\n                    'faithfulness_score': faithfulness_score\n                }\n            )\n            if self.block_on_failure:\n                fallback = 'I could not find a reliable answer based on the available documents.'\n                return {'replies': [fallback], 'faithfulness_score': faithfulness_score, 'is_faithful': False}\n\n        return {'replies': replies, 'faithfulness_score': faithfulness_score, 'is_faithful': is_faithful}",
+          "language": "python"
+        },
+        {
+          "title": "Assemble the Full Guarded Haystack Pipeline",
+          "description": "Wire together the retriever, VexRetrievalGuardrail, PromptBuilder, OpenAIGenerator, and VexFaithfulnessGuardrail into a complete Haystack Pipeline. Connect components using pipeline.connect() with explicit socket names to ensure type safety.",
+          "code": "from haystack import Pipeline, Document\nfrom haystack.components.retrievers.in_memory import InMemoryBM25Retriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.components.builders import PromptBuilder\nfrom haystack.document_stores.in_memory import InMemoryDocumentStore\nfrom haystack.components.writers import DocumentWriter\nimport os\n\n# Initialize document store and index some documents\ndocument_store = InMemoryDocumentStore()\nindexing_pipeline = Pipeline()\nindexing_pipeline.add_component('writer', DocumentWriter(document_store=document_store))\nindexing_pipeline.run({\n    'writer': {\n        'documents': [\n            Document(content='Our refund policy allows returns within 30 days of purchase.'),\n            Document(content='Shipping takes 3-5 business days for standard delivery.'),\n            Document(content='Premium members receive free expedited shipping on all orders.')\n        ]\n    }\n})\n\n# Initialize Vex\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Define the RAG prompt template\nprompt_template = \"\"\"\nAnswer the question based ONLY on the provided documents.\nIf the answer is not in the documents, say you don't know.\n\nDocuments:\n{% for doc in documents %}\n  - {{ doc.content }}\n{% endfor %}\n\nQuestion: {{ query }}\nAnswer:\n\"\"\"\n\n# Build the guarded pipeline\npipeline = Pipeline()\n\npipeline.add_component('retriever', InMemoryBM25Retriever(document_store=document_store, top_k=5))\npipeline.add_component('retrieval_guard', VexRetrievalGuardrail(vex_client=vex, min_relevance_score=0.3))\npipeline.add_component('prompt_builder', PromptBuilder(template=prompt_template))\npipeline.add_component('generator', OpenAIGenerator(model='gpt-4o-mini'))\npipeline.add_component('faithfulness_guard', VexFaithfulnessGuardrail(vex_client=vex, block_on_failure=True))\n\n# Connect components with explicit socket names\npipeline.connect('retriever.documents', 'retrieval_guard.documents')\npipeline.connect('retrieval_guard.documents', 'prompt_builder.documents')\npipeline.connect('retrieval_guard.documents', 'faithfulness_guard.documents')\npipeline.connect('prompt_builder.prompt', 'generator.prompt')\npipeline.connect('generator.replies', 'faithfulness_guard.replies')\n\n# Run the guarded pipeline\nquery = 'What is the refund policy?'\nresult = pipeline.run({\n    'retriever': {'query': query},\n    'retrieval_guard': {'query': query},\n    'prompt_builder': {'query': query},\n    'faithfulness_guard': {'query': query}\n})\n\nprint('Answer:', result['faithfulness_guard']['replies'][0])\nprint('Faithfulness Score:', result['faithfulness_guard']['faithfulness_score'])\nprint('Guardrail Passed:', result['faithfulness_guard']['is_faithful'])\nprint('Documents Filtered:', result['retrieval_guard']['filtered_count'])",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Place Vex Components at Every Pipeline Boundary",
+          "description": "In Haystack, data flows through explicit socket connections between components. Insert VexGuardrail components after each major stage — post-retrieval, post-preprocessing, and post-generation — rather than only at the pipeline's output. This lets you pinpoint which component introduced a failure rather than only detecting it at the end."
+        },
+        {
+          "title": "Use Haystack's component.output_types to Enforce Contracts",
+          "description": "Always declare explicit output types on your VexGuardrail components using the @component.output_types decorator. This ensures Haystack's pipeline validation catches socket type mismatches at pipeline.connect() time rather than at runtime, and gives Vex accurate metadata about what each component is expected to produce."
+        },
+        {
+          "title": "Pass Query Context Through the Entire Pipeline",
+          "description": "Haystack pipelines require you to explicitly route data between components. Always pass the original query string as an input to both your retrieval and faithfulness guardrail components — not just to the retriever. This allows Vex to compute relevance and faithfulness scores relative to the actual user intent rather than the transformed prompt."
+        },
+        {
+          "title": "Set block_on_failure=False in Development, True in Production",
+          "description": "During development and evaluation, configure VexFaithfulnessGuardrail with block_on_failure=False so you can observe hallucination rates without disrupting pipeline output. Switch to block_on_failure=True in production to replace unfaithful answers with a safe fallback, and use Vex's dashboard to track the frequency and patterns of blocked responses."
+        },
+        {
+          "title": "Serialize Vex Check Results to Haystack's Metadata",
+          "description": "Attach Vex check results (faithfulness scores, filtered document counts, guardrail pass/fail) to Haystack Document metadata or pipeline output dictionaries. This makes reliability signals available for downstream logging, A/B testing, and evaluation pipelines built with Haystack's EvaluationRunResult, giving you a complete audit trail alongside your pipeline outputs."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Haystack Agents",
+      "description": "Add Vex to your Haystack pipeline today and get real-time visibility into retrieval quality, hallucination rates, and component failures across every stage of your production RAG application."
+    }
+  }
+}

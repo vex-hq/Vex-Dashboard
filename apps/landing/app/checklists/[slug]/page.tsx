@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 
 import { notFound } from 'next/navigation';
 
-import { Breadcrumbs } from '~/app/_components/pseo/breadcrumbs';
-import { ChecklistRenderer } from '~/app/_components/pseo/checklist-renderer';
-import { RelatedPages } from '~/app/_components/pseo/related-pages';
+import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
+import { ChecklistRenderer } from '~/_components/pseo/checklist-renderer';
+import { RelatedPages } from '~/_components/pseo/related-pages';
 import { getAllChecklists, getChecklistBySlug } from '~/lib/pseo/content';
 
 interface Props {

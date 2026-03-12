@@ -28,9 +28,16 @@ from pydantic import BaseModel, Field
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "content" / "pseo"
 TAXONOMY_DIR = CONTENT_DIR / "taxonomy"
 
-MODEL = "anthropic/claude-sonnet-4-6"
+DEFAULT_MODEL = "Claude Sonnet 4.6"
 MAX_CONCURRENT = 50
 SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
+
+# LiteLLM proxy config (reads from .env.local or environment)
+LITELLM_API_URL = os.getenv("LITELLM_API_URL")
+LITELLM_API_KEY = os.getenv("LITELLM_API_KEY")
+
+# Runtime model (can be overridden via --model flag)
+_model = DEFAULT_MODEL
 
 
 # ── Pydantic models (mirrors TypeScript types) ──────────────────────
@@ -162,17 +169,29 @@ def load_taxonomy():
 
 async def generate_json(system_prompt: str, user_prompt: str) -> dict:
     async with SEMAPHORE:
-        response = await litellm.acompletion(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
+        # When routing through LiteLLM proxy, use openai/ prefix so litellm
+        # treats the proxy as an OpenAI-compatible endpoint.
+        model = f"openai/{_model}" if LITELLM_API_URL else _model
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt + "\n\nReturn ONLY raw JSON. No markdown fences, no explanation."},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        text = response.choices[0].message.content
+            "temperature": 0.3,
+            "max_tokens": 8192,
+        }
+        if LITELLM_API_URL:
+            kwargs["api_base"] = LITELLM_API_URL
+        if LITELLM_API_KEY:
+            kwargs["api_key"] = LITELLM_API_KEY
+
+        response = await litellm.acompletion(**kwargs)
+        text = response.choices[0].message.content.strip()
+        # Strip markdown fences if model wraps JSON in ```json ... ```
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            text = text.rsplit("```", 1)[0].strip()
         return json.loads(text)
 
 
@@ -584,11 +603,11 @@ async def main():
     parser.add_argument("--category", choices=["guides", "checklists", "comparisons", "problem-guides"])
     parser.add_argument("--slug", help="Generate a single page by slug")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be generated")
-    parser.add_argument("--model", default=MODEL, help=f"LiteLLM model (default: {MODEL})")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"LiteLLM model (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 
-    global MODEL
-    MODEL = args.model
+    global _model  # noqa: PLW0603
+    _model = args.model
 
     if not args.all and not args.category:
         parser.print_help()

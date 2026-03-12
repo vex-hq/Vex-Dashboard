@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Google ADK Agents",
+    "description": "Learn how to add runtime guardrails to Google ADK agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Google ADK guardrails",
+      "Google ADK monitoring",
+      "Google ADK hallucination detection",
+      "Vex Google ADK",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Google ADK enables powerful multi-agent systems powered by Gemini models, but the complexity of agent delegation, session state management, and tool orchestration introduces failure modes that can silently degrade production reliability. Without guardrails, circular delegation chains, model output inconsistencies, and corrupted session state can cascade across your entire agent graph. Vex integrates directly into ADK's callback system to catch these failures before they reach your users.",
+    "whyGuardrails": {
+      "heading": "Why Google ADK Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Multi-Agent Delegation Complexity",
+          "explanation": "ADK's AgentTool and LlmAgent delegation patterns allow agents to invoke sub-agents dynamically, creating delegation graphs that can develop circular dependencies or infinite loops at runtime. Vex monitors each delegation hop and enforces depth and cycle constraints before execution."
+        },
+        {
+          "title": "Gemini Model Output Variability",
+          "explanation": "Switching between Gemini model versions (gemini-1.5-pro, gemini-2.0-flash, gemini-ultra) within the same agent graph can produce structurally inconsistent outputs that break downstream tool parsers. Vex validates output schemas at each agent boundary regardless of which model generated them."
+        },
+        {
+          "title": "Session State Integrity",
+          "explanation": "ADK's InMemorySessionService and persistent session backends accumulate state across long conversations, and partial tool failures or interrupted agent runs can leave session.state in a corrupted intermediate form. Vex checkpoints and validates state transitions to prevent downstream agents from operating on invalid context."
+        },
+        {
+          "title": "Tool Response Contract Enforcement",
+          "explanation": "ADK tools defined via @tool decorator or FunctionTool must return data in formats that the calling LlmAgent's prompt expects, but mismatches between tool response schemas and agent expectations fail silently as hallucinated data. Vex enforces tool response contracts and flags schema drift before it propagates."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Google ADK Failure Modes",
+      "failures": [
+        {
+          "name": "Circular Agent Delegation",
+          "description": "Agent A delegates to Agent B via AgentTool, which delegates back to Agent A, creating an infinite loop that exhausts token budgets and API rate limits without producing a final response.",
+          "severity": "critical",
+          "example": "orchestrator_agent delegates to research_agent via AgentTool('research_agent'), and research_agent's prompt instructs it to use AgentTool('orchestrator_agent') for summarization, creating a cycle that only terminates on timeout."
+        },
+        {
+          "name": "Gemini Model Version Mismatch",
+          "description": "Different agents in the same graph are configured with different Gemini model versions that produce structurally different JSON outputs for the same prompt, breaking downstream parsing.",
+          "severity": "high",
+          "example": "A parent LlmAgent using gemini-1.5-pro returns tool_calls as a list, while a sub-agent using gemini-2.0-flash returns them as a dict, causing a TypeError when the orchestrator iterates over the response."
+        },
+        {
+          "name": "Session State Corruption",
+          "description": "A tool raises an exception mid-execution after partially writing to session.state, leaving keys in an inconsistent state that subsequent agents read as valid data.",
+          "severity": "critical",
+          "example": "A payment_tool writes session.state['payment_initiated'] = True before calling the payment API, which then fails. The next agent reads payment_initiated as True and skips the payment step entirely, resulting in a silent billing failure."
+        },
+        {
+          "name": "Tool Response Format Mismatch",
+          "description": "FunctionTool or @tool decorated functions return Python objects that ADK serializes differently than the agent's system prompt expects, causing the LLM to hallucinate missing fields.",
+          "severity": "high",
+          "example": "A search_tool returns a list of dicts with key 'url', but the agent's prompt instructs it to read 'link' from each result. The model hallucinates plausible-looking URLs rather than reporting the missing field."
+        },
+        {
+          "name": "Runnable Agent Context Overflow",
+          "description": "Long multi-turn conversations accumulate tool outputs and agent responses in the ADK context window until the Gemini model silently truncates early conversation turns, losing critical instructions or user preferences.",
+          "severity": "medium",
+          "example": "After 40+ turns, a customer service agent loses the user's account ID from turn 2 because the context was truncated, and begins asking the user to re-authenticate despite having already verified their identity."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Google ADK",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both google-adk and vex-sdk, then initialize the Vex client with your API key and project configuration targeting your ADK deployment.",
+          "code": "pip install google-adk vex-sdk\n\n# In your agent module\nimport vex\nfrom google.adk.agents import LlmAgent\nfrom google.adk.sessions import InMemorySessionService\n\n# Initialize Vex client\nvex_client = vex.Client(\n    api_key=\"your-vex-api-key\",\n    project=\"my-adk-project\",\n    environment=\"production\"\n)\n\n# Configure guardrail policies for ADK-specific failure modes\nvex_client.configure_policies([\n    vex.Policy(\"agent_delegation_depth\", max_depth=5),\n    vex.Policy(\"session_state_validation\", enabled=True),\n    vex.Policy(\"tool_response_schema\", strict=True),\n    vex.Policy(\"circular_delegation_detection\", enabled=True)\n])",
+          "language": "python"
+        },
+        {
+          "title": "Create a Vex Before-Agent Callback",
+          "description": "Define a before_agent_callback function that Vex uses to intercept every agent invocation in your ADK graph, validating delegation chains, session state, and input context before the LlmAgent runs.",
+          "code": "from google.adk.agents.callback_context import CallbackContext\nfrom google.adk.models import LlmResponse\nfrom google.genai import types\nimport vex\n\ndef vex_before_agent_callback(callback_context: CallbackContext) -> LlmResponse | None:\n    \"\"\"\n    Vex guardrail callback executed before each ADK agent invocation.\n    Return None to allow execution, or an LlmResponse to short-circuit.\n    \"\"\"\n    # Extract ADK-specific context for Vex analysis\n    agent_name = callback_context.agent_name\n    session_state = callback_context.state.to_dict()\n    invocation_id = callback_context.invocation_id\n\n    # Run Vex guardrail checks\n    result = vex_client.check(\n        agent_id=agent_name,\n        session_id=invocation_id,\n        context={\n            \"session_state\": session_state,\n            \"agent_name\": agent_name,\n            \"delegation_chain\": session_state.get(\"_vex_delegation_chain\", [])\n        }\n    )\n\n    if result.blocked:\n        # Return an LlmResponse to short-circuit the agent\n        return LlmResponse(\n            content=types.Content(\n                role=\"model\",\n                parts=[types.Part(text=f\"Request blocked by Vex guardrails: {result.reason}\")]\n            )\n        )\n\n    # Track delegation chain in session state for circular dependency detection\n    chain = session_state.get(\"_vex_delegation_chain\", [])\n    chain.append(agent_name)\n    callback_context.state[\"_vex_delegation_chain\"] = chain\n\n    return None  # Allow agent to proceed",
+          "language": "python"
+        },
+        {
+          "title": "Attach the Callback to Your ADK Agents",
+          "description": "Register the Vex callback on each LlmAgent in your multi-agent graph using the before_agent_callback parameter, ensuring every agent invocation is guarded regardless of delegation depth.",
+          "code": "from google.adk.agents import LlmAgent\nfrom google.adk.tools import AgentTool, FunctionTool\nfrom google.adk.sessions import InMemorySessionService\nfrom google.adk.runners import Runner\n\n# Define your tools\n@FunctionTool\ndef search_web(query: str) -> dict:\n    \"\"\"Search the web for information.\"\"\"\n    # Tool implementation\n    return {\"results\": [], \"query\": query}\n\n# Create sub-agent with Vex callback\nresearch_agent = LlmAgent(\n    name=\"research_agent\",\n    model=\"gemini-2.0-flash\",\n    instruction=\"You are a research specialist. Use search_web to find information.\",\n    tools=[search_web],\n    before_agent_callback=vex_before_agent_callback  # Vex guardrail attached\n)\n\n# Create orchestrator agent with Vex callback\norchestrator_agent = LlmAgent(\n    name=\"orchestrator_agent\",\n    model=\"gemini-1.5-pro\",\n    instruction=\"You are an orchestrator. Delegate research tasks to research_agent.\",\n    tools=[AgentTool(agent=research_agent)],\n    before_agent_callback=vex_before_agent_callback  # Vex guardrail attached\n)\n\n# Set up session and runner\nsession_service = InMemorySessionService()\nrunner = Runner(\n    agent=orchestrator_agent,\n    app_name=\"my_adk_app\",\n    session_service=session_service\n)",
+          "language": "python"
+        },
+        {
+          "title": "Run Your Guarded ADK Agent and Monitor Results",
+          "description": "Execute your ADK agent through the Runner with Vex active, and use the Vex dashboard to monitor delegation graphs, session state health, and tool response validation across all agent invocations.",
+          "code": "from google.adk.runners import Runner\nfrom google.genai import types\nimport asyncio\n\nasync def run_guarded_agent(user_message: str, session_id: str):\n    \"\"\"Run the ADK agent with Vex guardrails active.\"\"\"\n    \n    # Create or retrieve session\n    session = await session_service.create_session(\n        app_name=\"my_adk_app\",\n        user_id=\"user_123\",\n        session_id=session_id,\n        state={\"_vex_delegation_chain\": []}  # Initialize Vex tracking state\n    )\n\n    # Build the user message\n    content = types.Content(\n        role=\"user\",\n        parts=[types.Part(text=user_message)]\n    )\n\n    final_response = None\n    async for event in runner.run_async(\n        user_id=\"user_123\",\n        session_id=session_id,\n        new_message=content\n    ):\n        if event.is_final_response():\n            final_response = event.content.parts[0].text\n            \n            # Log successful completion to Vex for reliability tracking\n            vex_client.record_outcome(\n                session_id=session_id,\n                outcome=\"success\",\n                metadata={\n                    \"delegation_depth\": len(\n                        session.state.get(\"_vex_delegation_chain\", [])\n                    )\n                }\n            )\n\n    return final_response\n\n# Run the agent\nif __name__ == \"__main__\":\n    result = asyncio.run(\n        run_guarded_agent(\n            user_message=\"Research the latest AI agent frameworks and summarize findings.\",\n            session_id=\"session_abc123\"\n        )\n    )\n    print(result)",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Track Delegation Chains in Session State",
+          "description": "Use ADK's session.state to maintain a _vex_delegation_chain list that records every agent name in the current invocation path. In your before_agent_callback, check this list for repeated agent names before allowing delegation to proceed, catching circular dependencies before they exhaust your token budget."
+        },
+        {
+          "title": "Pin Gemini Model Versions Per Agent Role",
+          "description": "Assign specific, pinned Gemini model versions to each agent role in your graph (e.g., gemini-1.5-pro for orchestrators, gemini-2.0-flash for tool-calling agents) and configure Vex schema validators for each model's known output format. This prevents silent schema drift when Google updates model defaults."
+        },
+        {
+          "title": "Validate Session State Before Long-Running Tool Calls",
+          "description": "Before any tool that modifies external state (payments, database writes, API calls), use your before_agent_callback to snapshot the relevant session.state keys via Vex. If the tool fails, Vex can detect the inconsistency on the next invocation by comparing the current state against the pre-tool snapshot."
+        },
+        {
+          "title": "Define Explicit Tool Response Schemas with FunctionTool",
+          "description": "Always annotate your @tool and FunctionTool functions with complete Python type hints and docstrings, then register those schemas with Vex's tool_response_schema policy. Vex will validate every tool return value against the registered schema and block the agent from receiving malformed tool responses."
+        },
+        {
+          "title": "Set Delegation Depth Limits at the Runner Level",
+          "description": "Configure Vex's agent_delegation_depth policy to match your intended maximum delegation depth (typically 3-5 hops for most ADK applications). When the limit is reached, Vex's before_agent_callback returns an LlmResponse immediately, preventing runaway delegation chains from consuming API quota and producing timeout errors."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Google ADK Agents",
+      "description": "Add Vex to your Google ADK multi-agent system today and get real-time visibility into delegation chains, session state health, and tool response validation across your entire Gemini-powered agent graph."
+    }
+  }
+}

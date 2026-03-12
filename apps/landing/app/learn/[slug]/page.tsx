@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 
 import { notFound } from 'next/navigation';
 
-import { Breadcrumbs } from '~/app/_components/pseo/breadcrumbs';
-import { ProblemGuideRenderer } from '~/app/_components/pseo/problem-guide-renderer';
-import { RelatedPages } from '~/app/_components/pseo/related-pages';
+import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
+import { ProblemGuideRenderer } from '~/_components/pseo/problem-guide-renderer';
+import { RelatedPages } from '~/_components/pseo/related-pages';
 import { getAllProblemGuides, getProblemGuideBySlug } from '~/lib/pseo/content';
 
 interface Props {

@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to AG2 Agents",
+    "description": "Learn how to add runtime guardrails to AG2 agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "AG2 guardrails",
+      "AG2 monitoring",
+      "AG2 hallucination detection",
+      "Vex AG2",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "AG2's powerful multi-agent conversation framework enables complex workflows where multiple AI agents collaborate, debate, and execute code — but this same flexibility creates compounding failure risks that single-agent systems never face. When a GroupChat goes wrong, incorrect facts can achieve false consensus, off-topic spirals waste resources, and code execution agents can produce harmful outputs before any human notices. Vex integrates directly into AG2's message hook system to intercept, validate, and correct agent behavior in real time across every conversation turn.",
+    "whyGuardrails": {
+      "heading": "Why AG2 Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Multi-Agent Consensus Amplifies Errors",
+          "explanation": "In AG2 GroupChat, multiple agents can collectively agree on a factually incorrect answer through conversational momentum. Without guardrails, a single agent's hallucination can be validated and reinforced by other agents in the group, making the final output appear highly confident despite being wrong."
+        },
+        {
+          "title": "Code Execution Is a Direct Attack Surface",
+          "explanation": "AG2's AssistantAgent and UserProxyAgent patterns frequently involve executing LLM-generated code via Docker or local shells. A guardrail layer is essential to inspect generated code before execution, blocking shell injections, file system abuse, and network exfiltration attempts that an LLM might produce."
+        },
+        {
+          "title": "Speaker Selection Can Be Gamed or Biased",
+          "explanation": "AG2's GroupChatManager uses LLM-driven speaker selection, which can be manipulated through prompt injection in agent messages or can develop systematic biases that exclude certain agents. Guardrails can monitor selection patterns and flag anomalous routing before it derails a workflow."
+        },
+        {
+          "title": "Conversation Loops Have No Native Termination Safety",
+          "explanation": "AG2 conversations can spiral indefinitely when agents disagree, misunderstand task scope, or enter repetitive clarification loops. Without an external monitor tracking semantic drift and repetition across turns, these loops consume tokens and time with no productive output."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common AG2 Failure Modes",
+      "failures": [
+        {
+          "name": "Agent Conversation Spiraling Off-Topic",
+          "description": "Agents in a GroupChat progressively drift from the original task as each turn introduces tangential context. The LLM-based speaker selector reinforces the drift by choosing agents whose recent messages are topically similar to the current (off-topic) thread.",
+          "severity": "high",
+          "example": "A GroupChat tasked with writing a Python data pipeline spends 15 turns debating the philosophical merits of functional programming after one agent makes an offhand comment, never producing the requested code."
+        },
+        {
+          "name": "Group Chat Consensus on Incorrect Facts",
+          "description": "Multiple agents independently hallucinate the same plausible-sounding but incorrect fact, then cite each other's messages as confirmation. The GroupChatManager interprets the agreement as task completion and terminates the conversation with a confidently wrong answer.",
+          "severity": "critical",
+          "example": "Three agents in a medical research GroupChat all agree that a specific drug interaction is safe based on fabricated citations, with each agent's agreement reinforcing the others' confidence before the result is passed to a downstream system."
+        },
+        {
+          "name": "Code Execution Agents Producing Harmful Outputs",
+          "description": "An AssistantAgent generates code that, when executed by a UserProxyAgent's code executor, performs unintended or dangerous operations such as deleting files, making unauthorized API calls, or exfiltrating environment variables.",
+          "severity": "critical",
+          "example": "An AssistantAgent tasked with 'cleaning up temp files' generates a shell command that recursively deletes a production data directory, which the UserProxyAgent executes without inspection because no code review hook is registered."
+        },
+        {
+          "name": "Speaker Selection Bias in Multi-Agent Groups",
+          "description": "The GroupChatManager's LLM-based next-speaker selection develops a systematic preference for certain agents, effectively silencing others. This creates an echo chamber where diverse agent perspectives — the core value of multi-agent design — are lost.",
+          "severity": "high",
+          "example": "In a five-agent research GroupChat, the critic agent is selected only twice across 30 turns because its previous messages contained negative sentiment, causing the group to produce an uncritically optimistic analysis."
+        },
+        {
+          "name": "Infinite Clarification Loops",
+          "description": "Two agents enter a back-and-forth clarification exchange where neither has enough context to proceed, but neither terminates the conversation. The is_termination_msg function never triggers because each message contains partial progress signals.",
+          "severity": "medium",
+          "example": "A UserProxyAgent and AssistantAgent exchange 40 messages asking for clarification on ambiguous requirements, each response slightly rephrasing the question rather than making progress, until the token limit is exhausted."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with AG2",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both AG2 and the Vex SDK, then initialize the Vex client with your API key and project configuration. The Vex client will be used to create hooks that attach to AG2 agent instances.",
+          "code": "pip install ag2 vex-sdk\n\n# In your Python script:\nimport autogen  # ag2 uses the autogen import namespace\nfrom vex_sdk import VexClient, Policy\n\n# Initialize Vex with your project credentials\nvex = VexClient(\n    api_key=\"your-vex-api-key\",\n    project_id=\"your-project-id\",\n    environment=\"production\"  # or \"staging\", \"development\"\n)\n\n# Define policies relevant to your AG2 workflow\ncode_safety_policy = Policy(\n    name=\"ag2-code-execution-safety\",\n    rules=[\n        \"block_shell_commands_with_rm_rf\",\n        \"block_env_variable_exfiltration\",\n        \"block_unauthorized_network_requests\",\n        \"flag_file_system_writes_outside_workspace\"\n    ]\n)\n\ntopic_drift_policy = Policy(\n    name=\"ag2-topic-drift\",\n    rules=[\n        \"flag_semantic_drift_above_threshold\",\n        \"block_conversation_exceeding_50_turns_without_progress\"\n    ]\n)\n\nvex.register_policies([code_safety_policy, topic_drift_policy])\nprint(\"Vex client initialized and policies registered.\")",
+          "language": "python"
+        },
+        {
+          "title": "Create a Vex Message Hook for Individual Agents",
+          "description": "AG2 agents support reply function hooks via register_reply(). Register a Vex-powered hook on your AssistantAgent and UserProxyAgent instances to intercept every message before it is processed or executed. The hook inspects both incoming and outgoing messages.",
+          "code": "import autogen\nfrom vex_sdk import VexClient, CheckResult\nfrom typing import Optional, Union, Dict, List\n\nvex = VexClient(api_key=\"your-vex-api-key\", project_id=\"your-project-id\")\n\ndef create_vex_reply_hook(agent_name: str, policies: List[str]):\n    \"\"\"\n    Returns an AG2-compatible reply function that runs Vex checks\n    before allowing the agent to generate or act on a message.\n    \"\"\"\n    def vex_hook(\n        recipient: autogen.ConversableAgent,\n        messages: Optional[List[Dict]] = None,\n        sender: Optional[autogen.ConversableAgent] = None,\n        config: Optional[Dict] = None\n    ) -> tuple[bool, Optional[Union[str, Dict]]]:\n        \n        if not messages:\n            return False, None\n        \n        last_message = messages[-1]\n        message_content = (\n            last_message.get(\"content\", \"\")\n            if isinstance(last_message, dict)\n            else str(last_message)\n        )\n        \n        # Run Vex safety check on the incoming message\n        result: CheckResult = vex.check(\n            content=message_content,\n            context={\n                \"agent_name\": agent_name,\n                \"sender\": sender.name if sender else \"unknown\",\n                \"conversation_length\": len(messages),\n                \"policies\": policies\n            }\n        )\n        \n        if result.blocked:\n            # Return a safe refusal message instead of processing the harmful input\n            refusal = (\n                f\"[Vex Safety Block] This message was blocked by policy \"\n                f\"'{result.triggered_policy}': {result.reason}. \"\n                f\"Please revise your request.\"\n            )\n            return True, refusal  # True = reply generated, skip normal processing\n        \n        if result.flagged:\n            # Log the flag but allow processing to continue\n            print(f\"[Vex Warning] Agent '{agent_name}' flagged: {result.reason}\")\n        \n        return False, None  # False = let the agent handle it normally\n    \n    return vex_hook\n\n\n# Create your AG2 agents\nllm_config = {\"model\": \"gpt-4o\", \"api_key\": \"your-openai-key\"}\n\nassistant = autogen.AssistantAgent(\n    name=\"assistant\",\n    llm_config=llm_config,\n    system_message=\"You are a helpful coding assistant.\"\n)\n\nuser_proxy = autogen.UserProxyAgent(\n    name=\"user_proxy\",\n    human_input_mode=\"NEVER\",\n    code_execution_config={\"work_dir\": \"workspace\", \"use_docker\": True}\n)\n\n# Register Vex hooks on both agents\nassistant.register_reply(\n    trigger=autogen.ConversableAgent,  # Trigger on messages from any agent\n    reply_func=create_vex_reply_hook(\n        agent_name=\"assistant\",\n        policies=[\"ag2-topic-drift\", \"ag2-code-execution-safety\"]\n    ),\n    position=0  # Run before all other reply functions\n)\n\nuser_proxy.register_reply(\n    trigger=autogen.ConversableAgent,\n    reply_func=create_vex_reply_hook(\n        agent_name=\"user_proxy\",\n        policies=[\"ag2-code-execution-safety\"]\n    ),\n    position=0\n)\n\nprint(\"Vex hooks registered on assistant and user_proxy agents.\")",
+          "language": "python"
+        },
+        {
+          "title": "Add Vex Monitoring to a GroupChat",
+          "description": "For AG2 GroupChat workflows, register a Vex hook on the GroupChatManager to monitor speaker selection patterns and group-level consensus quality. Also attach per-agent hooks to catch individual agent failures before they propagate through the group.",
+          "code": "import autogen\nfrom vex_sdk import VexClient, GroupChatMonitor\nfrom typing import Optional, List, Dict, Union\n\nvex = VexClient(api_key=\"your-vex-api-key\", project_id=\"your-project-id\")\n\n# Initialize a Vex GroupChatMonitor for tracking cross-turn patterns\ngroup_monitor = vex.create_group_monitor(\n    monitor_id=\"research-group-chat\",\n    checks=[\n        \"speaker_selection_bias\",      # Detect if one agent is being over/under-selected\n        \"factual_consensus_quality\",   # Flag when agents agree without citing evidence\n        \"topic_drift_detection\",       # Semantic similarity to original task\n        \"repetition_loop_detection\"    # Detect circular clarification exchanges\n    ],\n    thresholds={\n        \"speaker_bias_gini_coefficient\": 0.6,  # Flag if selection is this unequal\n        \"topic_drift_cosine_threshold\": 0.4,   # Flag if similarity drops below this\n        \"repetition_window\": 5                  # Check last N turns for repetition\n    }\n)\n\ndef create_groupchat_vex_hook(monitor: GroupChatMonitor):\n    def vex_groupchat_hook(\n        recipient: autogen.ConversableAgent,\n        messages: Optional[List[Dict]] = None,\n        sender: Optional[autogen.ConversableAgent] = None,\n        config: Optional[autogen.GroupChat] = None\n    ) -> tuple[bool, Optional[Union[str, Dict]]]:\n        \n        if not messages or not config:\n            return False, None\n        \n        # Feed the full conversation history to the group monitor\n        group_result = monitor.analyze(\n            messages=messages,\n            groupchat_config={\n                \"agents\": [a.name for a in config.agents],\n                \"speaker_history\": [\n                    m.get(\"name\", \"unknown\") for m in messages if isinstance(m, dict)\n                ],\n                \"original_task\": messages[0].get(\"content\", \"\") if messages else \"\"\n            }\n        )\n        \n        if group_result.speaker_bias_detected:\n            print(\n                f\"[Vex GroupChat Alert] Speaker bias detected. \"\n                f\"Underrepresented agents: {group_result.underrepresented_agents}. \"\n                f\"Gini coefficient: {group_result.gini_coefficient:.2f}\"\n            )\n        \n        if group_result.topic_drift_detected:\n            # Inject a corrective message to redirect the conversation\n            correction = (\n                \"[Facilitator] The conversation has drifted from the original task. \"\n                f\"Original objective: '{group_result.original_task_summary}'. \"\n                \"Please refocus your next response on this goal.\"\n            )\n            return True, correction\n        \n        if group_result.repetition_loop_detected:\n            termination_msg = (\n                \"[Vex Loop Detection] A repetitive clarification loop has been detected \"\n                \"over the last 5 turns. Terminating this sub-thread. \"\n                \"Please make a decision with available information or escalate to a human.\"\n            )\n            return True, termination_msg\n        \n        return False, None\n    \n    return vex_groupchat_hook\n\n\n# Set up a multi-agent GroupChat\nllm_config = {\"model\": \"gpt-4o\", \"api_key\": \"your-openai-key\"}\n\nresearcher = autogen.AssistantAgent(\"researcher\", llm_config=llm_config)\ncritic = autogen.AssistantAgent(\"critic\", llm_config=llm_config)\nfact_checker = autogen.AssistantAgent(\"fact_checker\", llm_config=llm_config)\nuser_proxy = autogen.UserProxyAgent(\"user_proxy\", human_input_mode=\"NEVER\")\n\ngroupchat = autogen.GroupChat(\n    agents=[user_proxy, researcher, critic, fact_checker],\n    messages=[],\n    max_round=30,\n    speaker_selection_method=\"auto\"\n)\n\nmanager = autogen.GroupChatManager(\n    groupchat=groupchat,\n    llm_config=llm_config\n)\n\n# Register the group-level Vex monitor on the GroupChatManager\nmanager.register_reply(\n    trigger=autogen.ConversableAgent,\n    reply_func=create_groupchat_vex_hook(group_monitor),\n    position=0\n)\n\nprint(\"Vex GroupChat monitor registered on GroupChatManager.\")\n\n# Start the monitored group conversation\nuser_proxy.initiate_chat(\n    manager,\n    message=\"Research the safety profile of combining metformin and ibuprofen and summarize findings.\"\n)",
+          "language": "python"
+        },
+        {
+          "title": "Intercept Code Before Execution with a Custom Code Executor",
+          "description": "Wrap AG2's code execution pipeline with a Vex code safety check. By subclassing UserProxyAgent and overriding execute_code_blocks(), you can scan every code block for dangerous patterns before it runs in Docker or locally.",
+          "code": "import autogen\nfrom autogen.coding import LocalCommandLineCodeExecutor, DockerCommandLineCodeExecutor\nfrom vex_sdk import VexClient, CodeSafetyResult\nfrom typing import List, Optional\nimport os\n\nvex = VexClient(api_key=\"your-vex-api-key\", project_id=\"your-project-id\")\n\nclass VexProtectedUserProxyAgent(autogen.UserProxyAgent):\n    \"\"\"\n    A UserProxyAgent subclass that runs every code block through\n    Vex code safety checks before execution.\n    \"\"\"\n    \n    def __init__(self, *args, vex_client: VexClient, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.vex = vex_client\n        self._execution_log = []\n    \n    def execute_code_blocks(\n        self,\n        code_blocks: List[autogen.coding.base.CodeBlock]\n    ) -> autogen.coding.base.CommandLineCodeResult:\n        \"\"\"\n        Override to inject Vex code safety checks before execution.\n        \"\"\"\n        for i, block in enumerate(code_blocks):\n            # Run Vex code safety analysis on each block\n            safety_result: CodeSafetyResult = self.vex.check_code(\n                code=block.code,\n                language=block.language,\n                context={\n                    \"agent\": self.name,\n                    \"block_index\": i,\n                    \"total_blocks\": len(code_blocks),\n                    \"working_dir\": str(\n                        self.code_executor.work_dir\n                        if hasattr(self, 'code_executor') else 'unknown'\n                    )\n                },\n                checks=[\n                    \"shell_injection\",\n                    \"file_system_destructive_ops\",  # rm -rf, shutil.rmtree on non-workspace paths\n                    \"env_variable_access\",           # os.environ, subprocess with env leak\n                    \"network_exfiltration\",           # curl, wget, requests to external IPs\n                    \"privilege_escalation\",           # sudo, chmod 777, etc.\n                    \"crypto_mining_patterns\"\n                ]\n            )\n            \n            if safety_result.blocked:\n                # Log the blocked attempt and return a safe error result\n                self._execution_log.append({\n                    \"status\": \"blocked\",\n                    \"reason\": safety_result.reason,\n                    \"policy\": safety_result.triggered_policy,\n                    \"code_snippet\": block.code[:200]\n                })\n                print(\n                    f\"[Vex Code Block] BLOCKED block {i+1}/{len(code_blocks)}: \"\n                    f\"{safety_result.triggered_policy} — {safety_result.reason}\"\n                )\n                # Return a synthetic error result without executing\n                return autogen.coding.base.CommandLineCodeResult(\n                    exit_code=1,\n                    output=(\n                        f\"Code execution blocked by Vex safety policy \"\n                        f\"'{safety_result.triggered_policy}'.\\n\"\n                        f\"Reason: {safety_result.reason}\\n\"\n                        f\"Please revise the code to comply with safety requirements.\"\n                    )\n                )\n            \n            if safety_result.flagged:\n                print(\n                    f\"[Vex Code Warning] Block {i+1} flagged (allowed): {safety_result.reason}\"\n                )\n                # Log but continue to execution\n                self._execution_log.append({\n                    \"status\": \"flagged\",\n                    \"reason\": safety_result.reason,\n                    \"code_snippet\": block.code[:200]\n                })\n        \n        # All blocks passed — proceed with normal execution\n        return super().execute_code_blocks(code_blocks)\n    \n    def get_execution_log(self) -> List[dict]:\n        return self._execution_log\n\n\n# Use the protected agent in place of a standard UserProxyAgent\nllm_config = {\"model\": \"gpt-4o\", \"api_key\": \"your-openai-key\"}\n\nassistant = autogen.AssistantAgent(\n    name=\"coder\",\n    llm_config=llm_config,\n    system_message=\"You are an expert Python developer. Write clean, safe code.\"\n)\n\nprotected_proxy = VexProtectedUserProxyAgent(\n    name=\"executor\",\n    vex_client=vex,\n    human_input_mode=\"NEVER\",\n    code_execution_config={\n        \"executor\": LocalCommandLineCodeExecutor(work_dir=\"./workspace\")\n    },\n    is_termination_msg=lambda msg: \"TERMINATE\" in (msg.get(\"content\") or \"\")\n)\n\n# Initiate a coding task — all generated code will be Vex-checked before execution\nprotected_proxy.initiate_chat(\n    assistant,\n    message=\"Write a Python script that reads all CSV files in ./data and merges them into one output file.\"\n)\n\n# Review what was blocked or flagged\nprint(\"\\nVex Execution Log:\")\nfor entry in protected_proxy.get_execution_log():\n    print(f\"  [{entry['status'].upper()}] {entry['reason']}\")",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Register Vex Hooks at position=0 on Every Agent",
+          "description": "AG2's register_reply() accepts a position argument that controls hook execution order. Always set position=0 to ensure Vex runs before AG2's built-in reply functions, including the default LLM reply and the check_termination_and_human_reply functions. If Vex runs after the LLM has already generated a response, you lose the ability to block harmful outputs before they enter the conversation history."
+        },
+        {
+          "title": "Use GroupChatMonitor for Cross-Turn Pattern Detection",
+          "description": "Individual message hooks cannot detect patterns that emerge across multiple turns, such as speaker selection bias or gradual topic drift. Use Vex's GroupChatMonitor and pass the full messages list on every turn so the monitor can compute rolling metrics like cosine similarity to the original task and Gini coefficients for speaker distribution. Set alert thresholds conservatively at first and tune them based on observed false positive rates in your specific workflow."
+        },
+        {
+          "title": "Subclass UserProxyAgent for Code Execution Safety",
+          "description": "The most reliable way to intercept code before execution in AG2 is to override execute_code_blocks() in a UserProxyAgent subclass, as shown in Step 4. Avoid trying to intercept code via message content parsing alone — AG2 extracts code blocks internally, and a message-level hook may not see the final parsed code blocks that get passed to the executor. The subclass approach gives you access to the exact CodeBlock objects that will be executed."
+        },
+        {
+          "title": "Inject Corrective Messages Rather Than Silent Blocks",
+          "description": "When Vex detects topic drift or a policy violation in a GroupChat, return a corrective facilitator message (return True, correction_message) rather than silently returning False. AG2 agents learn from conversation context, so an explicit redirection message helps the LLMs in subsequent turns understand why the conversation was redirected. Silent blocks can confuse agents and lead to repeated violations as they have no signal that their output was intercepted."
+        },
+        {
+          "title": "Log All Vex Events to a Persistent Store for Audit",
+          "description": "AG2 workflows are often long-running and involve many agents, making post-hoc debugging difficult without a complete audit trail. Configure the Vex client to emit structured logs for every check, flag, and block event, including the agent name, turn number, triggered policy, and a hash of the message content. This audit trail is essential for tuning policies, demonstrating compliance, and diagnosing why a multi-agent workflow produced an unexpected result."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your AG2 Agents",
+      "description": "Sign up for Vex today and get your AG2 multi-agent workflows protected against conversation drift, harmful code execution, and group consensus failures in under 15 minutes."
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "slug": "hallucination-detection",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection Guide",
+    "description": "Complete guide to ai agent hallucination detection guide. Learn detection methods, fixes, and best practices for production AI agents.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "AI agent reliability",
+      "agent monitoring"
+    ]
+  },
+  "content": {
+    "intro": "AI agent hallucination occurs when a language model generates confident, plausible-sounding outputs that are factually incorrect, fabricated, or unsupported by the provided context. In agentic systems, hallucinations are especially dangerous because they can cascade through multi-step pipelines, causing downstream tools to act on false information. Detecting and mitigating hallucinations is critical for building reliable, production-grade AI agents.",
+    "whatIsIt": {
+      "heading": "What Is AI Agent Hallucination Detection?",
+      "explanation": "Hallucination detection is the practice of identifying when an AI agent produces outputs that are factually wrong, internally inconsistent, or not grounded in the retrieved or provided source material. Unlike simple errors, hallucinations are often delivered with high confidence and fluent language, making them difficult for end users to spot without systematic verification mechanisms in place.\n\nIn agentic workflows, hallucinations manifest in several distinct forms: factual hallucinations (inventing statistics, citations, or events), contextual hallucinations (misrepresenting information from retrieved documents), and structural hallucinations (fabricating function call arguments, API parameters, or JSON fields that don't exist). Each type poses unique risks depending on the agent's role and the downstream systems it interacts with.\n\nEffective hallucination detection combines multiple layers of defense, including retrieval grounding checks, self-consistency sampling, external fact verification, and output schema validation. No single method is sufficient on its own, so robust agent systems implement detection as a pipeline of complementary checks that run before any hallucinated output can trigger irreversible actions.",
+      "examples": [
+        {
+          "scenario": "A research agent is asked to summarize a legal document and fabricates a clause that does not exist in the source, citing a specific section number with confidence.",
+          "consequence": "Legal teams rely on the summary for contract negotiations, leading to a missed obligation and potential breach of contract liability."
+        },
+        {
+          "scenario": "A customer support agent invents a product feature that was never built, telling a user that the software supports a specific integration.",
+          "consequence": "The customer purchases the product based on false capabilities, resulting in churn, refund requests, and reputational damage."
+        },
+        {
+          "scenario": "A code-generation agent fabricates a non-existent library function name and passes it as a tool call argument in an automated CI/CD pipeline.",
+          "consequence": "The pipeline fails silently or executes with corrupted parameters, causing a production deployment to break or data to be written incorrectly."
+        },
+        {
+          "scenario": "A financial analysis agent invents quarterly revenue figures for a company when the actual data was not present in the retrieved context.",
+          "consequence": "An investment decision is made based on fabricated numbers, resulting in significant financial loss and potential regulatory scrutiny."
+        }
+      ]
+    },
+    "howToDetect": {
+      "heading": "How to Detect It",
+      "methods": [
+        {
+          "name": "Retrieval Grounding Score",
+          "description": "Compare the agent's output against the source documents retrieved during RAG (Retrieval-Augmented Generation) using semantic similarity or NLI (Natural Language Inference) models. Each claim in the output is checked to verify it can be entailed by at least one retrieved passage. Claims with low entailment scores are flagged as potential hallucinations. Tools like TruLens, RAGAS, and custom NLI pipelines using models like DeBERTa can automate this check at scale.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Self-Consistency Sampling",
+          "description": "Generate multiple independent responses to the same prompt using temperature sampling, then compare the outputs for consistency. Facts that appear in most samples are likely grounded, while facts that vary across samples are likely hallucinated. This method is model-agnostic and requires no external knowledge base, but increases inference cost proportionally to the number of samples drawn.",
+          "effectiveness": "medium"
+        },
+        {
+          "name": "External Fact Verification",
+          "description": "Route specific factual claims extracted from the agent's output to an external verification tool such as a search engine, knowledge graph, or structured database query. The agent's claims are parsed into atomic propositions and each is independently verified. This is the most accurate method for factual hallucinations but introduces latency and requires robust claim extraction logic.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Output Schema and Constraint Validation",
+          "description": "For structured outputs such as JSON tool calls, API parameters, or database queries, validate the agent's output against a strict schema before execution. Pydantic models, JSON Schema validators, or custom assertion layers can catch hallucinated field names, invalid enum values, and out-of-range parameters before they propagate into downstream systems. This method is fast and deterministic but only covers structural hallucinations.",
+          "effectiveness": "medium"
+        }
+      ]
+    },
+    "howToFix": {
+      "heading": "How to Fix It",
+      "strategies": [
+        {
+          "name": "Implement RAG Grounding Validation with NLI",
+          "description": "After the agent generates a response, use a Natural Language Inference model to score each sentence against the retrieved context chunks. Sentences that cannot be entailed by any retrieved passage are flagged or removed before the response is returned to the user or passed to the next agent step.",
+          "code": "from transformers import pipeline\nfrom typing import List, Dict\n\n# Load a pre-trained NLI model\nnli_pipeline = pipeline(\n    \"text-classification\",\n    model=\"cross-encoder/nli-deberta-v3-base\"\n)\n\ndef check_grounding(\n    agent_output: str,\n    retrieved_chunks: List[str],\n    threshold: float = 0.7\n) -> Dict:\n    \"\"\"\n    Check if agent output is grounded in retrieved context.\n    Returns grounded sentences and flagged hallucinations.\n    \"\"\"\n    sentences = agent_output.split(\". \")\n    grounded = []\n    hallucinated = []\n\n    for sentence in sentences:\n        if not sentence.strip():\n            continue\n        \n        max_entailment_score = 0.0\n        \n        for chunk in retrieved_chunks:\n            result = nli_pipeline(\n                f\"{chunk} [SEP] {sentence}\",\n                truncation=True,\n                max_length=512\n            )\n            # Look for ENTAILMENT label\n            for item in result:\n                if item[\"label\"].upper() == \"ENTAILMENT\":\n                    max_entailment_score = max(\n                        max_entailment_score,\n                        item[\"score\"]\n                    )\n        \n        if max_entailment_score >= threshold:\n            grounded.append(sentence)\n        else:\n            hallucinated.append({\n                \"sentence\": sentence,\n                \"max_entailment_score\": max_entailment_score\n            })\n    \n    return {\n        \"grounded_sentences\": grounded,\n        \"hallucinated_sentences\": hallucinated,\n        \"hallucination_rate\": len(hallucinated) / max(len(sentences), 1)\n    }\n\n# Example usage\nretrieved_context = [\n    \"The company reported $4.2B in revenue for Q3 2024.\",\n    \"The product supports OAuth 2.0 and SAML integrations.\"\n]\n\nagent_response = (\n    \"The company earned $4.2B in Q3 2024. \"\n    \"The product also supports LDAP and Kerberos. \"\n    \"OAuth 2.0 is available for enterprise customers.\"\n)\n\nresult = check_grounding(agent_response, retrieved_context)\nprint(f\"Hallucination rate: {result['hallucination_rate']:.1%}\")\nprint(f\"Flagged: {result['hallucinated_sentences']}\")",
+          "language": "python"
+        },
+        {
+          "name": "Self-Consistency Voting Pipeline",
+          "description": "Sample multiple completions from the agent at a higher temperature and implement a voting mechanism to identify consistent facts. Claims that appear in fewer than a configurable majority of samples are treated as unreliable and either removed or flagged for human review.",
+          "code": "import openai\nfrom collections import Counter\nfrom typing import List\nimport re\n\nclient = openai.OpenAI()\n\ndef extract_atomic_claims(text: str) -> List[str]:\n    \"\"\"Simple sentence-level claim extraction.\"\"\"\n    sentences = re.split(r'(?<=[.!?])\\s+', text.strip())\n    return [s for s in sentences if len(s) > 10]\n\ndef self_consistency_check(\n    prompt: str,\n    n_samples: int = 5,\n    temperature: float = 0.8,\n    agreement_threshold: float = 0.6\n) -> dict:\n    \"\"\"\n    Run self-consistency sampling to detect hallucinations.\n    Claims appearing in fewer samples than the threshold are flagged.\n    \"\"\"\n    samples = []\n    \n    for _ in range(n_samples):\n        response = client.chat.completions.create(\n            model=\"gpt-4o\",\n            messages=[{\"role\": \"user\", \"content\": prompt}],\n            temperature=temperature\n        )\n        samples.append(response.choices[0].message.content)\n    \n    # Extract claims from each sample\n    all_claims_per_sample = [extract_atomic_claims(s) for s in samples]\n    \n    # Flatten and count approximate claim frequency\n    # In production, use semantic similarity clustering\n    claim_counter = Counter()\n    for claims in all_claims_per_sample:\n        for claim in claims:\n            claim_counter[claim] += 1\n    \n    consistent_claims = [\n        claim for claim, count in claim_counter.items()\n        if count / n_samples >= agreement_threshold\n    ]\n    \n    inconsistent_claims = [\n        {\"claim\": claim, \"agreement_rate\": count / n_samples}\n        for claim, count in claim_counter.items()\n        if count / n_samples < agreement_threshold\n    ]\n    \n    return {\n        \"samples\": samples,\n        \"consistent_claims\": consistent_claims,\n        \"inconsistent_claims\": inconsistent_claims,\n        \"recommended_response\": samples[0]  # Use first sample as base\n    }\n\n# Example usage\nresult = self_consistency_check(\n    prompt=\"What were OpenAI's key product releases in 2023?\",\n    n_samples=5,\n    agreement_threshold=0.6\n)\n\nprint(\"Potentially hallucinated claims:\")\nfor item in result[\"inconsistent_claims\"]:\n    print(f\"  [{item['agreement_rate']:.0%} agreement] {item['claim']}\")",
+          "language": "python"
+        },
+        {
+          "name": "Structured Output Validation with Pydantic",
+          "description": "Enforce strict output schemas for all agent tool calls and structured responses using Pydantic models. This prevents structural hallucinations where the agent invents field names, uses invalid enum values, or provides parameters outside acceptable ranges before they can affect downstream systems.",
+          "code": "from pydantic import BaseModel, Field, field_validator\nfrom typing import Literal, Optional\nfrom enum import Enum\nimport openai\nimport json\n\nclient = openai.OpenAI()\n\nclass SupportedIntegration(str, Enum):\n    OAUTH2 = \"oauth2\"\n    SAML = \"saml\"\n    API_KEY = \"api_key\"\n\nclass DatabaseQueryParams(BaseModel):\n    table_name: str = Field(..., min_length=1, max_length=64)\n    limit: int = Field(default=100, ge=1, le=10000)\n    order_by: Optional[str] = Field(default=None)\n    integration_type: SupportedIntegration\n    \n    @field_validator(\"table_name\")\n    @classmethod\n    def validate_table_name(cls, v: str) -> str:\n        allowed_tables = {\"users\", \"orders\", \"products\", \"events\"}\n        if v not in allowed_tables:\n            raise ValueError(\n                f\"Hallucinated table name '{v}'. \"\n                f\"Must be one of: {allowed_tables}\"\n            )\n        return v\n\ndef validated_agent_tool_call(user_request: str) -> dict:\n    \"\"\"\n    Get structured output from agent and validate before execution.\n    \"\"\"\n    response = client.chat.completions.create(\n        model=\"gpt-4o\",\n        messages=[\n            {\n                \"role\": \"system\",\n                \"content\": (\n                    \"You are a database query agent. Return a JSON object \"\n                    \"with fields: table_name, limit, order_by, integration_type. \"\n                    \"table_name must be one of: users, orders, products, events. \"\n                    \"integration_type must be one of: oauth2, saml, api_key.\"\n                )\n            },\n            {\"role\": \"user\", \"content\": user_request}\n        ],\n        response_format={\"type\": \"json_object\"}\n    )\n    \n    raw_output = json.loads(response.choices[0].message.content)\n    \n    try:\n        # Validate against schema - raises if hallucinated fields detected\n        validated = DatabaseQueryParams(**raw_output)\n        return {\n            \"status\": \"valid\",\n            \"params\": validated.model_dump()\n        }\n    except Exception as e:\n        return {\n            \"status\": \"hallucination_detected\",\n            \"error\": str(e),\n            \"raw_output\": raw_output\n        }\n\n# Example usage\nresult = validated_agent_tool_call(\n    \"Query the customer_records table with ldap integration\"\n)\nprint(result)\n# Output: {\"status\": \"hallucination_detected\", \"error\": \"...\"}\n# 'customer_records' and 'ldap' are hallucinated values",
+          "language": "python"
+        },
+        {
+          "name": "Hallucination-Aware Prompt Engineering",
+          "description": "Redesign agent system prompts to explicitly instruct the model to acknowledge uncertainty, cite sources, and refuse to answer when information is not available in the provided context. Combine this with a post-processing layer that detects hedge-less factual claims and routes them for verification.",
+          "code": "from openai import OpenAI\nfrom typing import Optional\nimport re\n\nclient = OpenAI()\n\nGROUNDED_SYSTEM_PROMPT = \"\"\"\nYou are a precise research assistant. Follow these rules strictly:\n\n1. ONLY state facts that are explicitly present in the provided context.\n2. If information is not in the context, say: \"This information is not available in the provided sources.\"\n3. Always cite the specific part of the context supporting each claim.\n4. Use phrases like \"According to the provided document...\" or \"The source states...\"\n5. Never infer, extrapolate, or use your training knowledge to fill gaps.\n6. If asked about something outside the context, respond with your uncertainty level:\n   - [HIGH CONFIDENCE] - directly stated in context\n   - [LOW CONFIDENCE] - inferred from context\n   - [NOT IN CONTEXT] - not available in provided sources\n\"\"\"\n\nUNCERTAINTY_PATTERNS = [\n    r\"\\b(definitely|certainly|absolutely|always|never)\\b\",\n    r\"\\b(the fact is|it is known that|studies show)\\b\",\n    r\"\\$[\\d,]+\",  # Specific dollar amounts\n    r\"\\b\\d{4}\\b\",  # Specific years\n    r\"\\b\\d+(\\.\\d+)?%\\b\",  # Specific percentages\n]\n\ndef flag_overconfident_claims(text: str) -> list:\n    \"\"\"Flag sentences containing high-risk hallucination patterns.\"\"\"\n    flagged = []\n    sentences = re.split(r'(?<=[.!?])\\s+', text)\n    \n    for sentence in sentences:\n        matched_patterns = []\n        for pattern in UNCERTAINTY_PATTERNS:\n            if re.search(pattern, sentence, re.IGNORECASE):\n                matched_patterns.append(pattern)\n        \n        if matched_patterns and \"[HIGH CONFIDENCE]\" not in sentence:\n            flagged.append({\n                \"sentence\": sentence,\n                \"risk_patterns\": matched_patterns\n            })\n    \n    return flagged\n\ndef grounded_agent_query(\n    user_query: str,\n    context: str,\n    model: str = \"gpt-4o\"\n) -> dict:\n    \"\"\"Run a hallucination-resistant agent query.\"\"\"\n    response = client.chat.completions.create(\n        model=model,\n        messages=[\n            {\"role\": \"system\", \"content\": GROUNDED_SYSTEM_PROMPT},\n            {\n                \"role\": \"user\",\n                \"content\": f\"Context:\\n{context}\\n\\nQuestion: {user_query}\"\n            }\n        ],\n        temperature=0.1  # Low temperature for factual tasks\n    )\n    \n    output = response.choices[0].message.content\n    flagged_claims = flag_overconfident_claims(output)\n    \n    return {\n        \"response\": output,\n        \"flagged_claims\": flagged_claims,\n        \"requires_review\": len(flagged_claims) > 0\n    }\n\n# Example usage\ncontext = \"Q3 2024 revenue was $4.2B, up 12% YoY. OAuth 2.0 is supported.\"\nresult = grounded_agent_query(\n    user_query=\"What integrations does the product support and what was revenue?\",\n    context=context\n)\n\nprint(f\"Requires review: {result['requires_review']}\")\nif result['flagged_claims']:\n    print(\"Flagged claims:\", result['flagged_claims'])",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Layer Multiple Detection Methods",
+          "description": "No single hallucination detection technique catches all failure modes. Combine retrieval grounding checks for RAG outputs, schema validation for structured tool calls, self-consistency sampling for open-ended generation, and prompt-level constraints. Each layer catches different hallucination types, and together they provide defense-in-depth that significantly reduces the rate of undetected hallucinations reaching production."
+        },
+        {
+          "title": "Gate Irreversible Actions Behind Confidence Thresholds",
+          "description": "Before an agent executes any irreversible action—sending an email, writing to a database, making an API call, or processing a payment—require that the inputs pass a minimum confidence threshold from your hallucination detection pipeline. Actions that fail the threshold should be queued for human review rather than executed automatically. This prevents hallucinated parameters from causing real-world harm."
+        },
+        {
+          "title": "Log and Monitor Hallucination Rates Over Time",
+          "description": "Instrument your agent pipeline to log hallucination detection scores for every request, and set up dashboards and alerts for hallucination rate spikes. Track metrics like grounding score distributions, schema validation failure rates, and self-consistency agreement rates. A sudden increase in hallucination rate often signals a model update, a shift in input distribution, or a retrieval quality degradation that needs immediate attention."
+        },
+        {
+          "title": "Use Low Temperature for Factual and Structured Tasks",
+          "description": "Set the model temperature to 0.0 or near-zero for tasks that require factual accuracy, structured output generation, or tool call parameter construction. Higher temperatures increase creativity but also increase hallucination rates. Reserve higher temperatures only for creative tasks where factual precision is not critical, and always pair them with post-generation validation when the output will be used in downstream systems."
+        },
+        {
+          "title": "Build a Hallucination Test Suite for Regression Testing",
+          "description": "Maintain a curated dataset of prompts that are known to elicit hallucinations from your specific agent, along with ground truth answers and expected grounding sources. Run this test suite automatically on every model update, prompt change, or retrieval system modification. Tracking hallucination rates on a fixed benchmark over time lets you detect regressions before they reach production and measure the real impact of mitigation strategies."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Vex continuously monitors your AI agents for hallucinations in real time, providing automated grounding checks, confidence scoring, and actionable alerts so your team can ship reliable agents without manually auditing every output."
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Instructor Agents",
+    "description": "Learn how to add runtime guardrails to Instructor agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Instructor guardrails",
+      "Instructor monitoring",
+      "Instructor hallucination detection",
+      "Vex Instructor",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies structured output extraction by patching LLM clients to return validated Pydantic models, but production deployments face silent failures when models hallucinate enum values, skip required fields, or exhaust retry budgets without alerting your team. Vex wraps your Instructor-patched client calls to provide real-time reliability monitoring, automatic failure classification, and alerting before bad extractions corrupt downstream systems. Without guardrails, a single malformed nested object or out-of-schema enum can silently propagate through your data pipeline undetected.",
+    "whyGuardrails": {
+      "heading": "Why Instructor Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Retry Exhaustion Goes Silent",
+          "explanation": "Instructor's built-in retry mechanism (max_retries parameter on instructor.patch()) will silently raise a ValidationError or return a partial result after exhausting attempts. Vex captures these exhaustion events with full context — the raw LLM response, the Pydantic validation errors, and the number of attempts — so you can triage which schemas are consistently failing."
+        },
+        {
+          "title": "Schema Drift Between Model Versions",
+          "explanation": "When you upgrade from gpt-3.5-turbo to gpt-4o or switch to a Claude model via instructor.from_anthropic(), your Pydantic models may suddenly see new hallucinated field values or missing nested objects. Vex tracks extraction success rates per model version so you can detect schema drift the moment it begins, not after thousands of corrupted records."
+        },
+        {
+          "title": "Enum Hallucination Is Undetectable Without Monitoring",
+          "explanation": "Instructor validates that extracted values match your Literal or Enum types, but if retries are exhausted and you catch the exception to return a default, that failure is invisible. Vex intercepts both the exception path and the fallback path, giving you accurate hallucination rates per field and per model."
+        },
+        {
+          "title": "Nested Model Depth Inconsistency",
+          "explanation": "Complex nested Pydantic models like Address inside Person inside Organization frequently produce inconsistent extraction depth — the model may populate the top-level object but return None for deeply nested required fields. Vex's field-level telemetry identifies exactly which nested paths fail most often, enabling targeted prompt engineering."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Instructor Failure Modes",
+      "failures": [
+        {
+          "name": "Structured Output Validation Retries Exhausted",
+          "description": "Instructor retries the LLM call up to max_retries times when Pydantic validation fails. When all retries are consumed, a InstructorRetryException or ValidationError is raised. In high-throughput pipelines this can cause cascading failures if not caught and monitored.",
+          "severity": "critical",
+          "example": "client = instructor.patch(openai.OpenAI(), max_retries=3)\n# After 3 failed Pydantic validations, raises:\n# instructor.exceptions.InstructorRetryException: Max retries exceeded"
+        },
+        {
+          "name": "Partial Extraction Missing Required Fields",
+          "description": "The LLM returns a JSON object that omits required Pydantic fields entirely, causing ValidationError with 'field required' errors. This is especially common with large schemas where the model truncates its output or loses track of required fields mid-generation.",
+          "severity": "critical",
+          "example": "class UserProfile(BaseModel):\n    name: str\n    email: str  # required\n    age: int    # required\n# LLM returns: {\"name\": \"Alice\"}\n# Raises: ValidationError: 2 validation errors for UserProfile\n#   email: field required\n#   age: field required"
+        },
+        {
+          "name": "Model Hallucinating Enum Values Outside Schema",
+          "description": "When using Literal types or Python Enum classes, the LLM may generate plausible-sounding but invalid values. Instructor catches these via Pydantic validation, but repeated hallucination of the same invalid enum value across retries indicates a prompt engineering problem that monitoring can surface.",
+          "severity": "high",
+          "example": "class Priority(str, Enum):\n    LOW = 'low'\n    MEDIUM = 'medium'\n    HIGH = 'high'\n\nclass Task(BaseModel):\n    priority: Priority\n# LLM returns: {\"priority\": \"urgent\"}  # not in enum\n# ValidationError: value is not a valid enumeration member"
+        },
+        {
+          "name": "Nested Object Extraction Producing Inconsistent Depth",
+          "description": "Deeply nested Pydantic models cause the LLM to populate outer objects correctly while returning null or incomplete data for inner required models. This is particularly common with 3+ levels of nesting and models that lack explicit null handling.",
+          "severity": "high",
+          "example": "class Address(BaseModel):\n    street: str\n    city: str\n\nclass Company(BaseModel):\n    name: str\n    headquarters: Address  # required nested model\n\n# LLM returns: {\"name\": \"Acme\", \"headquarters\": null}\n# ValidationError: headquarters -> none is not an allowed value"
+        },
+        {
+          "name": "Response Model Type Coercion Failures",
+          "description": "Instructor attempts type coercion when the LLM returns a string for an int field or a number for a date field. When coercion fails, the error message from Pydantic is often cryptic, making it hard to identify which field caused the failure without structured logging.",
+          "severity": "medium",
+          "example": "class Invoice(BaseModel):\n    amount: float\n    due_date: datetime\n\n# LLM returns: {\"amount\": \"one hundred\", \"due_date\": \"next Friday\"}\n# ValidationError: amount -> value is not a valid float\n#                  due_date -> invalid datetime format"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Instructor",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both the Instructor and Vex SDK packages, then initialize the Vex client with your API key. The Vex client should be initialized once at application startup and reused across all calls.",
+          "code": "# Install dependencies\n# pip install instructor vex-sdk openai pydantic\n\nimport instructor\nimport openai\nfrom pydantic import BaseModel\nfrom vex_sdk import Vex\n\n# Initialize Vex once at startup\nvex = Vex(api_key=\"your-vex-api-key\", agent_name=\"instructor-extraction-agent\")\n\n# Patch the OpenAI client with Instructor as usual\nclient = instructor.patch(openai.OpenAI(api_key=\"your-openai-api-key\"), max_retries=3)",
+          "language": "python"
+        },
+        {
+          "title": "Define Your Pydantic Models and Wrap Extraction Calls",
+          "description": "Define your Pydantic response models normally, then wrap the instructor client.chat.completions.create() call with vex.verify(). Vex captures the raw response, validation errors, retry count, and extracted model for monitoring.",
+          "code": "from pydantic import BaseModel, Field\nfrom typing import Optional, Literal\nfrom enum import Enum\n\nclass Priority(str, Enum):\n    LOW = 'low'\n    MEDIUM = 'medium'\n    HIGH = 'high'\n\nclass TaskExtraction(BaseModel):\n    title: str = Field(..., description=\"The task title\")\n    priority: Priority\n    due_date: Optional[str] = Field(None, description=\"ISO 8601 date string\")\n    assignee: str\n\ndef extract_task(user_input: str) -> TaskExtraction:\n    result = vex.verify(\n        fn=lambda: client.chat.completions.create(\n            model=\"gpt-4o\",\n            response_model=TaskExtraction,\n            messages=[\n                {\"role\": \"system\", \"content\": \"Extract structured task data from the user input.\"},\n                {\"role\": \"user\", \"content\": user_input}\n            ]\n        ),\n        operation=\"task_extraction\",\n        schema=TaskExtraction.model_json_schema(),\n        tags={\"model\": \"gpt-4o\", \"response_model\": \"TaskExtraction\"}\n    )\n    return result\n\n# Usage\ntask = extract_task(\"Remind Alice to submit the Q4 report by Friday, high priority\")\nprint(task.model_dump())",
+          "language": "python"
+        },
+        {
+          "title": "Handle Retry Exhaustion and Validation Failures with Vex Alerts",
+          "description": "Wrap Instructor calls in a try/except block and use vex.record_failure() to capture exhausted retries and validation errors with full context. This ensures every failure is tracked even when your application handles the exception gracefully.",
+          "code": "import instructor\nfrom instructor.exceptions import InstructorRetryException\nfrom pydantic import ValidationError\nfrom vex_sdk import Vex, FailureType\n\nvex = Vex(api_key=\"your-vex-api-key\", agent_name=\"instructor-extraction-agent\")\nclient = instructor.patch(openai.OpenAI(), max_retries=3)\n\ndef safe_extract(user_input: str, fallback: TaskExtraction = None) -> Optional[TaskExtraction]:\n    try:\n        result = vex.verify(\n            fn=lambda: client.chat.completions.create(\n                model=\"gpt-4o\",\n                response_model=TaskExtraction,\n                messages=[{\"role\": \"user\", \"content\": user_input}]\n            ),\n            operation=\"task_extraction\"\n        )\n        return result\n    except InstructorRetryException as e:\n        vex.record_failure(\n            operation=\"task_extraction\",\n            failure_type=FailureType.RETRY_EXHAUSTED,\n            error=str(e),\n            context={\n                \"attempts\": e.n_attempts,\n                \"last_validation_errors\": str(e.last_completion),\n                \"input_preview\": user_input[:200]\n            }\n        )\n        return fallback\n    except ValidationError as e:\n        vex.record_failure(\n            operation=\"task_extraction\",\n            failure_type=FailureType.SCHEMA_VALIDATION,\n            error=str(e),\n            context={\"validation_errors\": e.errors()}\n        )\n        return fallback",
+          "language": "python"
+        },
+        {
+          "title": "TypeScript Integration with Instructor-JS and Vex",
+          "description": "For TypeScript projects using the instructor-js library with Zod schemas, wrap the instructor client call with vex.verify() in the same pattern. Vex captures Zod validation failures and retry exhaustion from the instructor-js client.",
+          "code": "import Instructor from '@instructor-ai/instructor';\nimport OpenAI from 'openai';\nimport { z } from 'zod';\nimport { Vex, FailureType } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: 'your-vex-api-key', agentName: 'instructor-ts-agent' });\n\nconst oai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\nconst client = Instructor({ client: oai, mode: 'TOOLS' });\n\nconst TaskSchema = z.object({\n  title: z.string(),\n  priority: z.enum(['low', 'medium', 'high']),\n  dueDate: z.string().optional(),\n  assignee: z.string(),\n});\n\ntype Task = z.infer<typeof TaskSchema>;\n\nasync function extractTask(userInput: string): Promise<Task | null> {\n  try {\n    const result = await vex.verify(\n      () => client.chat.completions.create({\n        model: 'gpt-4o',\n        response_model: { schema: TaskSchema, name: 'Task' },\n        max_retries: 3,\n        messages: [\n          { role: 'system', content: 'Extract structured task data.' },\n          { role: 'user', content: userInput },\n        ],\n      }),\n      {\n        operation: 'task_extraction',\n        tags: { model: 'gpt-4o', responseModel: 'TaskSchema' },\n      }\n    );\n    return result;\n  } catch (error) {\n    await vex.recordFailure({\n      operation: 'task_extraction',\n      failureType: FailureType.RETRY_EXHAUSTED,\n      error: String(error),\n      context: { inputPreview: userInput.slice(0, 200) },\n    });\n    return null;\n  }\n}\n\n// Usage\nconst task = await extractTask('Ask Bob to finalize the budget report by Monday, medium priority');\nconsole.log(task);",
+          "language": "typescript"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Tag Extractions by Response Model Name",
+          "description": "Always pass the Pydantic model class name as a tag in vex.verify() calls (e.g., tags={'response_model': 'TaskExtraction'}). This allows Vex dashboards to break down failure rates by schema type, making it easy to identify which Pydantic models are most fragile and need prompt engineering attention."
+        },
+        {
+          "title": "Set max_retries Conservatively and Monitor Retry Rates",
+          "description": "Instructor's max_retries parameter on instructor.patch() or per-call should be set to 2-3 for production. Higher values mask underlying prompt or schema problems. Use Vex's retry rate metric to detect when a schema is consistently requiring 3 retries — that's a signal to fix the prompt or simplify the Pydantic model, not to increase max_retries."
+        },
+        {
+          "title": "Use Optional Fields Strategically to Reduce Validation Failures",
+          "description": "Mark fields as Optional[str] = None in your Pydantic models only when the data is genuinely optional in your domain. Avoid making fields Optional just to suppress ValidationErrors — this hides real extraction failures. Instead, let Vex capture the required-field failures and use that data to improve your system prompt's field extraction instructions."
+        },
+        {
+          "title": "Monitor Enum Hallucination Rates Per Field",
+          "description": "Use Vex's field-level failure tracking to identify which Literal or Enum fields are most frequently hallucinated. When a specific enum field shows a high hallucination rate, add explicit few-shot examples for that field in your system prompt, or consider using instructor's field_validator with a corrective prompt to guide the model toward valid values."
+        },
+        {
+          "title": "Separate Extraction Operations by Complexity Tier",
+          "description": "Register different operation names in vex.verify() for simple flat extractions versus deeply nested model extractions (e.g., 'flat_extraction' vs 'nested_org_extraction'). This lets Vex surface reliability differences between schema complexities, helping you decide when to decompose a complex nested extraction into multiple simpler sequential Instructor calls."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Instructor Agents",
+      "description": "Connect Vex to your Instructor-patched client in under 10 minutes and get immediate visibility into validation failures, retry exhaustion, and enum hallucination rates across every structured extraction in your pipeline."
+    }
+  }
+}

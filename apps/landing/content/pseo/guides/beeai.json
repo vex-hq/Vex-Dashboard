@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to BeeAI Agents",
+    "description": "Learn how to add runtime guardrails to BeeAI agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "BeeAI guardrails",
+      "BeeAI monitoring",
+      "BeeAI hallucination detection",
+      "Vex BeeAI",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI is IBM's production-grade agent framework built on Granite models, offering powerful memory management, tool orchestration, and observability hooks — but these same capabilities introduce critical reliability risks in long-running or multi-user deployments. Without guardrails, BeeAI agents can suffer from unbounded memory growth, tool injection vulnerabilities, and inconsistent Granite model output parsing that silently corrupt agent state. Vex integrates directly into BeeAI's event system to provide real-time monitoring, validation, and circuit-breaking before failures reach production.",
+    "whyGuardrails": {
+      "heading": "Why BeeAI Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Granite Model Output Variability",
+          "explanation": "IBM Granite models can return structured outputs with inconsistent formatting across temperature settings and prompt variations. BeeAI's ReActAgent relies on parsing these outputs to determine tool calls and final answers — a malformed response can cause silent reasoning failures or infinite retry loops without external validation."
+        },
+        {
+          "title": "Memory Backend Fragility",
+          "explanation": "BeeAI's TokenMemory and SlidingMemory implementations truncate or evict messages based on token budgets, but misconfigured maxTokens values or rapid message ingestion can cause memory to grow unbounded or drop critical context mid-session, leading to agents that lose track of user intent entirely."
+        },
+        {
+          "title": "Tool Execution Attack Surface",
+          "explanation": "BeeAI's DynamicTool and custom Tool subclasses accept user-controlled input that flows directly into tool handlers. Without input schema enforcement and output sanitization at the framework level, prompt injection through tool results can redirect agent behavior or exfiltrate session context."
+        },
+        {
+          "title": "Agent State Serialization Failures",
+          "explanation": "BeeAI supports agent state persistence via serialization for resumable workflows, but custom Tool instances, non-serializable memory objects, or circular references in agent context can cause silent data loss or corrupted state restoration that is difficult to detect without observability instrumentation."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common BeeAI Failure Modes",
+      "failures": [
+        {
+          "name": "Unbounded TokenMemory Growth",
+          "description": "When TokenMemory is initialized without a strict maxTokens cap, or when the cap is set too high relative to the Granite model's context window, the memory accumulates messages across turns until the model context overflows, causing API errors or truncated reasoning chains.",
+          "severity": "critical",
+          "example": "from beeai_framework.memory import TokenMemory\nmemory = TokenMemory(maxTokens=None)  # Dangerous: no cap set\n# After 50+ turns, memory.messages grows to 200k+ tokens\n# Granite model throws context length exceeded error mid-session"
+        },
+        {
+          "name": "Tool Input Injection via Unvalidated Schema",
+          "description": "BeeAI DynamicTool instances that define loose input schemas (e.g., accepting raw string inputs without pattern validation) allow adversarial users to inject instructions into tool results that override the agent's system prompt or redirect its next action.",
+          "severity": "critical",
+          "example": "from beeai_framework.tools import DynamicTool\nfrom pydantic import BaseModel\n\nclass SearchInput(BaseModel):\n    query: str  # No max_length, no pattern validation\n\nsearch_tool = DynamicTool(\n    name='web_search',\n    input_schema=SearchInput,\n    handler=lambda x: fetch_url(x.query)  # Result injected back into agent context\n)"
+        },
+        {
+          "name": "Granite Output Format Inconsistency",
+          "description": "Granite models occasionally return ReAct-format responses where the Thought/Action/Observation delimiters are malformed or merged, causing BeeAI's ReActAgent parser to misidentify a tool call as a final answer or vice versa, silently producing incorrect outputs.",
+          "severity": "high",
+          "example": "# Expected Granite output:\n# Thought: I need to search for X\n# Action: web_search\n# Action Input: {\"query\": \"X\"}\n\n# Actual malformed output at high temperature:\n# Thought: I need to search for X Action: web_search\n# ReActAgent parser treats entire string as Final Answer\n# Agent returns raw reasoning text to user instead of tool result"
+        },
+        {
+          "name": "Agent State Serialization Corruption",
+          "description": "When persisting BeeAI agent state using agent.serialize() for resumable workflows, custom Tool subclasses that hold non-serializable references (e.g., open file handles, database connections, lambda functions) cause partial serialization that silently drops tool registrations on restore.",
+          "severity": "high",
+          "example": "from beeai_framework.agents.react import ReActAgent\n\n# Tool with non-serializable state\nclass DBTool(Tool):\n    def __init__(self):\n        self.conn = psycopg2.connect(DSN)  # Not serializable\n\nagent = ReActAgent(llm=llm, tools=[DBTool()], memory=memory)\nstate = agent.serialize()  # Silently drops DBTool from serialized state\nrestored = ReActAgent.deserialize(state)  # Agent has no tools, fails silently"
+        },
+        {
+          "name": "SlidingMemory Context Eviction Mid-Reasoning",
+          "description": "BeeAI's SlidingMemory evicts oldest messages when the window is full, but if this eviction occurs between an agent's tool call and the corresponding tool result within a single reasoning chain, the agent loses the original user intent and produces a response to a different implicit goal.",
+          "severity": "medium",
+          "example": "from beeai_framework.memory import SlidingMemory\n\nmemory = SlidingMemory(size=10)  # Only 10 messages retained\n# Turn 1-9: User builds up complex multi-step task context\n# Turn 10: Agent issues tool call, tool result pushes message 1 (user goal) out\n# Agent now responds based on messages 2-10, missing original intent entirely"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with BeeAI",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex Client",
+          "description": "Install both the BeeAI framework and Vex SDK, then initialize the Vex client with your project credentials. The Vex client will be passed to the event listener and used to report agent events, flag anomalies, and enforce policies.",
+          "code": "# Install dependencies\n# pip install beeai-framework vex-sdk\n\nimport os\nfrom vex_sdk import VexClient, VexConfig\nfrom beeai_framework.agents.react import ReActAgent\nfrom beeai_framework.memory import TokenMemory\nfrom beeai_framework.llms.ibm import IBMWatsonxLLM\n\n# Initialize Vex client\nvex_config = VexConfig(\n    api_key=os.environ[\"VEX_API_KEY\"],\n    project_id=os.environ[\"VEX_PROJECT_ID\"],\n    environment=\"production\",\n    agent_framework=\"beeai\"\n)\nvex = VexClient(config=vex_config)\n\n# Initialize Granite LLM via WatsonX\nllm = IBMWatsonxLLM(\n    model_id=\"ibm/granite-13b-chat-v2\",\n    api_key=os.environ[\"WATSONX_API_KEY\"],\n    project_id=os.environ[\"WATSONX_PROJECT_ID\"],\n    parameters={\"temperature\": 0.7, \"max_new_tokens\": 1024}\n)\n\nprint(\"Vex client initialized:\", vex.is_connected())",
+          "language": "python"
+        },
+        {
+          "title": "Create the Vex BeeAI Event Listener",
+          "description": "Implement a Vex-powered event listener class that hooks into BeeAI's agent event system. BeeAI emits events on AgentStartEvent, AgentToolCallEvent, AgentToolResultEvent, AgentSuccessEvent, and AgentErrorEvent — register handlers on each to capture the full reasoning trace and validate outputs in real time.",
+          "code": "from beeai_framework.agents.react.events import (\n    ReActAgentStartEvent,\n    ReActAgentToolCallEvent,\n    ReActAgentToolResultEvent,\n    ReActAgentSuccessEvent,\n    ReActAgentErrorEvent,\n    ReActAgentIterationEvent\n)\nfrom beeai_framework.emitter import EventMeta\nfrom vex_sdk import VexTrace, VexSpan, VexPolicy\nimport time\n\nclass VexBeeAIListener:\n    def __init__(self, vex_client: VexClient, policies: list[VexPolicy] = None):\n        self.vex = vex_client\n        self.policies = policies or [\n            VexPolicy.MEMORY_BOUNDS_CHECK,\n            VexPolicy.TOOL_INPUT_VALIDATION,\n            VexPolicy.OUTPUT_FORMAT_VALIDATION,\n            VexPolicy.INJECTION_DETECTION\n        ]\n        self._active_traces: dict[str, VexTrace] = {}\n\n    def on_start(self, data: ReActAgentStartEvent, meta: EventMeta):\n        trace = self.vex.start_trace(\n            trace_id=meta.run_id,\n            agent_type=\"ReActAgent\",\n            framework=\"beeai\",\n            input_text=data.input.text if hasattr(data.input, 'text') else str(data.input),\n            metadata={\"model\": \"granite-13b-chat-v2\", \"timestamp\": time.time()}\n        )\n        self._active_traces[meta.run_id] = trace\n        # Validate memory bounds before agent starts reasoning\n        memory_check = self.vex.check_policy(\n            VexPolicy.MEMORY_BOUNDS_CHECK,\n            context={\"memory_size\": data.memory.messages.__len__() if hasattr(data, 'memory') else 0}\n        )\n        if memory_check.violated:\n            raise RuntimeError(f\"Vex memory policy violated: {memory_check.reason}\")\n\n    def on_tool_call(self, data: ReActAgentToolCallEvent, meta: EventMeta):\n        trace = self._active_traces.get(meta.run_id)\n        if trace:\n            span = trace.start_span(\n                name=f\"tool_call:{data.tool_name}\",\n                span_type=\"tool\",\n                input_data={\"tool\": data.tool_name, \"input\": data.tool_input}\n            )\n            # Validate tool input for injection patterns\n            injection_check = self.vex.check_policy(\n                VexPolicy.INJECTION_DETECTION,\n                context={\"tool_name\": data.tool_name, \"tool_input\": str(data.tool_input)}\n            )\n            if injection_check.violated:\n                span.flag_anomaly(\"injection_detected\", injection_check.reason)\n                raise ValueError(f\"Vex blocked tool call: potential injection in {data.tool_name}\")\n            trace.set_active_span(span)\n\n    def on_tool_result(self, data: ReActAgentToolResultEvent, meta: EventMeta):\n        trace = self._active_traces.get(meta.run_id)\n        if trace and trace.active_span:\n            trace.active_span.finish(\n                output_data={\"result\": str(data.tool_result)[:2000]},  # Cap logged output\n                success=not data.error\n            )\n            if data.error:\n                trace.active_span.flag_anomaly(\"tool_error\", str(data.error))\n\n    def on_success(self, data: ReActAgentSuccessEvent, meta: EventMeta):\n        trace = self._active_traces.pop(meta.run_id, None)\n        if trace:\n            # Validate Granite output format before returning to caller\n            format_check = self.vex.check_policy(\n                VexPolicy.OUTPUT_FORMAT_VALIDATION,\n                context={\"output\": data.output.text, \"expected_format\": \"natural_language\"}\n            )\n            trace.finish(\n                output_text=data.output.text,\n                success=True,\n                anomalies=[format_check.reason] if format_check.violated else []\n            )\n\n    def on_error(self, data: ReActAgentErrorEvent, meta: EventMeta):\n        trace = self._active_traces.pop(meta.run_id, None)\n        if trace:\n            trace.finish(\n                success=False,\n                error=str(data.error),\n                error_type=type(data.error).__name__\n            )\n            self.vex.report_failure(\n                trace_id=meta.run_id,\n                failure_type=\"agent_error\",\n                details={\"error\": str(data.error), \"framework\": \"beeai\"}\n            )\n\n    def on_iteration(self, data: ReActAgentIterationEvent, meta: EventMeta):\n        # Circuit-break runaway agents exceeding max iterations\n        if data.iteration > 15:\n            self.vex.trigger_circuit_breaker(\n                trace_id=meta.run_id,\n                reason=f\"Agent exceeded 15 iterations (current: {data.iteration})\"\n            )\n            raise RuntimeError(\"Vex circuit breaker: agent iteration limit exceeded\")",
+          "language": "python"
+        },
+        {
+          "title": "Register the Listener on the BeeAI Agent",
+          "description": "Attach the VexBeeAIListener to a ReActAgent instance using BeeAI's emitter.on() method. Register each event type explicitly so Vex captures the complete agent lifecycle. This approach works for both single-agent and multi-agent BeeAI deployments.",
+          "code": "from beeai_framework.tools.search import DuckDuckGoSearchTool\nfrom beeai_framework.tools import DynamicTool\nfrom beeai_framework.memory import TokenMemory\nfrom pydantic import BaseModel, Field\nimport asyncio\n\n# Define a validated tool with strict input schema\nclass CalculatorInput(BaseModel):\n    expression: str = Field(\n        max_length=200,\n        pattern=r'^[0-9\\+\\-\\*\\/\\(\\)\\.\\s]+$',  # Only math characters\n        description=\"Mathematical expression to evaluate\"\n    )\n\ncalculator_tool = DynamicTool(\n    name=\"calculator\",\n    description=\"Evaluates mathematical expressions safely\",\n    input_schema=CalculatorInput,\n    handler=lambda x: str(eval(x.expression))  # Safe due to pattern validation\n)\n\n# Initialize memory with explicit bounds\nmemory = TokenMemory(\n    llm=llm,\n    maxTokens=4096,  # Hard cap to prevent unbounded growth\n    capacityThreshold=0.85  # Evict when 85% full\n)\n\n# Create the ReActAgent\nagent = ReActAgent(\n    llm=llm,\n    tools=[DuckDuckGoSearchTool(), calculator_tool],\n    memory=memory\n)\n\n# Instantiate the Vex listener\nvex_listener = VexBeeAIListener(\n    vex_client=vex,\n    policies=[\n        VexPolicy.MEMORY_BOUNDS_CHECK,\n        VexPolicy.TOOL_INPUT_VALIDATION,\n        VexPolicy.OUTPUT_FORMAT_VALIDATION,\n        VexPolicy.INJECTION_DETECTION\n    ]\n)\n\n# Register Vex listener on all BeeAI agent events\nagent.emitter.on(\"start\", vex_listener.on_start)\nagent.emitter.on(\"toolCall\", vex_listener.on_tool_call)\nagent.emitter.on(\"toolResult\", vex_listener.on_tool_result)\nagent.emitter.on(\"success\", vex_listener.on_success)\nagent.emitter.on(\"error\", vex_listener.on_error)\nagent.emitter.on(\"iteration\", vex_listener.on_iteration)\n\nprint(\"Vex listener registered on BeeAI ReActAgent\")\n\n# Run the agent with Vex monitoring active\nasync def run_monitored_agent(user_input: str):\n    try:\n        response = await agent.run(user_input)\n        return response.result.text\n    except ValueError as e:\n        # Vex blocked the request (injection, policy violation)\n        return f\"Request blocked by safety policy: {e}\"\n    except RuntimeError as e:\n        # Vex circuit breaker triggered\n        return f\"Agent halted by reliability guardrail: {e}\"\n\n# Example usage\nresult = asyncio.run(run_monitored_agent(\"What is the GDP of Germany?\"))\nprint(result)",
+          "language": "python"
+        },
+        {
+          "title": "Add Vex Serialization Guards for State Persistence",
+          "description": "Wrap BeeAI's agent serialization and deserialization with Vex validation to detect and report state corruption before it causes silent failures in resumable agent workflows. This is critical for production deployments using BeeAI's checkpoint-and-resume pattern.",
+          "code": "import json\nfrom vex_sdk import VexStateValidator\nfrom beeai_framework.agents.react import ReActAgent\n\nclass VexSerializationGuard:\n    def __init__(self, vex_client: VexClient):\n        self.vex = vex_client\n        self.validator = VexStateValidator(framework=\"beeai\")\n\n    def safe_serialize(self, agent: ReActAgent, session_id: str) -> dict:\n        \"\"\"Serialize agent state with Vex validation.\"\"\"\n        try:\n            raw_state = agent.serialize()\n            state_dict = json.loads(raw_state) if isinstance(raw_state, str) else raw_state\n\n            # Validate serialized state completeness\n            validation = self.validator.validate_state(\n                state=state_dict,\n                required_keys=[\"memory\", \"tools\", \"llm\"],\n                session_id=session_id\n            )\n\n            if validation.missing_keys:\n                self.vex.report_failure(\n                    trace_id=session_id,\n                    failure_type=\"serialization_incomplete\",\n                    details={\n                        \"missing_keys\": validation.missing_keys,\n                        \"tool_count_expected\": len(agent.tools),\n                        \"tool_count_serialized\": len(state_dict.get(\"tools\", []))\n                    }\n                )\n                raise ValueError(\n                    f\"Vex detected incomplete serialization. \"\n                    f\"Missing: {validation.missing_keys}. \"\n                    f\"Expected {len(agent.tools)} tools, got {len(state_dict.get('tools', []))}\"\n                )\n\n            # Tag state with Vex integrity hash\n            state_dict[\"_vex_checksum\"] = self.validator.compute_checksum(state_dict)\n            state_dict[\"_vex_session_id\"] = session_id\n            return state_dict\n\n        except (TypeError, AttributeError) as e:\n            self.vex.report_failure(\n                trace_id=session_id,\n                failure_type=\"serialization_error\",\n                details={\"error\": str(e), \"error_type\": type(e).__name__}\n            )\n            raise\n\n    def safe_deserialize(\n        self,\n        state_dict: dict,\n        tools: list,\n        session_id: str\n    ) -> ReActAgent:\n        \"\"\"Deserialize agent state with Vex integrity check.\"\"\"\n        # Verify Vex checksum before restoring\n        stored_checksum = state_dict.pop(\"_vex_checksum\", None)\n        state_dict.pop(\"_vex_session_id\", None)\n\n        if stored_checksum:\n            current_checksum = self.validator.compute_checksum(state_dict)\n            if current_checksum != stored_checksum:\n                self.vex.report_failure(\n                    trace_id=session_id,\n                    failure_type=\"state_integrity_violation\",\n                    details={\"expected\": stored_checksum, \"actual\": current_checksum}\n                )\n                raise ValueError(\"Vex integrity check failed: agent state has been tampered with or corrupted\")\n\n        restored_agent = ReActAgent.deserialize(\n            json.dumps(state_dict),\n            tools=tools,\n            llm=llm\n        )\n\n        # Verify tool count matches expectation\n        if len(restored_agent.tools) != len(tools):\n            self.vex.report_failure(\n                trace_id=session_id,\n                failure_type=\"deserialization_tool_mismatch\",\n                details={\n                    \"expected_tools\": [t.name for t in tools],\n                    \"restored_tools\": [t.name for t in restored_agent.tools]\n                }\n            )\n\n        # Re-register Vex listener on restored agent\n        restored_agent.emitter.on(\"start\", vex_listener.on_start)\n        restored_agent.emitter.on(\"toolCall\", vex_listener.on_tool_call)\n        restored_agent.emitter.on(\"toolResult\", vex_listener.on_tool_result)\n        restored_agent.emitter.on(\"success\", vex_listener.on_success)\n        restored_agent.emitter.on(\"error\", vex_listener.on_error)\n        restored_agent.emitter.on(\"iteration\", vex_listener.on_iteration)\n\n        return restored_agent\n\n# Usage\nguard = VexSerializationGuard(vex_client=vex)\n\n# Save agent state\nstate = guard.safe_serialize(agent, session_id=\"user-session-abc123\")\nwith open(\"agent_state.json\", \"w\") as f:\n    json.dump(state, f)\n\n# Restore agent state\nwith open(\"agent_state.json\") as f:\n    saved_state = json.load(f)\n\nrestored_agent = guard.safe_deserialize(\n    state_dict=saved_state,\n    tools=[DuckDuckGoSearchTool(), calculator_tool],\n    session_id=\"user-session-abc123\"\n)\nprint(\"Agent restored with\", len(restored_agent.tools), \"tools\")",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Always Set Explicit TokenMemory Bounds",
+          "description": "Never initialize BeeAI's TokenMemory with maxTokens=None or with a value exceeding 80% of your Granite model's context window. Set capacityThreshold to 0.85 so Vex's memory bounds check fires before the model context overflows. For Granite-13b-chat-v2, keep maxTokens at or below 4096 for reliable ReAct parsing."
+        },
+        {
+          "title": "Use Pydantic Field Constraints on All Tool Inputs",
+          "description": "Every BeeAI DynamicTool or custom Tool subclass should define its input_schema using Pydantic BaseModel with explicit Field constraints: max_length for strings, pattern for structured inputs, and ge/le for numeric ranges. This gives Vex's TOOL_INPUT_VALIDATION policy concrete bounds to enforce and prevents injection payloads from reaching tool handlers."
+        },
+        {
+          "title": "Register Vex Listeners Before the First agent.run() Call",
+          "description": "BeeAI's emitter.on() registrations must happen before any agent.run() invocation, including in async contexts. If you register listeners after the first run, early events (especially ReActAgentStartEvent) will be missed, leaving Vex blind to the initial memory state and input validation window. Always register in the agent initialization block."
+        },
+        {
+          "title": "Validate Granite Output Format Explicitly",
+          "description": "At temperatures above 0.5, Granite models occasionally merge ReAct delimiters. Configure Vex's OUTPUT_FORMAT_VALIDATION policy with a custom validator that checks for the presence of a Final Answer: prefix before accepting agent output as complete. If the prefix is absent but the agent reports success, flag it as a potential format inconsistency and log the raw output for review."
+        },
+        {
+          "title": "Re-Register Vex Listeners After Every Deserialization",
+          "description": "BeeAI's ReActAgent.deserialize() creates a new agent instance with a fresh emitter, which does not carry over any previously registered listeners. Always call agent.emitter.on() for all Vex event handlers immediately after deserialization, as shown in the VexSerializationGuard.safe_deserialize() pattern. Failing to do this leaves restored agents completely unmonitored."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your BeeAI Agents",
+      "description": "Instrument your BeeAI ReActAgent with Vex in under 30 minutes and get real-time visibility into memory growth, tool injection attempts, Granite output anomalies, and serialization failures before they impact your users."
+    }
+  }
+}

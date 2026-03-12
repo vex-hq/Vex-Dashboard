@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to LlamaIndex Agents",
+    "description": "Learn how to add runtime guardrails to LlamaIndex agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "LlamaIndex guardrails",
+      "LlamaIndex monitoring",
+      "LlamaIndex hallucination detection",
+      "Vex LlamaIndex",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "LlamaIndex powers sophisticated RAG pipelines by connecting LLMs to external data sources through indexing and retrieval, but this complexity introduces unique failure points where retrieved context can be irrelevant, synthesizers can hallucinate beyond source documents, or stale indexes can silently serve outdated information. Without runtime guardrails, these failures surface as confident-sounding but incorrect responses that are difficult to detect and debug in production. Vex wraps your LlamaIndex query engine to intercept, verify, and validate responses before they reach end users.",
+    "whyGuardrails": {
+      "heading": "Why LlamaIndex Agents Need Guardrails",
+      "points": [
+        {
+          "title": "RAG Pipelines Have Multiple Failure Points",
+          "explanation": "A LlamaIndex pipeline chains together embedding models, vector stores, retrievers, and synthesizers — each component can fail independently. A retriever returning low-similarity chunks, a VectorStoreIndex with a misconfigured similarity_top_k, or a ResponseSynthesizer operating in tree_summarize mode can each produce subtly wrong outputs that pass silently without runtime verification."
+        },
+        {
+          "title": "Synthesizers Can Hallucinate Beyond Retrieved Nodes",
+          "explanation": "LlamaIndex's response synthesizers like CompactAndRefine and TreeSummarize use retrieved NodeWithScore objects as context, but LLMs can still generate claims not grounded in those source nodes. Vex detects when synthesized responses contain assertions that cannot be traced back to the retrieved source_nodes in the response object."
+        },
+        {
+          "title": "Index Staleness Is Invisible at Query Time",
+          "explanation": "A VectorStoreIndex or SummaryIndex built over a document corpus has no built-in mechanism to warn callers when underlying documents have changed. Queries against a stale index return outdated information with full confidence, making index freshness validation a critical guardrail for any production LlamaIndex deployment."
+        },
+        {
+          "title": "Chunk Boundaries Create Context Gaps",
+          "explanation": "LlamaIndex's node parsers like SentenceSplitter and TokenTextSplitter split documents at configurable chunk sizes, and critical information spanning chunk boundaries can be lost or fragmented. Without guardrails, responses built from incomplete node context appear complete but are missing key facts that existed in the original documents."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common LlamaIndex Failure Modes",
+      "failures": [
+        {
+          "name": "Retrieved Context Irrelevant to Query",
+          "description": "The VectorStoreIndex retriever returns nodes with low cosine similarity scores that are topically unrelated to the query. This happens when similarity_top_k is set too high, the embedding model is mismatched to the domain, or the index contains noisy documents. The synthesizer then generates a response from irrelevant context.",
+          "severity": "critical",
+          "example": "Query: 'What is our refund policy?' returns nodes about shipping logistics with similarity scores of 0.41, and the synthesizer fabricates a refund policy from unrelated content."
+        },
+        {
+          "name": "Synthesizer Hallucinating Beyond Source Documents",
+          "description": "LlamaIndex's CompactAndRefine or TreeSummarize synthesizers generate responses that include factual claims not present in any of the retrieved source_nodes. The LLM fills gaps in retrieved context with plausible-sounding but invented information, which is especially dangerous in domains like legal, medical, or financial applications.",
+          "severity": "critical",
+          "example": "A query about a product's warranty returns a response citing a '2-year warranty' when no retrieved node mentions warranty duration — the LLM inferred it from general product knowledge."
+        },
+        {
+          "name": "Index Staleness Causing Outdated Responses",
+          "description": "A VectorStoreIndex persisted to disk or a remote vector store like Pinecone or Weaviate reflects the document state at index build time. When source documents are updated, deleted, or added, the index does not automatically reflect those changes, causing queries to return responses based on obsolete information.",
+          "severity": "high",
+          "example": "A pricing query returns '$99/month' from an index built three months ago, while the current price is '$149/month' — the index was never rebuilt after the pricing update."
+        },
+        {
+          "name": "Chunk Boundary Errors Losing Critical Context",
+          "description": "SentenceSplitter or TokenTextSplitter divides documents into fixed-size chunks, and sentences or paragraphs containing critical information can be split across node boundaries. The retriever may fetch only one half of a critical fact, leading the synthesizer to produce an incomplete or contradictory response.",
+          "severity": "high",
+          "example": "A contract clause stating 'The agreement is valid for 12 months, renewable annually' is split so that only 'The agreement is valid for 12 months' is retrieved, causing the synthesizer to omit the renewal condition."
+        },
+        {
+          "name": "Empty or Insufficient Node Retrieval",
+          "description": "When the query embedding finds no sufficiently similar nodes in the index, LlamaIndex may return an empty response or a default fallback message like 'Empty Response' without raising an exception. Applications that do not check for this condition silently serve non-answers to users.",
+          "severity": "medium",
+          "example": "A SubQuestionQueryEngine decomposes a complex query into sub-questions, one of which retrieves zero nodes, causing the final synthesized response to be missing an entire dimension of the answer without any error signal."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with LlamaIndex",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both llama-index and vex-sdk, then initialize the Vex client with your API key. Configure a LlamaIndex VectorStoreIndex from your documents as you normally would — Vex wraps the query engine without modifying your index construction.",
+          "code": "import vex\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings\nfrom llama_index.core.node_parser import SentenceSplitter\nfrom llama_index.llms.openai import OpenAI\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Configure LlamaIndex settings\nSettings.llm = OpenAI(model=\"gpt-4o\", temperature=0.1)\nSettings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)\n\n# Build your index as normal\ndocuments = SimpleDirectoryReader(\"./data\").load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=5)",
+          "language": "python"
+        },
+        {
+          "title": "Wrap query_engine.query() with vex.verify()",
+          "description": "Use vex.verify() as a context manager around your query_engine.query() call. Vex intercepts the LlamaIndex Response object, inspects the source_nodes for relevance, checks synthesized text for grounding, and raises a VexVerificationError if guardrails are violated.",
+          "code": "from llama_index.core.response.schema import Response\nimport vex\nfrom vex.exceptions import VexVerificationError\n\ndef safe_query(query_engine, query_text: str) -> Response:\n    \"\"\"\n    Wraps LlamaIndex query_engine.query() with Vex guardrails.\n    Validates retrieved context relevance and response grounding.\n    \"\"\"\n    with vex_client.verify(\n        framework=\"llamaindex\",\n        checks=[\n            \"context_relevance\",      # Validates source_nodes match query intent\n            \"response_grounding\",     # Ensures response is grounded in source_nodes\n            \"empty_response\",         # Detects 'Empty Response' fallbacks\n            \"index_freshness\"         # Warns on potentially stale node metadata\n        ],\n        thresholds={\n            \"min_similarity_score\": 0.65,   # Minimum NodeWithScore.score\n            \"max_hallucination_rate\": 0.05, # Max fraction of ungrounded claims\n            \"min_nodes_retrieved\": 2        # Minimum source_nodes required\n        }\n    ) as verifier:\n        response = query_engine.query(query_text)\n        \n        # Pass LlamaIndex response metadata to Vex for inspection\n        verifier.inspect(\n            response=str(response),\n            source_nodes=response.source_nodes,\n            metadata=response.metadata\n        )\n        \n        return response\n\n# Usage\ntry:\n    result = safe_query(query_engine, \"What are the payment terms in the contract?\")\n    print(result)\nexcept VexVerificationError as e:\n    print(f\"Guardrail triggered: {e.check_name} — {e.message}\")\n    print(f\"Failed nodes: {e.details.get('low_relevance_nodes', [])}\")",
+          "language": "python"
+        },
+        {
+          "title": "TypeScript Integration with LlamaIndex.TS",
+          "description": "For TypeScript applications using LlamaIndex.TS, wrap the QueryEngine.query() method with the Vex SDK's verify() wrapper. This example uses VectorStoreIndex from llamaindex and integrates Vex verification on the QueryEngine response.",
+          "code": "import { VectorStoreIndex, SimpleDirectoryReader, Settings } from 'llamaindex';\nimport { OpenAI } from '@llamaindex/openai';\nimport { VexClient, VexVerificationError } from 'vex-sdk';\n\n// Initialize Vex client\nconst vex = new VexClient({ apiKey: process.env.VEX_API_KEY! });\n\n// Configure LlamaIndex settings\nSettings.llm = new OpenAI({ model: 'gpt-4o', temperature: 0.1 });\n\nasync function buildQueryEngine() {\n  const reader = new SimpleDirectoryReader();\n  const documents = await reader.loadData({ directoryPath: './data' });\n  const index = await VectorStoreIndex.fromDocuments(documents);\n  return index.asQueryEngine({ similarityTopK: 5 });\n}\n\nasync function safeQuery(queryEngine: any, queryText: string): Promise<string> {\n  const verifier = vex.verify({\n    framework: 'llamaindex',\n    checks: ['context_relevance', 'response_grounding', 'empty_response'],\n    thresholds: {\n      minSimilarityScore: 0.65,\n      maxHallucinationRate: 0.05,\n      minNodesRetrieved: 2\n    }\n  });\n\n  try {\n    const response = await queryEngine.query({ query: queryText });\n\n    // Inspect LlamaIndex response with Vex\n    await verifier.inspect({\n      response: response.toString(),\n      sourceNodes: response.sourceNodes,\n      metadata: response.metadata\n    });\n\n    return response.toString();\n  } catch (error) {\n    if (error instanceof VexVerificationError) {\n      console.error(`Guardrail triggered: ${error.checkName} — ${error.message}`);\n      throw error;\n    }\n    throw error;\n  }\n}\n\n// Usage\n(async () => {\n  const queryEngine = await buildQueryEngine();\n  const result = await safeQuery(queryEngine, 'What are the payment terms?');\n  console.log(result);\n})();",
+          "language": "typescript"
+        },
+        {
+          "title": "Advanced: Guardrails for SubQuestionQueryEngine and Chat Engines",
+          "description": "For complex LlamaIndex patterns like SubQuestionQueryEngine or CondensePlusContextChatEngine, apply Vex verification at each sub-query level to catch failures in individual retrieval steps before they propagate to the final synthesized response.",
+          "code": "from llama_index.core.query_engine import SubQuestionQueryEngine\nfrom llama_index.core.tools import QueryEngineTool, ToolMetadata\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nimport vex\nfrom vex.exceptions import VexVerificationError\nfrom typing import List\n\n# Build multiple specialized indexes\ncontracts_index = VectorStoreIndex.from_documents(\n    SimpleDirectoryReader(\"./contracts\").load_data()\n)\npolicies_index = VectorStoreIndex.from_documents(\n    SimpleDirectoryReader(\"./policies\").load_data()\n)\n\n# Create query engine tools\ntools = [\n    QueryEngineTool(\n        query_engine=contracts_index.as_query_engine(similarity_top_k=4),\n        metadata=ToolMetadata(name=\"contracts\", description=\"Legal contracts and agreements\")\n    ),\n    QueryEngineTool(\n        query_engine=policies_index.as_query_engine(similarity_top_k=4),\n        metadata=ToolMetadata(name=\"policies\", description=\"Company policies and procedures\")\n    )\n]\n\n# Build SubQuestionQueryEngine\nsub_question_engine = SubQuestionQueryEngine.from_defaults(\n    query_engine_tools=tools,\n    use_async=True\n)\n\nasync def safe_sub_question_query(query_text: str) -> str:\n    \"\"\"\n    Applies Vex guardrails to SubQuestionQueryEngine with\n    per-sub-question verification and aggregate response validation.\n    \"\"\"\n    async with vex_client.verify_async(\n        framework=\"llamaindex\",\n        mode=\"sub_question\",  # Enables per-sub-query inspection\n        checks=[\n            \"context_relevance\",\n            \"response_grounding\",\n            \"cross_source_consistency\",  # Detects contradictions across indexes\n            \"empty_response\"\n        ],\n        thresholds={\n            \"min_similarity_score\": 0.60,\n            \"min_nodes_retrieved\": 1,\n            \"max_hallucination_rate\": 0.05\n        }\n    ) as verifier:\n        response = await sub_question_engine.aquery(query_text)\n        \n        # Inspect each sub-question response individually\n        for sub_qa in response.metadata.get(\"sub_qa\", []):\n            await verifier.inspect_sub_query(\n                sub_query=sub_qa[\"sub_q\"].sub_question,\n                sub_response=str(sub_qa[\"answer\"]),\n                source_nodes=sub_qa[\"answer\"].source_nodes\n            )\n        \n        # Final aggregate inspection\n        await verifier.inspect(\n            response=str(response),\n            source_nodes=response.source_nodes,\n            metadata=response.metadata\n        )\n        \n        return str(response)\n\n# Usage with asyncio\nimport asyncio\n\nasync def main():\n    try:\n        result = await safe_sub_question_query(\n            \"Compare the payment terms in our contracts with our billing policy.\"\n        )\n        print(result)\n    except VexVerificationError as e:\n        print(f\"Sub-query guardrail failed: {e.check_name}\")\n        print(f\"Affected sub-query: {e.details.get('sub_query')}\")\n        print(f\"Details: {e.message}\")\n\nasyncio.run(main())",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Validate NodeWithScore Similarity Thresholds Before Synthesis",
+          "description": "Configure Vex to inspect the score attribute on each NodeWithScore in response.source_nodes before the synthesizer processes them. Set a minimum similarity threshold (typically 0.60–0.75 depending on your embedding model) and reject or flag queries where all retrieved nodes fall below this threshold. This prevents the synthesizer from operating on irrelevant context, which is the root cause of most LlamaIndex hallucinations."
+        },
+        {
+          "title": "Monitor Index Build Timestamps in Node Metadata",
+          "description": "LlamaIndex stores document metadata in each TextNode's metadata dict. Instrument your index builds to include a 'last_updated' timestamp in document metadata using SimpleDirectoryReader's file_metadata callback, then configure Vex's index_freshness check to alert when retrieved nodes contain metadata older than your acceptable staleness window. This makes index staleness visible at query time rather than silently serving outdated responses."
+        },
+        {
+          "title": "Use Vex in Streaming Mode with stream_chat and astream_query",
+          "description": "When using LlamaIndex's streaming interfaces like query_engine.astream_query() or chat_engine.stream_chat(), use Vex's streaming verifier to validate response chunks as they arrive rather than waiting for the full response. This enables early termination of a streaming response if grounding checks fail mid-generation, preventing partial hallucinated content from reaching the user."
+        },
+        {
+          "title": "Apply Separate Guardrail Profiles per QueryEngine Type",
+          "description": "LlamaIndex supports multiple query engine types — VectorStoreIndex query engines, SummaryIndex query engines, KnowledgeGraphQueryEngine, and SQLJoinQueryEngine — each with different failure modes. Configure distinct Vex verification profiles for each engine type: vector engines need similarity score checks, summary engines need completeness checks, and SQL join engines need schema grounding checks. Avoid applying a single generic profile across all engine types."
+        },
+        {
+          "title": "Log source_nodes Metadata for Debugging Guardrail Failures",
+          "description": "When Vex raises a VexVerificationError, always log the full source_nodes list including each node's node_id, score, text preview, and metadata. LlamaIndex's NodeWithScore objects contain the exact chunks that were fed to the synthesizer, making them the most valuable debugging artifact when a guardrail fires. Integrate this logging with your observability stack using LlamaIndex's built-in CallbackManager alongside Vex's event hooks for end-to-end traceability."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your LlamaIndex Agents",
+      "description": "Add Vex to your LlamaIndex pipeline today and get real-time guardrails against hallucination, irrelevant retrieval, and index staleness — so your RAG applications deliver accurate, grounded responses in production."
+    }
+  }
+}

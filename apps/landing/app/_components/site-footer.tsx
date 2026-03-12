@@ -12,12 +12,12 @@ const sections = [
     ],
   },
   {
-    heading: 'Compare',
+    heading: 'Resources',
     links: [
-      { href: '/compare/langsmith', label: 'Vex vs LangSmith' },
-      { href: '/compare/langfuse', label: 'Vex vs Langfuse' },
-      { href: '/compare/guardrails-ai', label: 'Vex vs Guardrails AI' },
-      { href: '/tools/agent-health-score', label: 'Agent Health Score' },
+      { href: '/guides', label: 'Framework Guides' },
+      { href: '/checklists', label: 'Compliance Checklists' },
+      { href: '/learn', label: 'Problem Guides' },
+      { href: '/compare', label: 'Comparisons' },
     ],
   },
   {

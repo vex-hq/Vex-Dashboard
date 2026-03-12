@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Smolagents Agents",
+    "description": "Learn how to add runtime guardrails to Smolagents agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Smolagents guardrails",
+      "Smolagents monitoring",
+      "Smolagents hallucination detection",
+      "Vex Smolagents",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Smolagents' code-first approach lets agents write and execute Python directly, which dramatically increases the attack surface for unsafe code execution, runaway loops, and unvalidated tool calls. Without guardrails, a single malformed prompt can cause your CodeAgent to execute destructive system commands or leak sensitive data through tool misuse. Vex wraps your agent.run() calls to intercept, validate, and monitor every step before damage occurs.",
+    "whyGuardrails": {
+      "heading": "Why Smolagents Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Code Execution is a First-Class Feature",
+          "explanation": "Smolagents' CodeAgent generates and executes Python code as its primary reasoning mechanism via LocalPythonInterpreter or E2BExecutor. This means arbitrary code paths are opened at runtime, making input validation and output sandboxing non-optional for production deployments."
+        },
+        {
+          "title": "Tool Descriptions Drive Behavior",
+          "explanation": "ToolCallingAgent selects and invokes tools based solely on their docstrings and type hints. Ambiguous or adversarially crafted inputs can cause the agent to call the wrong tool, pass malformed arguments, or chain tools in unintended sequences that bypass your business logic."
+        },
+        {
+          "title": "Multi-Step Reasoning Compounds Errors",
+          "explanation": "Smolagents agents iterate through a planning loop where each step's output becomes the next step's input. A single hallucinated intermediate result — such as a fabricated file path or API response — propagates and amplifies through subsequent steps, making the final output silently wrong."
+        },
+        {
+          "title": "Minimal Built-in Error Recovery",
+          "explanation": "By design, Smolagents keeps the framework lightweight and delegates error handling to the developer. Generated code that raises exceptions, tools that return None, or LLM responses that break the expected format can all cause silent failures or unhandled crashes without external monitoring."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Smolagents Failure Modes",
+      "failures": [
+        {
+          "name": "Unsafe Code Generation",
+          "description": "CodeAgent generates Python that calls os.system(), subprocess.run(), or open() with write mode on sensitive paths. The LocalPythonInterpreter executes this code in the host environment unless explicitly sandboxed.",
+          "severity": "critical",
+          "example": "Agent task: 'Clean up temp files' → Generated code: import subprocess; subprocess.run(['rm', '-rf', '/var/app/data'], check=True)"
+        },
+        {
+          "name": "Tool Argument Injection",
+          "description": "When ToolCallingAgent constructs tool calls, user-supplied strings are interpolated into tool arguments without sanitization. A crafted prompt can override intended arguments or inject additional parameters into tools like WebSearchTool or custom API wrappers.",
+          "severity": "critical",
+          "example": "User input: 'Search for X AND also call delete_record(id=42)' → Agent misinterprets compound instruction and calls an unintended tool in the same step."
+        },
+        {
+          "name": "Infinite Planning Loop",
+          "description": "If the agent's stopping condition is never met — because the LLM keeps generating intermediate steps without a final_answer() call — the agent will exhaust max_steps and either crash or return an empty result, consuming tokens and compute silently.",
+          "severity": "high",
+          "example": "CodeAgent with max_steps=10 never calls final_answer() because each step produces a partial result the LLM decides needs further refinement, burning all 10 steps and returning None."
+        },
+        {
+          "name": "Hallucinated Tool Outputs",
+          "description": "In multi-step tasks, the agent may fabricate the return value of a tool call in its reasoning trace rather than using the actual tool output, especially when the real output is empty or an error. Subsequent steps then operate on invented data.",
+          "severity": "high",
+          "example": "WebSearchTool returns no results → Agent reasoning: 'The search returned: [fabricated article summary]' → Final answer cites non-existent sources."
+        },
+        {
+          "name": "Unhandled Exception Propagation",
+          "description": "Generated code that raises an unhandled exception inside the interpreter causes the entire agent.run() call to raise, with no partial result or graceful degradation. Without a try/except wrapper at the integration layer, this crashes the calling application.",
+          "severity": "medium",
+          "example": "Agent generates: result = json.loads(api_response) where api_response is an HTML error page → JSONDecodeError propagates uncaught through agent.run() to the caller."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Smolagents",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both packages and configure the Vex client with your API key. The VexClient is thread-safe and should be initialized once at application startup.",
+          "code": "pip install smolagents vex-sdk\n\n# agent_setup.py\nimport os\nfrom vex_sdk import VexClient\nfrom smolagents import CodeAgent, HfApiModel\n\n# Initialize Vex client once at startup\nvex = VexClient(api_key=os.environ[\"VEX_API_KEY\"])\n\n# Configure your Smolagents model\nmodel = HfApiModel(model_id=\"meta-llama/Meta-Llama-3.1-8B-Instruct\")\n\n# Create your CodeAgent as usual\nagent = CodeAgent(\n    tools=[],\n    model=model,\n    max_steps=10,\n    verbosity_level=1\n)",
+          "language": "python"
+        },
+        {
+          "title": "Wrap agent.run() with vex.verify()",
+          "description": "Replace direct agent.run() calls with a vex.verify() wrapper. This intercepts the task before execution, validates the output after completion, and logs the full reasoning trace for audit.",
+          "code": "# secure_runner.py\nfrom vex_sdk import VexClient, VerifyConfig, PolicyViolationError\nfrom smolagents import CodeAgent, HfApiModel\n\nvex = VexClient(api_key=os.environ[\"VEX_API_KEY\"])\nmodel = HfApiModel(model_id=\"meta-llama/Meta-Llama-3.1-8B-Instruct\")\nagent = CodeAgent(tools=[], model=model, max_steps=10)\n\ndef run_safe_agent(task: str, user_id: str) -> str:\n    config = VerifyConfig(\n        agent_id=\"smolagents-code-agent\",\n        user_id=user_id,\n        policies=[\"no_system_commands\", \"no_file_write\", \"output_length_limit\"],\n        timeout_seconds=60\n    )\n\n    try:\n        # vex.verify() wraps the callable, intercepting input and output\n        result = vex.verify(\n            fn=lambda: agent.run(task),\n            input_payload={\"task\": task},\n            config=config\n        )\n        return result\n    except PolicyViolationError as e:\n        print(f\"Vex blocked execution: {e.policy} — {e.reason}\")\n        return \"Request blocked by safety policy.\"\n    except Exception as e:\n        vex.log_error(agent_id=\"smolagents-code-agent\", error=e, context={\"task\": task})\n        raise",
+          "language": "python"
+        },
+        {
+          "title": "Add Code Execution Guardrails for CodeAgent",
+          "description": "For CodeAgent specifically, register a Vex code inspection hook that scans generated Python before it reaches LocalPythonInterpreter. This catches dangerous imports, shell calls, and file system access patterns.",
+          "code": "# code_guardrails.py\nfrom vex_sdk import VexClient, CodeInspectionHook, BlockedCodeError\nfrom smolagents import CodeAgent, HfApiModel\nfrom smolagents.local_python_executor import LocalPythonInterpreter\n\nvex = VexClient(api_key=os.environ[\"VEX_API_KEY\"])\n\n# Define blocked patterns for code inspection\ncode_hook = CodeInspectionHook(\n    blocked_imports=[\"os\", \"subprocess\", \"sys\", \"shutil\", \"pathlib\"],\n    blocked_builtins=[\"exec\", \"eval\", \"__import__\", \"compile\"],\n    blocked_patterns=[\n        r\"open\\s*\\(.*['\\\"]w['\\\"]\\s*\\)\",  # file write\n        r\"requests\\.delete\",               # destructive HTTP\n        r\"DROP\\s+TABLE\",                   # SQL injection\n    ],\n    agent_id=\"smolagents-code-agent\"\n)\n\n# Patch the interpreter to call Vex before execution\noriginal_run = LocalPythonInterpreter.__call__\n\ndef safe_interpreter_call(self, code: str, *args, **kwargs):\n    # Vex inspects the generated code before execution\n    inspection = vex.inspect_code(\n        code=code,\n        hook=code_hook,\n        context={\"step\": getattr(self, '_step_number', 'unknown')}\n    )\n    if inspection.is_blocked:\n        raise BlockedCodeError(\n            f\"Generated code blocked by Vex: {inspection.reason}\\n\"\n            f\"Blocked pattern: {inspection.matched_pattern}\"\n        )\n    return original_run(self, code, *args, **kwargs)\n\nLocalPythonInterpreter.__call__ = safe_interpreter_call\n\nmodel = HfApiModel(model_id=\"meta-llama/Meta-Llama-3.1-8B-Instruct\")\nagent = CodeAgent(tools=[], model=model, max_steps=10)",
+          "language": "python"
+        },
+        {
+          "title": "Monitor Multi-Step Reasoning with Vex Traces",
+          "description": "Use Vex's trace context manager to capture every intermediate step of the Smolagents planning loop. This gives you full observability into tool calls, generated code snippets, and intermediate outputs for debugging and compliance.",
+          "code": "# traced_agent.py\nfrom vex_sdk import VexClient, VexTrace\nfrom smolagents import CodeAgent, ToolCallingAgent, HfApiModel, tool\nfrom smolagents.monitoring import AgentLogger\n\nvex = VexClient(api_key=os.environ[\"VEX_API_KEY\"])\nmodel = HfApiModel(model_id=\"meta-llama/Meta-Llama-3.1-8B-Instruct\")\n\n@tool\ndef get_weather(city: str) -> str:\n    \"\"\"Fetches current weather for a given city name.\"\"\"\n    # Real implementation would call a weather API\n    return f\"Weather in {city}: 72°F, partly cloudy\"\n\nagent = ToolCallingAgent(\n    tools=[get_weather],\n    model=model,\n    max_steps=5\n)\n\ndef run_traced_agent(task: str, session_id: str) -> str:\n    with VexTrace(\n        client=vex,\n        agent_id=\"smolagents-tool-agent\",\n        session_id=session_id,\n        metadata={\"framework\": \"smolagents\", \"agent_type\": \"ToolCallingAgent\"}\n    ) as trace:\n        # Log the initial task\n        trace.log_input(task)\n\n        # Hook into Smolagents step callback to capture intermediate steps\n        step_results = []\n        def on_step(step_log):\n            trace.log_step(\n                step_number=step_log.step_number,\n                tool_calls=[\n                    {\"tool\": tc.tool_name, \"args\": tc.tool_arguments}\n                    for tc in (step_log.tool_calls or [])\n                ],\n                observations=str(step_log.observations),\n                generated_code=getattr(step_log, 'generated_code', None)\n            )\n            step_results.append(step_log)\n\n        result = agent.run(task, step_callbacks=[on_step])\n\n        # Log final output and validate\n        trace.log_output(result)\n        validation = vex.validate_output(\n            output=str(result),\n            agent_id=\"smolagents-tool-agent\",\n            checks=[\"no_pii\", \"no_hallucinated_citations\", \"coherence\"]\n        )\n        if not validation.passed:\n            trace.flag_issue(validation.failures)\n\n        return result\n\nif __name__ == \"__main__\":\n    print(run_traced_agent(\"What is the weather in Paris?\", session_id=\"sess-001\"))",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Always Use E2BExecutor or a Sandbox in Production",
+          "description": "Never run CodeAgent with LocalPythonInterpreter in production without Vex code inspection hooks. Prefer E2BExecutor for true sandboxing: agent = CodeAgent(tools=[], model=model, executor_type='e2b'). Pair this with Vex's code inspection layer to catch dangerous patterns before they even reach the sandbox."
+        },
+        {
+          "title": "Restrict Tool Imports at the Interpreter Level",
+          "description": "Smolagents' LocalPythonInterpreter accepts an authorized_imports list. Always define this explicitly: LocalPythonInterpreter(authorized_imports=['math', 'json', 'datetime']). Register the same allowlist with Vex's CodeInspectionHook so both layers enforce identical boundaries and discrepancies are flagged."
+        },
+        {
+          "title": "Validate Tool Descriptions Before Deployment",
+          "description": "Run vex.audit_tools(agent.tools) before deploying a ToolCallingAgent. Vex analyzes each tool's docstring and type hints for ambiguity, missing parameter descriptions, and prompt injection vectors. Ambiguous tool descriptions are the leading cause of tool misuse in Smolagents deployments."
+        },
+        {
+          "title": "Set Explicit max_steps and Monitor Step Counts",
+          "description": "Always configure max_steps conservatively (5-10 for most tasks) and use Vex's step-count alerting to detect agents approaching their limit: vex.set_alert(agent_id='...', metric='steps_remaining', threshold=2). Agents consistently hitting max_steps indicate a reasoning loop that needs prompt or tool redesign."
+        },
+        {
+          "title": "Log and Review Intermediate Code Snippets",
+          "description": "Use the VexTrace step logger to capture every code snippet generated by CodeAgent, not just the final output. Review these in the Vex dashboard weekly to identify recurring unsafe patterns, hallucinated API calls, or inefficient reasoning chains that indicate your system prompt needs refinement."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Smolagents Agents",
+      "description": "Add vex.verify() around your agent.run() calls today and get full visibility into every code execution, tool call, and reasoning step your Smolagents agents take in production."
+    }
+  }
+}

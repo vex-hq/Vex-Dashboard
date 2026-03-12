@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Mastra Agents",
+    "description": "Learn how to add runtime guardrails to Mastra agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Mastra guardrails",
+      "Mastra monitoring",
+      "Mastra hallucination detection",
+      "Vex Mastra",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Mastra's powerful workflow engine and third-party integration layer make it easy to build sophisticated AI agents, but that same flexibility introduces subtle failure points where unvalidated data, stale memory, and malformed tool outputs can silently corrupt agent behavior. Without guardrails, a single bad tool response or misconfigured workflow transition can cascade into incorrect decisions that are hard to trace. Vex adds a reliability layer directly into the Mastra agent pipeline, catching these failures before they reach your users.",
+    "whyGuardrails": {
+      "heading": "Why Mastra Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Workflow Step Outputs Are Untyped at Runtime",
+          "explanation": "Mastra workflows pass data between steps using a context object, but TypeScript types are erased at runtime. A step that returns an unexpected shape — null fields, wrong types, or missing keys — will silently propagate through subsequent steps without throwing, causing downstream logic to operate on corrupt state."
+        },
+        {
+          "title": "Tool Call Results Are Trusted Implicitly",
+          "explanation": "When a Mastra agent invokes a tool via its tools registry, the return value is passed directly to the LLM context. If a third-party API returns an error object, a truncated payload, or a schema-breaking response, the agent will attempt to reason over malformed data, producing hallucinated or nonsensical outputs."
+        },
+        {
+          "title": "Memory Retrieval Can Inject Stale or Irrelevant Context",
+          "explanation": "Mastra's knowledge and memory APIs retrieve semantically similar records, but semantic similarity does not guarantee temporal relevance or factual accuracy. Stale records from previous sessions can override current context, causing agents to act on outdated information without any signal that the retrieved data is no longer valid."
+        },
+        {
+          "title": "Sync Integrations Introduce External State Drift",
+          "explanation": "Mastra's integration layer syncs data from external services like CRMs, calendars, and databases. If a sync is partial, delayed, or returns a conflict, the agent's world model diverges from reality. Without validation at the integration boundary, agents make decisions based on a snapshot that no longer reflects the live system."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Mastra Failure Modes",
+      "failures": [
+        {
+          "name": "Workflow Step Output Schema Violation",
+          "description": "A workflow step returns a payload that does not match the expected shape consumed by the next step. Because Mastra's step context is a plain object, the receiving step silently accesses undefined properties and continues execution with null or NaN values.",
+          "severity": "critical",
+          "example": "A 'fetchUserData' step returns { user: null } due to a database miss, and the next 'generateReport' step calls context.user.email without a null check, causing the entire workflow run to produce an empty report that is emailed to no one."
+        },
+        {
+          "name": "Agent Tool Returning Malformed JSON",
+          "description": "A Mastra tool wrapping a third-party REST API returns a response body that is not valid JSON or contains unexpected fields. The tool's return value is injected into the LLM prompt as-is, causing the model to hallucinate structure around the malformed data.",
+          "severity": "critical",
+          "example": "A Stripe tool returns an HTML error page instead of JSON when rate-limited. The agent receives the raw HTML string as its tool result and proceeds to extract a 'charge_id' from it, fabricating a transaction ID that does not exist."
+        },
+        {
+          "name": "Stale Memory Context Overriding Current Instructions",
+          "description": "Mastra's memory retrieval surfaces records from previous agent runs that are semantically close to the current query. If those records contain outdated preferences, revoked permissions, or superseded instructions, the agent acts on them instead of the current session context.",
+          "severity": "high",
+          "example": "A customer support agent retrieves a memory record stating 'user prefers email contact' from six months ago, ignoring the current session message where the user explicitly requests a phone callback, resulting in the wrong contact method being scheduled."
+        },
+        {
+          "name": "Integration Sync Conflict Causing Duplicate Actions",
+          "description": "When a Mastra integration sync runs concurrently with an agent action, the agent may read a pre-sync state, take an action, and then the sync overwrites the result. This creates duplicate records, double-sent messages, or conflicting state in the external system.",
+          "severity": "high",
+          "example": "A calendar integration syncs while an agent is booking a meeting slot. The agent reads the slot as available, books it, and then the sync marks the same slot as already taken by a newly synced external event, resulting in a double-booked calendar entry."
+        },
+        {
+          "name": "Unhandled Tool Timeout Propagating as Empty Result",
+          "description": "A Mastra tool that calls an external service times out and returns undefined or an empty object instead of throwing. The agent interprets the empty result as a valid response and continues reasoning as if the tool call succeeded, producing confident but baseless outputs.",
+          "severity": "medium",
+          "example": "A weather tool times out and returns {}. The agent, receiving an empty object, infers that conditions are 'normal' and proceeds to recommend outdoor activities, unaware that no actual weather data was retrieved."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Mastra",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both the Mastra framework and the Vex SDK, then initialize the Vex client with your API key. The Vex client will be used to wrap agent steps, tool calls, and memory retrievals throughout your Mastra application.",
+          "code": "import { Mastra } from 'mastra';\nimport { VexClient } from '@vex_dev/sdk';\n\nconst vex = new VexClient({\n  apiKey: process.env.VEX_API_KEY!,\n  project: 'my-mastra-agent',\n  environment: process.env.NODE_ENV ?? 'development',\n});\n\nexport { vex };",
+          "language": "typescript"
+        },
+        {
+          "title": "Wrap Mastra Tools with Vex Guardrails",
+          "description": "Use Vex's tool wrapper to intercept tool call inputs and outputs. This validates that tool responses conform to their expected schema before the result is injected into the agent's LLM context, catching malformed API responses and timeouts at the boundary.",
+          "code": "import { createTool } from 'mastra';\nimport { z } from 'zod';\nimport { vex } from './vex-client';\n\nconst stripeChargeSchema = z.object({\n  charge_id: z.string(),\n  amount: z.number(),\n  currency: z.string(),\n  status: z.enum(['succeeded', 'pending', 'failed']),\n});\n\nexport const stripeChargeTool = createTool({\n  id: 'stripe-get-charge',\n  description: 'Retrieves a Stripe charge by ID',\n  inputSchema: z.object({ chargeId: z.string() }),\n  outputSchema: stripeChargeSchema,\n  execute: vex.wrapTool(\n    async ({ context }) => {\n      const response = await fetch(\n        `https://api.stripe.com/v1/charges/${context.chargeId}`,\n        { headers: { Authorization: `Bearer ${process.env.STRIPE_KEY}` } }\n      );\n      if (!response.ok) {\n        throw new Error(`Stripe API error: ${response.status}`);\n      }\n      return response.json();\n    },\n    {\n      toolId: 'stripe-get-charge',\n      outputSchema: stripeChargeSchema,\n      onViolation: 'throw',\n    }\n  ),\n});",
+          "language": "typescript"
+        },
+        {
+          "title": "Add Vex Middleware to Mastra Workflow Steps",
+          "description": "Wrap individual Mastra workflow step execute functions with Vex's step guard to validate inputs and outputs at each transition. This prevents corrupt state from propagating through multi-step workflows and provides a trace of exactly which step introduced bad data.",
+          "code": "import { createWorkflow, createStep } from 'mastra';\nimport { z } from 'zod';\nimport { vex } from './vex-client';\n\nconst userSchema = z.object({\n  id: z.string(),\n  email: z.string().email(),\n  plan: z.enum(['free', 'pro', 'enterprise']),\n});\n\nconst reportSchema = z.object({\n  userId: z.string(),\n  reportUrl: z.string().url(),\n  generatedAt: z.string().datetime(),\n});\n\nconst fetchUserStep = createStep({\n  id: 'fetch-user',\n  inputSchema: z.object({ userId: z.string() }),\n  outputSchema: userSchema,\n  execute: vex.wrapStep(\n    async ({ inputData }) => {\n      const user = await db.users.findById(inputData.userId);\n      if (!user) throw new Error(`User ${inputData.userId} not found`);\n      return user;\n    },\n    { stepId: 'fetch-user', outputSchema: userSchema }\n  ),\n});\n\nconst generateReportStep = createStep({\n  id: 'generate-report',\n  inputSchema: userSchema,\n  outputSchema: reportSchema,\n  execute: vex.wrapStep(\n    async ({ inputData }) => {\n      const url = await reportService.generate(inputData.id, inputData.plan);\n      return {\n        userId: inputData.id,\n        reportUrl: url,\n        generatedAt: new Date().toISOString(),\n      };\n    },\n    { stepId: 'generate-report', outputSchema: reportSchema }\n  ),\n});\n\nexport const reportWorkflow = createWorkflow({\n  name: 'generate-user-report',\n  triggerSchema: z.object({ userId: z.string() }),\n})\n  .then(fetchUserStep)\n  .then(generateReportStep)\n  .commit();",
+          "language": "typescript"
+        },
+        {
+          "title": "Guard Memory Retrieval and Integration Syncs",
+          "description": "Wrap Mastra memory queries with Vex's context validator to detect stale records and flag integration sync conflicts before they reach the agent. Use the staleness threshold and conflict detection options to tune sensitivity for your use case.",
+          "code": "import { Agent } from 'mastra';\nimport { vex } from './vex-client';\nimport { stripeChargeTool } from './tools/stripe';\n\nconst billingAgent = new Agent({\n  name: 'billing-agent',\n  instructions: 'You help users understand their billing history and resolve charge disputes.',\n  model: {\n    provider: 'OPEN_AI',\n    toolChoice: 'auto',\n    name: 'gpt-4o',\n  },\n  tools: { stripeChargeTool },\n});\n\n// Wrap the agent's generate method with Vex memory and context guards\nconst safeBillingAgent = vex.wrapAgent(billingAgent, {\n  agentId: 'billing-agent',\n  memoryGuard: {\n    enabled: true,\n    stalenessThresholdMs: 24 * 60 * 60 * 1000, // 24 hours\n    onStaleRecord: 'warn-and-filter',\n  },\n  contextGuard: {\n    enabled: true,\n    maxContextTokens: 8000,\n    onOverflow: 'truncate-oldest',\n  },\n  integrationGuard: {\n    enabled: true,\n    syncConflictStrategy: 'prefer-remote',\n    onConflict: (conflict) => {\n      console.warn('[Vex] Sync conflict detected:', conflict);\n    },\n  },\n});\n\n// Use safeBillingAgent.generate() exactly like billingAgent.generate()\nexport { safeBillingAgent };",
+          "language": "typescript"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Define Zod Schemas for Every Workflow Step Boundary",
+          "description": "Mastra's createStep accepts inputSchema and outputSchema as Zod objects. Always define these explicitly and pass the same schemas to Vex's wrapStep so that runtime validation mirrors your TypeScript types. Sharing a single schema definition between Mastra and Vex eliminates drift between compile-time and runtime checks."
+        },
+        {
+          "title": "Set onViolation to 'throw' in Production Tool Wrappers",
+          "description": "When wrapping Mastra tools with vex.wrapTool, use onViolation: 'throw' in production environments so that a malformed tool response immediately halts the agent run and surfaces a traceable error, rather than silently passing bad data to the LLM. Reserve onViolation: 'warn' for development and staging where you want visibility without interruption."
+        },
+        {
+          "title": "Configure Staleness Thresholds Per Memory Domain",
+          "description": "Not all Mastra memory records age at the same rate. User preferences may be valid for weeks, while pricing data may be stale within hours. Configure Vex's stalenessThresholdMs separately for each agent that uses memory retrieval, matching the threshold to the volatility of the data domain that agent operates in."
+        },
+        {
+          "title": "Use Vex Traces to Debug Workflow Step Failures",
+          "description": "Every vex.wrapStep and vex.wrapTool call automatically emits a trace event to the Vex dashboard. When a Mastra workflow run fails, use the trace ID returned in the error to jump directly to the step that introduced the violation, rather than replaying the entire workflow to reproduce the issue."
+        },
+        {
+          "title": "Validate Integration Sync State Before Agent Invocation",
+          "description": "Before invoking a Mastra agent that depends on synced integration data, call vex.checkSyncHealth(integrationId) to confirm the last sync completed without conflicts and is within an acceptable age window. If the sync is stale or conflicted, delay agent invocation or surface a degraded-mode response rather than letting the agent operate on unreliable data."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Mastra Agents",
+      "description": "Add Vex to your Mastra project today and get full visibility into workflow step violations, tool call failures, and memory staleness before they reach your users — sign up at vex.dev to get your API key and start your first monitored agent run in minutes."
+    }
+  }
+}
