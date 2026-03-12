@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Azure AI Agent Service Agents",
+    "description": "Learn how to add runtime guardrails to Azure AI Agent Service agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Azure AI Agent Service guardrails",
+      "Azure AI Agent Service monitoring",
+      "Azure AI Agent Service hallucination detection",
+      "Vex Azure AI Agent Service",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Azure AI Agent Service combines Azure OpenAI models with enterprise-grade grounding, file search, and tool execution — but these powerful capabilities introduce reliability risks that can silently degrade agent behavior in production. Without guardrails, agents can exceed thread token limits, return stale Bing-grounded data, or execute tools whose outputs violate enterprise compliance policies. Vex adds a middleware validation layer directly into the Azure AI agent processing pipeline to catch these failures before they reach end users.",
+    "whyGuardrails": {
+      "heading": "Why Azure AI Agent Service Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Enterprise Policy Enforcement on Tool Outputs",
+          "explanation": "Azure AI Agent Service allows agents to call custom tools and Azure Functions, but the platform does not natively validate tool execution results against enterprise data governance or compliance policies. A tool returning PII, restricted financial data, or policy-violating content will be passed directly to the model without interception unless middleware validation is in place."
+        },
+        {
+          "title": "Grounding Data Freshness and Accuracy",
+          "explanation": "Bing Search grounding in Azure AI Agent Service retrieves real-time web content, but indexed pages can be days or weeks out of date for fast-moving topics like regulatory changes, security advisories, or market data. Agents confidently citing stale grounded sources can cause significant downstream harm in enterprise decision-making workflows."
+        },
+        {
+          "title": "File Search Metadata Leakage",
+          "explanation": "The Azure AI Agent Service file search tool indexes documents stored in Azure Blob Storage and returns chunked results, but it can surface Azure-specific metadata fields — such as storage account names, container paths, and internal document IDs — instead of or alongside the intended content. This metadata can expose infrastructure details to end users or downstream systems."
+        },
+        {
+          "title": "Thread and Token Limit Management",
+          "explanation": "Azure AI Agent Service threads accumulate messages across multi-turn conversations, and long-running threads can silently hit Azure OpenAI context window limits. Without graceful degradation logic, agents either truncate context unpredictably or throw unhandled exceptions, causing conversation state loss and poor user experiences in production enterprise deployments."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Azure AI Agent Service Failure Modes",
+      "failures": [
+        {
+          "name": "Tool Output Policy Violation",
+          "description": "Custom tools or Azure Function integrations return data that violates enterprise compliance policies — such as unmasked PII, restricted financial records, or data from unauthorized regions — and the agent incorporates this content into its response without any validation step.",
+          "severity": "critical",
+          "example": "A tool querying an internal HR database returns an employee's full SSN and salary history. The agent summarizes this data in a response to a manager who only has authorization to view role titles, violating GDPR and internal data access controls."
+        },
+        {
+          "name": "Stale Bing Search Grounding",
+          "description": "The Bing Search grounding tool retrieves web pages that were indexed before a critical update — such as a recalled product, a changed regulation, or a patched security vulnerability — causing the agent to confidently present outdated information as current fact.",
+          "severity": "high",
+          "example": "An agent grounded with Bing Search advises a user that a specific Azure SDK version is the latest stable release, when in fact a critical security patch was released 48 hours ago and the old version has a known CVE."
+        },
+        {
+          "name": "File Search Metadata Exposure",
+          "description": "The Azure AI Agent Service file search tool returns Azure Blob Storage metadata — including container names, storage account URLs, internal document IDs, and access tier information — embedded in search results, which the agent then includes in user-facing responses.",
+          "severity": "high",
+          "example": "A user asks for a summary of the Q3 financial report. The file search result includes the blob URL 'https://corpstorageacct.blob.core.windows.net/confidential-finance/q3-2024.pdf' and internal document tags, which the agent reproduces verbatim in its response, exposing infrastructure topology."
+        },
+        {
+          "name": "Thread Token Limit Exceeded Without Degradation",
+          "description": "Long-running Azure AI Agent Service threads accumulate messages until the underlying Azure OpenAI model's context window is exhausted. The agent service throws an unhandled error or silently truncates early conversation context, causing the agent to lose track of user instructions, prior decisions, or established constraints.",
+          "severity": "critical",
+          "example": "A multi-step research agent running a 40-turn thread hits the 128k token limit of GPT-4o. The Azure AI Projects SDK raises an InvalidRequestError, the thread is abandoned, and the user loses all intermediate research results with no recovery path or user notification."
+        },
+        {
+          "name": "Unvalidated Code Interpreter Output",
+          "description": "The Azure AI Agent Service Code Interpreter tool executes Python code and returns results, but the generated code or its outputs are not validated for correctness, safety, or compliance before being presented to users. Incorrect numerical computations or data transformations can be presented with false confidence.",
+          "severity": "high",
+          "example": "An agent uses Code Interpreter to calculate compound interest for a loan product. A subtle off-by-one error in the generated Python loop produces incorrect APR figures, which the agent presents as authoritative financial calculations to a customer without any output validation."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Azure AI Agent Service",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex Client",
+          "description": "Install the Azure AI Projects SDK and Vex SDK, then initialize both clients. The Vex client is configured with your policy set that defines enterprise compliance rules, grounding freshness thresholds, and metadata filtering patterns.",
+          "language": "python",
+          "code": "import os\nfrom azure.ai.projects import AIProjectClient\nfrom azure.identity import DefaultAzureCredential\nfrom vex_sdk import VexClient, PolicySet, GroundingPolicy, ToolOutputPolicy\n\n# Initialize Azure AI Projects client\nazure_client = AIProjectClient(\n    subscription_id=os.environ[\"AZURE_SUBSCRIPTION_ID\"],\n    resource_group_name=os.environ[\"AZURE_RESOURCE_GROUP\"],\n    project_name=os.environ[\"AZURE_AI_PROJECT_NAME\"],\n    credential=DefaultAzureCredential()\n)\n\n# Initialize Vex client with enterprise policy configuration\nvex_client = VexClient(\n    api_key=os.environ[\"VEX_API_KEY\"],\n    policy_set=PolicySet(\n        id=\"azure-enterprise-policy-v1\",\n        grounding=GroundingPolicy(\n            max_content_age_hours=24,\n            require_source_attribution=True,\n            block_metadata_patterns=[\n                r\"https?://[a-z0-9]+\\.blob\\.core\\.windows\\.net\",\n                r\"container=[a-zA-Z0-9\\-]+\",\n                r\"x-ms-blob-type\"\n            ]\n        ),\n        tool_output=ToolOutputPolicy(\n            pii_detection=True,\n            pii_action=\"redact\",\n            restricted_data_patterns=[\"SSN\", \"salary\", \"compensation\"],\n            compliance_frameworks=[\"GDPR\", \"HIPAA\"]\n        )\n    )\n)\n\nprint(\"Azure AI Projects and Vex clients initialized successfully\")"
+        },
+        {
+          "title": "Wrap Tool Execution with Vex Policy Validation",
+          "description": "Intercept tool call results from the Azure AI Agent Service run loop and validate them through Vex before submitting tool outputs back to the agent. This ensures policy violations are caught before the model processes tool results.",
+          "language": "python",
+          "code": "import json\nfrom azure.ai.projects.models import (\n    AgentThread,\n    ThreadRun,\n    RequiredAction,\n    SubmitToolOutputsAction,\n    ToolOutput\n)\nfrom vex_sdk import VexValidationError, PolicyViolation\n\ndef execute_tool(tool_name: str, tool_args: dict) -> dict:\n    \"\"\"Your actual tool implementation.\"\"\"\n    # Replace with real tool logic\n    if tool_name == \"get_employee_data\":\n        return {\"name\": \"Jane Doe\", \"role\": \"Engineer\", \"ssn\": \"123-45-6789\"}\n    return {\"result\": \"tool output\"}\n\ndef process_run_with_vex_validation(\n    agent_client,\n    vex: VexClient,\n    thread_id: str,\n    run_id: str\n) -> ThreadRun:\n    \"\"\"Process an agent run, validating all tool outputs through Vex.\"\"\"\n    \n    agents = agent_client.agents\n    \n    while True:\n        run = agents.get_run(thread_id=thread_id, run_id=run_id)\n        \n        if run.status == \"requires_action\":\n            required_action: SubmitToolOutputsAction = run.required_action\n            tool_outputs = []\n            \n            for tool_call in required_action.submit_tool_outputs.tool_calls:\n                tool_name = tool_call.function.name\n                tool_args = json.loads(tool_call.function.arguments)\n                \n                # Execute the actual tool\n                raw_output = execute_tool(tool_name, tool_args)\n                \n                # Validate output through Vex before returning to agent\n                try:\n                    validated_output = vex.validate_tool_output(\n                        tool_name=tool_name,\n                        tool_args=tool_args,\n                        tool_output=raw_output,\n                        context={\"thread_id\": thread_id, \"run_id\": run_id}\n                    )\n                    output_str = json.dumps(validated_output.sanitized_output)\n                except PolicyViolation as e:\n                    # Return policy-safe error message instead of violating data\n                    output_str = json.dumps({\n                        \"error\": \"Tool output blocked by enterprise policy\",\n                        \"policy_id\": e.policy_id,\n                        \"safe_message\": e.user_safe_message\n                    })\n                    vex.log_violation(e, thread_id=thread_id, run_id=run_id)\n                \n                tool_outputs.append(\n                    ToolOutput(tool_call_id=tool_call.id, output=output_str)\n                )\n            \n            agents.submit_tool_outputs_to_run(\n                thread_id=thread_id,\n                run_id=run_id,\n                tool_outputs=tool_outputs\n            )\n        \n        elif run.status in (\"completed\", \"failed\", \"cancelled\", \"expired\"):\n            return run\n        \n        import time\n        time.sleep(0.5)\n\n# Usage\nrun = process_run_with_vex_validation(\n    agent_client=azure_client,\n    vex=vex_client,\n    thread_id=\"thread_abc123\",\n    run_id=\"run_xyz789\"\n)\nprint(f\"Run completed with status: {run.status}\")"
+        },
+        {
+          "title": "Validate Grounding Results and Filter File Search Metadata",
+          "description": "Intercept messages after run completion to validate Bing Search grounding freshness and strip Azure Blob Storage metadata from file search results before delivering responses to users.",
+          "language": "python",
+          "code": "from azure.ai.projects.models import MessageTextContent, MessageTextFileCitationAnnotation\nfrom vex_sdk import GroundingValidationResult, MetadataFilterResult\nfrom datetime import datetime, timezone\n\ndef get_validated_agent_response(\n    agent_client,\n    vex: VexClient,\n    thread_id: str\n) -> dict:\n    \"\"\"Retrieve the latest agent message with Vex grounding and metadata validation.\"\"\"\n    \n    agents = agent_client.agents\n    messages = agents.list_messages(thread_id=thread_id)\n    \n    # Get the most recent assistant message\n    assistant_message = next(\n        (m for m in messages.data if m.role == \"assistant\"),\n        None\n    )\n    \n    if not assistant_message:\n        return {\"error\": \"No assistant message found\"}\n    \n    validated_content_parts = []\n    grounding_warnings = []\n    \n    for content_block in assistant_message.content:\n        if isinstance(content_block, MessageTextContent):\n            raw_text = content_block.text.value\n            annotations = content_block.text.annotations\n            \n            # Extract grounding sources from annotations\n            grounding_sources = []\n            for annotation in annotations:\n                if hasattr(annotation, 'url_citation'):\n                    grounding_sources.append({\n                        \"url\": annotation.url_citation.url,\n                        \"title\": annotation.url_citation.title,\n                        \"start_index\": annotation.start_index,\n                        \"end_index\": annotation.end_index\n                    })\n            \n            # Validate grounding freshness through Vex\n            if grounding_sources:\n                grounding_result: GroundingValidationResult = vex.validate_grounding(\n                    content=raw_text,\n                    sources=grounding_sources,\n                    validation_timestamp=datetime.now(timezone.utc).isoformat()\n                )\n                \n                if grounding_result.has_stale_sources:\n                    grounding_warnings.extend(grounding_result.stale_source_warnings)\n                    raw_text = grounding_result.content_with_staleness_annotations\n            \n            # Filter Azure Blob metadata from file search results\n            metadata_result: MetadataFilterResult = vex.filter_infrastructure_metadata(\n                content=raw_text,\n                patterns=\"azure_blob_storage\",\n                replacement=\"[document reference]\"\n            )\n            \n            validated_content_parts.append(metadata_result.filtered_content)\n    \n    return {\n        \"content\": \" \".join(validated_content_parts),\n        \"grounding_warnings\": grounding_warnings,\n        \"metadata_filtered\": any(\n            vex.filter_infrastructure_metadata(p, \"azure_blob_storage\").was_filtered\n            for p in validated_content_parts\n        ),\n        \"message_id\": assistant_message.id,\n        \"thread_id\": thread_id\n    }\n\n# Usage\nresponse = get_validated_agent_response(\n    agent_client=azure_client,\n    vex=vex_client,\n    thread_id=\"thread_abc123\"\n)\n\nif response[\"grounding_warnings\"]:\n    print(f\"Warning: {len(response['grounding_warnings'])} stale grounding sources detected\")\n    for warning in response[\"grounding_warnings\"]:\n        print(f\"  - {warning['url']}: last indexed {warning['age_hours']}h ago\")\n\nprint(f\"Validated response: {response['content']}\")"
+        },
+        {
+          "title": "Implement Thread Token Limit Monitoring with Graceful Degradation",
+          "description": "Use Vex to monitor thread token consumption and implement graceful degradation — including automatic thread summarization and context pruning — before Azure OpenAI context limits are hit.",
+          "language": "typescript",
+          "code": "import { AIProjectClient } from \"@azure/ai-projects\";\nimport { DefaultAzureCredential } from \"@azure/identity\";\nimport { VexClient, ThreadHealthResult, DegradationStrategy } from \"vex-sdk\";\n\nconst azureClient = new AIProjectClient(\n  process.env.AZURE_SUBSCRIPTION_ID!,\n  process.env.AZURE_RESOURCE_GROUP!,\n  process.env.AZURE_AI_PROJECT_NAME!,\n  new DefaultAzureCredential()\n);\n\nconst vex = new VexClient({\n  apiKey: process.env.VEX_API_KEY!,\n  threadMonitoring: {\n    tokenWarningThreshold: 0.75,   // Warn at 75% of context window\n    tokenCriticalThreshold: 0.90,  // Degrade gracefully at 90%\n    modelContextWindow: 128000,    // GPT-4o context window\n    degradationStrategy: DegradationStrategy.SUMMARIZE_AND_PRUNE\n  }\n});\n\nasync function createMessageWithTokenGuard(\n  threadId: string,\n  userMessage: string,\n  agentId: string\n): Promise<{ runId: string; degraded: boolean; warning?: string }> {\n  const agents = azureClient.agents;\n\n  // Check thread health before adding new message\n  const threadHealth: ThreadHealthResult = await vex.checkThreadHealth({\n    threadId,\n    pendingMessageTokenEstimate: vex.estimateTokens(userMessage),\n    fetchThreadMessages: async () => {\n      const msgs = await agents.listMessages(threadId);\n      return msgs.data.map(m => ({\n        role: m.role,\n        content: m.content\n          .filter(c => c.type === \"text\")\n          .map(c => (c as any).text.value)\n          .join(\" \")\n      }));\n    }\n  });\n\n  let actualThreadId = threadId;\n  let degraded = false;\n  let warning: string | undefined;\n\n  if (threadHealth.status === \"critical\") {\n    // Summarize thread and create continuation thread\n    const summary = await vex.summarizeThread({\n      threadId,\n      messages: threadHealth.messages,\n      preserveSystemInstructions: true,\n      summaryMaxTokens: 2000\n    });\n\n    // Create new thread with summary as context\n    const newThread = await agents.createThread();\n    await agents.createMessage(newThread.id, {\n      role: \"user\",\n      content: `[Conversation context summary]: ${summary.summaryText}`\n    });\n\n    actualThreadId = newThread.id;\n    degraded = true;\n    warning = `Thread ${threadId} exceeded 90% token capacity. Continued in new thread ${newThread.id} with summarized context.`;\n\n    await vex.logDegradationEvent({\n      originalThreadId: threadId,\n      continuationThreadId: newThread.id,\n      tokensAtDegradation: threadHealth.currentTokenCount,\n      strategy: \"summarize_and_prune\"\n    });\n\n  } else if (threadHealth.status === \"warning\") {\n    warning = `Thread at ${Math.round(threadHealth.utilizationPercent * 100)}% token capacity. Consider starting a new conversation soon.`;\n  }\n\n  // Add user message to (potentially new) thread\n  await agents.createMessage(actualThreadId, {\n    role: \"user\",\n    content: userMessage\n  });\n\n  // Create and return run\n  const run = await agents.createRun(actualThreadId, agentId);\n\n  return {\n    runId: run.id,\n    degraded,\n    warning\n  };\n}\n\n// Usage\nconst result = await createMessageWithTokenGuard(\n  \"thread_abc123\",\n  \"Summarize the latest Azure security advisories and compare with our current configuration.\",\n  \"asst_xyz789\"\n);\n\nif (result.degraded) {\n  console.warn(`Thread degradation occurred: ${result.warning}`);\n}\nconsole.log(`Run created: ${result.runId}, degraded: ${result.degraded}`);"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Define Separate Vex Policies per Azure AI Agent Role",
+          "description": "Different Azure AI agents in your project serve different purposes — a customer-facing support agent has different compliance requirements than an internal data analysis agent. Configure distinct Vex PolicySet objects for each agent role, referencing the agent's ID from the Azure AI Projects SDK, so that tool output validation, PII handling, and grounding freshness thresholds are calibrated appropriately for each agent's risk profile."
+        },
+        {
+          "title": "Validate Tool Outputs Before SubmitToolOutputsToRun",
+          "description": "The critical interception point in the Azure AI Agent Service run loop is between your tool execution logic and the call to agents.submit_tool_outputs_to_run() (Python) or agents.submitToolOutputsToRun() (TypeScript). Always run Vex validation at this exact point — not after the run completes — because once tool outputs are submitted, the model has already processed them and any policy violations are baked into the response."
+        },
+        {
+          "title": "Set Bing Grounding Freshness Thresholds Based on Domain Volatility",
+          "description": "Not all grounded content ages at the same rate. Configure Vex GroundingPolicy with domain-specific max_content_age_hours values: use 2-4 hours for financial market data or security advisories, 24 hours for product documentation, and 72 hours for general reference content. Use the url_citation annotations returned in Azure AI Agent Service message content to extract source URLs for per-domain freshness validation."
+        },
+        {
+          "title": "Use Vex Thread Health Checks as a Pre-Run Gate",
+          "description": "Call vex.checkThreadHealth() before every agents.createRun() invocation, not just when errors occur. Proactive token monitoring allows you to implement graceful degradation — thread summarization, context pruning, or user notification — before hitting Azure OpenAI's hard context limits. Reactive error handling after an InvalidRequestError means conversation state is already lost."
+        },
+        {
+          "title": "Log All Vex Violations to Azure Monitor for Compliance Auditing",
+          "description": "Configure the Vex client to forward all policy violation events to Azure Monitor using the azure_monitor_connection_string parameter in VexClient initialization. This creates a unified audit trail in your Azure Log Analytics workspace that correlates Vex policy violations with Azure AI Agent Service run IDs, thread IDs, and agent IDs — essential for enterprise compliance reporting under GDPR, HIPAA, or SOC 2 frameworks."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Azure AI Agent Service Agents",
+      "description": "Add Vex to your Azure AI agent pipeline today to enforce enterprise compliance policies, validate grounding freshness, and prevent token limit failures before they impact production users."
+    }
+  }
+}

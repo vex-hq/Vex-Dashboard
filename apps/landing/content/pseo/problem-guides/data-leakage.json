@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "slug": "data-leakage",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents",
+    "description": "Complete guide to sensitive data leakage prevention in ai agents. Learn detection methods, fixes, and best practices for production AI agents.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "AI agent reliability",
+      "agent monitoring"
+    ]
+  },
+  "content": {
+    "intro": "AI agents frequently handle sensitive data—PII, credentials, financial records, and proprietary business logic—yet their multi-step reasoning and tool-calling architectures create numerous vectors for that data to leak into logs, downstream APIs, or model outputs. Unlike traditional software, agents can inadvertently expose sensitive information through prompt echoing, verbose logging, or by passing raw context to third-party tools. Preventing sensitive data leakage requires deliberate design at every layer of the agent stack.",
+    "whatIsIt": {
+      "heading": "What Is Sensitive Data Leakage Prevention in AI Agents?",
+      "explanation": "Sensitive data leakage in AI agents occurs when confidential information—such as personally identifiable information (PII), API keys, passwords, medical records, or financial data—is unintentionally exposed through the agent's inputs, outputs, intermediate reasoning steps, or tool calls. Because modern agents operate as orchestrators that chain together LLM calls, external APIs, databases, and memory systems, each handoff point represents a potential leak surface that traditional security models were not designed to address.\n\nThe problem is compounded by the fact that LLMs are trained to be helpful and verbose. When an agent retrieves a customer record to answer a billing question, the model may echo back the full record—including SSNs, credit card numbers, or home addresses—even when only a subset of that data was needed to answer the query. Similarly, agents that log their full reasoning traces for debugging purposes can inadvertently persist sensitive data in plaintext log files or observability platforms.\n\nSensitive data leakage prevention is the practice of implementing systematic controls—data masking, output filtering, least-privilege data access, and audit logging—to ensure that sensitive information is only exposed to the parties and systems that are explicitly authorized to receive it, and only for the duration required to complete a task. It is not a single fix but a defense-in-depth strategy that must be applied at ingestion, processing, tool-call, and output stages of the agent lifecycle.",
+      "examples": [
+        {
+          "scenario": "A customer support agent retrieves a full user profile from a CRM to answer a shipping question, then includes the customer's full credit card number and SSN verbatim in its response to the end user.",
+          "consequence": "Direct exposure of PII and financial data to the user interface, creating regulatory liability under PCI-DSS and GDPR, and potential for data harvesting if the conversation is intercepted."
+        },
+        {
+          "scenario": "An agent uses verbose debug logging that captures the full system prompt and tool call payloads, which include database connection strings and API keys injected at runtime.",
+          "consequence": "Credentials are persisted in plaintext log files, which are often shipped to centralized logging platforms with broader access controls, dramatically expanding the blast radius of a credential compromise."
+        },
+        {
+          "scenario": "A coding assistant agent is given access to an internal codebase and, when asked a general programming question, includes proprietary algorithm implementations and internal API endpoint URLs in its response.",
+          "consequence": "Intellectual property and internal infrastructure details are leaked to the end user and potentially stored in the LLM provider's request logs, violating confidentiality agreements and exposing attack surface."
+        },
+        {
+          "scenario": "A multi-agent pipeline passes a full medical record between a triage agent and a scheduling agent as raw JSON context, and the scheduling agent forwards this payload to a third-party calendar API that does not have a BAA in place.",
+          "consequence": "Protected Health Information (PHI) is transmitted to an unauthorized third party, constituting a HIPAA breach with mandatory reporting requirements and potential fines exceeding $50,000 per violation."
+        }
+      ]
+    },
+    "howToDetect": {
+      "heading": "How to Detect It",
+      "methods": [
+        {
+          "name": "Output Scanning with Regex and NLP Classifiers",
+          "description": "Intercept all agent outputs—including tool call arguments, intermediate chain-of-thought steps, and final responses—and scan them against a library of patterns for known sensitive data formats (credit card numbers, SSNs, email addresses, API key patterns) using regex, and against trained NLP classifiers for unstructured PII like names, addresses, and medical terminology. Tools like Microsoft Presidio or AWS Comprehend can be integrated as a middleware layer in the agent's output pipeline.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Structured Audit Logging with Data Classification Tags",
+          "description": "Instrument the agent to emit structured log events at each stage of execution—tool invocation, LLM call, memory read/write—and attach data classification tags to each event based on the sensitivity of the data sources accessed. Anomaly detection rules can then flag events where high-sensitivity data flows into low-trust output channels, such as a response destined for an unauthenticated API endpoint.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Canary Token Injection",
+          "description": "Embed synthetic canary tokens—fake but realistic-looking SSNs, API keys, or email addresses—into sensitive data stores that the agent has access to. Configure alerting so that any time a canary token appears in an agent output, log stream, or external API call, an immediate alert is triggered. This provides a reliable signal that the agent is leaking data from a specific source without requiring exhaustive output scanning.",
+          "effectiveness": "medium"
+        },
+        {
+          "name": "Data Flow Graph Analysis",
+          "description": "Statically and dynamically analyze the agent's tool definitions, memory access patterns, and prompt templates to construct a data flow graph mapping where sensitive data originates and which downstream systems it can reach. Review this graph for paths where sensitive data can flow to outputs or tools without explicit redaction steps. This is most effective during the design and code review phase before deployment.",
+          "effectiveness": "medium"
+        }
+      ]
+    },
+    "howToFix": {
+      "heading": "How to Fix It",
+      "strategies": [
+        {
+          "name": "Implement a PII Redaction Middleware Layer",
+          "description": "Wrap all agent outputs—including tool call arguments and LLM responses—in a redaction middleware that uses a library like Microsoft Presidio to detect and mask sensitive entities before they are passed to downstream systems or returned to users. Apply this both on ingestion (before data enters the agent context) and on egress (before any output leaves the agent boundary).",
+          "code": "import re\nfrom presidio_analyzer import AnalyzerEngine\nfrom presidio_anonymizer import AnonymizerEngine\nfrom presidio_anonymizer.entities import OperatorConfig\nfrom typing import Any\n\nanalyzer = AnalyzerEngine()\nanonymizer = AnonymizerEngine()\n\ndef redact_sensitive_data(text: str, language: str = \"en\") -> str:\n    \"\"\"\n    Detect and redact PII from agent outputs before they are\n    passed to downstream tools or returned to users.\n    \"\"\"\n    results = analyzer.analyze(\n        text=text,\n        language=language,\n        entities=[\n            \"CREDIT_CARD\", \"US_SSN\", \"EMAIL_ADDRESS\",\n            \"PHONE_NUMBER\", \"PERSON\", \"LOCATION\",\n            \"US_BANK_NUMBER\", \"MEDICAL_LICENSE\"\n        ]\n    )\n    if not results:\n        return text\n\n    anonymized = anonymizer.anonymize(\n        text=text,\n        analyzer_results=results,\n        operators={\n            \"CREDIT_CARD\": OperatorConfig(\"mask\", {\"masking_char\": \"*\", \"chars_to_mask\": 12, \"from_end\": False}),\n            \"US_SSN\": OperatorConfig(\"replace\", {\"new_value\": \"[REDACTED-SSN]\"}),\n            \"EMAIL_ADDRESS\": OperatorConfig(\"replace\", {\"new_value\": \"[REDACTED-EMAIL]\"}),\n            \"DEFAULT\": OperatorConfig(\"replace\", {\"new_value\": \"[REDACTED]\"})\n        }\n    )\n    return anonymized.text\n\n\nclass RedactingAgentWrapper:\n    \"\"\"\n    Wraps an agent to apply PII redaction on all inputs and outputs.\n    \"\"\"\n    def __init__(self, agent):\n        self.agent = agent\n\n    def run(self, user_input: str) -> str:\n        # Redact PII from user input before it enters the agent context\n        clean_input = redact_sensitive_data(user_input)\n        raw_output = self.agent.run(clean_input)\n        # Redact PII from agent output before returning to caller\n        return redact_sensitive_data(raw_output)\n\n\n# Example usage with a LangChain-style agent\n# agent = build_your_agent()\n# safe_agent = RedactingAgentWrapper(agent)\n# response = safe_agent.run(\"What is the status of order for john.doe@example.com?\")\n# print(response)  # Email address will be redacted in both directions",
+          "language": "python"
+        },
+        {
+          "name": "Enforce Least-Privilege Data Retrieval with Field-Level Filtering",
+          "description": "Modify all tool and database retrieval functions to return only the minimum fields required for the agent's current task, rather than full records. Define a schema of 'safe fields' per tool per task type, and strip sensitive fields before the retrieved data enters the agent's context window. This prevents the model from ever seeing data it does not need, eliminating the possibility of it echoing that data back.",
+          "code": "from typing import Optional\nfrom pydantic import BaseModel\nfrom functools import wraps\n\n# Define which fields are safe to expose per task context\nDATA_SCHEMAS = {\n    \"billing_inquiry\": {\n        \"allowed_fields\": {\"order_id\", \"order_status\", \"order_date\", \"total_amount\", \"shipping_address_city\"},\n        \"blocked_fields\": {\"credit_card_number\", \"ssn\", \"full_address\", \"date_of_birth\"}\n    },\n    \"account_lookup\": {\n        \"allowed_fields\": {\"account_id\", \"username\", \"account_status\", \"plan_type\"},\n        \"blocked_fields\": {\"password_hash\", \"ssn\", \"credit_card_number\", \"security_questions\"}\n    }\n}\n\ndef field_level_filter(task_context: str):\n    \"\"\"\n    Decorator that strips sensitive fields from tool return values\n    based on the current task context.\n    \"\"\"\n    def decorator(func):\n        @wraps(func)\n        def wrapper(*args, **kwargs) -> dict:\n            raw_result = func(*args, **kwargs)\n            schema = DATA_SCHEMAS.get(task_context)\n            if not schema or not isinstance(raw_result, dict):\n                return raw_result\n\n            allowed = schema[\"allowed_fields\"]\n            filtered = {\n                key: value\n                for key, value in raw_result.items()\n                if key in allowed\n            }\n            # Log any blocked fields that were present (for audit)\n            blocked_present = set(raw_result.keys()) & schema[\"blocked_fields\"]\n            if blocked_present:\n                import logging\n                logging.getLogger(\"data_access_audit\").warning(\n                    f\"Blocked fields stripped before agent context: {blocked_present} \"\n                    f\"in task '{task_context}' for function '{func.__name__}'\"\n                )\n            return filtered\n        return wrapper\n    return decorator\n\n\n# Apply to your agent's tool functions\n@field_level_filter(task_context=\"billing_inquiry\")\ndef get_customer_record(customer_id: str) -> dict:\n    \"\"\"Simulated DB fetch - in production this queries your database.\"\"\"\n    return {\n        \"order_id\": \"ORD-12345\",\n        \"order_status\": \"shipped\",\n        \"order_date\": \"2024-01-15\",\n        \"total_amount\": 99.99,\n        \"shipping_address_city\": \"Austin\",\n        # These will be stripped before reaching the agent:\n        \"credit_card_number\": \"4111111111111111\",\n        \"ssn\": \"123-45-6789\",\n        \"full_address\": \"123 Main St, Austin, TX 78701\"\n    }\n\n# record = get_customer_record(\"CUST-001\")\n# Agent only sees: {\"order_id\", \"order_status\", \"order_date\", \"total_amount\", \"shipping_address_city\"}",
+          "language": "python"
+        },
+        {
+          "name": "Secure Credential Management for Tool Calls",
+          "description": "Never inject API keys, database passwords, or other credentials directly into the agent's prompt, system message, or context window. Instead, resolve credentials at the tool execution layer using a secrets manager (AWS Secrets Manager, HashiCorp Vault, etc.), so the LLM never has visibility into the credential values. This prevents credentials from appearing in model outputs, reasoning traces, or logs.",
+          "code": "import boto3\nimport os\nfrom functools import lru_cache\nfrom typing import Callable\nimport json\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n\n@lru_cache(maxsize=32)\ndef get_secret(secret_name: str, region: str = \"us-east-1\") -> dict:\n    \"\"\"\n    Retrieve credentials from AWS Secrets Manager.\n    Cached to avoid repeated API calls within a session.\n    Never expose the return value to the agent context.\n    \"\"\"\n    client = boto3.client(\"secretsmanager\", region_name=region)\n    response = client.get_secret_value(SecretId=secret_name)\n    return json.loads(response[\"SecretString\"])\n\n\ndef secure_tool(secret_name: str):\n    \"\"\"\n    Decorator that injects credentials at execution time\n    without exposing them to the agent's context window.\n    The agent calls the tool with business parameters only;\n    credentials are resolved internally.\n    \"\"\"\n    def decorator(func: Callable):\n        @wraps(func)\n        def wrapper(*args, **kwargs):\n            # Resolve credentials at call time, not at agent planning time\n            try:\n                credentials = get_secret(secret_name)\n            except Exception as e:\n                logger.error(f\"Failed to retrieve secret '{secret_name}': {e}\")\n                raise RuntimeError(\"Tool authentication failed. Please try again.\")\n\n            # Pass credentials as internal kwargs, never visible to the LLM\n            kwargs[\"_credentials\"] = credentials\n            return func(*args, **kwargs)\n        return wrapper\n    return decorator\n\n\n@secure_tool(secret_name=\"prod/payment-service/api-key\")\ndef process_refund(order_id: str, amount: float, **kwargs) -> dict:\n    \"\"\"\n    Agent-callable tool. The agent only knows about order_id and amount.\n    The API key is injected securely and never appears in the agent's context.\n    \"\"\"\n    credentials = kwargs.pop(\"_credentials\", {})\n    api_key = credentials.get(\"api_key\")\n\n    # Use api_key to authenticate with payment service\n    # import requests\n    # response = requests.post(\n    #     \"https://payments.internal/refund\",\n    #     headers={\"Authorization\": f\"Bearer {api_key}\"},\n    #     json={\"order_id\": order_id, \"amount\": amount}\n    # )\n    logger.info(f\"Refund processed for order {order_id}, amount ${amount}\")\n    return {\"status\": \"success\", \"refund_id\": \"REF-99887\", \"amount\": amount}\n\n\n# The agent's tool schema exposed to the LLM contains NO credential fields:\nTOOL_SCHEMA = {\n    \"name\": \"process_refund\",\n    \"description\": \"Process a refund for a given order.\",\n    \"parameters\": {\n        \"order_id\": {\"type\": \"string\"},\n        \"amount\": {\"type\": \"number\"}\n        # No 'api_key' field - the LLM never knows it exists\n    }\n}",
+          "language": "python"
+        },
+        {
+          "name": "Implement a Structured Output Validator with Data Classification",
+          "description": "Before any agent response is returned to the user or passed to a downstream system, run it through a structured validator that classifies the sensitivity of the content and enforces output policies. Responses containing high-sensitivity data should be blocked, logged for review, and replaced with a safe fallback message. This acts as a final safety net catching leakage that upstream controls missed.",
+          "code": "import re\nfrom enum import Enum\nfrom dataclasses import dataclass\nfrom typing import Optional\nimport logging\n\naudit_logger = logging.getLogger(\"security.audit\")\n\n\nclass DataSensitivity(Enum):\n    SAFE = \"safe\"\n    LOW = \"low\"\n    MEDIUM = \"medium\"\n    HIGH = \"high\"\n    CRITICAL = \"critical\"\n\n\n@dataclass\nclass ValidationResult:\n    is_safe: bool\n    sensitivity: DataSensitivity\n    detected_patterns: list[str]\n    sanitized_output: Optional[str]\n    original_output: Optional[str] = None  # Only stored in secure audit log\n\n\n# Patterns ordered by severity\nSENSITIVITY_PATTERNS = {\n    DataSensitivity.CRITICAL: [\n        (r\"\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\\b\", \"credit_card\"),\n        (r\"\\b[0-9]{3}-[0-9]{2}-[0-9]{4}\\b\", \"ssn\"),\n        (r\"(?i)(?:password|passwd|secret|api[_-]?key|token)[\\s:=]+[\\S]{8,}\", \"credential\"),\n        (r\"\\b[A-Za-z0-9]{20,}\\b(?=.*[A-Z])(?=.*[0-9])\", \"potential_api_key\"),\n    ],\n    DataSensitivity.HIGH: [\n        (r\"\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b\", \"email\"),\n        (r\"\\b(?:\\+1[-.]?)?\\(?[0-9]{3}\\)?[-.]?[0-9]{3}[-.]?[0-9]{4}\\b\", \"phone\"),\n        (r\"\\b[0-9]{1,5}\\s[A-Za-z0-9\\s]{5,30}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd)\\b\", \"address\"),\n    ],\n    DataSensitivity.MEDIUM: [\n        (r\"\\b(?:19|20)[0-9]{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])\\b\", \"date_of_birth_pattern\"),\n        (r\"(?i)\\b(?:diagnosis|prescription|medication|patient id)\\b\", \"medical_term\"),\n    ]\n}\n\nFALLBACK_RESPONSES = {\n    DataSensitivity.CRITICAL: \"I'm unable to display this information as it contains sensitive data. Please contact support through a secure channel.\",\n    DataSensitivity.HIGH: \"Some details have been redacted from this response for security reasons.\",\n    DataSensitivity.MEDIUM: \"This response has been reviewed and certain details have been omitted per our data policy.\"\n}\n\n\ndef validate_agent_output(\n    output: str,\n    session_id: str,\n    agent_id: str,\n    block_on: DataSensitivity = DataSensitivity.HIGH\n) -> ValidationResult:\n    \"\"\"\n    Validate agent output against sensitivity patterns.\n    Blocks and replaces output if sensitivity meets or exceeds block_on threshold.\n    \"\"\"\n    detected = []\n    highest_sensitivity = DataSensitivity.SAFE\n    sensitivity_order = [\n        DataSensitivity.SAFE, DataSensitivity.LOW,\n        DataSensitivity.MEDIUM, DataSensitivity.HIGH, DataSensitivity.CRITICAL\n    ]\n\n    for sensitivity_level, patterns in SENSITIVITY_PATTERNS.items():\n        for pattern, label in patterns:\n            if re.search(pattern, output):\n                detected.append(label)\n                if sensitivity_order.index(sensitivity_level) > sensitivity_order.index(highest_sensitivity):\n                    highest_sensitivity = sensitivity_level\n\n    should_block = (\n        sensitivity_order.index(highest_sensitivity) >= sensitivity_order.index(block_on)\n    )\n\n    if detected:\n        audit_logger.warning(\n            \"Sensitive data detected in agent output\",\n            extra={\n                \"session_id\": session_id,\n                \"agent_id\": agent_id,\n                \"sensitivity\": highest_sensitivity.value,\n                \"patterns_detected\": detected,\n                \"blocked\": should_block,\n                # Store hash of original for forensics, not plaintext\n                \"output_hash\": hash(output)\n            }\n        )\n\n    if should_block:\n        return ValidationResult(\n            is_safe=False,\n            sensitivity=highest_sensitivity,\n            detected_patterns=detected,\n            sanitized_output=FALLBACK_RESPONSES.get(highest_sensitivity, \"Output blocked.\"),\n            original_output=None  # Never log plaintext sensitive data\n        )\n\n    return ValidationResult(\n        is_safe=True,\n        sensitivity=highest_sensitivity,\n        detected_patterns=detected,\n        sanitized_output=output\n    )\n\n\n# Integration example:\ndef safe_agent_response(raw_output: str, session_id: str, agent_id: str) -> str:\n    result = validate_agent_output(raw_output, session_id, agent_id)\n    return result.sanitized_output",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Apply Data Minimization at the Context Window Level",
+          "description": "Treat the agent's context window as a high-risk surface. Before any data enters the context—whether from a database query, a file read, or a user message—apply field-level filtering to include only the minimum data required for the current task. The LLM cannot leak data it never sees, making context minimization the most effective upstream control available."
+        },
+        {
+          "title": "Separate Credential Resolution from Agent Reasoning",
+          "description": "Never include API keys, database passwords, or authentication tokens in the agent's system prompt, user messages, or tool schemas. Resolve all credentials at the tool execution layer using a dedicated secrets manager, and ensure that tool return values never echo back credential values. The agent should only ever see the results of authenticated operations, not the credentials used to perform them."
+        },
+        {
+          "title": "Implement Defense-in-Depth with Multiple Redaction Layers",
+          "description": "No single control is sufficient. Layer your defenses: apply field-level filtering on data ingestion, run PII detection on data entering the context window, scan tool call arguments before they are dispatched to external APIs, and validate all final outputs before they are returned to users or downstream systems. Each layer catches what the previous one misses."
+        },
+        {
+          "title": "Maintain Immutable Audit Logs Without Storing Sensitive Data",
+          "description": "Log all data access events, tool calls, and output validation decisions in an immutable audit trail for compliance and forensic purposes—but never log the sensitive data itself. Use hashes, truncated identifiers, or classification labels in log entries. This gives you full auditability and anomaly detection capability without creating a secondary data store that itself becomes a leakage risk."
+        },
+        {
+          "title": "Conduct Regular Red-Team Exercises for Prompt Injection and Data Extraction",
+          "description": "Actively test your agent for data leakage by simulating adversarial users who craft prompts designed to extract sensitive information—asking the agent to 'repeat its instructions,' 'summarize the database contents,' or 'translate the system prompt into another language.' Automated red-teaming tools and manual penetration testing should be part of your pre-deployment checklist and run on a regular cadence post-deployment."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Vex continuously monitors your AI agents for sensitive data leakage in real time—scanning tool calls, context windows, and outputs with built-in PII detection, policy enforcement, and audit logging—so you can ship with confidence and stay compliant without slowing down your team."
+    }
+  }
+}

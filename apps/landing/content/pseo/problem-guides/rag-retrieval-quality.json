@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "slug": "rag-retrieval-quality",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization Guide",
+    "description": "Complete guide to rag retrieval quality optimization guide. Learn detection methods, fixes, and best practices for production AI agents.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "AI agent reliability",
+      "agent monitoring"
+    ]
+  },
+  "content": {
+    "intro": "RAG (Retrieval-Augmented Generation) systems are only as good as the documents they retrieve — poor retrieval quality leads to hallucinations, incomplete answers, and user distrust. Optimizing retrieval quality is one of the highest-leverage improvements you can make to any AI agent that relies on external knowledge. This guide covers the root causes of retrieval failures, how to detect them, and concrete strategies to fix them.",
+    "whatIsIt": {
+      "heading": "What Is RAG Retrieval Quality Optimization?",
+      "explanation": "RAG retrieval quality refers to how accurately and completely a retrieval system surfaces the most relevant documents or chunks in response to a user query. When retrieval quality is poor, the language model receives irrelevant, outdated, or incomplete context, causing it to generate responses that are factually wrong, vague, or entirely fabricated. This is distinct from the LLM's own hallucination problem — even a perfect model will fail if it is fed bad context.\n\nThe core challenge is the semantic gap between how users phrase queries and how information is stored in your vector database. Embedding models compress meaning into fixed-size vectors, and small differences in phrasing, domain vocabulary, or query length can dramatically shift which documents are retrieved. Chunking strategy, embedding model choice, metadata filtering, and re-ranking all interact to determine final retrieval quality, making this a multi-dimensional optimization problem.\n\nRetrieval quality degradation is often silent — the system continues to return results, but those results are subtly wrong. Without explicit evaluation pipelines, teams often discover retrieval failures only after users complain or after manual audits. Proactive measurement using retrieval-specific metrics like MRR, NDCG, and context precision is essential to catching and fixing these issues before they erode user trust.",
+      "examples": [
+        {
+          "scenario": "A customer support agent is asked 'How do I cancel my subscription?' but the vector search retrieves chunks about 'pausing a subscription' because the word 'cancel' was never used in the documentation.",
+          "consequence": "The agent gives the user incorrect instructions for pausing instead of canceling, leading to continued billing and an escalated support ticket."
+        },
+        {
+          "scenario": "A legal research assistant retrieves a 512-token chunk that contains the conclusion of a court ruling but not the reasoning, because the document was chunked at fixed token boundaries without respect to semantic structure.",
+          "consequence": "The LLM cites the correct case but misrepresents the legal reasoning, creating liability risk for the law firm using the tool."
+        },
+        {
+          "scenario": "A medical knowledge base is queried with 'What is the dosage for pediatric ibuprofen?' but the top-k retrieval returns adult dosage guidelines because the pediatric-specific document has lower embedding similarity due to sparse indexing.",
+          "consequence": "The agent provides a potentially dangerous dosage recommendation, exposing the platform to serious safety and regulatory risk."
+        },
+        {
+          "scenario": "An internal HR chatbot is asked about the 2024 parental leave policy, but the retrieval system returns the 2022 policy document because both have similar embeddings and there is no metadata filtering on document version or date.",
+          "consequence": "Employees receive outdated policy information, leading to incorrect expectations and HR disputes during leave requests."
+        }
+      ]
+    },
+    "howToDetect": {
+      "heading": "How to Detect It",
+      "methods": [
+        {
+          "name": "Retrieval Evaluation with Ground Truth Datasets",
+          "description": "Build a labeled evaluation set of query-document pairs where you know which chunks should be retrieved for each query. Compute metrics like Mean Reciprocal Rank (MRR), Normalized Discounted Cumulative Gain (NDCG), Recall@K, and Precision@K. Run this evaluation suite on every change to your chunking strategy, embedding model, or index configuration. Tools like RAGAS, TruLens, and DeepEval provide out-of-the-box retrieval evaluation pipelines.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Context Relevance Scoring with an LLM Judge",
+          "description": "After each retrieval, use a secondary LLM call to score whether the retrieved chunks are actually relevant to the user query on a 1-5 scale. Log these scores over time and alert when average context relevance drops below a threshold. This is especially useful in production where you lack ground truth labels. RAGAS's 'context_precision' and 'context_recall' metrics implement this pattern using GPT-4 as a judge.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Embedding Distance Distribution Analysis",
+          "description": "Monitor the cosine similarity scores between queries and their top-K retrieved chunks. Plot the distribution of similarity scores over time. A healthy retrieval system shows a clear separation between top-ranked and lower-ranked results. If you see the top-1 similarity score consistently below 0.70, or if the score distribution is flat across all K results, your embedding model or chunking strategy is likely misaligned with your query patterns.",
+          "effectiveness": "medium"
+        },
+        {
+          "name": "Answer Faithfulness Tracing",
+          "description": "Use faithfulness evaluation to check whether the final LLM answer is actually grounded in the retrieved context. If faithfulness scores are low, it is a strong signal that retrieval is failing — the model is being forced to hallucinate because the retrieved context does not contain the answer. Tools like RAGAS, Arize Phoenix, and LangSmith can trace the full RAG pipeline and flag low-faithfulness responses for human review.",
+          "effectiveness": "medium"
+        }
+      ]
+    },
+    "howToFix": {
+      "heading": "How to Fix It",
+      "strategies": [
+        {
+          "name": "Implement Semantic Chunking Instead of Fixed-Size Chunking",
+          "description": "Replace naive fixed-token chunking with semantic chunking that respects sentence and paragraph boundaries. Use embedding similarity between consecutive sentences to detect topic shifts and create chunk boundaries at natural breakpoints. This ensures each chunk contains a coherent unit of information rather than an arbitrary slice of text.",
+          "code": "from langchain_experimental.text_splitter import SemanticChunker\nfrom langchain_openai.embeddings import OpenAIEmbeddings\n\nembeddings = OpenAIEmbeddings(model=\"text-embedding-3-large\")\n\n# SemanticChunker splits on embedding similarity drops between sentences\ntext_splitter = SemanticChunker(\n    embeddings,\n    breakpoint_threshold_type=\"percentile\",  # split where similarity drops below 95th percentile\n    breakpoint_threshold_amount=95\n)\n\nwith open(\"policy_document.txt\") as f:\n    raw_text = f.read()\n\nchunks = text_splitter.create_documents([raw_text])\n\nprint(f\"Created {len(chunks)} semantic chunks\")\nfor i, chunk in enumerate(chunks[:3]):\n    print(f\"\\nChunk {i+1} ({len(chunk.page_content)} chars):\")\n    print(chunk.page_content[:200])",
+          "language": "python"
+        },
+        {
+          "name": "Use Hybrid Search (Dense + Sparse Retrieval)",
+          "description": "Combine dense vector search (semantic similarity) with sparse BM25 keyword search using Reciprocal Rank Fusion (RRF). Dense search handles paraphrasing and semantic similarity while sparse search handles exact keyword matches, product names, and rare terms. This hybrid approach consistently outperforms either method alone, especially for domain-specific queries with technical vocabulary.",
+          "code": "from langchain_community.retrievers import BM25Retriever\nfrom langchain.retrievers import EnsembleRetriever\nfrom langchain_community.vectorstores import Chroma\nfrom langchain_openai import OpenAIEmbeddings\n\n# Assume `documents` is your list of chunked Document objects\nembeddings = OpenAIEmbeddings(model=\"text-embedding-3-large\")\n\n# Dense retriever (semantic)\nvectorstore = Chroma.from_documents(documents, embeddings)\ndense_retriever = vectorstore.as_retriever(search_kwargs={\"k\": 10})\n\n# Sparse retriever (keyword)\nbm25_retriever = BM25Retriever.from_documents(documents)\nbm25_retriever.k = 10\n\n# Hybrid retriever using Reciprocal Rank Fusion\n# weights: [bm25_weight, dense_weight] — tune based on your domain\nhybrid_retriever = EnsembleRetriever(\n    retrievers=[bm25_retriever, dense_retriever],\n    weights=[0.4, 0.6]  # favor semantic for most use cases\n)\n\nquery = \"How do I cancel my subscription?\"\nresults = hybrid_retriever.invoke(query)\nprint(f\"Retrieved {len(results)} documents\")\nfor doc in results[:3]:\n    print(f\"\\n--- Chunk ---\\n{doc.page_content[:300]}\")",
+          "language": "python"
+        },
+        {
+          "name": "Add a Cross-Encoder Re-Ranker After Initial Retrieval",
+          "description": "Use a two-stage retrieval pipeline: first retrieve a large candidate set (top-20 or top-50) using fast approximate nearest neighbor search, then re-rank using a cross-encoder model that jointly encodes the query and each document for more accurate relevance scoring. Cross-encoders are slower but significantly more accurate than bi-encoders for ranking. Use the top-K re-ranked results as the final context.",
+          "code": "from sentence_transformers import CrossEncoder\nfrom langchain_community.vectorstores import Chroma\nfrom langchain_openai import OpenAIEmbeddings\n\nembeddings = OpenAIEmbeddings(model=\"text-embedding-3-large\")\nvectorstore = Chroma.from_documents(documents, embeddings)\n\n# Load a cross-encoder re-ranker\n# ms-marco models are trained specifically for passage re-ranking\nreranker = CrossEncoder(\"cross-encoder/ms-marco-MiniLM-L-6-v2\")\n\ndef retrieve_and_rerank(query: str, initial_k: int = 20, final_k: int = 5) -> list:\n    # Stage 1: Fast approximate retrieval of large candidate set\n    candidates = vectorstore.similarity_search(query, k=initial_k)\n    \n    # Stage 2: Cross-encoder re-ranking\n    pairs = [[query, doc.page_content] for doc in candidates]\n    scores = reranker.predict(pairs)\n    \n    # Sort by re-ranker score descending\n    ranked = sorted(\n        zip(scores, candidates),\n        key=lambda x: x[0],\n        reverse=True\n    )\n    \n    top_docs = [doc for score, doc in ranked[:final_k]]\n    top_scores = [score for score, doc in ranked[:final_k]]\n    \n    print(f\"Top {final_k} re-ranked scores: {[f'{s:.3f}' for s in top_scores]}\")\n    return top_docs\n\nresults = retrieve_and_rerank(\"pediatric ibuprofen dosage\", initial_k=20, final_k=5)\nfor doc in results:\n    print(f\"\\n{doc.page_content[:300]}\")",
+          "language": "python"
+        },
+        {
+          "name": "Implement Query Transformation and HyDE",
+          "description": "Improve retrieval by transforming the user query before embedding it. Two powerful techniques are: (1) Query Expansion — generate multiple rephrasings of the query and retrieve for each, then merge results; and (2) HyDE (Hypothetical Document Embeddings) — ask the LLM to generate a hypothetical answer document, embed that document, and use it as the retrieval query. HyDE is especially effective when user queries are short and the knowledge base contains long-form documents.",
+          "code": "from langchain_openai import ChatOpenAI, OpenAIEmbeddings\nfrom langchain.prompts import ChatPromptTemplate\nfrom langchain_community.vectorstores import Chroma\n\nllm = ChatOpenAI(model=\"gpt-4o-mini\", temperature=0)\nembeddings = OpenAIEmbeddings(model=\"text-embedding-3-large\")\nvectorstore = Chroma.from_documents(documents, embeddings)\n\n# --- Technique 1: Query Expansion ---\nexpansion_prompt = ChatPromptTemplate.from_template(\"\"\"\nGenerate 3 different rephrasings of the following question to improve document retrieval.\nReturn only the questions, one per line, no numbering.\n\nOriginal question: {question}\n\"\"\")\n\ndef expand_and_retrieve(query: str, k: int = 5) -> list:\n    response = llm.invoke(expansion_prompt.format_messages(question=query))\n    variants = [query] + response.content.strip().split(\"\\n\")\n    \n    all_docs = {}\n    for variant in variants:\n        results = vectorstore.similarity_search(variant, k=k)\n        for doc in results:\n            # Deduplicate by content hash\n            key = hash(doc.page_content)\n            if key not in all_docs:\n                all_docs[key] = doc\n    \n    return list(all_docs.values())\n\n# --- Technique 2: HyDE ---\nhyde_prompt = ChatPromptTemplate.from_template(\"\"\"\nWrite a short, factual passage that would directly answer the following question.\nWrite it as if it were from an authoritative document. 2-3 sentences only.\n\nQuestion: {question}\n\"\"\")\n\ndef hyde_retrieve(query: str, k: int = 5) -> list:\n    # Generate hypothetical document\n    hypo_doc = llm.invoke(hyde_prompt.format_messages(question=query))\n    hypo_text = hypo_doc.content\n    \n    print(f\"Hypothetical document: {hypo_text[:200]}\")\n    \n    # Embed the hypothetical document and use it as the query vector\n    hypo_embedding = embeddings.embed_query(hypo_text)\n    results = vectorstore.similarity_search_by_vector(hypo_embedding, k=k)\n    return results\n\n# Example usage\nquery = \"What is the return policy for damaged items?\"\nprint(\"=== Query Expansion Results ===\")\nexpanded_results = expand_and_retrieve(query)\nprint(f\"Retrieved {len(expanded_results)} unique documents\")\n\nprint(\"\\n=== HyDE Results ===\")\nhyde_results = hyde_retrieve(query)\nprint(f\"Retrieved {len(hyde_results)} documents\")",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Always Enrich Chunks with Metadata",
+          "description": "Attach structured metadata to every chunk at index time: document title, section heading, creation date, version, source URL, and document type. Use metadata filtering to pre-filter the search space before vector similarity is computed. This dramatically reduces false positives from semantically similar but contextually irrelevant documents — for example, filtering by date range before retrieving policy documents ensures users always get current information."
+        },
+        {
+          "title": "Tune Chunk Size and Overlap for Your Domain",
+          "description": "There is no universal optimal chunk size. Short chunks (128-256 tokens) work well for FAQ-style content where each answer is self-contained. Long chunks (512-1024 tokens) work better for technical documentation where context spans multiple paragraphs. Always include a 10-20% overlap between consecutive chunks to prevent answers from being split across chunk boundaries. Run ablation experiments on your evaluation set to find the optimal configuration for your specific corpus."
+        },
+        {
+          "title": "Use Domain-Specific or Fine-Tuned Embedding Models",
+          "description": "General-purpose embedding models like text-embedding-3-large perform well on everyday language but can underperform on specialized domains like medicine, law, or finance where terminology is highly specific. Evaluate domain-specific models (e.g., BioBERT for medical, LegalBERT for legal) or fine-tune an embedding model on query-document pairs from your domain using contrastive learning. Even a small fine-tuning dataset of 1,000-5,000 labeled pairs can yield significant retrieval improvements."
+        },
+        {
+          "title": "Implement Retrieval Caching for Common Queries",
+          "description": "Cache retrieval results for semantically similar queries using a secondary vector store of past queries mapped to their retrieved chunks. When a new query arrives, check if a semantically similar query (cosine similarity > 0.95) has been answered before and return the cached chunks. This reduces latency, cuts embedding API costs, and ensures consistency for frequently asked questions. Invalidate cache entries when the underlying documents are updated."
+        },
+        {
+          "title": "Monitor Retrieval Quality Continuously in Production",
+          "description": "Treat retrieval quality as a production metric, not just an offline benchmark. Log query embeddings, retrieved chunk IDs, similarity scores, and downstream faithfulness scores for every request. Set up dashboards and alerts for degradation in average context relevance, increases in low-similarity retrievals, and spikes in faithfulness failures. Use implicit feedback signals like user follow-up questions and thumbs-down ratings as weak supervision signals to identify retrieval failures in the wild."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Vex continuously monitors your RAG pipeline's retrieval quality in production — automatically detecting context relevance drops, faithfulness failures, and embedding drift before they impact your users."
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "agno",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Agno Agents",
+    "description": "Learn how to add runtime guardrails to Agno agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Agno guardrails",
+      "Agno monitoring",
+      "Agno hallucination detection",
+      "Vex Agno",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Agno's lightweight, model-agnostic architecture makes it easy to spin up multi-modal agents that can process images, audio, and structured data — but that flexibility also means failures can surface in unexpected ways across modalities and team coordination layers. Without runtime guardrails, fabricated memory recalls, malformed nested outputs, and contradictory sub-agent results can silently corrupt production workflows. Vex integrates directly with Agno's agent.run() lifecycle to catch these failures before they reach your users.",
+    "whyGuardrails": {
+      "heading": "Why Agno Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Multi-Modal Input Ambiguity",
+          "explanation": "Agno agents built with Image() or Audio() message types can misinterpret visual or audio content, producing confident but factually wrong outputs. Guardrails let you validate that the agent's interpretation aligns with expected semantic constraints before the response is returned."
+        },
+        {
+          "title": "Session Memory Hallucination",
+          "explanation": "Agno's AgentMemory and session storage (SqliteStorage, PostgresStorage) can be queried by the agent to recall past interactions. Without verification, agents may fabricate plausible-sounding but entirely invented memories, especially when session data is sparse or ambiguous."
+        },
+        {
+          "title": "Structured Output Schema Failures",
+          "explanation": "Agno supports Pydantic response_model definitions for structured outputs. Complex nested schemas with optional fields, discriminated unions, or recursive models frequently fail silent validation, returning partially populated objects that downstream code treats as complete."
+        },
+        {
+          "title": "Team Agent Coordination Drift",
+          "explanation": "Agno's Team class orchestrates multiple specialized agents whose sub-results are synthesized into a final response. Without guardrails, contradictory conclusions from sub-agents can be merged into incoherent final outputs with no error surfaced to the caller."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Agno Failure Modes",
+      "failures": [
+        {
+          "name": "Multi-Modal Misinterpretation",
+          "description": "When an Agno agent receives an Image() or Audio() input, the underlying model may hallucinate content not present in the media, such as reading text that doesn't exist in an image or transcribing words not spoken in audio.",
+          "severity": "critical",
+          "example": "Agent receives an invoice image via Image(url='https://...') and returns extracted line items that include fabricated product names and prices not visible in the actual document."
+        },
+        {
+          "name": "Fabricated Session Memory Recall",
+          "description": "Agno agents using SqliteStorage or PostgresStorage for session persistence may generate responses that reference past conversations that never occurred, especially when the agent is prompted to summarize prior interactions.",
+          "severity": "critical",
+          "example": "An agent with storage=SqliteStorage(table_name='sessions', db_file='agent.db') claims the user previously approved a transaction that has no record in the session database."
+        },
+        {
+          "name": "Nested Pydantic Schema Validation Failure",
+          "description": "Agno's response_model parameter accepts Pydantic BaseModel classes, but deeply nested schemas with List[BaseModel] fields or Optional unions often result in partially populated objects that pass isinstance checks but contain None where values are expected.",
+          "severity": "high",
+          "example": "A response_model with a nested List[LineItem] field returns an object where line_items is an empty list instead of raising a validation error, causing silent data loss in downstream processing."
+        },
+        {
+          "name": "Team Agent Contradictory Synthesis",
+          "description": "In an Agno Team with multiple specialized agents, one sub-agent may return a recommendation that directly contradicts another's output. The team leader agent synthesizes these into a final response that is internally inconsistent.",
+          "severity": "high",
+          "example": "A financial analysis Team has a risk_agent recommending 'sell' and a sentiment_agent recommending 'buy' for the same asset. The team leader merges both into a response that advises both actions simultaneously."
+        },
+        {
+          "name": "Tool Call Result Injection",
+          "description": "Agno agents with registered tools (via @agent.tool or the tools=[] parameter) may misuse tool outputs by treating error responses or empty results as valid data, propagating tool failures into the final agent response.",
+          "severity": "medium",
+          "example": "An agent with a web search tool receives a 429 rate-limit error response and proceeds to fabricate search results rather than acknowledging the tool failure, returning invented citations."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Agno",
+      "steps": [
+        {
+          "title": "Install Dependencies",
+          "description": "Install both Agno and the Vex SDK into your Python environment. Vex requires Python 3.9+ and works with all Agno agent types including single agents, multi-modal agents, and Team configurations.",
+          "code": "pip install agno vex-sdk\n\n# Verify installation\npython -c \"import agno; import vex; print('agno:', agno.__version__, '| vex: OK')\"",
+          "language": "python"
+        },
+        {
+          "title": "Configure Vex and Wrap a Basic Agno Agent",
+          "description": "Initialize the Vex client with your API key and wrap your Agno agent's run() call using the vex.verify() decorator. This intercepts the agent response before it is returned to your application code.",
+          "code": "import vex\nfrom agno.agent import Agent\nfrom agno.models.openai import OpenAIChat\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define your Agno agent\nagent = Agent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    description=\"You are a financial analysis assistant.\",\n    markdown=True\n)\n\n# Wrap agent.run() with vex.verify()\n@vex_client.verify(\n    checks=[\"hallucination\", \"factual_consistency\", \"output_schema\"],\n    on_failure=\"raise\"\n)\ndef run_agent(user_message: str):\n    return agent.run(user_message)\n\n# Use exactly like agent.run()\nresponse = run_agent(\"Summarize the Q3 earnings report.\")\nprint(response.content)",
+          "language": "python"
+        },
+        {
+          "title": "Validate Multi-Modal and Structured Output Agents",
+          "description": "For Agno agents using Image() inputs or Pydantic response_model schemas, configure Vex checks specific to multi-modal fidelity and schema completeness. This catches misinterpretations and silent partial-population failures.",
+          "code": "import vex\nfrom agno.agent import Agent\nfrom agno.models.openai import OpenAIChat\nfrom agno.media import Image\nfrom pydantic import BaseModel\nfrom typing import List\n\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define a complex nested response schema\nclass LineItem(BaseModel):\n    description: str\n    quantity: int\n    unit_price: float\n    total: float\n\nclass InvoiceExtraction(BaseModel):\n    vendor_name: str\n    invoice_number: str\n    line_items: List[LineItem]\n    total_amount: float\n\n# Multi-modal agent with structured output\nagent = Agent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    response_model=InvoiceExtraction,\n    description=\"Extract structured invoice data from images.\"\n)\n\n@vex_client.verify(\n    checks=[\n        \"schema_completeness\",      # Ensures no required fields are None\n        \"multimodal_grounding\",     # Validates output is grounded in image content\n        \"numeric_consistency\"       # Checks line_items totals sum to total_amount\n    ],\n    response_model=InvoiceExtraction,\n    on_failure=\"raise\"\n)\ndef extract_invoice(image_url: str) -> InvoiceExtraction:\n    return agent.run(\n        \"Extract all invoice data from this image.\",\n        images=[Image(url=image_url)]\n    )\n\ntry:\n    invoice = extract_invoice(\"https://example.com/invoice.png\")\n    print(f\"Vendor: {invoice.vendor_name}, Total: {invoice.total_amount}\")\nexcept vex.VerificationError as e:\n    print(f\"Vex caught a failure: {e.check_name} - {e.message}\")",
+          "language": "python"
+        },
+        {
+          "title": "Guard Agno Team Agents Against Contradictory Synthesis",
+          "description": "For Agno Team configurations, apply Vex verification at both the sub-agent and team leader levels. Use the consistency check to detect when the synthesized team response contradicts individual sub-agent outputs.",
+          "code": "import vex\nfrom agno.agent import Agent\nfrom agno.team import Team\nfrom agno.models.openai import OpenAIChat\nfrom agno.models.anthropic import Claude\n\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define specialized sub-agents\nrisk_agent = Agent(\n    name=\"RiskAnalyst\",\n    model=OpenAIChat(id=\"gpt-4o\"),\n    description=\"Analyze investment risk and provide buy/sell/hold recommendations.\",\n    role=\"Assess downside risk for the given asset.\"\n)\n\nsentiment_agent = Agent(\n    name=\"SentimentAnalyst\",\n    model=Claude(id=\"claude-3-5-sonnet-20241022\"),\n    description=\"Analyze market sentiment from news and social signals.\",\n    role=\"Assess market sentiment and momentum.\"\n)\n\n# Create the Agno Team\nanalysis_team = Team(\n    name=\"InvestmentAnalysisTeam\",\n    agents=[risk_agent, sentiment_agent],\n    model=OpenAIChat(id=\"gpt-4o\"),\n    description=\"Synthesize risk and sentiment analysis into a unified recommendation.\",\n    mode=\"coordinate\"\n)\n\n@vex_client.verify(\n    checks=[\n        \"internal_consistency\",   # Detects contradictory buy/sell signals in final output\n        \"sub_agent_alignment\",    # Flags when synthesis ignores sub-agent conclusions\n        \"hallucination\"           # Catches fabricated market data in the synthesis\n    ],\n    on_failure=\"warn\",            # Log warnings instead of raising for team agents\n    metadata={\"team\": \"InvestmentAnalysisTeam\", \"mode\": \"coordinate\"}\n)\ndef run_investment_analysis(ticker: str, context: str) -> str:\n    return analysis_team.run(\n        f\"Provide a unified investment recommendation for {ticker}. Context: {context}\"\n    )\n\nresult = run_investment_analysis(\n    ticker=\"NVDA\",\n    context=\"Q4 earnings beat by 15%, but macro headwinds increasing.\"\n)\nprint(result.content)",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Apply Vex Verification at the Agent Boundary, Not Inside Tools",
+          "description": "Wrap agent.run() at the outermost call site rather than inside individual Agno tool functions. This ensures Vex evaluates the complete agent response including all tool call results that have been incorporated, giving it full context to detect fabricated tool outputs or inconsistent synthesis."
+        },
+        {
+          "title": "Use response_model with Vex schema_completeness for All Structured Outputs",
+          "description": "Always pair Agno's response_model=YourPydanticModel parameter with Vex's schema_completeness check. Agno will not raise an error when optional nested fields are silently omitted, so Vex must enforce that all semantically required fields are populated before the response reaches downstream code."
+        },
+        {
+          "title": "Tag Vex Verifications with Agno Agent Names for Observability",
+          "description": "Pass the Agno agent's name and model ID into Vex's metadata parameter so that failures are attributed correctly in the Vex dashboard. Use metadata={'agent_name': agent.name, 'model': agent.model.id, 'session_id': agent.session_id} to correlate Vex alerts with specific Agno session logs."
+        },
+        {
+          "title": "Set on_failure='warn' During Development, 'raise' in Production",
+          "description": "During development and prompt iteration, configure Vex with on_failure='warn' so verification failures are logged without interrupting your testing loop. Switch to on_failure='raise' in production so that vex.VerificationError exceptions are caught by your error handling middleware and the unverified response is never returned to end users."
+        },
+        {
+          "title": "Validate Session Memory Reads Separately from Agent Responses",
+          "description": "When using Agno's SqliteStorage or PostgresStorage for session persistence, add a dedicated Vex memory_consistency check that compares claims the agent makes about past interactions against the actual stored session records. This requires passing the session storage contents as ground_truth context to vex.verify() so it can detect fabricated recall."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Agno Agents",
+      "description": "Add Vex to your Agno project today and get runtime guardrails for multi-modal inputs, structured outputs, session memory, and team coordination in under 10 minutes."
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Claude Tool Use Agents",
+    "description": "Learn how to add runtime guardrails to Claude Tool Use agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Claude Tool Use guardrails",
+      "Claude Tool Use monitoring",
+      "Claude Tool Use hallucination detection",
+      "Vex Claude Tool Use",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Claude's native tool use and agentic capabilities enable powerful multi-step workflows, but each tool invocation introduces a potential failure point that can cascade through your entire agent pipeline. Without guardrails, a single malformed tool call or conflicting parallel result can corrupt downstream reasoning and produce harmful or incorrect actions. Vex wraps Claude's messages.create() responses to validate tool use chains, detect reasoning inconsistencies, and prevent unintended agentic behavior before it reaches your users or systems.",
+    "whyGuardrails": {
+      "heading": "Why Claude Tool Use Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Tool Chains Amplify Early Errors",
+          "explanation": "When Claude executes multi-step tool use sequences, an incorrect result from the first tool_use block gets passed as tool_result context to subsequent calls. By step three or four, the agent may be operating on entirely fabricated premises with no mechanism to self-correct without external validation."
+        },
+        {
+          "title": "Parallel Tool Calls Can Conflict",
+          "explanation": "Claude can invoke multiple tools simultaneously in a single response, returning several tool_use blocks with the same stop_reason. If two tools return contradictory data — such as conflicting database reads or API responses — Claude has no built-in arbitration logic, and the final synthesis may silently favor one result without flagging the discrepancy."
+        },
+        {
+          "title": "Extended Thinking Diverges from Output",
+          "explanation": "Claude's extended thinking feature exposes internal reasoning via thinking content blocks, but the final text response is generated independently. This means the visible reasoning can conclude one thing while the actual tool call arguments or final answer reflect something entirely different, creating an undetectable logic gap."
+        },
+        {
+          "title": "Computer Use Agents Act Irreversibly",
+          "explanation": "Claude's computer use capability can click, type, and navigate UI elements autonomously. Without pre-action validation, the agent may interact with unintended screen elements — submitting forms, deleting records, or triggering workflows — in ways that cannot be undone and may violate user intent or compliance requirements."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Claude Tool Use Failure Modes",
+      "failures": [
+        {
+          "name": "Cascading Tool Chain Corruption",
+          "description": "An early tool_use call returns an error or unexpected schema, and Claude incorporates the malformed tool_result into subsequent tool inputs without flagging the inconsistency, propagating bad data through the entire agentic loop.",
+          "severity": "critical",
+          "example": "Claude calls get_user_id() which returns null due to a lookup failure. It then passes null as the user_id argument to update_subscription() and charge_payment(), executing financial operations against a non-existent user record."
+        },
+        {
+          "name": "Parallel Tool Result Conflict",
+          "description": "Claude issues multiple tool_use blocks in one response turn. The returned tool_results contain contradictory information, and Claude synthesizes a response that blends both without acknowledging or resolving the conflict.",
+          "severity": "critical",
+          "example": "Claude simultaneously calls get_inventory_count() returning 0 and check_availability() returning true. It then confirms an order to the user despite zero inventory, causing fulfillment failures downstream."
+        },
+        {
+          "name": "Extended Thinking vs. Output Mismatch",
+          "description": "The thinking content block in a Claude response reasons through a problem and reaches a clear conclusion, but the subsequent tool_use input_schema arguments or final text block contradict that reasoning without explanation.",
+          "severity": "high",
+          "example": "The thinking block concludes 'the user wants to cancel only the add-on, not the base plan' but the tool_use block calls cancel_subscription() with cancel_base_plan: true, executing the broader cancellation."
+        },
+        {
+          "name": "Computer Use Unintended Action",
+          "description": "The computer use agent misidentifies a UI element due to visual ambiguity or coordinate drift and performs an action on the wrong target, such as clicking a destructive button instead of a confirmation button.",
+          "severity": "critical",
+          "example": "Instructed to click 'Save Draft', the agent's coordinate calculation targets 'Delete Post' due to a dynamic layout shift, permanently removing published content."
+        },
+        {
+          "name": "Tool Input Schema Hallucination",
+          "description": "Claude generates tool_use input arguments that do not conform to the defined input_schema, passing fields that don't exist, omitting required fields, or providing values of the wrong type, causing silent failures or exceptions in the tool executor.",
+          "severity": "high",
+          "example": "The tool schema requires amount as an integer in cents, but Claude passes amount: '29.99' as a string with a dollar sign, causing the payment processor to throw a type error that the agent loop interprets as a successful no-op."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Claude Tool Use",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install the Anthropic and Vex SDKs, then initialize the Vex client with your API key and configure it for Claude tool use monitoring.",
+          "code": "import anthropic\nimport vex_sdk as vex\n\n# Initialize clients\nclient = anthropic.Anthropic(api_key=\"your-anthropic-api-key\")\nvex_client = vex.Client(\n    api_key=\"your-vex-api-key\",\n    framework=\"claude-tool-use\",\n    environment=\"production\"\n)\n\n# Define your tools\ntools = [\n    {\n        \"name\": \"get_customer_data\",\n        \"description\": \"Retrieve customer account information by customer ID\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"customer_id\": {\"type\": \"string\", \"description\": \"The unique customer identifier\"},\n                \"include_billing\": {\"type\": \"boolean\", \"description\": \"Whether to include billing details\"}\n            },\n            \"required\": [\"customer_id\"]\n        }\n    },\n    {\n        \"name\": \"update_subscription\",\n        \"description\": \"Update a customer subscription plan\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"customer_id\": {\"type\": \"string\"},\n                \"plan_id\": {\"type\": \"string\"},\n                \"effective_date\": {\"type\": \"string\", \"format\": \"date\"}\n            },\n            \"required\": [\"customer_id\", \"plan_id\"]\n        }\n    }\n]",
+          "language": "python"
+        },
+        {
+          "title": "Wrap messages.create() with vex.verify()",
+          "description": "Intercept the raw Claude API response before processing tool_use blocks. Pass the full response to vex.verify() to validate tool inputs against schemas, detect chain corruption, and flag reasoning mismatches.",
+          "code": "import anthropic\nimport vex_sdk as vex\nfrom vex_sdk.exceptions import VexVerificationError\n\nclient = anthropic.Anthropic()\nvex_client = vex.Client(api_key=\"your-vex-api-key\", framework=\"claude-tool-use\")\n\ndef safe_claude_tool_call(messages: list, tools: list, system: str = None) -> anthropic.types.Message:\n    # Make the raw API call\n    response = client.messages.create(\n        model=\"claude-opus-4-5\",\n        max_tokens=4096,\n        system=system or \"You are a helpful assistant with access to customer management tools.\",\n        tools=tools,\n        messages=messages\n    )\n    \n    # Wrap with Vex verification before processing tool_use blocks\n    try:\n        verified_response = vex_client.verify(\n            response=response,\n            context={\n                \"tools_provided\": [t[\"name\"] for t in tools],\n                \"message_history_length\": len(messages),\n                \"check_schema_conformance\": True,\n                \"check_parallel_conflicts\": True,\n                \"check_thinking_consistency\": True\n            }\n        )\n        return verified_response\n    except VexVerificationError as e:\n        print(f\"Vex blocked unsafe tool use: {e.failure_mode} - {e.details}\")\n        raise\n\n# Usage\nmessages = [{\"role\": \"user\", \"content\": \"Upgrade customer C-12345 to the Pro plan\"}]\nresponse = safe_claude_tool_call(messages, tools)\n\nif response.stop_reason == \"tool_use\":\n    for block in response.content:\n        if block.type == \"tool_use\":\n            print(f\"Verified tool call: {block.name} with inputs: {block.input}\")",
+          "language": "python"
+        },
+        {
+          "title": "Implement Verified Agentic Loop in TypeScript",
+          "description": "Build a full agentic loop in TypeScript that wraps each Claude response with Vex verification, handles tool execution, and feeds results back while maintaining chain integrity validation across turns.",
+          "code": "import Anthropic from '@anthropic-ai/sdk';\nimport { VexClient, VexVerificationError } from 'vex-sdk';\n\nconst anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });\nconst vex = new VexClient({ apiKey: process.env.VEX_API_KEY, framework: 'claude-tool-use' });\n\nconst tools: Anthropic.Tool[] = [\n  {\n    name: 'get_customer_data',\n    description: 'Retrieve customer account information',\n    input_schema: {\n      type: 'object' as const,\n      properties: {\n        customer_id: { type: 'string' },\n        include_billing: { type: 'boolean' }\n      },\n      required: ['customer_id']\n    }\n  },\n  {\n    name: 'update_subscription',\n    description: 'Update a customer subscription plan',\n    input_schema: {\n      type: 'object' as const,\n      properties: {\n        customer_id: { type: 'string' },\n        plan_id: { type: 'string' },\n        effective_date: { type: 'string' }\n      },\n      required: ['customer_id', 'plan_id']\n    }\n  }\n];\n\nasync function executeToolCall(toolName: string, toolInput: Record<string, unknown>): Promise<string> {\n  // Your actual tool execution logic\n  if (toolName === 'get_customer_data') {\n    return JSON.stringify({ customer_id: toolInput.customer_id, plan: 'basic', status: 'active' });\n  }\n  if (toolName === 'update_subscription') {\n    return JSON.stringify({ success: true, new_plan: toolInput.plan_id });\n  }\n  throw new Error(`Unknown tool: ${toolName}`);\n}\n\nasync function runVerifiedAgentLoop(userMessage: string): Promise<string> {\n  const messages: Anthropic.MessageParam[] = [\n    { role: 'user', content: userMessage }\n  ];\n\n  while (true) {\n    const rawResponse = await anthropic.messages.create({\n      model: 'claude-opus-4-5',\n      max_tokens: 4096,\n      tools,\n      messages\n    });\n\n    // Verify each response before processing tool_use blocks\n    let verifiedResponse: Anthropic.Message;\n    try {\n      verifiedResponse = await vex.verify(rawResponse, {\n        toolsProvided: tools.map(t => t.name),\n        turnNumber: messages.length,\n        checkSchemaConformance: true,\n        checkParallelConflicts: true\n      });\n    } catch (err) {\n      if (err instanceof VexVerificationError) {\n        console.error(`Vex blocked: ${err.failureMode}`, err.details);\n        return `Agent stopped: safety verification failed at turn ${messages.length / 2}`;\n      }\n      throw err;\n    }\n\n    if (verifiedResponse.stop_reason === 'end_turn') {\n      const textBlock = verifiedResponse.content.find(b => b.type === 'text');\n      return textBlock && textBlock.type === 'text' ? textBlock.text : 'No response generated';\n    }\n\n    if (verifiedResponse.stop_reason === 'tool_use') {\n      const toolResults: Anthropic.ToolResultBlockParam[] = [];\n\n      for (const block of verifiedResponse.content) {\n        if (block.type === 'tool_use') {\n          const result = await executeToolCall(block.name, block.input as Record<string, unknown>);\n          toolResults.push({\n            type: 'tool_result',\n            tool_use_id: block.id,\n            content: result\n          });\n        }\n      }\n\n      messages.push({ role: 'assistant', content: verifiedResponse.content });\n      messages.push({ role: 'user', content: toolResults });\n    }\n  }\n}\n\n// Run the verified agent\nrunVerifiedAgentLoop('Upgrade customer C-12345 to the Pro plan starting next month')\n  .then(result => console.log('Agent result:', result))\n  .catch(console.error);",
+          "language": "typescript"
+        },
+        {
+          "title": "Configure Computer Use Guardrails",
+          "description": "For Claude computer use agents, add Vex pre-action validation to intercept bash and computer tool calls before execution, with configurable action allowlists and screenshot-based intent verification.",
+          "code": "import anthropic\nimport vex_sdk as vex\nfrom vex_sdk.exceptions import VexVerificationError, VexActionBlockedError\nimport base64\n\nclient = anthropic.Anthropic()\nvex_client = vex.Client(\n    api_key=\"your-vex-api-key\",\n    framework=\"claude-computer-use\"\n)\n\n# Computer use tools\ncomputer_tools = [\n    {\n        \"type\": \"computer_20241022\",\n        \"name\": \"computer\",\n        \"display_width_px\": 1920,\n        \"display_height_px\": 1080,\n        \"display_number\": 1\n    },\n    {\n        \"type\": \"bash_20241022\",\n        \"name\": \"bash\"\n    }\n]\n\ndef get_screenshot() -> str:\n    # Your screenshot capture implementation\n    # Returns base64-encoded PNG\n    return \"base64_screenshot_data_here\"\n\ndef run_verified_computer_agent(task: str) -> str:\n    messages = [{\"role\": \"user\", \"content\": task}]\n    \n    while True:\n        response = client.beta.messages.create(\n            model=\"claude-opus-4-5\",\n            max_tokens=4096,\n            tools=computer_tools,\n            messages=messages,\n            betas=[\"computer-use-2024-10-22\"]\n        )\n        \n        # Verify the full response first\n        try:\n            verified_response = vex_client.verify(\n                response=response,\n                context={\n                    \"task_description\": task,\n                    \"check_action_intent\": True,\n                    \"screenshot_context\": get_screenshot()\n                }\n            )\n        except VexVerificationError as e:\n            return f\"Verification failed: {e.failure_mode}\"\n        \n        if verified_response.stop_reason == \"end_turn\":\n            return next((b.text for b in verified_response.content if hasattr(b, 'text')), \"Done\")\n        \n        tool_results = []\n        for block in verified_response.content:\n            if block.type == \"tool_use\":\n                # Pre-action validation for each computer action\n                try:\n                    vex_client.verify_action(\n                        tool_name=block.name,\n                        tool_input=block.input,\n                        screenshot=get_screenshot(),\n                        allowed_actions=[\"left_click\", \"type\", \"scroll\"],\n                        blocked_selectors=[\"#delete-btn\", \".destructive\", \"[data-action='remove']\"],\n                        require_confirmation_for=[\"submit\", \"purchase\", \"delete\"]\n                    )\n                except VexActionBlockedError as e:\n                    tool_results.append({\n                        \"type\": \"tool_result\",\n                        \"tool_use_id\": block.id,\n                        \"content\": f\"Action blocked by safety policy: {e.reason}\",\n                        \"is_error\": True\n                    })\n                    continue\n                \n                # Execute the verified action\n                # result = execute_computer_action(block.name, block.input)\n                result = f\"Executed {block.name}: {block.input}\"\n                tool_results.append({\n                    \"type\": \"tool_result\",\n                    \"tool_use_id\": block.id,\n                    \"content\": result\n                })\n        \n        messages.append({\"role\": \"assistant\", \"content\": verified_response.content})\n        messages.append({\"role\": \"user\", \"content\": tool_results})\n\nresult = run_verified_computer_agent(\"Open the dashboard and export the monthly report as CSV\")\nprint(result)",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Verify Before Processing, Not After",
+          "description": "Always call vex.verify() on the raw messages.create() response before iterating over content blocks to extract tool_use items. Processing tool calls before verification means you may execute harmful or malformed actions before Vex has a chance to intercept them. The verification step must be the first operation after receiving any Claude response in your agentic loop."
+        },
+        {
+          "title": "Pass Full Tool Schema Context to Vex",
+          "description": "When calling vex.verify(), include the complete tools array you passed to Claude in the context object. Vex uses the input_schema definitions to validate that each tool_use block's input field conforms to the expected types, required fields, and constraints — catching schema hallucinations that would otherwise cause silent failures in your tool executor."
+        },
+        {
+          "title": "Track Turn Numbers for Chain Integrity",
+          "description": "Pass the current turn number and message history length to vex.verify() on every iteration of your agentic loop. Vex uses this to detect when tool_result context from earlier turns is being misapplied in later tool_use inputs, identifying the specific turn where chain corruption originated so you can implement targeted recovery logic rather than restarting the entire agent."
+        },
+        {
+          "title": "Enable Extended Thinking Consistency Checks",
+          "description": "When using Claude with extended_thinking enabled, set check_thinking_consistency: true in your Vex context. This instructs Vex to compare the conclusions in thinking content blocks against the actual tool_use input arguments and final text blocks, flagging cases where the visible reasoning and the executed action diverge — a failure mode that is otherwise completely invisible to standard output monitoring."
+        },
+        {
+          "title": "Configure Severity-Based Halt Policies for Computer Use",
+          "description": "For computer use agents, configure Vex with differentiated halt policies based on action severity: allow low-risk actions like scrolling and reading to proceed automatically, require Vex confidence scores above a threshold for form submissions, and enforce mandatory human-in-the-loop confirmation for any action matching destructive patterns such as delete, remove, cancel, or submit on financial interfaces. Use vex_client.verify_action() with the blocked_selectors and require_confirmation_for parameters to implement this tiered policy."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Claude Tool Use Agents",
+      "description": "Add vex.verify() to your Claude messages.create() calls today and get immediate visibility into tool chain failures, schema violations, and reasoning inconsistencies before they reach production."
+    }
+  }
+}

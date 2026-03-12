@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to OpenAI Assistants API Agents",
+    "description": "Learn how to add runtime guardrails to OpenAI Assistants API agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "OpenAI Assistants API guardrails",
+      "OpenAI Assistants API monitoring",
+      "OpenAI Assistants API hallucination detection",
+      "Vex OpenAI Assistants API",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "OpenAI's Assistants API provides a powerful managed runtime with built-in tools like code interpreter, file search, and function calling — but these capabilities introduce significant reliability and safety risks that the API itself does not guard against. Without external verification, assistants can silently exceed context limits, hallucinate function arguments, retrieve stale documents, or execute unintended code in the sandbox. Vex adds a verification layer that intercepts run completion events via webhooks to validate outputs before they reach your users.",
+    "whyGuardrails": {
+      "heading": "Why OpenAI Assistants API Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Opaque Run Lifecycle",
+          "explanation": "The Assistants API manages thread state, tool execution, and model calls internally. Developers have limited visibility into intermediate steps, making it easy for failures like context truncation or tool misuse to go undetected until they surface as bad outputs."
+        },
+        {
+          "title": "Stateful Thread Accumulation",
+          "explanation": "Threads persist messages across turns and can silently grow beyond the model's context window. When this happens, the API truncates older messages without warning, causing the assistant to lose critical context and produce inconsistent or incorrect responses."
+        },
+        {
+          "title": "Unvalidated Tool Outputs",
+          "explanation": "Function calling in the Assistants API relies on the model to generate valid JSON arguments matching your schema. The API does not enforce schema compliance at runtime, meaning hallucinated or out-of-range arguments can be passed directly to your backend functions."
+        },
+        {
+          "title": "Sandbox Code Execution Risk",
+          "explanation": "The code interpreter tool executes Python in a sandboxed environment, but the model decides what code to run based on user input. Without output validation, the assistant can produce and execute code that performs unintended data transformations, infinite loops, or resource-intensive operations."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common OpenAI Assistants API Failure Modes",
+      "failures": [
+        {
+          "name": "Code Interpreter Unsafe Execution",
+          "description": "The code interpreter executes model-generated Python code that may perform unintended operations such as excessive memory allocation, recursive loops, or data corruption within the sandbox session.",
+          "severity": "critical",
+          "example": "A user asks the assistant to 'analyze all rows' in an uploaded CSV. The model generates a loop that loads the entire file into memory repeatedly, causing the sandbox to exhaust resources and return a truncated or failed result silently."
+        },
+        {
+          "name": "File Search Retrieving Stale Documents",
+          "description": "The file search tool retrieves chunks from vector stores that may contain outdated information if files are not regularly re-indexed. The assistant presents this stale content as current without any staleness signal.",
+          "severity": "high",
+          "example": "An assistant backed by a product documentation vector store retrieves a pricing page that was superseded three months ago, quoting an old price tier to a customer because the vector store was not updated after the file was replaced."
+        },
+        {
+          "name": "Thread Context Silent Truncation",
+          "description": "As threads accumulate messages, the Assistants API silently truncates older messages to fit within the model's context window. The assistant loses earlier instructions or user-provided data without any error or warning in the run response.",
+          "severity": "high",
+          "example": "A multi-turn support assistant forgets a user's account ID provided in message 3 after 40 subsequent messages, because the thread exceeded the context limit and that message was truncated, causing the assistant to ask for the ID again or use a wrong one."
+        },
+        {
+          "name": "Function Call Argument Hallucination",
+          "description": "When the model generates arguments for a required_action function call, it may produce values that are syntactically valid JSON but semantically invalid — such as enum values not in the schema, negative quantities, or fabricated identifiers.",
+          "severity": "critical",
+          "example": "A booking assistant calls a reserve_seat function with a seat_class argument of 'premium-plus', a value not defined in the enum ['economy', 'business', 'first'], causing a downstream API error or silent fallback to an incorrect seat class."
+        },
+        {
+          "name": "Run Stuck in requires_action",
+          "description": "If a run enters the requires_action state and the application fails to submit tool outputs within the timeout window, the run expires. The assistant returns no response to the user and the thread is left in an inconsistent state.",
+          "severity": "medium",
+          "example": "A function call to an external inventory API times out after 30 seconds. The application does not handle the timeout and never calls client.beta.threads.runs.submit_tool_outputs(), causing the run to expire and the user to receive no response."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with OpenAI Assistants API",
+      "steps": [
+        {
+          "title": "Install Dependencies and Configure Vex",
+          "description": "Install the OpenAI and Vex SDKs, then initialize the Vex client with your API key and define a verification policy scoped to your assistant's capabilities.",
+          "code": "import openai\nfrom vex_sdk import VexClient, Policy, RuleSet\n\n# Initialize clients\nopenai_client = openai.OpenAI(api_key=\"sk-...\")\nvex = VexClient(api_key=\"vex-...\")\n\n# Define a policy for your assistant\npolicy = Policy(\n    name=\"assistants-api-policy\",\n    rules=RuleSet(\n        max_thread_tokens=80000,          # Warn before context truncation\n        require_schema_validation=True,    # Validate function call args\n        block_hallucinated_enums=True,     # Reject invalid enum values\n        file_search_staleness_days=30,     # Flag docs older than 30 days\n        code_interpreter_output_check=True # Validate code output safety\n    )\n)\n\nvex.policies.register(policy)",
+          "language": "python"
+        },
+        {
+          "title": "Register a Webhook for Run Completion Events",
+          "description": "Configure your application to receive OpenAI run status webhooks and route completed or requires_action runs through Vex verification before processing the assistant's response.",
+          "code": "from flask import Flask, request, jsonify\nfrom vex_sdk import VexClient, VerificationContext\nimport openai\nimport json\n\napp = Flask(__name__)\nopenai_client = openai.OpenAI(api_key=\"sk-...\")\nvex = VexClient(api_key=\"vex-...\")\n\n@app.route(\"/webhooks/openai-runs\", methods=[\"POST\"])\ndef handle_run_event():\n    event = request.json\n    run_id = event[\"data\"][\"id\"]\n    thread_id = event[\"data\"][\"thread_id\"]\n    status = event[\"data\"][\"status\"]\n\n    if status == \"completed\":\n        # Fetch the latest assistant message\n        messages = openai_client.beta.threads.messages.list(\n            thread_id=thread_id, order=\"desc\", limit=1\n        )\n        assistant_message = messages.data[0]\n\n        # Verify the completed run output with Vex\n        result = vex.verify(\n            context=VerificationContext(\n                policy_name=\"assistants-api-policy\",\n                run_id=run_id,\n                thread_id=thread_id,\n                output=assistant_message.content[0].text.value,\n                run_metadata=event[\"data\"]\n            )\n        )\n\n        if not result.passed:\n            # Flag the run and notify your system\n            vex.incidents.create(\n                run_id=run_id,\n                violations=result.violations,\n                severity=result.severity\n            )\n            return jsonify({\"status\": \"flagged\", \"violations\": result.violations}), 200\n\n    elif status == \"requires_action\":\n        # Route to function call validation (see step 3)\n        pass\n\n    return jsonify({\"status\": \"ok\"}), 200\n\nif __name__ == \"__main__\":\n    app.run(port=3000)",
+          "language": "python"
+        },
+        {
+          "title": "Validate Function Call Arguments Before Submission",
+          "description": "When a run enters requires_action state, use Vex to validate the model-generated function arguments against your registered JSON schema before submitting tool outputs back to the Assistants API.",
+          "code": "import { OpenAI } from 'openai';\nimport { VexClient, SchemaValidator } from 'vex-sdk';\n\nconst openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\nconst vex = new VexClient({ apiKey: process.env.VEX_API_KEY });\n\n// Your function schemas — same ones registered with the assistant\nconst functionSchemas: Record<string, object> = {\n  reserve_seat: {\n    type: 'object',\n    properties: {\n      flight_id: { type: 'string', pattern: '^FL-[0-9]{6}$' },\n      seat_class: { type: 'string', enum: ['economy', 'business', 'first'] },\n      passenger_count: { type: 'integer', minimum: 1, maximum: 9 }\n    },\n    required: ['flight_id', 'seat_class', 'passenger_count']\n  }\n};\n\nasync function handleRequiresAction(\n  threadId: string,\n  runId: string,\n  requiredAction: OpenAI.Beta.Runs.RequiredAction\n) {\n  const toolCalls = requiredAction.submit_tool_outputs.tool_calls;\n  const toolOutputs: OpenAI.Beta.Threads.Runs.RunSubmitToolOutputsParams.ToolOutput[] = [];\n\n  for (const toolCall of toolCalls) {\n    const fnName = toolCall.function.name;\n    const args = JSON.parse(toolCall.function.arguments);\n\n    // Validate args against schema using Vex before executing\n    const validation = await vex.schema.validate({\n      functionName: fnName,\n      arguments: args,\n      schema: functionSchemas[fnName],\n      policyName: 'assistants-api-policy'\n    });\n\n    if (!validation.valid) {\n      console.error(`Vex blocked hallucinated args for ${fnName}:`, validation.errors);\n      // Return an error tool output instead of executing with bad args\n      toolOutputs.push({\n        tool_call_id: toolCall.id,\n        output: JSON.stringify({ error: 'Invalid arguments detected', details: validation.errors })\n      });\n      continue;\n    }\n\n    // Safe to execute — call your actual function\n    const result = await dispatchFunction(fnName, args);\n    toolOutputs.push({ tool_call_id: toolCall.id, output: JSON.stringify(result) });\n  }\n\n  // Submit validated tool outputs back to the run\n  await openai.beta.threads.runs.submitToolOutputs(threadId, runId, { tool_outputs: toolOutputs });\n}\n\nasync function dispatchFunction(name: string, args: Record<string, unknown>) {\n  // Your function dispatch logic here\n  return { success: true };\n}",
+          "language": "typescript"
+        },
+        {
+          "title": "Monitor Thread Health and Set Up Alerting",
+          "description": "Use Vex's thread monitoring utilities to proactively check token usage on active threads and configure alerts for context approaching truncation thresholds, preventing silent context loss.",
+          "code": "import openai\nfrom vex_sdk import VexClient, ThreadMonitor, AlertConfig\nimport tiktoken\n\nopenai_client = openai.OpenAI(api_key=\"sk-...\")\nvex = VexClient(api_key=\"vex-...\")\n\ndef check_thread_health(thread_id: str, model: str = \"gpt-4o\") -> dict:\n    \"\"\"Check thread token usage and register with Vex monitoring.\"\"\"\n    # Fetch all messages in the thread\n    messages = openai_client.beta.threads.messages.list(\n        thread_id=thread_id, order=\"asc\", limit=100\n    )\n\n    # Count tokens using tiktoken\n    enc = tiktoken.encoding_for_model(model)\n    total_tokens = 0\n    for msg in messages.data:\n        for content_block in msg.content:\n            if content_block.type == \"text\":\n                total_tokens += len(enc.encode(content_block.text.value))\n\n    # Register thread health with Vex\n    monitor = vex.threads.monitor(\n        thread_id=thread_id,\n        current_tokens=total_tokens,\n        model=model,\n        alert_config=AlertConfig(\n            warn_at_percent=70,    # Alert at 70% of context window\n            critical_at_percent=90 # Critical alert at 90%\n        )\n    )\n\n    if monitor.status == \"critical\":\n        # Optionally summarize old messages to compress the thread\n        summary = openai_client.chat.completions.create(\n            model=model,\n            messages=[\n                {\"role\": \"system\", \"content\": \"Summarize this conversation history concisely.\"},\n                {\"role\": \"user\", \"content\": str([m.content for m in messages.data[:20]])}\n            ]\n        )\n        # Add summary as a new message and archive old ones via your own logic\n        print(f\"Thread {thread_id} critical: {total_tokens} tokens. Summary: {summary.choices[0].message.content}\")\n\n    return {\n        \"thread_id\": thread_id,\n        \"total_tokens\": total_tokens,\n        \"status\": monitor.status,\n        \"utilization_percent\": monitor.utilization_percent\n    }\n\n# Example: check health after every 10 messages\nhealth = check_thread_health(\"thread_abc123\", model=\"gpt-4o\")\nprint(health)",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Register Function Schemas with Vex at Assistant Creation Time",
+          "description": "When you create or update an OpenAI Assistant with function tools, simultaneously register the same JSON schemas with Vex using vex.schema.register(). This ensures Vex always has the authoritative schema to validate against when the model generates function call arguments during a run, preventing schema drift between your assistant definition and your validation layer."
+        },
+        {
+          "title": "Use Run Metadata to Correlate Vex Incidents with Threads",
+          "description": "Always pass the thread_id, run_id, and assistant_id into your VerificationContext when calling vex.verify(). This allows Vex's dashboard to group incidents by assistant and thread, making it easy to identify whether a failure mode is isolated to a specific thread's accumulated context or is a systemic issue with your assistant's instructions."
+        },
+        {
+          "title": "Set Staleness Policies Per Vector Store, Not Globally",
+          "description": "Different file search vector stores have different update cadences — a legal document store may need daily freshness checks while a product FAQ store may be updated weekly. Configure Vex staleness policies at the vector_store_id level using vex.policies.set_file_search_policy(vector_store_id=..., max_age_days=...) to avoid false positives from applying a single global threshold."
+        },
+        {
+          "title": "Implement Exponential Backoff on requires_action Timeouts",
+          "description": "The Assistants API cancels runs that do not receive tool output submissions within 10 minutes. Wrap your tool execution and vex.schema.validate() calls in a retry loop with exponential backoff, and always call openai.beta.threads.runs.cancel(thread_id, run_id) if your handler detects it cannot submit outputs in time, preventing threads from being left in a broken requires_action state."
+        },
+        {
+          "title": "Validate Code Interpreter Outputs, Not Just Inputs",
+          "description": "The code interpreter tool returns both text summaries and generated file outputs. Use Vex's output validation hook to inspect the code_interpreter content blocks in run steps — accessible via openai.beta.threads.runs.steps.list() — and flag runs where the interpreter produced error outputs, empty dataframes, or suspiciously large file sizes before surfacing results to users."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your OpenAI Assistants API Agents",
+      "description": "Connect Vex to your Assistants API runs in under 15 minutes and get immediate visibility into function call hallucinations, context truncation events, and file search quality issues across every thread."
+    }
+  }
+}

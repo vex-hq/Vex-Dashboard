@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Llama Stack Agents",
+    "description": "Learn how to add runtime guardrails to Llama Stack agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Llama Stack guardrails",
+      "Llama Stack monitoring",
+      "Llama Stack hallucination detection",
+      "Vex Llama Stack",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Llama Stack provides a powerful standardized interface for deploying Llama-powered agents with built-in safety shields, memory banks, and tool integrations — but production deployments expose complex failure surfaces that Meta's default tooling alone cannot fully address. Safety filters can suppress legitimate responses, agentic loops can stall without resolution, and tool schema mismatches can silently corrupt outputs. Vex adds a post-processing verification layer that catches these failures before they reach your users.",
+    "whyGuardrails": {
+      "heading": "Why Llama Stack Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Safety Shield False Positives",
+          "explanation": "Llama Stack's built-in shields like Llama Guard can aggressively filter benign content, returning violation events that block valid user requests. Without a secondary verification layer, these false positives silently degrade user experience and are nearly impossible to audit at scale."
+        },
+        {
+          "title": "Agentic Loop Non-Termination",
+          "explanation": "The AgentsTurnResponseStreamChunk stream can cycle through tool calls and inference steps without converging on a meaningful answer, exhausting turn limits. Vex detects when a turn sequence has exceeded expected depth without producing a CompletionMessage, enabling graceful fallback."
+        },
+        {
+          "title": "Tool Response Schema Drift",
+          "explanation": "When agents invoke custom or third-party tools via ToolDef registrations, the returned ToolResponseMessage payloads may not conform to the schema the model was prompted to expect. This causes silent hallucination of tool results rather than surfacing an error."
+        },
+        {
+          "title": "Memory Bank Retrieval Hallucination",
+          "explanation": "Llama Stack's vector memory banks can return semantically similar but contextually incorrect document chunks, which the model then cites as factual. Vex verifies that retrieved memory content is actually referenced in the final response and flags unsupported attributions."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Llama Stack Failure Modes",
+      "failures": [
+        {
+          "name": "Safety Shield False Positive Filtering",
+          "description": "Llama Guard or Prompt Guard shields classify benign user messages as policy violations, returning a ShieldCallEvent with violation=True and blocking the agent from responding. This is especially common with domain-specific jargon in medical, legal, or security contexts.",
+          "severity": "high",
+          "example": "A user asks 'How do I terminate a running process in Linux?' and the shield flags 'terminate' as a harmful intent keyword, returning violation_type='harmful_content' and preventing any agent response."
+        },
+        {
+          "name": "Agentic Turn Limit Exceeded Without Resolution",
+          "description": "The agent's max_infer_iters limit is reached while the model is still in a tool-calling loop, causing the stream to end without a CompletionMessage. The client receives only ToolCallDelta chunks with no final answer.",
+          "severity": "critical",
+          "example": "An agent tasked with multi-step web research exhausts 10 inference iterations cycling between brave_search tool calls, returning only intermediate InferenceStepEvent objects with no terminal CompletionMessage in the stream."
+        },
+        {
+          "name": "Tool Runtime Response Schema Mismatch",
+          "description": "A registered tool returns a response payload that does not match the JSON schema defined in its ToolDef, causing the model to hallucinate the tool's output rather than parsing it correctly.",
+          "severity": "critical",
+          "example": "A custom database lookup tool defined to return {\"rows\": [...]} instead returns {\"data\": [...]} due to an API version change. The model invents plausible row values rather than raising a parsing error."
+        },
+        {
+          "name": "Memory Bank Document Hallucination",
+          "description": "The vector memory bank retrieves chunks from semantically adjacent but factually unrelated documents. The agent cites these chunks as supporting evidence, producing confident but incorrect answers.",
+          "severity": "high",
+          "example": "A query about 'Python 3.11 performance improvements' retrieves a chunk about 'Python 2.7 deprecation timelines' due to embedding similarity. The agent then incorrectly states Python 2.7 received performance improvements in 3.11."
+        },
+        {
+          "name": "Streaming Chunk Deserialization Failure",
+          "description": "Malformed or unexpected AgentsTurnResponseStreamChunk payloads from the Llama Stack server cause silent deserialization errors in the client, resulting in truncated or empty responses without raising exceptions.",
+          "severity": "medium",
+          "example": "A network interruption mid-stream causes the final CompletionMessage chunk to be partially received. The client's async iterator exits cleanly but the collected response is missing the last 40% of the model's answer."
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Llama Stack",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Clients",
+          "description": "Install both the Llama Stack client and Vex SDK, then initialize both clients. The Vex client is configured with your project credentials and will be used to wrap agent turn responses for verification.",
+          "code": "# pip install llama-stack-client vex-sdk\n\nimport asyncio\nfrom llama_stack_client import LlamaStackClient\nfrom llama_stack_client.types.agents import AgentConfig\nfrom llama_stack_client.types import SamplingParams\nimport vex\n\n# Initialize Llama Stack client pointing at your Llama Stack server\nllama_client = LlamaStackClient(base_url=\"http://localhost:5000\")\n\n# Initialize Vex client with your project credentials\nvex_client = vex.Client(\n    api_key=\"your-vex-api-key\",\n    project=\"llama-stack-production\",\n    environment=\"production\"\n)\n\nprint(\"Llama Stack and Vex clients initialized successfully\")",
+          "language": "python"
+        },
+        {
+          "title": "Create a Llama Stack Agent with Safety Shields",
+          "description": "Define an AgentConfig with Llama Guard safety shields and memory bank integration. This is the standard Llama Stack agent setup that Vex will wrap for post-processing verification.",
+          "code": "# Create an agent with safety shields and memory bank enabled\nagent_config = AgentConfig(\n    model=\"Meta-Llama3.1-8B-Instruct\",\n    instructions=\"You are a helpful assistant. Always cite your sources.\",\n    sampling_params=SamplingParams(\n        strategy=\"greedy\",\n        temperature=0.0,\n        max_tokens=2048\n    ),\n    # Enable Llama Guard safety shield\n    input_shields=[\"llama_guard\"],\n    output_shields=[\"llama_guard\"],\n    # Enable memory bank for RAG\n    memory_config={\n        \"memory_bank_configs\": [\n            {\n                \"bank_id\": \"production_docs\",\n                \"type\": \"vector\"\n            }\n        ]\n    },\n    # Register tools\n    tools=[\n        {\n            \"type\": \"brave_search\",\n            \"engine\": \"brave\",\n            \"api_key\": \"your-brave-api-key\"\n        }\n    ],\n    tool_choice=\"auto\",\n    max_infer_iters=10\n)\n\n# Create the agent\nagent_response = llama_client.agents.create(agent_config=agent_config)\nagent_id = agent_response.agent_id\nprint(f\"Agent created with ID: {agent_id}\")\n\n# Create a session for this conversation\nsession_response = llama_client.agents.sessions.create(\n    agent_id=agent_id,\n    session_name=\"user-session-001\"\n)\nsession_id = session_response.session_id\nprint(f\"Session created with ID: {session_id}\")",
+          "language": "python"
+        },
+        {
+          "title": "Collect Agent Turn Stream and Apply vex.verify()",
+          "description": "Consume the AgentsTurnResponseStreamChunk async stream, collect all events, and pass the assembled turn response through vex.verify() for post-processing. Vex checks for shield false positives, incomplete turns, tool schema violations, and memory hallucinations.",
+          "code": "async def run_verified_agent_turn(agent_id: str, session_id: str, user_message: str):\n    \"\"\"\n    Execute a Llama Stack agent turn and verify the response with Vex.\n    \"\"\"\n    # Collect all stream chunks from the agent turn\n    stream_chunks = []\n    completion_message = None\n    shield_events = []\n    tool_responses = []\n    has_completion = False\n\n    # Stream the agent turn response\n    response_stream = llama_client.agents.turns.create(\n        agent_id=agent_id,\n        session_id=session_id,\n        messages=[\n            {\"role\": \"user\", \"content\": user_message}\n        ],\n        stream=True\n    )\n\n    async for chunk in response_stream:\n        stream_chunks.append(chunk)\n\n        # Track shield call events for false positive detection\n        if hasattr(chunk.event, 'payload'):\n            payload = chunk.event.payload\n            event_type = getattr(payload, 'event_type', None)\n\n            if event_type == 'shield_call':\n                shield_events.append({\n                    \"shield_type\": getattr(payload, 'shield_type', 'unknown'),\n                    \"violation\": getattr(payload, 'violation', False),\n                    \"violation_type\": getattr(payload, 'violation_type', None),\n                    \"user_message\": user_message\n                })\n\n            elif event_type == 'tool_execution':\n                tool_responses.append({\n                    \"tool_name\": getattr(payload, 'tool_name', 'unknown'),\n                    \"tool_response\": getattr(payload, 'tool_response', {})\n                })\n\n            elif event_type == 'turn_complete':\n                turn = getattr(payload, 'turn', None)\n                if turn and hasattr(turn, 'output_message'):\n                    completion_message = turn.output_message\n                    has_completion = True\n\n    # Assemble the turn context for Vex verification\n    turn_context = {\n        \"agent_id\": agent_id,\n        \"session_id\": session_id,\n        \"user_message\": user_message,\n        \"has_completion\": has_completion,\n        \"completion_message\": completion_message.content if completion_message else None,\n        \"total_chunks\": len(stream_chunks),\n        \"shield_events\": shield_events,\n        \"tool_responses\": tool_responses,\n        \"turn_depth\": len([c for c in stream_chunks if hasattr(c.event, 'payload')])\n    }\n\n    # Apply Vex post-processing verification\n    verification_result = await vex_client.verify(\n        response=turn_context,\n        checks=[\n            \"shield_false_positive\",\n            \"turn_completion\",\n            \"tool_schema_conformance\",\n            \"memory_attribution\"\n        ],\n        metadata={\n            \"framework\": \"llama-stack\",\n            \"model\": \"Meta-Llama3.1-8B-Instruct\",\n            \"shields_enabled\": [\"llama_guard\"]\n        }\n    )\n\n    return verification_result, turn_context\n\n\n# Run the verified agent turn\nasync def main():\n    result, context = await run_verified_agent_turn(\n        agent_id=agent_id,\n        session_id=session_id,\n        user_message=\"How do I terminate a running Python process safely?\"\n    )\n\n    print(f\"Vex verification status: {result.status}\")\n    print(f\"Flags raised: {result.flags}\")\n    print(f\"Agent response: {context['completion_message']}\")\n\nasyncio.run(main())",
+          "language": "python"
+        },
+        {
+          "title": "Handle Vex Verification Results and Implement Fallbacks",
+          "description": "Inspect the Vex verification result to handle specific failure modes. Route shield false positives to a bypass flow, trigger fallback responses for incomplete turns, and log tool schema violations for debugging.",
+          "code": "async def handle_verified_response(verification_result, turn_context: dict) -> str:\n    \"\"\"\n    Process Vex verification results and apply appropriate fallback strategies\n    for each Llama Stack failure mode.\n    \"\"\"\n    flags = verification_result.flags\n    final_response = turn_context.get(\"completion_message\")\n\n    # Handle Safety Shield False Positives\n    # Vex detects when llama_guard blocked a benign message\n    if \"shield_false_positive\" in flags:\n        fp_details = verification_result.flag_details.get(\"shield_false_positive\", {})\n        confidence = fp_details.get(\"false_positive_confidence\", 0.0)\n\n        if confidence > 0.85:\n            print(f\"[VEX] Shield false positive detected (confidence: {confidence:.2f})\")\n            print(f\"[VEX] Blocked message: '{turn_context['user_message']}'\")\n\n            # Log the false positive for shield tuning\n            await vex_client.log_event(\n                event_type=\"shield_false_positive\",\n                payload={\n                    \"user_message\": turn_context[\"user_message\"],\n                    \"shield_events\": turn_context[\"shield_events\"],\n                    \"confidence\": confidence\n                }\n            )\n\n            # Retry without shields for confirmed false positives\n            # In production, route to human review instead\n            return \"I understand your question. Let me help you with that. [Reviewed by safety team]\"\n\n    # Handle Incomplete Turn (max_infer_iters exceeded)\n    if \"turn_completion\" in flags:\n        print(f\"[VEX] Agent turn did not complete. Turn depth: {turn_context['turn_depth']}\")\n        print(f\"[VEX] Tool calls made: {len(turn_context['tool_responses'])}\")\n\n        await vex_client.log_event(\n            event_type=\"turn_incomplete\",\n            payload={\n                \"agent_id\": turn_context[\"agent_id\"],\n                \"session_id\": turn_context[\"session_id\"],\n                \"turn_depth\": turn_context[\"turn_depth\"],\n                \"tool_calls\": [t[\"tool_name\"] for t in turn_context[\"tool_responses\"]]\n            }\n        )\n\n        return (\"I wasn't able to complete my research within the allowed steps. \"\n                \"Could you break your question into smaller parts?\")\n\n    # Handle Tool Schema Conformance Violations\n    if \"tool_schema_conformance\" in flags:\n        schema_issues = verification_result.flag_details.get(\"tool_schema_conformance\", {})\n        violating_tools = schema_issues.get(\"violating_tools\", [])\n\n        print(f\"[VEX] Tool schema violations detected for: {violating_tools}\")\n\n        await vex_client.log_event(\n            event_type=\"tool_schema_violation\",\n            payload={\n                \"violating_tools\": violating_tools,\n                \"tool_responses\": turn_context[\"tool_responses\"]\n            }\n        )\n\n        # Flag response as potentially unreliable\n        if final_response:\n            final_response = (f\"{final_response}\\n\\n\"\n                              f\"⚠️ Note: Some tool results could not be fully verified.\")\n\n    # Handle Memory Attribution Hallucination\n    if \"memory_attribution\" in flags:\n        attribution_issues = verification_result.flag_details.get(\"memory_attribution\", {})\n        unsupported_claims = attribution_issues.get(\"unsupported_claims\", [])\n\n        print(f\"[VEX] Memory hallucination detected. Unsupported claims: {len(unsupported_claims)}\")\n\n        await vex_client.log_event(\n            event_type=\"memory_hallucination\",\n            payload={\n                \"unsupported_claims\": unsupported_claims,\n                \"session_id\": turn_context[\"session_id\"]\n            }\n        )\n\n        return (\"I found some relevant information but couldn't fully verify all details. \"\n                \"Please consult the primary source documents directly.\")\n\n    # All checks passed — return the verified response\n    if final_response:\n        print(\"[VEX] Response verified successfully. No issues detected.\")\n        return final_response\n    else:\n        return \"I'm sorry, I was unable to generate a response. Please try again.\"\n\n\n# Full end-to-end verified pipeline\nasync def verified_llama_pipeline(user_message: str) -> str:\n    verification_result, turn_context = await run_verified_agent_turn(\n        agent_id=agent_id,\n        session_id=session_id,\n        user_message=user_message\n    )\n    return await handle_verified_response(verification_result, turn_context)\n\n\n# Example usage\nresponse = asyncio.run(verified_llama_pipeline(\n    \"How do I terminate a running Python process safely?\"\n))\nprint(f\"Final response: {response}\")",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Collect the Full Stream Before Verifying",
+          "description": "Always exhaust the entire AgentsTurnResponseStreamChunk async iterator before passing the turn to vex.verify(). Partial stream consumption means Vex cannot detect turn_complete absence or count total tool invocations accurately. Buffer all chunks in a list and check for the turn_complete event_type before triggering verification."
+        },
+        {
+          "title": "Distinguish Shield Violations from False Positives Using Vex Confidence Scores",
+          "description": "Not every ShieldCallEvent with violation=True is a false positive. Use Vex's false_positive_confidence score to gate your bypass logic — only route around shields when confidence exceeds 0.85. Below that threshold, treat the violation as legitimate and surface a safe refusal message to the user rather than bypassing safety controls."
+        },
+        {
+          "title": "Log Tool Schema Violations to Catch API Drift Early",
+          "description": "Tool response schemas drift silently when upstream APIs change. Configure Vex to emit tool_schema_violation events to your observability pipeline (Datadog, Grafana, etc.) so you can detect schema drift before it causes widespread hallucination. Include the tool_name and actual vs. expected schema diff in every logged event."
+        },
+        {
+          "title": "Set max_infer_iters Based on Tool Count, Not Arbitrarily",
+          "description": "The max_infer_iters parameter in AgentConfig should be set to at least 2x the number of registered tools plus 2 (for initial inference and final synthesis). An agent with 3 tools should have max_infer_iters of at least 8. Vex's turn_completion check will alert you when this limit is consistently hit, signaling that your limit is too low for the task complexity."
+        },
+        {
+          "title": "Validate Memory Bank Chunk Relevance Before Agent Injection",
+          "description": "Before the agent synthesizes a response using retrieved memory chunks, use Vex's memory_attribution check to score chunk relevance against the user query. If retrieved chunks score below the relevance threshold, either re-query with a refined embedding or inform the agent that no reliable context was found, preventing confident hallucination of document associations."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Llama Stack Agents",
+      "description": "Add vex.verify() to your Llama Stack agent turn pipeline today and get instant visibility into shield false positives, incomplete turns, tool schema drift, and memory hallucinations before they impact your production users."
+    }
+  }
+}

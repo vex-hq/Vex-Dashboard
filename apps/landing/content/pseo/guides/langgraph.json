@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to LangGraph Agents",
+    "description": "Learn how to add runtime guardrails to LangGraph agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "LangGraph guardrails",
+      "LangGraph monitoring",
+      "LangGraph hallucination detection",
+      "Vex LangGraph",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "LangGraph's cyclical, stateful graph architecture enables powerful multi-actor agent workflows, but the same features that make it flexible — persistent checkpoints, parallel branches, conditional edges, and human-in-the-loop breakpoints — introduce failure modes that are difficult to detect at runtime. Without guardrails, a single malformed state transition or infinite loop can silently corrupt agent memory, exhaust compute budgets, or bypass critical approval gates. Vex provides the reliability layer LangGraph developers need to catch these failures before they reach production.",
+    "whyGuardrails": {
+      "heading": "Why LangGraph Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Cyclic Graphs Can Loop Indefinitely",
+          "explanation": "LangGraph's core value proposition is supporting cycles, but a misconfigured conditional edge or a router node that never returns END can cause graph.invoke() to spin forever. Without an external monitor, there is no built-in circuit breaker to detect that a graph has been visiting the same node sequence for 50 iterations."
+        },
+        {
+          "title": "Parallel Branch Merges Are Unsafe by Default",
+          "explanation": "When using Send() to fan out to parallel branches, the reducer functions on your TypedDict state must handle every possible merge conflict. A missing or incorrect reducer silently overwrites data from one branch with another, producing corrupted state that propagates through all downstream nodes without raising an exception."
+        },
+        {
+          "title": "Checkpoint Schemas Break Silently After Code Changes",
+          "explanation": "LangGraph's MemorySaver and SqliteSaver serialize the full AgentState TypedDict to disk. When you add, remove, or rename a field in your state schema and then resume a persisted thread, deserialization can fail or silently populate fields with None, causing downstream tool calls to operate on incomplete data."
+        },
+        {
+          "title": "Human-in-the-Loop Breakpoints Can Be Bypassed",
+          "explanation": "interrupt_before and interrupt_after breakpoints depend on conditional edge logic executing correctly. A bug in a routing function or an unexpected state value can cause the graph to skip the intended breakpoint node entirely, allowing autonomous execution to proceed past a step that was designed to require human approval."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common LangGraph Failure Modes",
+      "failures": [
+        {
+          "name": "Infinite State Transition Loop",
+          "description": "A conditional edge router function returns a node name instead of END because the termination condition is never satisfied, causing the graph to cycle between nodes until the process is killed or an API rate limit is hit.",
+          "severity": "critical",
+          "example": "def should_continue(state: AgentState) -> str:\n    # Bug: checks wrong key, never returns 'end'\n    if state.get('done_flag'):  # key is actually 'is_done'\n        return 'end'\n    return 'agent'  # loops forever\n\ngraph.add_conditional_edges('agent', should_continue, {'end': END, 'agent': 'agent'})"
+        },
+        {
+          "name": "State Corruption on Parallel Branch Merge",
+          "description": "When using Send() for map-reduce patterns, if the state field accumulating results uses the default last-write-wins behavior instead of a proper list reducer, only the final branch result is retained and all other results are silently dropped.",
+          "severity": "critical",
+          "example": "# Broken: no reducer, last branch overwrites all others\nclass AgentState(TypedDict):\n    results: list[str]  # missing Annotated[list[str], operator.add]\n\n# Correct:\nfrom typing import Annotated\nimport operator\nclass AgentState(TypedDict):\n    results: Annotated[list[str], operator.add]"
+        },
+        {
+          "name": "Checkpoint Deserialization Error After Schema Change",
+          "description": "A persisted thread checkpoint stored with an older AgentState schema fails to load correctly after a field is renamed or its type changes, causing KeyError or ValidationError exceptions when the graph tries to resume execution on that thread.",
+          "severity": "high",
+          "example": "# Old schema stored in checkpoint:\n# {'messages': [...], 'user_query': 'hello'}\n\n# New schema after refactor:\nclass AgentState(TypedDict):\n    messages: list[BaseMessage]\n    query: str  # renamed from 'user_query' — checkpoint load returns None\n\nconfig = {'configurable': {'thread_id': 'existing-thread'}}\ngraph.invoke(None, config)  # state['query'] is None, crashes tool node"
+        },
+        {
+          "name": "Human-in-the-Loop Breakpoint Bypassed",
+          "description": "An interrupt_before breakpoint on an approval node is skipped because a conditional edge upstream routes around it when an unexpected state value is encountered, allowing a destructive tool call to execute without human review.",
+          "severity": "critical",
+          "example": "# Intended: always pause at 'human_approval' before 'execute_action'\ngraph.add_conditional_edges(\n    'plan',\n    route_after_plan,\n    {\n        'needs_approval': 'human_approval',\n        'safe': 'execute_action'\n    }\n)\n# Bug: route_after_plan returns 'safe' for unrecognized action types,\n# bypassing human_approval entirely for novel tool calls"
+        },
+        {
+          "name": "Unbounded Tool Call Recursion",
+          "description": "A ReAct-style agent node calls a tool that returns an error message, the LLM interprets the error as a reason to retry the same tool with the same arguments, and the graph cycles between the agent node and tools node indefinitely, accumulating messages and cost.",
+          "severity": "high",
+          "example": "# No retry limit on the tools -> agent -> tools cycle\nfrom langgraph.prebuilt import create_react_agent\n\nagent = create_react_agent(llm, tools)  # default has no max_iterations guard\n# Tool returns: 'Error: resource not found'\n# LLM retries same call 40+ times, burning tokens and hitting rate limits"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with LangGraph",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both packages and configure the Vex client with your API key. Vex will use this client to report graph execution telemetry, detect anomalies, and enforce policies you define in the Vex dashboard.",
+          "code": "# Install dependencies\n# pip install langgraph vex-sdk\n\nimport os\nfrom vex_sdk import Vex\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.memory import MemorySaver\nfrom langchain_openai import ChatOpenAI\nfrom typing import Annotated, TypedDict\nimport operator\n\n# Initialize Vex client\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Define your LangGraph state\nclass AgentState(TypedDict):\n    messages: Annotated[list, operator.add]\n    iteration_count: int\n    is_complete: bool",
+          "language": "python"
+        },
+        {
+          "title": "Wrap graph.invoke() with vex.verify()",
+          "description": "The simplest integration wraps your compiled graph's invoke call inside vex.verify(). Vex intercepts the execution, monitors state transitions in real time, enforces iteration limits, and raises a VexPolicyViolation if the graph exceeds thresholds you configure — such as max cycles, max tokens, or forbidden state values.",
+          "code": "from vex_sdk import Vex, VexPolicyViolation\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.memory import MemorySaver\n\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Build your graph normally\nbuilder = StateGraph(AgentState)\nbuilder.add_node('agent', call_model)\nbuilder.add_node('tools', call_tools)\nbuilder.set_entry_point('agent')\nbuilder.add_conditional_edges('agent', should_continue, {'tools': 'tools', 'end': END})\nbuilder.add_edge('tools', 'agent')\n\ncheckpointer = MemorySaver()\ngraph = builder.compile(checkpointer=checkpointer)\n\n# Wrap invocation with Vex guardrails\ntry:\n    result = vex.verify(\n        graph.invoke,\n        {'messages': [('user', 'Research and summarize AI safety papers')]},\n        config={'configurable': {'thread_id': 'thread-001'}},\n        policies={\n            'max_node_visits': 20,\n            'max_cycle_count': 5,\n            'blocked_state_keys': ['__error__'],\n            'require_human_approval_nodes': ['human_approval']\n        }\n    )\nexcept VexPolicyViolation as e:\n    print(f'Vex blocked execution: {e.policy} — {e.message}')\n    # e.partial_state contains the last valid AgentState before violation",
+          "language": "python"
+        },
+        {
+          "title": "Add Vex as a Native Graph Node",
+          "description": "For deeper integration, add Vex directly as a node in your StateGraph. This approach lets Vex inspect and validate the full AgentState at any point in the graph, emit structured telemetry per node, and conditionally halt execution by routing to END before a dangerous node is reached.",
+          "code": "from vex_sdk import Vex, VexNodeGuard\nfrom langgraph.graph import StateGraph, END\nfrom typing import Literal\n\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Create a Vex guard node that validates state before destructive actions\nvex_guard = VexNodeGuard(\n    client=vex,\n    checks=[\n        'state_schema_valid',       # validates all required keys present\n        'no_conflicting_branch_data', # detects parallel merge corruption\n        'iteration_budget',          # enforces max_iterations policy\n    ],\n    on_violation='route_to_end'     # or 'raise' to throw exception\n)\n\ndef vex_checkpoint_node(state: AgentState) -> AgentState:\n    \"\"\"Vex validation node — insert before any high-risk node.\"\"\"\n    return vex_guard.validate(state)\n\ndef vex_routing_after_check(state: AgentState) -> Literal['execute_action', 'end']:\n    \"\"\"Route to END if Vex flagged a violation, else continue.\"\"\"\n    if state.get('__vex_violation__'):\n        return 'end'\n    return 'execute_action'\n\nbuilder = StateGraph(AgentState)\nbuilder.add_node('plan', plan_node)\nbuilder.add_node('vex_guard', vex_checkpoint_node)  # Vex node\nbuilder.add_node('execute_action', execute_node)\nbuilder.add_node('human_approval', human_approval_node)\n\nbuilder.set_entry_point('plan')\nbuilder.add_edge('plan', 'vex_guard')\nbuilder.add_conditional_edges(\n    'vex_guard',\n    vex_routing_after_check,\n    {'execute_action': 'execute_action', 'end': END}\n)\n\ngraph = builder.compile(\n    checkpointer=MemorySaver(),\n    interrupt_before=['human_approval']  # Vex also monitors this breakpoint\n)",
+          "language": "python"
+        },
+        {
+          "title": "Monitor Checkpoints and Validate State Schema",
+          "description": "Use Vex's checkpoint validator to detect schema drift before resuming persisted threads. This is critical when deploying schema changes to production where existing thread checkpoints may have been serialized with an older AgentState definition.",
+          "code": "from vex_sdk import Vex, CheckpointValidator\nfrom langgraph.checkpoint.sqlite import SqliteSaver\nfrom langgraph.graph import StateGraph, END\nimport sqlite3\n\nvex = Vex(api_key=os.environ['VEX_API_KEY'])\n\n# Register your current schema with Vex for drift detection\nvex.register_state_schema(\n    graph_id='research-agent-v2',\n    schema=AgentState,\n    version='2.1.0'\n)\n\n# Validate a checkpoint before resuming a thread\nconn = sqlite3.connect('checkpoints.db')\ncheckpointer = SqliteSaver(conn)\n\nthread_config = {'configurable': {'thread_id': 'thread-legacy-001'}}\n\n# Vex inspects the serialized checkpoint against the registered schema\nvalidation = vex.validate_checkpoint(\n    checkpointer=checkpointer,\n    config=thread_config,\n    expected_schema=AgentState\n)\n\nif not validation.is_valid:\n    print(f'Schema drift detected: {validation.missing_keys} missing, {validation.type_mismatches} mismatched')\n    # Optionally run Vex's auto-migration to backfill missing fields with defaults\n    migrated_state = vex.migrate_checkpoint(\n        state=validation.raw_state,\n        target_schema=AgentState,\n        migration_map={'user_query': 'query'}  # rename old -> new field\n    )\n    graph.update_state(thread_config, migrated_state)\nelse:\n    # Safe to resume — Vex confirmed schema compatibility\n    result = graph.invoke(None, thread_config)",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Always Set max_node_visits in Vex Policies for Cyclic Graphs",
+          "description": "Every LangGraph workflow that contains a cycle — including standard ReAct agents built with create_react_agent — should have a Vex policy with max_node_visits set to a value appropriate for the task (typically 10–30). This acts as a circuit breaker that catches infinite loops caused by buggy conditional edge routers before they exhaust your API budget or block a thread indefinitely."
+        },
+        {
+          "title": "Use Annotated Reducers on Every List Field in Parallel Workflows",
+          "description": "Whenever your graph uses Send() for parallel fan-out, audit every list field in your AgentState TypedDict and ensure it is declared as Annotated[list[T], operator.add] or a custom reducer. Register the schema with vex.register_state_schema() so Vex can flag any field that lacks a reducer annotation before the graph is deployed, catching merge corruption at CI time rather than runtime."
+        },
+        {
+          "title": "Version Your AgentState Schema and Validate Before Resuming Threads",
+          "description": "Treat your AgentState TypedDict like a database schema: assign it a version string and call vex.validate_checkpoint() before invoking graph.invoke(None, config) on any persisted thread. This is especially important after deployments that add or rename fields, since LangGraph's checkpoint serializers do not perform automatic schema migration and will silently populate new fields with None."
+        },
+        {
+          "title": "Place Vex Guard Nodes Immediately Before High-Risk Tool Nodes",
+          "description": "Insert a vex_checkpoint_node directly before any graph node that calls destructive or irreversible tools — file writes, database mutations, external API calls with side effects, or financial transactions. This ensures Vex validates the full AgentState and confirms that human_approval breakpoints were actually visited before the action executes, rather than relying solely on interrupt_before which can be bypassed by conditional edge bugs."
+        },
+        {
+          "title": "Emit Structured Telemetry Per Node Using vex.trace()",
+          "description": "Wrap each node function body with vex.trace(node_name='agent', state=state) to emit per-node execution telemetry to the Vex dashboard. This gives you a complete audit trail of state values at every step of the graph, making it possible to replay and debug state corruption issues that only manifest after multiple node transitions — a class of bug that is nearly impossible to diagnose from logs alone."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your LangGraph Agents",
+      "description": "Add Vex to your LangGraph project today and get real-time cycle detection, state schema validation, and human-in-the-loop enforcement across all your agent workflows — so you can ship complex graph-based agents to production with confidence."
+    }
+  }
+}

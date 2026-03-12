@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "How to Add Guardrails to Pydantic AI Agents",
+    "description": "Learn how to add runtime guardrails to Pydantic AI agents with Vex. Detect hallucinations, prevent drift, and auto-correct bad outputs.",
+    "keywords": [
+      "Pydantic AI guardrails",
+      "Pydantic AI monitoring",
+      "Pydantic AI hallucination detection",
+      "Vex Pydantic AI",
+      "AI agent reliability"
+    ]
+  },
+  "content": {
+    "intro": "Pydantic AI's type-safe structured outputs and tool-calling system are powerful, but production agents still fail in subtle ways — validators reject valid edge-case outputs, tool retries silently swallow persistent errors, and streaming responses break mid-generation. Vex adds a reliability layer directly into Pydantic AI's result_validator pipeline, giving you observability, circuit-breaking, and anomaly detection without changing your agent's core logic.",
+    "whyGuardrails": {
+      "heading": "Why Pydantic AI Agents Need Guardrails",
+      "points": [
+        {
+          "title": "Structured Output Brittleness",
+          "explanation": "Pydantic AI enforces strict type contracts via result_type, but LLMs occasionally produce outputs that are semantically valid yet structurally unexpected — for example, returning an empty list where at least one item is required, or a numeric field at the boundary of an acceptable range. Without a guardrail layer, these edge cases either silently pass validation or cause unhandled retries."
+        },
+        {
+          "title": "Tool Retry Opacity",
+          "explanation": "Pydantic AI's built-in retry mechanism on tool calls (max_retries on @agent.tool) will re-invoke a failing tool up to N times, but it does not distinguish between a transient error and a persistent one. A broken downstream API or a logic bug in a tool can exhaust retries and surface only a generic ModelRetry exception, making root-cause analysis extremely difficult in production."
+        },
+        {
+          "title": "Dependency Injection Scope Gaps",
+          "explanation": "Pydantic AI's RunContext[Deps] dependency injection is scoped to the top-level agent run. When tools call nested agents or async sub-tasks, the deps object may not propagate correctly, leading to AttributeError or silent fallbacks to None. Guardrails can detect these missing-context patterns before they cause data corruption or security issues."
+        },
+        {
+          "title": "Streaming Validation Failures",
+          "explanation": "When using agent.run_stream() with structured result types, partial JSON is validated incrementally. A model that generates a valid prefix but an invalid suffix will raise a ValidationError mid-stream, leaving consumers in an inconsistent state. Guardrails can intercept these partial failures and trigger fallback strategies rather than crashing the stream consumer."
+        }
+      ]
+    },
+    "commonFailures": {
+      "heading": "Common Pydantic AI Failure Modes",
+      "failures": [
+        {
+          "name": "Result Validator Rejecting Valid Model Outputs",
+          "description": "Custom result_validator functions that are too strict will reject outputs that are technically correct but outside the expected distribution. This causes unnecessary retries and inflated token costs, and can loop indefinitely if the model consistently produces the same valid-but-rejected output.",
+          "severity": "critical",
+          "example": "@agent.result_validator\nasync def validate_result(ctx: RunContext[Deps], result: MyResult) -> MyResult:\n    # Overly strict: rejects any confidence score below 0.9 even when 0.7 is acceptable\n    if result.confidence < 0.9:\n        raise ModelRetry('Confidence too low, try again')\n    return result\n# Model consistently returns 0.85 -> infinite retry loop"
+        },
+        {
+          "name": "Tool Retry Masking Persistent Errors",
+          "description": "When a tool decorated with @agent.tool raises ModelRetry, Pydantic AI retries the entire tool call. If the underlying error is persistent (e.g., a broken API endpoint or a logic bug), all retries fail identically, exhausting the retry budget and surfacing only the last exception with no indication that all attempts failed for the same reason.",
+          "severity": "critical",
+          "example": "@agent.tool\nasync def fetch_user_data(ctx: RunContext[Deps], user_id: str) -> dict:\n    # This API is down — every retry will fail identically\n    response = await ctx.deps.http_client.get(f'/users/{user_id}')\n    if response.status_code != 200:\n        raise ModelRetry(f'Failed to fetch user {user_id}')\n    return response.json()\n# All 3 retries fail silently; agent reports generic failure"
+        },
+        {
+          "name": "Dependency Injection Context Not Available in Nested Calls",
+          "description": "When a Pydantic AI tool spawns a nested agent.run() call without explicitly forwarding the RunContext deps, the nested agent operates with no dependency context. This causes AttributeError on ctx.deps access or falls back to default None values, leading to silent data corruption or unauthenticated API calls.",
+          "severity": "high",
+          "example": "@agent.tool\nasync def summarize_with_subagent(ctx: RunContext[Deps], text: str) -> str:\n    # BUG: sub_agent runs without deps — ctx.deps will be None inside sub_agent tools\n    result = await sub_agent.run(text)\n    return result.data\n\n# Correct pattern (often forgotten):\n# result = await sub_agent.run(text, deps=ctx.deps)"
+        },
+        {
+          "name": "Streaming Structured Response Mid-Generation Validation Failure",
+          "description": "Using agent.run_stream() with a Pydantic result_type causes incremental JSON validation. If the model generates a structurally valid prefix but then produces an invalid field value (e.g., a string where an int is expected), a ValidationError is raised mid-stream. The async generator is abandoned, leaving the caller with a partial result and no clean error boundary.",
+          "severity": "high",
+          "example": "async with agent.run_stream('Analyze this dataset') as response:\n    # Model streams: {\"summary\": \"good\", \"record_count\": \"many\"}\n    # 'many' is not a valid int -> ValidationError raised mid-stream\n    async for chunk in response.stream_structured():\n        process(chunk)  # Never completes; caller state is undefined"
+        },
+        {
+          "name": "System Prompt Injection via Unvalidated Tool Outputs",
+          "description": "Pydantic AI tools can return strings that are incorporated into subsequent model prompts. If a tool fetches external content (e.g., a web page or database record) containing adversarial instructions, those instructions may be interpreted as system-level directives, causing the agent to deviate from its intended behavior.",
+          "severity": "critical",
+          "example": "@agent.tool\nasync def fetch_document(ctx: RunContext[Deps], doc_id: str) -> str:\n    # Document content is returned directly into the agent's context\n    doc = await ctx.deps.db.get_document(doc_id)\n    return doc.content  # If doc contains 'Ignore previous instructions...', agent is compromised"
+        }
+      ]
+    },
+    "integration": {
+      "heading": "Integrating Vex with Pydantic AI",
+      "steps": [
+        {
+          "title": "Install Dependencies and Initialize Vex",
+          "description": "Install both pydantic-ai and vex-sdk, then initialize the Vex client with your API key. The Vex client will be passed through Pydantic AI's dependency injection system so it is available in all validators and tools.",
+          "code": "# Install dependencies\n# pip install pydantic-ai vex-sdk\n\nimport vex\nfrom pydantic_ai import Agent\nfrom pydantic import BaseModel\nfrom dataclasses import dataclass\nimport httpx\n\n# Initialize Vex client\nvex_client = vex.Client(\n    api_key='your-vex-api-key',\n    agent_name='my-pydantic-ai-agent',\n    environment='production'\n)\n\n# Define your dependency container\n@dataclass\nclass AgentDeps:\n    http_client: httpx.AsyncClient\n    vex: vex.Client\n\n# Define your structured output type\nclass AnalysisResult(BaseModel):\n    summary: str\n    confidence: float\n    recommendations: list[str]\n    record_count: int",
+          "language": "python"
+        },
+        {
+          "title": "Create Agent and Attach Vex as a Result Validator",
+          "description": "Define your Pydantic AI agent with result_type for structured outputs, then register a result_validator that calls Vex to check the result against learned baselines, policy rules, and anomaly thresholds before returning it to the caller.",
+          "code": "from pydantic_ai import Agent, RunContext, ModelRetry\nfrom vex import ValidationOutcome\n\n# Create the agent with structured output type\nagent = Agent(\n    'openai:gpt-4o',\n    result_type=AnalysisResult,\n    deps_type=AgentDeps,\n    system_prompt=(\n        'You are a data analysis agent. Return structured analysis results '\n        'with a summary, confidence score between 0 and 1, '\n        'a list of recommendations, and the number of records analyzed.'\n    )\n)\n\n@agent.result_validator\nasync def vex_result_validator(\n    ctx: RunContext[AgentDeps],\n    result: AnalysisResult\n) -> AnalysisResult:\n    \"\"\"Validate agent output through Vex before returning to caller.\"\"\"\n    outcome: ValidationOutcome = await ctx.deps.vex.validate(\n        result=result.model_dump(),\n        context={\n            'agent': 'analysis-agent',\n            'model': 'gpt-4o',\n            'run_id': ctx.run_id,\n        }\n    )\n\n    if outcome.action == 'block':\n        # Vex determined this output violates a critical policy\n        raise ValueError(f'Output blocked by Vex policy: {outcome.reason}')\n\n    if outcome.action == 'retry':\n        # Vex detected an anomaly — ask the model to try again\n        raise ModelRetry(f'Output flagged for retry by Vex: {outcome.reason}')\n\n    # outcome.action == 'allow' — attach Vex metadata to result for downstream use\n    result.__vex_trace_id__ = outcome.trace_id\n    return result",
+          "language": "python"
+        },
+        {
+          "title": "Wrap Tool Calls with Vex Error Tracking",
+          "description": "Instrument your Pydantic AI tools with Vex spans so that persistent errors are distinguished from transient ones. Vex will detect when all retries fail for the same reason and trigger a circuit breaker, preventing further calls to a broken dependency.",
+          "code": "import asyncio\nfrom pydantic_ai import Agent, RunContext, ModelRetry\nfrom vex import SpanStatus\n\n@agent.tool\nasync def fetch_and_analyze_records(\n    ctx: RunContext[AgentDeps],\n    dataset_id: str,\n    limit: int = 100\n) -> dict:\n    \"\"\"Fetch records from API and return raw data for analysis.\"\"\"\n    async with ctx.deps.vex.span(\n        name='fetch_and_analyze_records',\n        attributes={'dataset_id': dataset_id, 'limit': limit}\n    ) as span:\n        try:\n            response = await ctx.deps.http_client.get(\n                f'/datasets/{dataset_id}/records',\n                params={'limit': limit},\n                timeout=10.0\n            )\n            response.raise_for_status()\n            data = response.json()\n\n            span.set_status(SpanStatus.OK)\n            span.set_attribute('record_count', len(data['records']))\n            return data\n\n        except httpx.HTTPStatusError as e:\n            span.set_status(SpanStatus.ERROR, str(e))\n            # Vex will detect if this error repeats across retries\n            # and automatically open a circuit breaker\n            await ctx.deps.vex.record_tool_error(\n                tool_name='fetch_and_analyze_records',\n                error=e,\n                is_retryable=e.response.status_code >= 500\n            )\n            if e.response.status_code >= 500:\n                raise ModelRetry(f'Server error fetching dataset {dataset_id}: {e}')\n            raise  # 4xx errors are not retryable — surface immediately\n\n        except httpx.TimeoutException as e:\n            span.set_status(SpanStatus.ERROR, 'timeout')\n            await ctx.deps.vex.record_tool_error(\n                tool_name='fetch_and_analyze_records',\n                error=e,\n                is_retryable=True\n            )\n            raise ModelRetry(f'Timeout fetching dataset {dataset_id}')",
+          "language": "python"
+        },
+        {
+          "title": "Run the Agent with Full Vex Observability",
+          "description": "Execute the agent within a Vex-traced run context. This captures the full agent lifecycle — including all tool calls, retries, and the final validated result — as a single observable trace in the Vex dashboard.",
+          "code": "import asyncio\nfrom pydantic_ai import Agent\n\nasync def run_analysis(dataset_id: str, query: str) -> AnalysisResult:\n    async with httpx.AsyncClient(base_url='https://api.example.com') as http_client:\n        deps = AgentDeps(\n            http_client=http_client,\n            vex=vex_client\n        )\n\n        # Wrap the entire agent run in a Vex trace\n        async with vex_client.trace(\n            name='analysis-agent-run',\n            attributes={\n                'dataset_id': dataset_id,\n                'query_length': len(query)\n            }\n        ) as trace:\n            try:\n                result = await agent.run(\n                    f'Analyze dataset {dataset_id}: {query}',\n                    deps=deps\n                )\n\n                await trace.set_outcome('success', {\n                    'confidence': result.data.confidence,\n                    'recommendation_count': len(result.data.recommendations),\n                    'total_tokens': result.usage().total_tokens\n                })\n\n                return result.data\n\n            except Exception as e:\n                await trace.set_outcome('failure', {'error': str(e)})\n                raise\n\n# Streaming variant with Vex mid-stream error handling\nasync def run_analysis_streaming(dataset_id: str, query: str):\n    async with httpx.AsyncClient(base_url='https://api.example.com') as http_client:\n        deps = AgentDeps(http_client=http_client, vex=vex_client)\n\n        async with vex_client.trace(name='analysis-agent-stream') as trace:\n            try:\n                async with agent.run_stream(\n                    f'Analyze dataset {dataset_id}: {query}',\n                    deps=deps\n                ) as response:\n                    async for chunk in response.stream_structured(debounce_by=0.1):\n                        yield chunk\n\n                    final = await response.get_data()\n                    await trace.set_outcome('success', {\n                        'confidence': final.confidence\n                    })\n            except Exception as e:\n                await trace.set_outcome('stream_failure', {'error': str(e)})\n                await vex_client.record_stream_error(\n                    agent_name='analysis-agent',\n                    error=e\n                )\n                raise\n\nif __name__ == '__main__':\n    result = asyncio.run(run_analysis('ds-001', 'Summarize Q4 performance'))\n    print(result.summary)\n    print(f'Confidence: {result.confidence}')\n    print(f'Recommendations: {result.recommendations}')",
+          "language": "python"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Distinguish ModelRetry from Hard Failures in Validators",
+          "description": "In your @agent.result_validator, only raise ModelRetry when there is a genuine chance the model can produce a better output on the next attempt — for example, when Vex detects a soft policy violation or a recoverable anomaly. Raise a plain ValueError or a custom exception for hard failures (policy blocks, security violations) so Pydantic AI does not waste tokens on futile retries. Configure Vex's retry_threshold to tune how aggressively it escalates from retry to block."
+        },
+        {
+          "title": "Always Forward deps to Nested Agent Calls",
+          "description": "When a Pydantic AI tool spawns a nested agent.run() call, always pass deps=ctx.deps explicitly. This ensures the Vex client and other dependencies are available in the nested agent's tools and validators. Consider creating a helper function like async def run_subagent(agent, prompt, ctx) that enforces this pattern and adds a Vex child span automatically, making nested call observability consistent across your codebase."
+        },
+        {
+          "title": "Use Vex Circuit Breakers for External Tool Dependencies",
+          "description": "Register your external API dependencies with Vex's circuit breaker registry at startup using vex_client.register_dependency('my-api', failure_threshold=5, recovery_timeout=30). In your @agent.tool functions, check the circuit state before making calls with await ctx.deps.vex.check_circuit('my-api'). This prevents Pydantic AI's tool retry budget from being wasted on a dependency that is known to be down, and surfaces the outage clearly in the Vex dashboard."
+        },
+        {
+          "title": "Validate Streaming Results at Completion, Not Just Mid-Stream",
+          "description": "When using agent.run_stream(), call await response.get_data() after consuming the stream and pass the final complete result through a Vex validation call. Mid-stream validation catches structural errors early, but semantic validation (e.g., checking that recommendations are actionable, or that confidence scores are calibrated) should happen on the complete output. Use Vex's two-phase validation mode: vex_client.validate(result, phase='stream_complete') for this final check."
+        },
+        {
+          "title": "Tag Vex Traces with Pydantic AI Run Metadata",
+          "description": "Always include ctx.run_id, the model identifier, and the result_type class name in your Vex span attributes. This allows you to correlate Vex anomaly alerts with specific Pydantic AI runs in your logs. Use result.__class__.__name__ to capture the output schema version, which is critical for detecting when a model upgrade starts producing outputs that are valid against the current Pydantic schema but semantically different from the training distribution."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Start Securing Your Pydantic AI Agents",
+      "description": "Add Vex to your Pydantic AI agents in under 10 minutes and get immediate visibility into validator failures, tool retry patterns, and streaming anomalies — before they reach your users in production."
+    }
+  }
+}

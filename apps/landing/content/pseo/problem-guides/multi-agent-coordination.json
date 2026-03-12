@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "slug": "multi-agent-coordination",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure Guide",
+    "description": "Complete guide to multi-agent coordination failure guide. Learn detection methods, fixes, and best practices for production AI agents.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "AI agent reliability",
+      "agent monitoring"
+    ]
+  },
+  "content": {
+    "intro": "Multi-agent coordination failure occurs when two or more AI agents working on a shared task produce conflicting outputs, duplicate work, or enter deadlock states due to poor communication and synchronization. These failures are notoriously difficult to debug because the root cause often lies in the interaction between agents rather than in any single agent's logic. As multi-agent systems become more common in production, coordination failures represent one of the highest-impact reliability risks teams face.",
+    "whatIsIt": {
+      "heading": "What Is Multi-Agent Coordination Failure?",
+      "explanation": "Multi-agent coordination failure is a class of system-level bug that emerges when autonomous agents lack a reliable mechanism to share state, divide responsibilities, or resolve conflicts. Unlike single-agent failures, these bugs are non-deterministic — the same inputs can produce different outcomes depending on timing, network latency, or the order in which agents receive messages. This makes them extremely hard to reproduce in testing environments and easy to miss until they cause real damage in production.\n\nAt its core, coordination failure stems from agents operating on stale, incomplete, or contradictory views of shared state. When Agent A believes a task is in progress while Agent B believes it is unassigned, both may attempt to execute it simultaneously, leading to duplicated side effects such as double-sent emails, double-charged payments, or conflicting database writes. Conversely, if both agents believe the other is handling a task, it may be silently dropped — a ghost task that never completes.\n\nCoordination failures also manifest as cascading loops, where agents trigger each other in a cycle with no termination condition, or as priority inversions, where a low-priority agent blocks a high-priority one by holding a shared resource. These failure modes scale in severity with the number of agents and the complexity of the shared task graph, making architectural discipline and observability tooling essential from day one.",
+      "examples": [
+        {
+          "scenario": "Two research agents are assigned to gather data on the same topic. Without a task-locking mechanism, both agents independently call the same external API, scrape the same sources, and write duplicate entries into a shared knowledge base.",
+          "consequence": "The knowledge base contains hundreds of duplicate records, downstream summarization agents produce incoherent outputs, and API rate limits are hit twice as fast, causing throttling errors for all agents in the system."
+        },
+        {
+          "scenario": "An orchestrator agent delegates a file-processing task to a worker agent and immediately marks it complete in shared state. A second orchestrator instance, running in parallel, reads the same shared state and concludes the task was never started, then re-delegates it to another worker.",
+          "consequence": "The file is processed twice, producing duplicate records in the database and triggering duplicate downstream notifications to end users, resulting in customer complaints and data integrity issues."
+        },
+        {
+          "scenario": "Agent A is waiting for Agent B to finish a subtask before proceeding, while Agent B is simultaneously waiting for Agent A to release a shared memory lock. Neither agent has a timeout or deadlock detection mechanism.",
+          "consequence": "Both agents hang indefinitely, consuming compute resources and blocking all downstream agents that depend on their outputs. The entire pipeline stalls silently with no error surfaced to the monitoring dashboard."
+        },
+        {
+          "scenario": "A planning agent decomposes a complex task into subtasks and assigns them to specialist agents with no dependency graph. A code-writing agent and a code-review agent both start simultaneously, but the review agent finishes first and reports no issues on an empty artifact.",
+          "consequence": "The review step is effectively skipped because it ran before the code existed. The final output is unreviewed code shipped to production, creating a security and quality risk that the multi-agent system was specifically designed to prevent."
+        }
+      ]
+    },
+    "howToDetect": {
+      "heading": "How to Detect It",
+      "methods": [
+        {
+          "name": "Distributed Trace Correlation",
+          "description": "Instrument every agent with a shared trace ID that propagates across all inter-agent messages and tool calls. By correlating traces in a tool like OpenTelemetry or Vex, you can visualize the full execution graph and immediately spot duplicate task executions (two spans with the same task ID), missing handoffs (a span with no child), or circular dependencies (a trace that references its own ancestor).",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Shared State Audit Logging",
+          "description": "Log every read and write to shared state (message queues, vector stores, databases) with a timestamp, agent ID, and operation type. By replaying the audit log, you can reconstruct the exact sequence of state transitions and identify the moment two agents diverged in their view of the world. Look for interleaved write patterns on the same key within a short time window as a strong signal of a race condition.",
+          "effectiveness": "high"
+        },
+        {
+          "name": "Idempotency Key Collision Monitoring",
+          "description": "Assign a unique idempotency key to every task before it enters the multi-agent system. Monitor for cases where the same key is processed more than once by querying your task store for duplicate completions. A collision rate above zero in production is a definitive indicator of a coordination failure, specifically a lack of atomic task claiming.",
+          "effectiveness": "medium"
+        },
+        {
+          "name": "Agent Heartbeat and Liveness Monitoring",
+          "description": "Require each agent to emit a heartbeat event every N seconds while processing a task. A monitoring process watches for agents that stop emitting heartbeats without emitting a completion or failure event. This detects deadlocks and livelock scenarios where agents are technically running but making no progress. Combine with a maximum task duration threshold to automatically surface stalled pipelines.",
+          "effectiveness": "medium"
+        }
+      ]
+    },
+    "howToFix": {
+      "heading": "How to Fix It",
+      "strategies": [
+        {
+          "name": "Atomic Task Claiming with Optimistic Locking",
+          "description": "Use an atomic compare-and-swap operation to claim tasks from a shared queue. An agent only begins work if it successfully transitions a task from 'pending' to 'claimed' in a single atomic operation. Any agent that loses the race receives a failure response and moves on. This eliminates the race condition at the root of most duplicate-execution failures.",
+          "language": "python",
+          "code": "import redis\nimport uuid\nimport json\nfrom datetime import datetime, timezone\n\nr = redis.Redis(host='localhost', port=6379, decode_responses=True)\n\ndef claim_task(task_id: str, agent_id: str, ttl_seconds: int = 300) -> bool:\n    \"\"\"\n    Atomically claim a task using a Redis lock.\n    Returns True if the claim succeeded, False if another agent already claimed it.\n    \"\"\"\n    lock_key = f\"task_lock:{task_id}\"\n    claim_data = json.dumps({\n        \"agent_id\": agent_id,\n        \"claimed_at\": datetime.now(timezone.utc).isoformat()\n    })\n    # SET key value NX EX — only set if key does not exist, with expiry\n    acquired = r.set(lock_key, claim_data, nx=True, ex=ttl_seconds)\n    if acquired:\n        print(f\"[{agent_id}] Successfully claimed task {task_id}\")\n        return True\n    else:\n        existing = r.get(lock_key)\n        print(f\"[{agent_id}] Task {task_id} already claimed: {existing}\")\n        return False\n\ndef release_task(task_id: str, agent_id: str) -> bool:\n    \"\"\"\n    Release a task lock only if this agent owns it (prevents other agents from releasing).\n    \"\"\"\n    lock_key = f\"task_lock:{task_id}\"\n    existing_raw = r.get(lock_key)\n    if not existing_raw:\n        return False\n    existing = json.loads(existing_raw)\n    if existing.get(\"agent_id\") == agent_id:\n        r.delete(lock_key)\n        print(f\"[{agent_id}] Released lock for task {task_id}\")\n        return True\n    print(f\"[{agent_id}] Cannot release task {task_id} — owned by {existing.get('agent_id')}\")\n    return False\n\n# Example usage\nagent_a = str(uuid.uuid4())\nagent_b = str(uuid.uuid4())\ntask = \"task-001\"\n\nprint(claim_task(task, agent_a))  # True\nprint(claim_task(task, agent_b))  # False — agent_a holds the lock\nrelease_task(task, agent_a)       # Releases successfully\nprint(claim_task(task, agent_b))  # True — now agent_b can claim it\n"
+        },
+        {
+          "name": "Explicit Dependency Graph with Topological Execution",
+          "description": "Before dispatching subtasks, build an explicit directed acyclic graph (DAG) of task dependencies. An orchestrator executes tasks in topological order, only releasing a task to an agent once all its predecessors have completed and their outputs are available. This prevents agents from operating on missing or partial inputs and eliminates the class of failures caused by out-of-order execution.",
+          "language": "python",
+          "code": "from collections import defaultdict, deque\nfrom typing import Callable, Any\n\nclass TaskDAG:\n    def __init__(self):\n        self.tasks: dict[str, Callable] = {}\n        self.dependencies: dict[str, list[str]] = defaultdict(list)\n        self.results: dict[str, Any] = {}\n\n    def add_task(self, task_id: str, fn: Callable, depends_on: list[str] = None):\n        self.tasks[task_id] = fn\n        if depends_on:\n            self.dependencies[task_id] = depends_on\n\n    def _topological_sort(self) -> list[str]:\n        in_degree = {t: 0 for t in self.tasks}\n        for task, deps in self.dependencies.items():\n            in_degree[task] = len(deps)\n        queue = deque([t for t, d in in_degree.items() if d == 0])\n        order = []\n        while queue:\n            task = queue.popleft()\n            order.append(task)\n            for other_task, deps in self.dependencies.items():\n                if task in deps:\n                    in_degree[other_task] -= 1\n                    if in_degree[other_task] == 0:\n                        queue.append(other_task)\n        if len(order) != len(self.tasks):\n            raise ValueError(\"Cycle detected in task dependency graph — cannot execute.\")\n        return order\n\n    def execute(self) -> dict[str, Any]:\n        order = self._topological_sort()\n        print(f\"Execution order: {order}\")\n        for task_id in order:\n            dep_results = {dep: self.results[dep] for dep in self.dependencies.get(task_id, [])}\n            print(f\"Running task '{task_id}' with inputs from: {list(dep_results.keys()) or ['none']}\")\n            self.results[task_id] = self.tasks[task_id](dep_results)\n        return self.results\n\n# Example: code generation pipeline\ndag = TaskDAG()\ndag.add_task(\"gather_requirements\", lambda _: {\"requirements\": \"Build a REST API\"})\ndag.add_task(\"write_code\", lambda d: {\"code\": f\"# Code for: {d['gather_requirements']['requirements']}\"}, depends_on=[\"gather_requirements\"])\ndag.add_task(\"review_code\", lambda d: {\"approved\": True, \"notes\": f\"Reviewed: {d['write_code']['code']}\"}, depends_on=[\"write_code\"])\ndag.add_task(\"deploy\", lambda d: {\"status\": \"deployed\" if d['review_code']['approved'] else \"blocked\"}, depends_on=[\"review_code\"])\n\nresults = dag.execute()\nprint(results)\n"
+        },
+        {
+          "name": "Deadlock Prevention with Timeout and Circuit Breaker",
+          "description": "Wrap all inter-agent wait operations in a timeout. If an agent does not receive a response from another agent within the timeout window, it raises a coordination error rather than waiting indefinitely. Combine this with a circuit breaker that temporarily suspends coordination attempts after repeated failures, preventing cascading stalls from propagating through the entire agent network.",
+          "language": "python",
+          "code": "import asyncio\nimport time\nfrom enum import Enum\n\nclass CircuitState(Enum):\n    CLOSED = \"closed\"       # Normal operation\n    OPEN = \"open\"           # Failing — reject requests immediately\n    HALF_OPEN = \"half_open\" # Testing if the dependency has recovered\n\nclass AgentCircuitBreaker:\n    def __init__(self, failure_threshold: int = 3, recovery_timeout: float = 30.0):\n        self.failure_threshold = failure_threshold\n        self.recovery_timeout = recovery_timeout\n        self.failure_count = 0\n        self.last_failure_time: float | None = None\n        self.state = CircuitState.CLOSED\n\n    def _transition(self, new_state: CircuitState):\n        print(f\"Circuit breaker: {self.state.value} -> {new_state.value}\")\n        self.state = new_state\n\n    def record_success(self):\n        self.failure_count = 0\n        if self.state == CircuitState.HALF_OPEN:\n            self._transition(CircuitState.CLOSED)\n\n    def record_failure(self):\n        self.failure_count += 1\n        self.last_failure_time = time.monotonic()\n        if self.failure_count >= self.failure_threshold:\n            self._transition(CircuitState.OPEN)\n\n    def can_attempt(self) -> bool:\n        if self.state == CircuitState.CLOSED:\n            return True\n        if self.state == CircuitState.OPEN:\n            elapsed = time.monotonic() - (self.last_failure_time or 0)\n            if elapsed >= self.recovery_timeout:\n                self._transition(CircuitState.HALF_OPEN)\n                return True\n            return False\n        return True  # HALF_OPEN: allow one probe\n\nasync def call_agent_with_timeout(\n    agent_coroutine,\n    timeout: float,\n    circuit_breaker: AgentCircuitBreaker,\n    agent_name: str\n):\n    if not circuit_breaker.can_attempt():\n        raise RuntimeError(f\"Circuit breaker OPEN for agent '{agent_name}' — skipping call\")\n    try:\n        result = await asyncio.wait_for(agent_coroutine, timeout=timeout)\n        circuit_breaker.record_success()\n        return result\n    except asyncio.TimeoutError:\n        circuit_breaker.record_failure()\n        raise TimeoutError(f\"Agent '{agent_name}' did not respond within {timeout}s\")\n    except Exception as e:\n        circuit_breaker.record_failure()\n        raise\n\n# Simulate a slow agent\nasync def slow_agent_task():\n    await asyncio.sleep(10)  # Simulates a hung agent\n    return \"done\"\n\nasync def main():\n    cb = AgentCircuitBreaker(failure_threshold=2, recovery_timeout=5.0)\n    for attempt in range(4):\n        try:\n            print(f\"\\nAttempt {attempt + 1}\")\n            result = await call_agent_with_timeout(slow_agent_task(), timeout=1.0, circuit_breaker=cb, agent_name=\"worker-agent\")\n            print(f\"Result: {result}\")\n        except (TimeoutError, RuntimeError) as e:\n            print(f\"Caught: {e}\")\n\nasyncio.run(main())\n"
+        },
+        {
+          "name": "Centralized State Machine for Task Lifecycle",
+          "description": "Model every task as a finite state machine with explicit, valid transitions (e.g., pending -> claimed -> in_progress -> completed | failed). All agents must transition tasks through this state machine via a central coordinator rather than writing to shared state directly. Invalid transitions are rejected, making it impossible for an agent to accidentally move a task backward or skip a required step, and providing a complete audit trail of every state change.",
+          "language": "python",
+          "code": "from enum import Enum\nfrom datetime import datetime, timezone\nfrom typing import Optional\nimport uuid\n\nclass TaskState(Enum):\n    PENDING = \"pending\"\n    CLAIMED = \"claimed\"\n    IN_PROGRESS = \"in_progress\"\n    COMPLETED = \"completed\"\n    FAILED = \"failed\"\n\nVALID_TRANSITIONS = {\n    TaskState.PENDING:     [TaskState.CLAIMED],\n    TaskState.CLAIMED:     [TaskState.IN_PROGRESS, TaskState.PENDING],  # PENDING = unclaim\n    TaskState.IN_PROGRESS: [TaskState.COMPLETED, TaskState.FAILED],\n    TaskState.COMPLETED:   [],\n    TaskState.FAILED:      [TaskState.PENDING],  # Allow retry\n}\n\nclass Task:\n    def __init__(self, task_id: str, description: str):\n        self.task_id = task_id\n        self.description = description\n        self.state = TaskState.PENDING\n        self.owner_agent_id: Optional[str] = None\n        self.history: list[dict] = []\n        self._record_transition(None, TaskState.PENDING, \"system\")\n\n    def _record_transition(self, from_state, to_state, agent_id):\n        self.history.append({\n            \"from\": from_state.value if from_state else None,\n            \"to\": to_state.value,\n            \"agent_id\": agent_id,\n            \"timestamp\": datetime.now(timezone.utc).isoformat()\n        })\n\n    def transition(self, new_state: TaskState, agent_id: str) -> bool:\n        allowed = VALID_TRANSITIONS.get(self.state, [])\n        if new_state not in allowed:\n            print(f\"[REJECTED] Task {self.task_id}: invalid transition {self.state.value} -> {new_state.value} by {agent_id}\")\n            return False\n        # Enforce ownership: only the claiming agent can progress the task\n        if self.owner_agent_id and self.owner_agent_id != agent_id and new_state != TaskState.PENDING:\n            print(f\"[REJECTED] Task {self.task_id}: agent {agent_id} does not own this task (owner: {self.owner_agent_id})\")\n            return False\n        print(f\"[OK] Task {self.task_id}: {self.state.value} -> {new_state.value} by {agent_id}\")\n        self._record_transition(self.state, new_state, agent_id)\n        self.state = new_state\n        if new_state == TaskState.CLAIMED:\n            self.owner_agent_id = agent_id\n        elif new_state == TaskState.PENDING:\n            self.owner_agent_id = None\n        return True\n\n# Simulate two agents competing for the same task\ntask = Task(task_id=\"task-42\", description=\"Analyze quarterly report\")\nagent_1 = \"agent-alpha\"\nagent_2 = \"agent-beta\"\n\ntask.transition(TaskState.CLAIMED, agent_1)       # OK\ntask.transition(TaskState.CLAIMED, agent_2)       # REJECTED — already claimed\ntask.transition(TaskState.IN_PROGRESS, agent_2)  # REJECTED — wrong owner\ntask.transition(TaskState.IN_PROGRESS, agent_1)  # OK\ntask.transition(TaskState.COMPLETED, agent_1)    # OK\ntask.transition(TaskState.PENDING, agent_1)      # REJECTED — completed tasks cannot go back\n\nprint(\"\\nTask history:\")\nfor entry in task.history:\n    print(entry)\n"
+        }
+      ]
+    },
+    "bestPractices": {
+      "heading": "Best Practices",
+      "tips": [
+        {
+          "title": "Design for Idempotency First",
+          "description": "Every agent action that modifies external state — writing to a database, sending a message, calling an API — must be idempotent. This means executing the same action twice produces the same result as executing it once. Use idempotency keys on all outbound calls and upsert semantics on all writes. Idempotency is your last line of defense when coordination mechanisms fail and an action is accidentally retried."
+        },
+        {
+          "title": "Never Share Mutable State Directly Between Agents",
+          "description": "Agents should communicate through well-defined message-passing interfaces, not by reading and writing shared in-memory objects or global variables. Direct shared mutable state creates invisible coupling between agents and makes race conditions nearly impossible to prevent. Use a message broker, a task queue, or an event store as the single source of truth, and treat all agent-local state as ephemeral and non-authoritative."
+        },
+        {
+          "title": "Make the Dependency Graph Explicit and Visible",
+          "description": "Document and enforce the dependency relationships between agents as a first-class artifact of your system design. Never allow implicit dependencies to form through shared state or timing assumptions. An explicit DAG makes it possible to reason about execution order, detect cycles before runtime, and generate accurate observability dashboards that show the real flow of work through your agent network."
+        },
+        {
+          "title": "Instrument Every Agent Boundary with Structured Logs",
+          "description": "Every message sent between agents, every task state transition, and every tool call should emit a structured log event with a consistent schema including trace ID, agent ID, task ID, timestamp, and outcome. This instrumentation is the foundation of all debugging and monitoring. Without it, diagnosing a coordination failure in a system with five or more agents is essentially guesswork."
+        },
+        {
+          "title": "Test Coordination Logic with Chaos and Concurrency",
+          "description": "Unit tests that run agents sequentially will never surface coordination failures. Write integration tests that deliberately introduce concurrency — launch multiple agent instances simultaneously against a shared task queue and verify that each task is executed exactly once. Use chaos engineering techniques such as injecting artificial delays, killing agents mid-task, and partitioning the message broker to validate that your locking, timeout, and recovery mechanisms work correctly under adversarial conditions."
+        }
+      ]
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Vex automatically traces multi-agent execution graphs, detects duplicate task claims, deadlocks, and missing handoffs in real time, and surfaces the exact coordination failure with full context so your team can fix it in minutes instead of hours."
+    }
+  }
+}
