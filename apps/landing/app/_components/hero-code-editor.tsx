@@ -9,7 +9,6 @@ import {
 import {
   CheckCircle2,
   Play,
-  RefreshCw,
   RotateCcw,
   Shield,
   ShieldCheck,
