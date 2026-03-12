@@ -1,8 +1,8 @@
 import Image from 'next/image';
 
-import type { MDXComponents } from 'mdx/types';
-
 import { slugify } from '~/lib/blog';
+
+type MDXComponents = Record<string, React.ComponentType<Record<string, unknown>>>;
 
 function Heading2({ children }: { children?: React.ReactNode }) {
   const text = typeof children === 'string' ? children : String(children ?? '');
@@ -35,7 +35,8 @@ function Heading3({ children }: { children?: React.ReactNode }) {
 }
 
 function MdxImage(props: React.ComponentProps<'img'>) {
-  const { src, alt, width, height } = props;
+  const { alt, width, height } = props;
+  const src = typeof props.src === 'string' ? props.src : undefined;
   if (!src) return null;
 
   if (src.startsWith('http')) {

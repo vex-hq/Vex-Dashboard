@@ -43,8 +43,8 @@ function extractHeadings(content: string): TocHeading[] {
   let match: RegExpExecArray | null;
 
   while ((match = headingRegex.exec(content)) !== null) {
-    const level = match[1].length as 2 | 3;
-    const text = match[2].trim();
+    const level = match[1]!.length as 2 | 3;
+    const text = match[2]!.trim();
     headings.push({ id: slugify(text), text, level });
   }
 

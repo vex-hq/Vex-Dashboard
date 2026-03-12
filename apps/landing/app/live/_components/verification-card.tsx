@@ -28,7 +28,17 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
   const confidence = result.confidence ?? 0;
   const action = result.action;
 
-  const actionConfig = {
+  const actionConfig: Record<
+    string,
+    {
+      icon: typeof ShieldCheck;
+      label: string;
+      color: string;
+      bg: string;
+      border: string;
+      barColor: string;
+    }
+  > = {
     pass: {
       icon: ShieldCheck,
       label: 'PASSED',
@@ -55,7 +65,7 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
     },
   };
 
-  const config = actionConfig[action];
+  const config = actionConfig[action]!;
   const Icon = config.icon;
 
   const checks = Object.entries(result.checks);
@@ -135,7 +145,7 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
       )}
 
       {/* Correction */}
-      {result.corrected && result.original_output && (
+      {result.corrected && result.original_output != null && (
         <div className="mt-4 space-y-3 border-t border-[#333] pt-4">
           <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
             <Shield className="h-3.5 w-3.5" />

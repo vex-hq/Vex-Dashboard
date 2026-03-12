@@ -133,9 +133,11 @@ export default function AgentHealthScore() {
     });
 
     questions.forEach((q, i) => {
-      categoryScores[q.category].max += 3;
+      const cs = categoryScores[q.category];
+      if (!cs) return;
+      cs.max += 3;
       if (answers[i] !== undefined) {
-        categoryScores[q.category].earned += answers[i];
+        cs.earned += answers[i]!;
       }
     });
 
@@ -265,6 +267,7 @@ export default function AgentHealthScore() {
             <div className="mb-12 space-y-4">
               {categories.map((cat) => {
                 const catScore = scores.categoryScores[cat];
+                if (!catScore) return null;
                 const pct = Math.round((catScore.earned / catScore.max) * 100);
                 const level = pct < 40 ? 'low' : pct < 70 ? 'medium' : 'high';
 
@@ -292,7 +295,7 @@ export default function AgentHealthScore() {
                       />
                     </div>
                     <p className="text-sm leading-relaxed text-[#a2a2a2]">
-                      {recommendations[cat][level]}
+                      {recommendations[cat]?.[level]}
                     </p>
                   </div>
                 );

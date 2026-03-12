@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   ],
 };
 
-const features = [
+const features: { name: string; vex: boolean | string; competitor: boolean | string }[] = [
   { name: 'Hallucination detection', vex: true, competitor: true },
   { name: 'Behavioral drift detection', vex: true, competitor: 'partial' },
   { name: 'Schema validation', vex: true, competitor: false },
