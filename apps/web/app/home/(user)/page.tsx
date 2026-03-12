@@ -1,15 +1,9 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { PageBody } from '@kit/ui/page';
-import { Trans } from '@kit/ui/trans';
-
 import pathsConfig from '~/config/paths.config';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
-
-// local imports
-import { HomeLayoutPageHeader } from './_components/home-page-header';
 import { loadUserWorkspace } from './_lib/server/load-user-workspace';
 
 export const generateMetadata = async () => {

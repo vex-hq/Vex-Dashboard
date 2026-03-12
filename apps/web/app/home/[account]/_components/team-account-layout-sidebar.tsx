@@ -14,8 +14,6 @@ import { LiveSupportButton } from '~/components/live-support-button';
 import featureFlagsConfig from '~/config/feature-flags.config';
 import pathsConfig from '~/config/paths.config';
 import { getTeamAccountSidebarConfig } from '~/config/team-account-navigation.config';
-import { TeamAccountNotifications } from '~/home/[account]/_components/team-account-notifications';
-
 import { TeamAccountAccountsSelector } from '../_components/team-account-accounts-selector';
 import { TeamAccountLayoutSidebarNavigation } from './team-account-layout-sidebar-navigation';
 
