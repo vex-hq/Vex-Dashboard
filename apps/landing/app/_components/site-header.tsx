@@ -17,7 +17,6 @@ export async function SiteHeader() {
             <MobileNav formatted={formatted} />
             <AppLogo href="/" />
           </div>
-          <AppLogo href="/" />
 
           <DesktopNav />
 
