@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in LlamaIndex Agents",
+    "description": "How to detect and fix pii filtering for ai agents in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "LlamaIndex pii-filtering",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex agents, PII Filtering failures manifest when retrieved documents or agent responses inadvertently expose sensitive user data like emails, phone numbers, or SSNs during RAG pipelines. This occurs because LlamaIndex's default retrievers and synthesizers do not natively scrub PII from chunked documents or generated responses, especially when agents synthesize across multiple retrieved contexts. The problem is amplified in agentic workflows where tools and multi-step reasoning can propagate unfiltered PII through intermediate states.",
+    "howItManifests": [
+      {
+        "scenario": "Customer support agent retrieving user profiles",
+        "symptom": "Response contains raw email addresses from retrieved documents",
+        "impact": "GDPR violation with exposed customer PII in chat history"
+      },
+      {
+        "scenario": "Document Q&A agent processing resumes",
+        "symptom": "Synthesized answer includes phone numbers and home addresses",
+        "impact": "Compliance breach exposing candidate personal information"
+      },
+      {
+        "scenario": "Knowledge base agent with employee handbook",
+        "symptom": "Agent responses leak employee IDs and payroll data",
+        "impact": "Internal data exposure risking HR compliance violations"
+      },
+      {
+        "scenario": "Multi-tool agent chaining document retrieval + summarization",
+        "symptom": "Intermediate tool calls contain unfiltered SSNs from context",
+        "impact": "Audit trail contamination with sensitive data across agent memory"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex PII Scanner for Retrieved Nodes",
+        "description": "Scan LlamaIndex retrieved nodes for common PII patterns before synthesis",
+        "code": "import re\n\nfrom llama_index.core import VectorStoreIndex\nfrom llama_index.core.schema import NodeWithScore\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b'\n]\n\ndef scan_nodes_for_pii(nodes: list[NodeWithScore]) -> list[str]:\n    findings = []\n    for node in nodes:\n        for pattern in PII_PATTERNS:\n            matches = re.findall(pattern, node.node.text)\n            if matches:\n                findings.append(f\"PII found in node {node.node.id}: {matches}\")\n    return findings\n\n# Usage\nretriever = index.as_retriever()\nnodes = retriever.retrieve(\"user query\")\npii_issues = scan_nodes_for_pii(nodes)\nif pii_issues:\n    print(\"🚨 PII detected:\", pii_issues)",
+        "language": "python"
+      },
+      {
+        "name": "Response PII Validator Wrapper",
+        "description": "Wrap query_engine to validate responses contain no PII using presidio analyzer",
+        "code": "from presidio_analyzer import AnalyzerEngine\nfrom llama_index.core.query_engine import QueryEngine\n\nanalyzer = AnalyzerEngine()\n\ndef pii_safe_query(query_engine: QueryEngine, query: str):\n    response = query_engine.query(query)\n    results = analyzer.analyze(\n        text=response.response,\n        entities=[\"PHONE_NUMBER\", \"EMAIL_ADDRESS\", \"US_SSN\"],\n        language=\"en\"\n    )\n    if results:\n        raise ValueError(f\"PII detected in response: {[r.text for r in results]}\")\n    return response\n\n# Usage\nsafe_response = pii_safe_query(query_engine, \"What is John's email?\")",
+        "language": "python"
+      },
+      {
+        "name": "Agent Chat History PII Monitor",
+        "description": "Monitor LlamaIndex agent chat history for PII accumulation",
+        "code": "import re\nfrom llama_index.core.agent import ReActAgent\n\ndef monitor_agent_history(agent: ReActAgent):\n    chat_history = agent.chat_history\n    pii_count = 0\n    for message in chat_history.messages:\n        if re.search(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', message.content):\n            pii_count += 1\n            print(f\"🚨 PII in message: {message.content[:50]}...\")\n    return pii_count\n\n# Usage after agent interaction\npii_detected = monitor_agent_history(my_agent)\nif pii_detected > 0:\n    print(f\"Found {pii_detected} PII instances in chat history\")",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Presidio PII Redactor for Index Documents",
+        "description": "Pre-process documents with Presidio redaction before indexing",
+        "code": "from presidio_anonymizer import AnonymizerEngine\nfrom presidio_analyzer import AnalyzerEngine\nfrom llama_index.core import SimpleDirectoryReader, VectorStoreIndex\n\nanalyzer = AnalyzerEngine()\nanonymizer = AnonymizerEngine()\n\ndef redact_pii(text: str) -> str:\n    results = analyzer.analyze(text=text, entities=[\"PHONE_NUMBER\", \"EMAIL_ADDRESS\"], language=\"en\")\n    return anonymizer.anonymize(text=text, analyzer_results=results).text\n\n# Load and redact documents before indexing\ndocuments = SimpleDirectoryReader(\"data\").load_data()\nredacted_docs = [redact_pii(doc.text) for doc in documents]\nindex = VectorStoreIndex.from_documents(redacted_docs)\n\nquery_engine = index.as_query_engine()\nresponse = query_engine.query(\"Find contact info\")  # Returns [REDACTED] instead of PII",
+        "language": "python"
+      },
+      {
+        "name": "PII-Safe Node Postprocessor",
+        "description": "Custom LlamaIndex postprocessor to scrub PII from retrieved nodes",
+        "code": "from llama_index.core.postprocessor import BaseNodePostprocessor\nfrom presidio_anonymizer import AnonymizerEngine\nfrom presidio_analyzer import AnalyzerEngine\n\nclass PIINodePostprocessor(BaseNodePostprocessor):\n    def __init__(self):\n        self.analyzer = AnalyzerEngine()\n        self.anonymizer = AnonymizerEngine()\n\n    def postprocess_nodes(self, nodes, query_bundle):\n        for node in nodes:\n            results = self.analyzer.analyze(\n                text=node.text, \n                entities=[\"PHONE_NUMBER\", \"EMAIL_ADDRESS\", \"US_SSN\"]\n            )\n            node.text = self.anonymizer.anonymize(\n                text=node.text, analyzer_results=results\n            ).text\n        return nodes\n\n# Usage\nquery_engine = index.as_query_engine(\n    node_postprocessors=[PIINodePostprocessor()]\n)\nresponse = query_engine.query(\"user query\")  # PII automatically redacted",
+        "language": "python"
+      },
+      {
+        "name": "Safe Agent Response Validator",
+        "description": "Custom output parser that rejects PII-containing responses",
+        "code": "import re\nfrom llama_index.core.schema import AgentOutput\n\nclass SafeAgentOutputParser:\n    PII_PATTERNS = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b'\n    ]\n\n    @staticmethod\n    def parse(agent_output: AgentOutput) -> AgentOutput:\n        response_text = str(agent_output)\n        for pattern in SafeAgentOutputParser.PII_PATTERNS:\n            if re.search(pattern, response_text):\n                return AgentOutput(\n                    response=\"[REDACTED: PII detected in response]\",\n                    source_nodes=agent_output.source_nodes\n                )\n        return agent_output\n\n# Wrap agent\nagent = ReActAgent.from_tools(tools, llm=llm)\nresponse = agent.chat(\"query\")\nsafe_response = SafeAgentOutputParser.parse(response)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex provides production-grade PII detection for LlamaIndex agents by wrapping query_engine.query() calls with vex.verify(). The platform automatically detects PII leakage across retrieved contexts, agent responses, and tool interactions using battle-tested regex patterns and ML classifiers trained on real-world PII datasets. \n\nVex's automation goes beyond simple regex scanning by establishing golden signals for your LlamaIndex RAG pipelines - tracking PII exposure rates, redaction effectiveness, and compliance drift over time. When PII is detected, Vex can automatically trigger remediation workflows including response redaction, query rewriting, or fallback to safe retrieval strategies.\n\nThe integration requires zero changes to your existing LlamaIndex agent code - simply wrap your query_engine calls and Vex handles the rest, providing detailed dashboards, alerting, and automated fixes for PII compliance at scale.",
+      "code": "import vex\nfrom llama_index.core import VectorStoreIndex, QueryBundle\n\n# Initialize Vex with PII policy\nvex.init(project=\"llama-pii-compliance\")\n\n# Your existing LlamaIndex setup\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine()\n\ndef safe_agent_query(query: str):\n    # Vex automatically detects PII in:\n    # 1. Retrieved node contexts\n    # 2. Synthesized responses\n    # 3. Tool call parameters\n    # 4. Agent chat history\n    \n    with vex.verify(policy=\"block-pii-exposure\") as span:\n        response = query_engine.query(query)\n        \n        # Vex auto-redacts PII and provides remediation metadata\n        span.set_metadata({\n            \"retrieved_nodes\": len(response.source_nodes),\n            \"pii_entities_detected\": span.pii_findings\n        })\n        \n    return response\n\n# Production usage\nresponse = safe_agent_query(\"What is John's contact information?\")\n# Returns: \"John's contact information is [EMAIL_REDACTED]\"\n\n# Vex dashboard shows:\n# ✅ 98.7% PII blocking rate\n# 🚨 3 redacted responses this hour\n# 📊 Compliance trending healthy",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk` and wrap your LlamaIndex query_engine calls to eliminate PII exposure in 5 minutes."
+    }
+  }
+}

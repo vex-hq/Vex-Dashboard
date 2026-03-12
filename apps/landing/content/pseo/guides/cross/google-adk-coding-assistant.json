@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Google ADK + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK ai coding assistant",
+      "Google ADK guardrails",
+      "ai coding assistant reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with Google's Agent Development Kit (ADK) enables powerful multi-agent systems powered by Gemini models for repository-aware code generation, sandbox execution, and iterative debugging. However, multi-agent delegation, model switching, and session state issues introduce risks like circular dependencies, output inconsistency, and security vulnerabilities. Vex provides essential guardrails to verify code correctness, prevent credential leaks, and ensure dependency safety in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Google ADK",
+      "description": "The AI Coding Assistant leverages Google ADK's multi-agent orchestration to create a code-aware workflow. A Router Agent delegates tasks to specialized agents: RepoContextAgent loads repository files and AST analysis, CodeGenAgent generates solutions using Gemini 1.5 Pro, SandboxAgent executes code in isolated containers, TestAgent validates outputs, and DebuggerAgent handles iterative fixes. Agents communicate via structured tool calls with shared session state for conversation memory.\n\nGemini model switching (1.5 Flash for speed, Pro for reasoning) occurs dynamically based on task complexity. Long conversations maintain state through ADK's session management, but this introduces risks of corruption. Tool responses must conform to strict JSON schemas across agents to prevent parsing failures.\n\nThe workflow processes user requests like 'fix this bug in main.py' by: 1) loading repo context, 2) generating code, 3) sandbox execution, 4) test validation, 5) iterative debugging until passing all checks.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│   Router Agent   │\n└─────────────────┘    │  (Task Delegate) │\n                       └──────────┬───────┘\n                                  │\n                       ┌──────────▼───────┐\n                       │ RepoContextAgent │\n                       │   (AST+Files)    │\n                       └──────────┬───────┘\n                                  │\n                       ┌──────────▼───────┐ ┌─────────────┐\n                       │  CodeGenAgent    │ │ SandboxAgent│\n                       │   (Gemini Pro)   │ │(Container)  │\n                       └──────────┬───────┘ └─────────────┘\n                                  │              │\n                       ┌──────────▼───────┐ ┌─────────────┐\n                       │   TestAgent      │ │ DebuggerAgent│\n                       │  (Pytest/Unit)   │ │ (Iterative) │\n                       └──────────────────┘ └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent circular delegation",
+        "description": "Router Agent endlessly delegates between CodeGen and Debugger due to ambiguous task boundaries",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation paths and enforces max delegation depth before execution"
+      },
+      {
+        "name": "Gemini model switching inconsistency",
+        "description": "Flash vs Pro outputs different code structures causing tool parsing failures downstream",
+        "severity": "high",
+        "mitigation": "Vex standardizes output schemas and validates format consistency across model switches"
+      },
+      {
+        "name": "Session state corruption",
+        "description": "Long debugging sessions corrupt shared context, mixing unrelated repo states",
+        "severity": "high",
+        "mitigation": "Vex snapshots and validates session state integrity per agent interaction"
+      },
+      {
+        "name": "Unverified code execution",
+        "description": "SandboxAgent executes malicious or credential-leaking code from unverified generations",
+        "severity": "critical",
+        "mitigation": "Vex scans for security vulns, credential patterns, and dependency risks before sandbox"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Router Agent with Multi-Delegation",
+        "description": "Core router that delegates to specialized agents based on task type, using ADK's agent orchestration.",
+        "code": "from google_adk.agents import RouterAgent, CodeGenAgent, TestAgent, SandboxAgent\nfrom google_adk.session import Session\n\nrouter = RouterAgent(\n    model='gemini-1.5-flash',\n    tools=[CodeGenAgent(), TestAgent(), SandboxAgent()],\n    delegation_rules={\n        'codegen': 'CodeGenAgent',\n        'test': 'TestAgent',\n        'execute': 'SandboxAgent',\n        'debug': lambda x: 'CodeGenAgent' if 'bug' in x else 'TestAgent'\n    }\n)\n\nasync def handle_request(session: Session, user_query: str):\n    response = await router.delegate(session, user_query)\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "RepoContextAgent with AST Analysis",
+        "description": "Loads repository context and performs static analysis before code generation.",
+        "code": "import ast\nfrom google_adk.tools import Tool\n\nclass RepoContextTool(Tool):\n    name = 'get_repo_context'\n    \n    async def execute(self, repo_path: str, file_pattern: str = '*.py'):\n        files = self.glob_repo(repo_path, file_pattern)\n        context = {}\n        for file_path, content in files.items():\n            tree = ast.parse(content)\n            context[file_path] = {\n                'imports': [node.names[0].name for node in ast.walk(tree) if isinstance(node, ast.Import)],\n                'functions': [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)],\n                'content_preview': content[:1000]\n            }\n        return context",
+        "language": "python"
+      },
+      {
+        "title": "SandboxAgent with Isolated Execution",
+        "description": "Executes generated code in Docker containers with resource limits and output capture.",
+        "code": "from google_adk.tools import Tool\nimport docker\n\nclass SandboxTool(Tool):\n    name = 'execute_sandbox'\n    \n    async def execute(self, code: str, deps: list = []):\n        client = docker.from_env()\n        container = client.containers.run(\n            'python:3.11-slim',\n            command=f'pip install {' '.join(deps)} && echo \"{code}\" > app.py && python app.py',\n            mem_limit='512m',\n            detach=True,\n            remove=True\n        )\n        result = await container.logs(stream=True)\n        return {'stdout': result.stdout, 'stderr': result.stderr}",
+        "language": "python"
+      },
+      {
+        "title": "TestAgent with Pytest Validation",
+        "description": "Generates and runs pytest suite to validate code correctness and coverage.",
+        "code": "from google_adk.tools import Tool\nimport subprocess\n\nclass TestTool(Tool):\n    name = 'run_tests'\n    \n    async def execute(self, code: str, test_cases: list):\n        with open('temp_code.py', 'w') as f:\n            f.write(code)\n        \n        test_code = f'''\nimport pytest\nfrom temp_code import *\n{chr(10).join(test_cases)}\n'''\n        \n        with open('test_temp.py', 'w') as f:\n            f.write(test_code)\n        \n        result = subprocess.run(['pytest', 'test_temp.py', '-v', '--tb=no'], \n                               capture_output=True, text=True)\n        return {\n            'passed': result.returncode == 0,\n            'coverage': self.calculate_coverage(),\n            'output': result.stdout\n        }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Before-Agent Callback Setup",
+        "description": "Install Vex SDK and configure as before_agent_callback to intercept all agent interactions.",
+        "code": "pip install google-adk vex-sdk\n\nfrom vex import Vex\nfrom google_adk.agents import BaseAgent\n\nvex = Vex(api_key='your-vex-api-key')\n\n@vex.guardrail(\n    verifications=[\n        'code_correctness',\n        'security_vulnerability_scanning',\n        'no_credential_leakage',\n        'dependency_safety',\n        'license_compliance'\n    ],\n    risk_profile='medium'\n)\nasync def before_agent_callback(agent: BaseAgent, session, input_data):\n    # Vex automatically scans input_data for all verifications\n    verdict = await vex.verify(input_data)\n    if not verdict.approved:\n        return {'blocked': True, 'reason': verdict.issues}\n    return {'approved': True, 'session_hash': session.hash()}",
+        "language": "python"
+      },
+      {
+        "title": "Session State Integrity Check",
+        "description": "Prevents circular dependencies and validates session state before delegation.",
+        "code": "from vex import SessionGuard\n\nguard = SessionGuard(max_depth=5, max_session_length=100)\n\nasync def safe_delegate(self, session, task):\n    # Check for circular delegation patterns\n    if not await guard.verify_delegation_path(session.delegation_history, task):\n        return {'error': 'Circular delegation detected'}\n    \n    # Validate session state integrity\n    state_hash = await guard.hash_session_state(session.context)\n    if state_hash != session.last_verified_hash:\n        await session.rollback_to_checkpoint()\n    \n    # Vex verification\n    verdict = await vex.verify({\n        'code': task.get('code', ''),\n        'session_state': session.context,\n        'delegation_path': session.delegation_history[-10:]\n    })\n    return verdict",
+        "language": "python"
+      },
+      {
+        "title": "Code Execution Safety Gate",
+        "description": "Scans generated code for security issues before sandbox execution.",
+        "code": "@vex.guardrail(verifications=['security_vulnerability_scanning', 'no_credential_leakage'])\nasync def safe_sandbox_execute(code: str, dependencies: list):\n    # Vex scans for:\n    # - eval/exec usage\n    # - hardcoded credentials\n    # - dangerous imports (os.system, subprocess)\n    # - dependency vulnerabilities\n    \n    verdict = await vex.verify({\n        'code': code,\n        'dependencies': dependencies,\n        'context': 'pre-sandbox-execution'\n    })\n    \n    if not verdict.approved:\n        raise SecurityError(f'Blocked: {verdict.issues}')\n    \n    # Safe execution\n    return await sandbox_tool.execute(code, dependencies)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK AI Coding Assistant",
+      "description": "Add Vex guardrails today to protect your coding agent from security risks and reliability failures."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in Instructor Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "Instructor rag-retrieval-quality",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor agents, RAG Retrieval Quality Optimization issues manifest as structured output validation failures when retrieved context leads to incomplete or hallucinated Pydantic model fields. Poor retrieval quality causes the LLM to generate partial extractions missing required fields or hallucinate enum values not present in retrieved documents. Instructor's validation retries exhaust quickly when RAG context lacks sufficient detail for accurate structured extraction.",
+    "howItManifests": [
+      {
+        "scenario": "Retrieved documents missing key entities for extraction",
+        "symptom": "Partial extraction missing required fields",
+        "impact": "Structured output validation retries exhausted after max_attempts"
+      },
+      {
+        "scenario": "RAG returns irrelevant documents with outdated enum values",
+        "symptom": "Model hallucinating enum values outside schema",
+        "impact": "ValidationError: value is not a valid enumeration member"
+      },
+      {
+        "scenario": "Context truncation cuts off nested document structure",
+        "symptom": "Nested object extraction producing inconsistent depth",
+        "impact": "Pydantic validation fails on missing nested required fields"
+      },
+      {
+        "scenario": "Low retrieval precision returns mixed document types",
+        "symptom": "Inconsistent field presence across validation attempts",
+        "impact": "Retry loop oscillates between partial successes and total failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Instructor Validation Retry Counts",
+        "description": "Track `max_retries` exhaustion and partial extraction rates in Instructor calls",
+        "code": "from instructor import from_openai\n\nfrom pydantic import BaseModel, Field\n\nclass Document(BaseModel):\n    title: str\n    entities: list[str]\n    category: Literal['contract', 'invoice', 'receipt']\n\nclient = from_openai(OpenAI())\n\n@client.chat.completions.create\n# Track these metrics\ndef monitor_rag_extraction(prompt: str, context: str) -> Document:\n    '''Monitor: retries_exhausted, partial_extractions, enum_errors'''\n    return client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=Document,\n        messages=[\n            {'role': 'system', 'content': 'Extract from context only:'},\n            {'role': 'user', 'content': f\"Context: {context}\\n\\n{prompt}\"}\n        ],\n        max_retries=3,\n        max_lead_following=2\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Log Pydantic Validation Error Patterns",
+        "description": "Capture specific validation errors indicating RAG quality issues",
+        "code": "import logging\nfrom pydantic import ValidationError\n\nclass RAGQualityMonitor:\n    def __init__(self):\n        self.retry_counts = 0\n        self.enum_errors = 0\n        self.partial_extractions = 0\n    \n    def extract_with_monitoring(self, client, prompt, context):\n        try:\n            result = client.chat.completions.create(\n                model='gpt-4o-mini',\n                response_model=Document,\n                messages=[...],\n                max_retries=3\n            )\n            return result\n        except ValidationError as e:\n            for error in e.errors():\n                if 'is not a valid enumeration member' in str(error):\n                    self.enum_errors += 1\n                    logging.warning(f'RAG enum hallucination: {error['loc']}')\n                elif 'field required' in str(error):\n                    self.partial_extractions += 1\n            raise\n        except Exception:\n            self.retry_counts += 1\n            raise",
+        "language": "python"
+      },
+      {
+        "name": "Context Relevance Score Check",
+        "description": "Validate retrieved context contains expected extraction patterns",
+        "code": "import re\n\ndef validate_rag_context(context: str, expected_entities: list[str]) -> float:\n    '''Score context relevance for structured extraction'''\n    context_lower = context.lower()\n    entity_hits = sum(1 for entity in expected_entities \n                     if re.search(re.escape(entity.lower()), context_lower))\n    \n    # Check for extraction patterns\n    title_pattern = r'\\b(?:title|subject|document):?\\s*[^\\n]+'\n    category_pattern = r'\\b(?:contract|invoice|receipt)\\b'\n    \n    patterns_found = len(re.findall(title_pattern, context)) + \\\n                    len(re.findall(category_pattern, context))\n    \n    relevance_score = (entity_hits + patterns_found) / (len(expected_entities) + 2)\n    return relevance_score\n\n# Alert if score < 0.6\nif validate_rag_context(context, ['invoice', 'payment']) < 0.6:\n    raise ValueError('RAG retrieval quality too low for extraction')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retrieval with Keyword Boosting",
+        "description": "Boost retrieval using Pydantic field names and enum values as query expansion",
+        "code": "from instructor import from_openai\n\nclass OptimizedDocumentExtractor:\n    def __init__(self, client):\n        self.instructor = from_openai(client)\n    \n    def extract_with_hybrid_retrieval(self, query: str, retriever):\n        # Extract schema hints for retrieval\n        schema_hints = ['title', 'entities', 'contract', 'invoice', 'receipt']\n        \n        # Hybrid query: original + schema hints\n        hybrid_query = f\"{query} {' '.join(schema_hints)}\"\n        \n        context = retriever.retrieve(hybrid_query, k=5)\n        \n        return self.instructor.chat.completions.create(\n            model='gpt-4o-mini',\n            response_model=Document,\n            messages=[\n                {'role': 'system', 'content': \n                 'Use ONLY information from context. Do not hallucinate.'},\n                {'role': 'user', 'content': f\"Context: {context}\\nQuery: {query}\"}\n            ],\n            temperature=0.1,  # Lower temp for consistency\n            max_retries=5\n        )",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Context Injection",
+        "description": "Inject schema-valid enum values and field examples into prompt when retrieval fails",
+        "code": "from typing import Literal\n\nclass Document(BaseModel):\n    title: str\n    entities: list[str]\n    category: Literal['contract', 'invoice', 'receipt']\n\nVALID_CATEGORIES = ['contract', 'invoice', 'receipt']\n\n@client.chat.completions.create\ndef extract_with_fallback(client, context: str, query: str) -> Document:\n    fallback_prompt = f\"\"\"\nContext: {context}\n\nValid categories: {', '.join(VALID_CATEGORIES)}\nExamples:\n- Invoice: payment documents\n- Contract: agreements\n- Receipt: transaction proof\n\nQuery: {query}\n\nExtract ONLY from context using valid categories above.\n\"\"\"\n    \n    return client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=Document,\n        messages=[{'role': 'user', 'content': fallback_prompt}],\n        partial=False,  # Fail fast on partial extraction\n        max_retries=3\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Multi-Stage Nested Extraction",
+        "description": "Extract nested objects in stages to handle inconsistent retrieval depth",
+        "code": "class NestedDocument(BaseModel):\n    title: str\n    metadata: dict\n    sections: list['Section']\n\nclass Section(BaseModel):\n    heading: str\n    content: str\n    category: Literal['terms', 'pricing', 'signature']\n\n@client.chat.completions.create\ndef staged_nested_extraction(client, context: str) -> NestedDocument:\n    # Stage 1: Extract top-level structure\n    structure = client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=dict,\n        messages=[{'role': 'user', 'content': f\"List sections in: {context}\"}],\n    )\n    \n    # Stage 2: Extract each section individually\n    sections = []\n    for section_info in structure.get('sections', []):\n        section_context = extract_section_context(context, section_info['heading'])\n        section = client.chat.completions.create(\n            response_model=Section,\n            messages=[{'role': 'user', 'content': f\"{section_context}\"}],\n        )\n        sections.append(section)\n    \n    return NestedDocument(\n        title=structure['title'],\n        metadata=structure['metadata'],\n        sections=sections\n    )",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex automatically detects RAG quality issues in Instructor agents by monitoring Pydantic validation patterns, retry exhaustion rates, and extraction completeness metrics. When Instructor's `max_retries` exhausts or specific validation errors like enum hallucinations occur, Vex captures the full error context including retrieved documents and query patterns. \n\nVex's agent reliability platform provides automated remediation by suggesting retrieval query expansions, fallback context injection, and hybrid retrieval strategies tuned to your Pydantic schemas. The platform tracks RAG quality KPIs across all Instructor calls and surfaces optimization opportunities with one-click fixes. \n\nIntegration takes <5 minutes by wrapping your Instructor client with `vex.verify()`, giving you instant visibility into retrieval-extraction failure modes and automated improvement recommendations.",
+      "code": "from vex_sdk import verify\nfrom instructor import from_openai\nfrom openai import OpenAI\n\n# Install: pip install instructor vex-sdk\n\nclient = from_openai(OpenAI())\n\n@vex.verify(\n    failure_modes=[\n        'instructor_retries_exhausted',\n        'pydantic_enum_validation',\n        'partial_extraction_missing_fields',\n        'nested_depth_inconsistency'\n    ],\n    auto_remediate=['query_expansion', 'fallback_injection']\n)\n@client.chat.completions.create\ndef reliable_rag_extraction(prompt: str, context: str) -> Document:\n    \"\"\"Vex monitors and auto-fixes RAG quality issues\"\"\"\n    return client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=Document,\n        messages=[\n            {'role': 'system', 'content': 'Extract from context only:'},\n            {'role': 'user', 'content': f\"Context: {context}\\n\\n{prompt}\"}\n        ],\n        max_retries=3\n    )\n\n# Vex auto-generates:\n# - Retrieval quality dashboards\n# - Query expansion recommendations\n# - Schema-aware fallback prompts\n# - Failure mode alerts",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Wrap your Instructor client with vex.verify() to get instant RAG quality monitoring and auto-remediation."
+    }
+  }
+}

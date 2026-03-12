@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Llama Stack Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Llama Stack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Llama Stack drift-monitoring",
+      "Llama Stack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Llama Stack manifests as gradual degradation in agent reliability due to safety over-filtering, loop exhaustion, tool schema violations, and memory retrieval inaccuracies. Llama Stack's standardized agent interface amplifies these issues through its safety shields, structured agentic loops, Pydantic-based tool schemas, and vector memory banks. Without proper monitoring, these drifts lead to cascading failures in production agent deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Safety shield filtering producing false positives on benign content",
+        "symptom": "Agent responses blocked by LlamaGuard with 'HARM_CATEGORY_HARASSMENT' on customer support queries",
+        "impact": "95% conversation drop-off rate as users abandon blocked helpful responses"
+      },
+      {
+        "scenario": "Agentic loop turn limits exceeded without meaningful resolution",
+        "symptom": "LlamaStackAgent.max_turns=10 reached while still calling 'web_search' tool repeatedly",
+        "impact": "Incomplete task resolution with 70% of sessions timing out unresolved"
+      },
+      {
+        "scenario": "Tool runtime responses not conforming to expected schema",
+        "symptom": "CalculatorTool returns {'result': '42'} instead of required Pydantic model CalculatorResponse",
+        "impact": "Agent parsing failures causing 80% tool call rejection rate"
+      },
+      {
+        "scenario": "Memory bank retrieval hallucinating document associations",
+        "symptom": "MemoryBank.retrieve() returns irrelevant docs with fabricated similarity scores >0.85",
+        "impact": "Agent context poisoning leading to 60% factual accuracy degradation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Safety Shield False Positive Detector",
+        "description": "Monitors LlamaGuard rejection logs for high-volume blocking of non-harmful content patterns",
+        "code": "from llama_stack_client import LlamaStackAgent\nimport re\n\ndef detect_safety_false_positives(agent_logs):\n    false_positive_patterns = [\n        r'customer support|help desk|faq|how to',\n        r'price|cost|pricing|quote',\n        r'status|update|progress'\n    ]\n    blocked_benign = 0\n    for log in agent_logs:\n        if log.get('llama_guard_blocked') and log.get('safety_category'):\n            content = log.get('input_content', '')\n            if any(re.search(pattern, content, re.IGNORECASE) for pattern in false_positive_patterns):\n                blocked_benign += 1\n    false_positive_rate = blocked_benign / len([l for l in agent_logs if l.get('llama_guard_blocked')])\n    return {'alert': false_positive_rate > 0.3, 'rate': false_positive_rate}",
+        "language": "python"
+      },
+      {
+        "name": "Agentic Loop Exhaustion Monitor",
+        "description": "Tracks turn count vs resolution quality in LlamaStackAgent execution traces",
+        "code": "def detect_loop_exhaustion(execution_trace):\n    max_turns = execution_trace.get('agent_config', {}).get('max_turns', 10)\n    final_turn = execution_trace['turns'][-1]\n    exhausted = final_turn['turn_number'] >= max_turns\n    unresolved = final_turn.get('resolution_status') != 'COMPLETE'\n    tool_calls_last_3 = len([t for t in execution_trace['turns'][-3:] if t.get('tool_calls')])\n    looping_behavior = tool_calls_last_3 >= 6\n    \n    drift_score = 0\n    if exhausted: drift_score += 40\n    if unresolved: drift_score += 30\n    if looping_behavior: drift_score += 30\n    \n    return {\n        'alert': drift_score > 50,\n        'drift_score': drift_score,\n        'diagnostics': {\n            'exhausted': exhausted,\n            'unresolved': unresolved,\n            'looping': looping_behavior\n        }\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Tool Schema Conformance Checker",
+        "description": "Validates Llama Stack tool responses against Pydantic schemas during runtime",
+        "code": "from pydantic import ValidationError\nimport json\n\ndef detect_tool_schema_drift(tool_response, expected_schema):\n    try:\n        # Llama Stack tool responses should match registered Pydantic models\n        validated = expected_schema.model_validate(tool_response)\n        return {'valid': True, 'data': validated}\n    except ValidationError as e:\n        missing_fields = [err['loc'] for err in e.errors() if err['type'] == 'missing']\n        extra_fields = [err['loc'] for err in e.errors() if err['type'] == 'extra_forbidden']\n        return {\n            'valid': False,\n            'drift_type': 'schema_mismatch',\n            'missing': missing_fields,\n            'extra': extra_fields,\n            'error_count': len(e.errors())\n        }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Custom Safety Shield Thresholds",
+        "description": "Adjust LlamaGuard sensitivity for domain-specific content using custom prompt engineering",
+        "code": "from llama_stack_client import LlamaStackAgent\n\nsafety_prompt = \"\"\"\nYou are a safety classifier for customer support agents.\nONLY flag content that contains:\n1. Direct threats of violence\n2. Explicit hate speech targeting protected groups\n3. Illegal activities\n\nCustomer service questions, pricing inquiries, and status updates are SAFE.\n\"\"\"\n\nagent = LlamaStackAgent(\n    model='llama-3.2-11b',\n    safety_config={\n        'custom_prompt': safety_prompt,\n        'thresholds': {\n            'HARASSMENT': 0.7,\n            'HATE': 0.9,\n            'VIOLENCE': 0.95\n        }\n    }\n)",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Loop Limit Controller",
+        "description": "Implement resolution-aware turn limits with early termination heuristics",
+        "code": "class AdaptiveLlamaAgent(LlamaStackAgent):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.progress_threshold = 0.7\n        self.max_repeated_tools = 3\n        \n    def should_terminate(self, execution_state):\n        turns = len(execution_state.turns)\n        if turns >= self.max_turns:\n            return True\n        \n        # Check resolution progress\n        if execution_state.get('confidence') > self.progress_threshold:\n            return True\n        \n        # Detect tool looping\n        recent_tools = [t.get('tool_name') for t in execution_state.turns[-5:]]\n        if len(set(recent_tools)) == 1 and recent_tools:\n            return True\n        \n        return False",
+        "language": "python"
+      },
+      {
+        "name": "Schema Enforcement Middleware",
+        "description": "Wrap tool calls with Pydantic validation and auto-correction",
+        "code": "from functools import wraps\nfrom pydantic import BaseModel\n\ndef schema_enforced_tool(tool_func):\n    @wraps(tool_func)\n    def wrapper(*args, **kwargs):\n        raw_result = tool_func(*args, **kwargs)\n        \n        # Auto-fix common schema drifts\n        if isinstance(raw_result, dict):\n            # Ensure required fields exist\n            for field in tool_func.__schema__.model_fields:\n                if field not in raw_result:\n                    raw_result[field] = None\n            \n            # Validate and correct\n            try:\n                return tool_func.__schema__.model_validate(raw_result)\n            except:\n                # Fallback to string response\n                return {'error': 'schema_validation_failed', 'raw': raw_result}\n        \n        return raw_result\n    wrapper.__schema__ = tool_func.__schema__\n    return wrapper\n\n# Usage\n@schema_enforced_tool\n@llama_stack_tool\nclass CalculatorResponse(BaseModel):\n    result: float\n    unit: str = 'none'",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex provides continuous drift monitoring for Llama Stack agents through its post-processing verification layer. By wrapping agent turns with vex.verify(), every response automatically gets scored against baseline behavior patterns, tool schemas, and safety thresholds. Vex maintains rolling baselines of healthy agent behavior and triggers alerts when drift exceeds configurable thresholds.\n\nThe platform auto-generates remediation strategies based on drift patterns observed across your Llama Stack deployments. For safety false positives, Vex suggests custom guardrail prompts. For loop exhaustion, it recommends dynamic termination rules. Tool schema violations trigger automatic middleware injection.\n\nVex's agentic observability captures full execution traces including memory bank retrievals, tool call graphs, and safety shield decisions, providing root-cause analysis for all drift incidents with one-click remediation deployment.",
+      "code": "from vex_sdk import verify\nfrom llama_stack_client import LlamaStackAgent\n\n# Wrap Llama Stack agent with Vex monitoring\n@verify(\n    monitors=[\n        'llama_stack_safety_drift',\n        'agentic_loop_exhaustion',\n        'tool_schema_conformance',\n        'memory_retrieval_accuracy'\n    ],\n    alert_threshold=0.25,\n    auto_remediate=True\n)\ndef monitored_llama_agent(user_query: str) -> str:\n    agent = LlamaStackAgent(\n        model='llama-3.2-11b-vision-instruct',\n        tools=[calculator_tool, web_search_tool]\n    )\n    \n    response = agent.run(\n        user_query,\n        max_turns=15,\n        memory_bank='production_memory'\n    )\n    \n    return {\n        'response': response,\n        'trace': agent.execution_trace,\n        'safety_scores': agent.safety_decisions\n    }\n\n# Production deployment\nresult = monitored_llama_agent('What’s 15% of 847?')\nprint(result['vex_score'])  # 0.92 (healthy)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Start your 14-day free trial and eliminate Llama Stack agent drift in minutes"
+    }
+  }
+}

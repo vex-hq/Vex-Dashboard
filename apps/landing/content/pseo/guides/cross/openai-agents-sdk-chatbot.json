@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK ai chatbot",
+      "OpenAI Agents SDK guardrails",
+      "ai chatbot reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with OpenAI Agents SDK enables sophisticated multi-agent systems with handoffs, tools, and tracing for conversational AI. However, complex agent interactions introduce risks like infinite loops, prompt injections, and unvalidated tool outputs that can degrade reliability. Vex provides essential output guardrails to ensure response accuracy, safety, and coherence in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with OpenAI Agents SDK",
+      "description": "The AI Chatbot uses OpenAI Agents SDK to orchestrate specialized agents: an IntentClassifierAgent routes user queries, RetrievalAgent fetches RAG context from vector stores, ResponseGeneratorAgent crafts answers with conversation memory, and SafetyAgent performs final validation. Agents handoff via the SDK's structured protocol, maintaining thread state for multi-turn coherence. Tools integrate external APIs while memory management persists context across sessions.\n\nThis modular design scales conversations but amplifies failure modes during handoffs. Tracing reveals bottlenecks, but lacks runtime verification for accuracy and safety. Vex integrates as output parsers on each agent to catch issues before propagation.\n\nThe high-risk profile demands verification for hallucinations, PII leaks, and coherence across agent boundaries.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│ IntentClassifier │\n└─────────────────┘    │     Agent         │\n                       └────────┬──────────┘\n                                │ handoff\n                       ┌────────▼──────────┐    ┌──────────────────┐\n                       │ RetrievalAgent    │───▶│ ResponseGenerator│\n                       │  (RAG Tools)      │    │     Agent         │\n                       └──────────────────┘    └──────┬──────────────┘\n                                                      │\n                                               ┌──────▼──────────────┐\n                                               │   SafetyAgent      │──▶┌──────────────┐\n                                               │ (Vex Guardrails)   │   │ Final Output  │\n                                               └────────────────────┘   └──────────────┘\n\nMemory Thread persists across all agents"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "IntentClassifier repeatedly routes to RetrievalAgent without progress, consuming tokens indefinitely",
+        "severity": "critical",
+        "mitigation": "Vex loop detection guardrail on agent outputs flags repetitive handoff patterns"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious users inject instructions that override SafetyAgent instructions during handoffs",
+        "severity": "critical",
+        "mitigation": "Vex PII/safety filtering validates all agent outputs regardless of prompt content"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "RetrievalAgent returns irrelevant/malformed RAG context that propagates hallucinations",
+        "severity": "high",
+        "mitigation": "Vex response accuracy checks validate tool outputs before ResponseGenerator consumption"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "OpenAI SDK tracing misses intermediate agent states, obscuring failure root causes",
+        "severity": "medium",
+        "mitigation": "Vex captures structured evaluations at every handoff for complete observability"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Classification Agent Setup",
+        "description": "Routes user input to appropriate specialized agents using OpenAI Agents SDK",
+        "code": "from agents import Agent, Runner\nfrom vex import Vex\n\nintent_agent = Agent(\n    name=\"IntentClassifier\",\n    instructions=\"Classify user intent: 'retrieval', 'general', 'safety_check'. Return only the intent type.\",\n    model=\"gpt-4o\",\n    tools=[]\n)\n\nrunner = Runner()\n\n@vex.guardrail(\n    verifications=[\n        \"response_accuracy\",\n        \"safety_filtering\"\n    ]\n)\ndef classify_intent(message: str) -> str:\n    result = runner.run_sync(\n        intent_agent,\n        message,\n        thread_id=\"chat_1\"\n    )\n    return result.final_output\n\nuser_intent = classify_intent(\"Find me flight information to NYC\")",
+        "language": "python"
+      },
+      {
+        "title": "RAG Retrieval Agent with Tool Integration",
+        "description": "Fetches relevant context from vector store for response generation",
+        "code": "from agents import tool\n\n@tool\nasync def search_knowledge_base(query: str):\n    \"\"\"Search vector store for relevant context\"\"\"\n    # Pinecone/Vector DB integration\n    results = pinecone_index.query(\n        vector=embeddings.embed_query(query),\n        top_k=5\n    )\n    return [match.text for match in results.matches]\n\nretrieval_agent = Agent(\n    name=\"RetrievalAgent\",\n    instructions=\"Use search_knowledge_base for user queries. Return ONLY relevant context passages.\",\n    tools=[search_knowledge_base]\n)\n\n@vex.guardrail(\n    verifications=[\n        \"response_accuracy\",\n        \"hallucination_detection\"\n    ]\n)\ndef retrieve_context(intent: str, query: str) -> list:\n    result = runner.run_sync(\n        retrieval_agent,\n        f\"Intent: {intent}. Query: {query}\",\n        thread_id=\"chat_1\"\n    )\n    return result.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Response Generator with Memory",
+        "description": "Generates coherent responses using conversation history and RAG context",
+        "code": "response_agent = Agent(\n    name=\"ResponseGenerator\",\n    instructions=\"\"\"Generate helpful, accurate responses using provided context.\n    Maintain conversation coherence. Never hallucinate information.\n    Structure: {'response': str, 'confidence': float}\"\"\",\n    model=\"gpt-4o\",\n    tools=[]\n)\n\n@vex.guardrail(\n    verifications=[\n        \"conversation_coherence\",\n        \"response_accuracy\",\n        \"hallucination_detection\"\n    ]\n)\ndef generate_response(context: list, history: list, query: str) -> dict:\n    full_context = f\"History: {history}\\nContext: {context}\\nQuery: {query}\"\n    \n    result = runner.run_sync(\n        response_agent,\n        full_context,\n        thread_id=\"chat_1\"\n    )\n    return {\n        'response': result.final_output['response'],\n        'confidence': result.final_output['confidence']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Safety Agent Final Validation",
+        "description": "Performs PII detection and content moderation before user delivery",
+        "code": "safety_agent = Agent(\n    name=\"SafetyAgent\",\n    instructions=\"Validate response: check PII, toxicity, coherence. Approve or reject.\",\n    model=\"gpt-4o\",\n    tools=[]\n)\n\n@vex.guardrail(\n    verifications=[\n        \"safety_filtering\",\n        \"pii_protection\"\n    ]\n)\ndef validate_final_response(response: dict) -> dict:\n    validation_prompt = f\"\"\"\n    Response: {response['response']}\n    History: {get_thread_history('chat_1')}\n    \n    Return: {{'approved': bool, 'reason': str, 'redacted_response': str}}\n    \"\"\"\n    \n    result = runner.run_sync(\n        safety_agent,\n        validation_prompt,\n        thread_id=\"chat_1\"\n    )\n    return result.final_output",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Loop Detection Guardrail",
+        "description": "Prevents infinite agent handoff cycles by tracking state patterns",
+        "code": "from vex.guardrails import LoopDetectionGuardrail\n\nloop_guardrail = LoopDetectionGuardrail(\n    max_handoffs=5,\n    state_patterns=[\"intent_retrieval\", \"retrieval_response\"],\n    thread_id=\"chat_1\"\n)\n\n@loop_guardrail\n@vex.guardrail(\"response_accuracy\")\ndef safe_agent_handoff(agent, message):\n    return runner.run_sync(agent, message, thread_id=\"chat_1\")\n\n# Usage\nintent_result = safe_agent_handoff(intent_agent, user_message)\nif loop_guardrail.blocked:\n    return \"Conversation stuck in loop. Please rephrase.\"",
+        "language": "python"
+      },
+      {
+        "title": "PII Protection with Redaction",
+        "description": "Scans and redacts sensitive information from all agent outputs",
+        "code": "from vex.guardrails import PiiProtectionGuardrail\n\npii_guardrail = PiiProtectionGuardrail(\n    patterns=[\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'  # Email\n    ],\n    replacement=\"[REDACTED]\"\n)\n\n@pii_guardrail\n@vex.guardrail(\"safety_filtering\")\ndef protect_response(response_text: str) -> str:\n    return response_text\n\n# Integrates automatically with all @vex.guardrail decorators\nfinal_response = protect_response(response_agent_output)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Verification Pipeline",
+        "description": "Combines all verifications in single output parser for agent chains",
+        "code": "from vex import VerificationPipeline\n\nchatbot_pipeline = VerificationPipeline([\n    \"response_accuracy:0.85\",      # 85% confidence threshold\n    \"conversation_coherence\",\n    \"safety_filtering:high\",\n    \"pii_protection\",\n    \"hallucination_detection:strict\"\n])\n\n@chatbot_pipeline\n@vex.guardrail()\ndef full_chatbot_pipeline(user_message: str, history: list) -> dict:\n    # Complete agent workflow\n    intent = classify_intent(user_message)\n    context = retrieve_context(intent, user_message)\n    response = generate_response(context, history, user_message)\n    validated = validate_final_response(response)\n    \n    return {\n        'response': validated['redacted_response'],\n        'approved': validated['approved'],\n        'vex_score': chatbot_pipeline.score\n    }",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK AI Chatbot",
+      "description": "Add Vex guardrails today to eliminate agent loops, PII leaks, and hallucinations in production."
+    }
+  }
+}

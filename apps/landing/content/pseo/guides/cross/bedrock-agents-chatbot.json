@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents ai chatbot",
+      "Amazon Bedrock Agents guardrails",
+      "ai chatbot reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable enterprise-grade AI chatbots with built-in knowledge bases, action groups, and guardrails for secure conversational AI. Integrating Vex provides runtime verification to catch malformed responses, hallucination, and policy violations before they reach users. This ensures production reliability for high-risk customer-facing deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Amazon Bedrock Agents",
+      "description": "The architecture centers on Bedrock Agents orchestrating multi-turn conversations with RAG from knowledge bases and Lambda action groups for external API calls. User input flows through optional guardrails, intent classification, then agent execution which retrieves context, reasons over tools, and generates responses. Session memory maintains conversation state across turns while PII filters and safety checks run in parallel.\n\nKnowledge bases use vector embeddings for semantic search, action groups execute business logic via Lambda, and guardrails enforce content policies. The agent runtime handles orchestration, but failure modes like chunking issues or malformed Lambda responses require post-processing verification.\n\nVex wraps the invoke_agent() API to validate response accuracy, coherence, and safety before delivery, closing the reliability gap in production deployments.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│ Bedrock Guardrails│\n└─────────────────┘    │   (PII/Safety)    │\n                       └──────────────────┘\n                               │\n                       ┌──────────────────┐\n                       │   Bedrock Agent  │◄──┐\n                       │  (Knowledge Base  │   │\n                       │     + Actions)    │   │ Session\n                       └──────────────────┘   │ State\n                               │              │\n                       ┌──────────────────┐   │\n                       │   Vex Verify     │◄──┘\n                       │ (Accuracy/Safety)│\n                       └──────────────────┘\n                               │\n                       ┌──────────────────┐\n                       │  User Response   │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malformed Lambda Action Responses",
+        "description": "Action group Lambda functions return invalid JSON or missing required fields, breaking agent orchestration",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() with Vex schema validation on action outputs"
+      },
+      {
+        "name": "Knowledge Base Chunking Failures",
+        "description": "RAG retrieval misses relevant documents due to poor chunking strategy or embedding mismatches",
+        "severity": "high",
+        "mitigation": "Verify response-grounding with Vex hallucination detection against retrieved context"
+      },
+      {
+        "name": "Guardrail Bypass",
+        "description": "Domain-specific policy violations slip through generic Bedrock guardrails",
+        "severity": "high",
+        "mitigation": "Layer Vex custom safety filtering on agent responses"
+      },
+      {
+        "name": "Multi-turn State Loss",
+        "description": "Session memory fails to maintain conversation context across agent invocations",
+        "severity": "medium",
+        "mitigation": "Validate conversation coherence with Vex state tracking"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation (Python)",
+        "description": "Core invoke_agent call with session management for multi-turn chat",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\nagent_id = 'YOUR_AGENT_ID'\nagent_alias_id = 'YOUR_AGENT_ALIAS_ID'\nsession_id = 'chat-session-123'\n\nresponse = bedrock_agent.invoke_agent(\n    agentId=agent_id,\n    agentAliasId=agent_alias_id,\n    sessionId=session_id,\n    inputText='What is our return policy?',\n    enableTrace=True\n)\n\n# Stream completion events\ncompletion = ''\nfor event in response['completion']:\n    if 'chunk' in event:\n        completion += event['chunk']['bytes'].decode()\n\nprint(json.dumps({'response': completion}, indent=2))",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Invocation with Session State",
+        "description": "Node.js implementation handling streaming responses and session persistence",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nconst command = new InvokeAgentCommand({\n  agentId: 'YOUR_AGENT_ID',\n  agentAliasId: 'YOUR_AGENT_ALIAS_ID',\n  sessionId: 'chat-session-123',\n  inputText: 'What is our return policy?',\n  enableTrace: true\n});\n\nconst response = await client.send(command);\nlet completion = '';\nfor await (const event of response.completion) {\n  if (event.chunk?.bytes) {\n    completion += new TextDecoder().decode(event.chunk.bytes);\n  }\n}\nconsole.log(JSON.stringify({ response: completion }, null, 2));",
+        "language": "typescript"
+      },
+      {
+        "title": "Python Lambda Action Group Example",
+        "description": "Action group handler that must return strict JSON schema",
+        "code": "import json\n\ndef lambda_handler(event, context):\n    # Parse agent input\n    task = event['task']\n    parameters = task.get('parameters', {})\n    \n    if task['taskType'] == 'get_order_status':\n        order_id = parameters.get('orderId')\n        # Mock order lookup\n        order_status = {'status': 'shipped', 'tracking': 'UPS123'}\n        \n        return {\n            'taskStatus': 'SUCCEEDED',\n            'response': {\n                'message': f'Order {order_id} is shipped. Tracking: UPS123',\n                'orderStatus': order_status\n            },\n            'returnControlToAgent': True\n        }\n    \n    return {'taskStatus': 'FAILED'}",
+        "language": "python"
+      },
+      {
+        "title": "Knowledge Base RAG Verification Setup",
+        "description": "Configure KB with proper chunking for chatbot domain",
+        "code": "import boto3\n\nbedrock_agent = boto3.client('bedrock-agent')\n\nbedrock_agent.create_knowledge_base(\n    name='chatbot-kb',\n    roleArn='arn:aws:iam::123:role/BedrockKBRole',\n    knowledgeBaseConfiguration={\n        'type': 'VECTOR',\n        'vectorKnowledgeBaseConfiguration': {\n            'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'\n        }\n    },\n    storageConfiguration={\n        'type': 'OPENSEARCH_SERVERLESS',\n        'opensearchServerlessConfiguration': {\n            'collectionArn': 'arn:aws:aoss:us-east-1:123:collection/abc',\n            'vectorIndexName': 'embeddings',\n            'fieldMapping': {\n                'vectorField': 'embedding',\n                'textField': 'text',\n                'metadataField': 'metadata'\n            }\n        }\n    }\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Verification Wrapper",
+        "description": "Wrap invoke_agent() with comprehensive verification for all risk areas",
+        "code": "import vex\n\nfrom your_bedrock_client import invoke_bedrock_agent\n\n@vex.workflow(\n    name=\"bedrock-chatbot\",\n    risk_profile=\"high\",\n    verifications=[\n        \"response_accuracy\",\n        \"conversation_coherence\",\n        \"safety_filtering\",\n        \"pii_protection\",\n        \"hallucination_detection\"\n    ]\n)\ndef verified_chatbot(input_text: str, session_id: str, context: dict = None) -> str:\n    # Invoke Bedrock Agent\n    raw_response = invoke_bedrock_agent(input_text, session_id)\n    \n    # Vex verifies response before returning\n    verified_response = vex.verify(\n        raw_response,\n        context={\n            'session_history': context,\n            'domain': 'ecommerce_chatbot',\n            'pii_patterns': ['order-\\d+', 'card-\\d+']\n        }\n    )\n    \n    return verified_response['content']",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Async wrapper with TypeScript types for production deployment",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  workflowId: 'bedrock-chatbot'\n});\n\nexport async function verifiedBedrockChat(\n  inputText: string,\n  sessionId: string,\n  context?: any\n): Promise<string> {\n  // Invoke Bedrock Agent\n  const rawResponse = await invokeBedrockAgent(inputText, sessionId);\n  \n  // Vex verification with custom checks\n  const verified = await vex.verify({\n    response: rawResponse,\n    context: {\n      sessionHistory: context,\n      domain: 'ecommerce_chatbot',\n      maxHallucinationScore: 0.2,\n      piiRules: ['order-\\d+', 'email']\n    },\n    checks: [\n      'response_accuracy',\n      'conversation_coherence',\n      'safety_filtering',\n      'pii_protection',\n      'hallucination_detection'\n    ]\n  });\n  \n  if (!verified.valid) {\n    throw new Error(`Verification failed: ${JSON.stringify(verified.issues)}`);\n  }\n  \n  return verified.response.content;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Session State Verification",
+        "description": "Python decorator maintaining conversation memory with Vex",
+        "code": "import vex\nfrom typing import Dict, List\n\nclass ChatbotSession:\n    def __init__(self):\n        self.sessions: Dict[str, List[Dict]] = {}\n    \n    @vex.workflow(\n        name=\"bedrock-multi-turn\",\n        verifications=[\"conversation_coherence\", \"response_accuracy\"]\n    )\n    def process_turn(self, session_id: str, input_text: str) -> str:\n        # Load session history\n        history = self.sessions.get(session_id, [])\n        \n        # Get agent response with context\n        agent_response = invoke_bedrock_agent(\n            input_text, \n            session_id, \n            session_context=history[-5:]  # Last 5 turns\n        )\n        \n        # Verify coherence across conversation\n        verified = vex.verify(\n            agent_response,\n            context={\n                'conversation_history': history,\n                'coherence_window': 5,\n                'topic_drift_threshold': 0.3\n            }\n        )\n        \n        # Update session\n        history.append({\n            'input': input_text,\n            'output': verified['content'],\n            'timestamp': 'now'\n        })\n        self.sessions[session_id] = history[-10:]  # Keep last 10\n        \n        return verified['content']\n\nsession = ChatbotSession()",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents AI Chatbot",
+      "description": "Add Vex verification to your Bedrock Agents in 5 minutes - start your free trial at vex.run"
+    }
+  }
+}

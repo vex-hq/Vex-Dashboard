@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with AG2 + Vex Guardrails",
+    "description": "Learn how to build voice agents with AG2 + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AG2 voice agents",
+      "AG2 guardrails",
+      "voice agents reliability",
+      "Vex AG2",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Voice Agents built with AG2 enable real-time multi-agent conversations powered by speech-to-text, LLM reasoning, and text-to-speech pipelines. With sub-second latency requirements, these agents handle dynamic group discussions but are prone to off-topic spirals, factual errors, and unsafe outputs. Vex integration provides essential guardrails to ensure response appropriateness, conversation coherence, and safety in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with AG2",
+      "description": "Voice Agents in AG2 follow a real-time pipeline: audio input is transcribed via speech-to-text (e.g., Whisper), fed into AG2's group chat agents for reasoning, then converted back to speech via text-to-speech (e.g., ElevenLabs). AG2's enhanced group chat handles speaker selection and consensus, but requires message hooks for latency monitoring and safety checks. Vex registers as a hook to verify each agent response before TTS, ensuring sub-second budgets while filtering harmful content.\n\nThe architecture supports low-latency by using streaming APIs and async agent execution. Group chats simulate turn-taking with speaker selection logic, but common failures include bias toward dominant speakers or hallucinated facts derailing conversations. Vex mitigates these by validating coherence and appropriateness at each message boundary.",
+      "diagram": "Mic → [STT: Whisper] → [AG2 Group Chat + Vex Hooks] → [TTS: ElevenLabs] → Speaker\n                  ↓\n             Latency Monitor (<500ms)\n                  ↓\n             Safety Filter → Block/Reject"
+    },
+    "risks": [
+      {
+        "name": "Agent conversation spiraling off-topic",
+        "description": "Voice agents in group chats deviate from user intent due to unconstrained multi-turn reasoning",
+        "severity": "critical",
+        "mitigation": "Vex coherence checks on conversation history and topic relevance"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "STT-LLM-TTS pipeline exceeds sub-second requirements, breaking real-time interaction",
+        "severity": "critical",
+        "mitigation": "Vex timeout enforcement and response truncation"
+      },
+      {
+        "name": "Safety violations in speech output",
+        "description": "Agents generate harmful, biased, or inappropriate TTS content",
+        "severity": "high",
+        "mitigation": "Vex safety filtering before TTS synthesis"
+      },
+      {
+        "name": "Speaker selection bias",
+        "description": "Group chat favors certain agents, leading to imbalanced or incorrect consensus",
+        "severity": "high",
+        "mitigation": "Vex fairness validation on speaker turns and content diversity"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic AG2 Voice Agent Group",
+        "description": "Set up core AG2 group chat with STT/TTS integration for real-time voice conversations",
+        "code": "from ag2 import GroupChat, GroupChatManager\nfrom ag2.agent import AssistantAgent\nimport whisper\nimport elevenlabs\n\n# STT and TTS clients\nstt_model = whisper.load_model('base')\nvoice_client = elevenlabs.VoiceClient()\n\nlistener_agent = AssistantAgent(name='Listener', llm_config={'model': 'gpt-4o-mini'})\nreasoner_agent = AssistantAgent(name='Reasoner', llm_config={'model': 'gpt-4o-mini'})\n\n# Vex hook placeholder\ndef vex_hook(message):\n    return True  # Will integrate Vex\n\ngroupchat = GroupChat(agents=[listener_agent, reasoner_agent], messages=[], max_round=10)\nmanager = GroupChatManager(groupchat=groupchat, llm_config={'model': 'gpt-4o-mini'})\n\n# Voice loop\ndef voice_loop():\n    audio = record_audio()  # Real-time mic input\n    text = stt_model.transcribe(audio)['text']\n    response = manager.initiate_chat(listener_agent, message=text, message_hook=vex_hook)\n    audio_out = voice_client.generate(response)\n    play_audio(audio_out)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Latency Monitoring",
+        "description": "Track STT → LLM → TTS pipeline timing to enforce sub-second budgets",
+        "code": "import time\nfrom ag2.callbacks import CallbackHandler\n\nclass LatencyMonitor(CallbackHandler):\n    def __init__(self):\n        self.start_time = None\n    \n    def on_message_start(self, message):\n        self.start_time = time.time()\n    \n    def on_message_end(self, message):\n        if self.start_time:\n            latency = time.time() - self.start_time\n            if latency > 0.5:  # 500ms budget\n                raise TimeoutError(f'Latency exceeded: {latency}s')\n\n# Register in groupchat\nmonitor = LatencyMonitor()\ngroupchat.register_callback(monitor)",
+        "language": "python"
+      },
+      {
+        "title": "Speaker Selection Logic",
+        "description": "Implement fair turn-taking for multi-agent voice conversations",
+        "code": "from ag2 import select_speaker\n\nclass VoiceSpeakerSelector:\n    def __init__(self):\n        self.last_speaker = None\n        self.speaker_counts = {}\n    \n    def select_speaker(self, groupchat: GroupChat):\n        # Avoid consecutive same speaker\n        candidates = [agent for agent in groupchat.agents \n                     if agent != self.last_speaker]\n        \n        # Weighted by expertise or recency\n        speaker = select_speaker(groupchat, selector_method='auto')\n        if speaker in candidates:\n            self.last_speaker = speaker\n            self.speaker_counts[speaker.name] = self.speaker_counts.get(speaker.name, 0) + 1\n        return speaker\n\n# Use in GroupChatManager\nmanager = GroupChatManager(groupchat=groupchat, speaker_selector=VoiceSpeakerSelector())",
+        "language": "python"
+      },
+      {
+        "title": "Streaming TTS Integration",
+        "description": "Enable partial TTS rendering for lowest possible latency",
+        "code": "import asyncio\nfrom elevenlabs import stream\n\nasync def stream_voice_response(response_generator):\n    async for chunk in response_generator:\n        # Stream partial LLM responses\n        if chunk:\n            audio_chunk = elevenlabs.generate(chunk, stream=True)\n            stream(audio_chunk)\n\n# Integrate with AG2 streaming\ndef streaming_chat_loop():\n    async def run():\n        response_stream = manager.stream_chat(listener_agent, message=text)\n        await stream_voice_response(response_stream)\n    asyncio.run(run())",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Message Hook",
+        "description": "Install and register Vex SDK as AG2 message hook for real-time verification",
+        "code": "pip install ag2 vex-sdk\n\nfrom vex import Vex\nfrom ag2.callbacks import CallbackHandler\n\n# Initialize Vex for high-risk voice agents\nvex = Vex(api_key='your-vex-key')\n\nclass VexHook(CallbackHandler):\n    def on_message_create(self, message):\n        # Verify before TTS\n        result = vex.verify(\n            messages=[{'role': 'user', 'content': message.content}],\n            checks={\n                'appropriateness': 'strict',\n                'latency': 500,\n                'coherence': 'conversation',\n                'safety': 'block'\n            }\n        )\n        if not result.passed:\n            return {'content': '[Blocked by Vex safety filter]', 'block': True}\n        return message\n\n# Register globally\nvex_hook = VexHook()\ngroupchat.register_callback(vex_hook)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Check",
+        "description": "Maintain topic coherence across voice conversation turns",
+        "code": "class CoherenceVexHook(VexHook):\n    def __init__(self):\n        super().__init__()\n        self.conversation_history = []\n    \n    def on_message_create(self, message):\n        self.conversation_history.append(message)\n        \n        # Limit history for latency\n        if len(self.conversation_history) > 10:\n            self.conversation_history = self.conversation_history[-5:]\n        \n        result = vex.verify(\n            messages=self.conversation_history,\n            checks={'coherence': {'topic_drift': 'low'}}\n        )\n        \n        if result.score < 0.8:\n            return {'content': 'Staying on topic...', 'redirect': True}\n        return message",
+        "language": "python"
+      },
+      {
+        "title": "Latency + Safety Pipeline",
+        "description": "Enforce combined latency and safety verification before TTS",
+        "code": "class VoiceSafetyPipeline(VexHook):\n    async def verify_pipeline(self, message, start_time):\n        # Parallel safety + latency check\n        latency = time.time() - start_time\n        \n        result = await vex.verify_async(\n            messages=[message],\n            checks={\n                'safety': {'categories': ['hate', 'violence', 'illegal']},\n                'latency': {'budget': 400 - latency*1000}  # Remaining ms\n            },\n            timeout=100  # 100ms max\n        )\n        \n        if not result.passed or latency > 0.45:\n            return {'content': '[Response filtered: safety/latency]', 'safe': False}\n        return message\n\n# Usage in voice loop\nstart = time.time()\nverified_msg = await pipeline.verify_pipeline(response, start)\nif verified_msg.get('safe'):\n    audio = voice_client.generate(verified_msg['content'])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AG2 Voice Agents",
+      "description": "Integrate Vex today to protect your real-time voice conversations from safety failures and latency violations."
+    }
+  }
+}

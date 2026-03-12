@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build voice agents with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents voice agents",
+      "Amazon Bedrock Agents guardrails",
+      "voice agents reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable building sophisticated voice agents by combining fully managed agent orchestration with knowledge bases, action groups, and guardrails for enterprise-grade deployments. Voice agents demand sub-second latency in speech-to-text → LLM reasoning → text-to-speech pipelines, where even minor failures cascade into poor user experiences. Vex provides runtime verification to catch malformed responses, latency violations, and safety issues before they reach users.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Amazon Bedrock Agents",
+      "description": "Voice agents process real-time audio streams through STT (e.g., Amazon Transcribe), invoke Bedrock Agents for reasoning via action groups and knowledge bases, then synthesize responses with TTS (e.g., Amazon Polly). Bedrock Agents handle multi-turn conversations with session state, guardrails for safety, and Lambda-backed action groups for external integrations. The pipeline requires <500ms end-to-end latency, making post-processing verification critical to avoid blocking delays.\n\nTypical flow: Audio → STT → Bedrock Agent invoke_agent() → Vex verification → TTS. Knowledge bases provide RAG for domain expertise, while guardrails filter PII/harmful content. Session state persists across turns via agent aliases and memory configurations.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│   Amazon         │───▶│  Bedrock Agent   │\n│     Input       │    │   Transcribe     │    │  (invoke_agent) │\n└─────────────────┘    │   (STT <200ms)   │    │+Knowledge Base   │\n                       └──────────────────┘    │+Action Groups    │\n                                               │+Guardrails       │\n                       ┌──────────────────┐    └─────────┬─────────┘\n                       │     Vex          │             │\n                       │   verify()       │◀────────────┘\n                       │(latency/safety)  │\n                       └──────────────────┘\n                                      │\n                       ┌──────────────────┐\n                       │   Amazon Polly   │\n                       │    (TTS)         │\n                       └──────────────────┘\n                                      │\n                               ┌──────────────┐\n                               │   Speaker    │\n                               └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups return invalid JSON schemas, causing agent parsing failures and session crashes",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() responses with vex.verify() using JSON schema validation specs"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies cause RAG to miss key context, leading to hallucinated or irrelevant voice responses",
+        "severity": "high",
+        "mitigation": "Verify retrieval relevance scores and context completeness before TTS synthesis"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Built-in guardrails miss industry-specific violations (HIPAA, finance regs), exposing compliance risks",
+        "severity": "critical",
+        "mitigation": "Layer Vex custom policy checks on conversation history and agent outputs"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Voice agents lose conversation context across STT chunks, causing incoherent multi-turn dialogue",
+        "severity": "high",
+        "mitigation": "Verify session state continuity and conversation coherence across agent invocations"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation with Session Management",
+        "description": "Invoke Bedrock Agent with persistent session state for multi-turn voice conversations",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\nagent_id = 'YOUR_AGENT_ID'\nalias_id = 'YOUR_AGENT_ALIAS'\n\nsession_state = {\n    'sessionAttributes': {\n        'conversation_history': json.dumps([\n            {'role': 'user', 'content': 'previous user input'}\n        ])\n    }\n}\n\nresponse = bedrock_agent.invoke_agent(\n    agentId=agent_id,\n    agentAliasId=alias_id,\n    sessionId='voice-session-123',\n    sessionState=session_state,\n    inputText='What\\'s my account balance?'\n)\n\ncompletion = ''\nfor event in response.get('completion'):\n    chunk = event.get('chunk', {}).get('bytes', b'').decode()\n    if chunk:\n        completion += chunk\nprint(completion)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time STT → Agent → TTS Pipeline",
+        "description": "End-to-end voice pipeline with latency tracking for sub-second requirements",
+        "code": "import boto3\nimport time\n\ntranscribe = boto3.client('transcribe')\nbedrock_agent = boto3.client('bedrock-agent-runtime')\npolly = boto3.client('polly')\n\ndef voice_pipeline(audio_chunk):\n    start_time = time.time()\n    \n    # STT\n    stt_start = time.time()\n    transcript = transcribe.start_stream_transcription(\n        LanguageCode='en-US',\n        MediaSampleRateHertz=16000,\n        AudioStream=audio_chunk\n    )['Transcript']\n    stt_latency = time.time() - stt_start\n    \n    # Agent\n    agent_start = time.time()\n    agent_response = bedrock_agent.invoke_agent(\n        agentId='AGENT_ID',\n        agentAliasId='ALIAS_ID',\n        sessionId='session-123',\n        inputText=transcript\n    )\n    agent_latency = time.time() - agent_start\n    \n    # TTS\n    tts_start = time.time()\n    speech = polly.synthesize_speech(\n        Text=agent_response['completion'],\n        OutputFormat='mp3',\n        VoiceId='Joanna'\n    )['AudioStream'].read()\n    tts_latency = time.time() - tts_start\n    \n    total_latency = time.time() - start_time\n    print(f'Latencies: STT={stt_latency:.2f}s, Agent={agent_latency:.2f}s, TTS={tts_latency:.2f}s, Total={total_latency:.2f}s')\n    \n    return speech",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Bedrock Agent Client with Session State",
+        "description": "Node.js client for Bedrock Agents with TypeScript session management",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\ninterface SessionState {\n  sessionAttributes: Record<string, string>;\n}\n\nconst invokeVoiceAgent = async (inputText: string, sessionId: string): Promise<string> => {\n  const sessionState: SessionState = {\n    sessionAttributes: {\n      conversationHistory: JSON.stringify([{ role: 'user', content: 'previous turn' }]),\n      latencyBudget: '500ms'\n    }\n  };\n\n  const command = new InvokeAgentCommand({\n    agentId: 'YOUR_AGENT_ID',\n    agentAliasId: 'YOUR_AGENT_ALIAS',\n    sessionId,\n    sessionState,\n    inputText\n  });\n\n  const response = await client.send(command);\n  let completion = '';\n\n  for await (const event of response.completion!) {\n    const chunk = event.chunk?.bytes?.toString();\n    if (chunk) completion += chunk;\n  }\n\n  return completion;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Action Group Lambda Handler with Proper Schema",
+        "description": "Lambda function for Bedrock Agent action group returning valid OpenAPI schema",
+        "code": "import json\n\ndef lambda_handler(event, context):\n    # Parse Bedrock Agent action request\n    parameters = event['parameters']\n    \n    account_id = next(p['value'] for p in parameters if p['name'] == 'accountId')\n    \n    # Business logic\n    balance = get_account_balance(account_id)\n    \n    # Return VALID JSON schema response\n    response = {\n        'accountBalance': {\n            'amount': balance,\n            'currency': 'USD',\n            'asOf': '2024-01-15T10:30:00Z'\n        },\n        'observation': f'Account balance of ${balance} retrieved successfully.'\n    }\n    \n    return {\n        'response': response,\n        'sessionState': {\n            'sessionAttributes': {\n                'lastBalanceCheck': account_id\n            }\n        }\n    }\n\ndef get_account_balance(account_id):\n    return 1250.75",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Latency Budgets and Response Appropriateness",
+        "description": "Ensure sub-second latency and domain-appropriate responses before TTS",
+        "code": "import vex\n\nfrom your_voice_pipeline import voice_pipeline\n\n@pip('vex verify --policy latency-budget')\ndef verify_voice_response(audio_chunk):\n    start_time = time.time()\n    \n    # Execute voice pipeline\n    speech_response = voice_pipeline(audio_chunk)\n    pipeline_latency = time.time() - start_time\n    \n    # Vex verification\n    result = vex.verify({\n        'input': {'audio_duration': len(audio_chunk)},\n        'output': {'response_text': speech_response['text'], 'latency_ms': pipeline_latency * 1000},\n        'policy': {\n            'latency_budget': {'lt': 500},  # <500ms\n            'response_appropriateness': {\n                'prompt': 'Is this a helpful banking response?',\n                'min_score': 0.8\n            }\n        }\n    })\n    \n    if result.passed:\n        return speech_response\n    else:\n        return {'text': 'Sorry, let me check that for you.', 'fallback': True}",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence and Safety Filtering",
+        "description": "Verify multi-turn coherence and apply domain-specific safety guardrails",
+        "code": "import vex\n\nconversation_history = [\n    {'role': 'user', 'content': 'Check my balance'},\n    {'role': 'assistant', 'content': '$1250.75'}\n]\n\nresult = vex.verify({\n    'input': {\n        'current_user_input': 'Transfer $1000 to savings',\n        'conversation_history': conversation_history\n    },\n    'output': {\n        'proposed_response': 'Confirming $1000 transfer to savings account.'\n    },\n    'policy': {\n        'coherence': {\n            'prompt': 'Does this response logically follow the conversation?',\n            'min_score': 0.85\n        },\n        'safety_filter': {\n            'denylist': ['transfer.*large.*amount', 'wire.*transfer'],\n            'financial_policy': {\n                'max_transfer_amount': 500,\n                'require_verification': True\n            }\n        }\n    }\n})\n\nif result.passed:\n    # Safe to send to TTS\n    pass",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification for Bedrock Responses",
+        "description": "Verify agent responses in Node.js voice pipeline",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nconst verifyAgentResponse = async (agentResponse: string, sessionState: any, latencyMs: number) => {\n  const result = await vex.verify({\n    input: {\n      sessionId: sessionState.sessionId,\n      conversationLength: sessionState.turnCount || 0,\n      latencyMs\n    },\n    output: {\n      agentResponse,\n      responseLength: agentResponse.length\n    },\n    policy: {\n      latencyBudget: { lt: 300 },\n      voiceAppropriateness: {\n        prompt: 'Is this response suitable for voice interface? (concise, clear)',\n        minScore: 0.9\n      },\n      sessionContinuity: {\n        prompt: `Previous context: ${JSON.stringify(sessionState.history.slice(-3))}\\nCurrent response coherent?`,\n        minScore: 0.8\n      }\n    }\n  });\n\n  return {\n    passed: result.passed,\n    safeToSynthesize: result.passed && latencyMs < 300,\n    issues: result.issues\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Voice Agents",
+      "description": "Add Vex verification to your Bedrock Agents pipeline in 5 minutes - pip install vex-sdk && vex.verify(your_agent_response)"
+    }
+  }
+}

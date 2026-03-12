@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Flowise Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Flowise pii-filtering",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, PII Filtering for AI Agents manifests as unfiltered personal data leaking through chatflow chains, vector store retrievals, and custom tool nodes due to the platform's drag-and-drop nature that bypasses traditional validation layers. Agents often process sensitive user inputs without regex or NER-based scrubbing, especially in multi-agent handoffs where context flows unchecked between nodes. This creates silent PII exposure in RAG pipelines and conversational flows, amplifying risks in production deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains producing unvalidated intermediate outputs",
+        "symptom": "LLM Response Parser nodes output raw user PII from previous Conversation Chain nodes without filtering",
+        "impact": "Customer emails/phone numbers appear in agent responses and logs"
+      },
+      {
+        "scenario": "Vector store retrieval returning low-relevance documents",
+        "symptom": "Document Loader nodes ingest unscrubbed PDFs containing PII that gets retrieved by Vector Store Retriever",
+        "impact": "Historical customer data exposed in unrelated queries"
+      },
+      {
+        "scenario": "Custom tool nodes failing silently without error propagation",
+        "symptom": "Custom Function Tool nodes process PII inputs but return unfiltered results to agent",
+        "impact": "API keys and credentials passed through tools without validation"
+      },
+      {
+        "scenario": "Multi-agent sequential flow losing context between agent handoffs",
+        "symptom": "Agent handoff between Conversational Agent and Zero-Shot Agent drops PII filtering between chains",
+        "impact": "PII accumulates across agent conversations without cleanup"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Chatflow Intermediate Output Monitor",
+        "description": "Injects into Flowise callback system to scan all node outputs for PII patterns using regex and Flowise's execution context",
+        "code": "import { CallbackManager } from 'flowise';\n\nconst piiPatterns = [\n  /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n  /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g,\n  /\\b\\d{16}\\b/g\n];\n\nexport class PIIFlowiseCallback extends CallbackManager {\n  async onChainEnd(inputs: any, outputs: any, runId: string) {\n    const outputText = outputs.text || outputs.output || JSON.stringify(outputs);\n    const piiMatches = piiPatterns.flatMap(pattern => \n      (outputText.match(pattern) || []).map(match => ({pattern, match}))\n    );\n    \n    if (piiMatches.length > 0) {\n      console.error(`[PII DETECTED] Run ${runId}:`, piiMatches);\n      throw new Error(`PII found in chain output: ${piiMatches.map(m => m.match).join(', ')}`);\n    }\n  }\n\n  async onRetrieverEnd(documents: any[], runId: string) {\n    documents.forEach((doc, i) => {\n      const content = doc.pageContent || doc.content;\n      const piiMatches = piiPatterns.flatMap(pattern => \n        (content.match(pattern) || []).map(match => match)\n      );\n      if (piiMatches.length > 0) {\n        console.warn(`[PII IN DOC] Doc ${i}:`, piiMatches);\n      }\n    });\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Custom Tool Input Scanner",
+        "description": "Wraps Flowise Custom Tool nodes to validate inputs before execution and log PII attempts",
+        "code": "import { Tool } from 'flowise';\n\nexport class SecureCustomTool extends Tool {\n  name = 'secure-tool';\n  description = 'PII-safe custom tool';\n  \n  private piiRegex = /\\b(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}|\\d{3}[-.]?\\d{3}[-.]?\\d{4})\\b/g;\n  \n  async _call(input: string, callbacks: any) {\n    const piiMatches = input.match(this.piiRegex);\n    if (piiMatches) {\n      callbacks.handleLog(`[PII BLOCKED] ${piiMatches.join(', ')}`);\n      return `Input contains sensitive data: ${piiMatches.length} matches found. Scrubbed response.`;\n    }\n    \n    // Original tool logic\n    return await this.originalCall(input);\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Store PII Audit",
+        "description": "Scans Flowise vector store embeddings for PII contamination during retrieval",
+        "code": "import { VectorStoreRetriever } from 'flowise';\n\nexport class PIIAwareRetriever extends VectorStoreRetriever {\n  private piiPatterns = [\n    /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/gi,\n    /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g\n  ];\n  \n  async getRelevantDocuments(query: string): Promise<any[]> {\n    const docs = await super.getRelevantDocuments(query);\n    \n    const auditResults = docs.map((doc, index) => {\n      const content = doc.pageContent || doc.content;\n      const matches = this.piiPatterns.flatMap(p => \n        (content.match(p) || []).map(m => m)\n      );\n      return { index, doc, piiCount: matches.length, samples: matches.slice(0, 3) };\n    }).filter(r => r.piiCount > 0);\n    \n    if (auditResults.length > 0) {\n      console.error('[VECTOR STORE PII]', auditResults);\n    }\n    \n    return docs;\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Scrubber Middleware Node",
+        "description": "Custom Flowise node that sits between all LLM chains to automatically redact PII before downstream processing",
+        "code": "import { BaseChatModel } from 'flowise';\n\nexport class PIIFilterNode {\n  private scrubber = {\n    email: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/gi,\n    phone: /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g,\n    ssn: /\\b\\d{3}-?\\d{2}-?\\d{4}\\b/g\n  };\n  \n  filter(content: string): string {\n    let cleaned = content;\n    Object.entries(this.scrubber).forEach(([type, pattern]) => {\n      cleaned = cleaned.replace(pattern, `[${type.toUpperCase()}_REDACTED]`);\n    });\n    return cleaned;\n  }\n  \n  async processInput(input: any): Promise<any> {\n    if (typeof input === 'string') {\n      return this.filter(input);\n    }\n    if (input.text) {\n      input.text = this.filter(input.text);\n    }\n    return input;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Agent Handoff Wrapper",
+        "description": "Wraps multi-agent flows to ensure PII is scrubbed during context handoffs between agents",
+        "code": "import { AgentExecutor } from 'flowise';\n\nexport class SecureAgentExecutor extends AgentExecutor {\n  private piiRedactor = /\\b(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}|\\d{3}[-.]?\\d{3}[-.]?\\d{4})\\b/gi;\n  \n  async invoke(input: any, config?: any) {\n    // Scrub input before agent processing\n    const safeInput = {\n      ...input,\n      input: input.input.replace(this.piiRedactor, '[REDACTED]')\n    };\n    \n    const result = await super.invoke(safeInput, config);\n    \n    // Scrub output before returning\n    return {\n      ...result,\n      output: result.output.replace(this.piiRedactor, '[REDACTED]')\n    };\n  }\n  \n  async handoffContext(fromAgent: string, toAgent: string, context: any) {\n    return {\n      ...context, \n      memory: this.scrubMemory(context.memory)\n    };\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Document Preprocessing Pipeline",
+        "description": "Automatically scrubs PII from documents before they enter Flowise vector stores",
+        "code": "import { DocumentLoader } from 'flowise';\n\nexport class SecureDocumentLoader extends DocumentLoader {\n  private piiReplacements = {\n    email: '[EMAIL_REDACTED]',\n    phone: '[PHONE_REDACTED]',\n    creditCard: '[CARD_REDACTED]'\n  };\n  \n  async loadAndSplit(): Promise<any[]> {\n    const docs = await super.loadAndSplit();\n    \n    return docs.map(doc => {\n      let content = doc.pageContent;\n      \n      // Apply PII redaction\n      content = content.replace(/\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/gi, this.piiReplacements.email);\n      content = content.replace(/\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g, this.piiReplacements.phone);\n      content = content.replace(/\\b\\d{16}\\b/g, this.piiReplacements.creditCard);\n      \n      return {\n        ...doc,\n        pageContent: content,\n        metadata: { ...doc.metadata, pii_scrubbed: true }\n      };\n    });\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a callback handler in Flowise chatflow configuration, automatically monitoring every node execution for PII leakage across chat chains, vector retrievals, and agent handoffs. It employs production-grade NER models and regex patterns tuned for Flowise's execution patterns, providing real-time blocking and remediation without modifying core flow logic. \n\nThe Vex SDK captures Flowise's callback events (onChainStart, onRetrieverEnd, onToolStart) and runs them through its PII detection pipeline, automatically suggesting and applying fixes like middleware insertion or document preprocessing. For multi-agent flows, Vex maintains session-level PII tracking across handoffs, ensuring comprehensive coverage that Flowise's native logging misses.\n\nDeployment takes seconds via npm install @vex_dev/sdk, with Vex automatically discovering all PII exposure points and generating remediation PRs to your Flowise flow definitions.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { FlowiseChatflow } from 'flowise';\n\n// Initialize Vex with Flowise integration\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  integrations: {\n    flowise: {\n      enabled: true,\n      piiRules: ['email', 'phone', 'ssn', 'credit_card'],\n      autoRemediate: true\n    }\n  }\n});\n\n// Add Vex as callback handler to Flowise chatflow\nconst chatflow = new FlowiseChatflow({\n  // your flow config\n});\n\nchatflow.callbackManager.addHandler({\n  handleChainStart: (chain, inputs) => {\n    vex.track('flowise.chain_start', { inputs });\n  },\n  \n  handleChainEnd: async (outputs, runId) => {\n    const issues = await vex.detectPII(outputs);\n    if (issues.length > 0) {\n      await vex.blockPII(runId, issues);\n      throw new Error('Vex: PII detected and blocked');\n    }\n  },\n  \n  handleRetrieverEnd: (documents) => {\n    vex.scanDocuments(documents, 'vector_retrieval');\n  }\n});\n\n// Vex auto-generates remediation\nvex.on('pii_fix_available', async (fix) => {\n  console.log('Vex PII Fix:', fix.code);\n  await vex.applyFix(fix);\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds to automatically secure all your Flowise agents against PII leakage."
+    }
+  }
+}

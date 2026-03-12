@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in LangChain Agents",
+    "description": "How to detect and fix ai agent testing strategies in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "LangChain testing-strategies",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Testing Strategies in LangChain reveal critical reliability gaps in agentic workflows, where dynamic tool usage and multi-step reasoning amplify issues like infinite loops and hallucinations. LangChain's AgentExecutor and RAG chains expose unique failure modes due to their reliance on LLM-driven decisions and stateful execution. Vex provides seamless integration to catch these issues early in development.",
+    "howItManifests": [
+      {
+        "scenario": "Tool call loops in agent executors",
+        "symptom": "AgentExecutor enters infinite recursion calling the same tool repeatedly",
+        "impact": "Infinite execution, memory exhaustion, and timeout failures"
+      },
+      {
+        "scenario": "Hallucination in RAG retrieval chains",
+        "symptom": "RetrievalQA chain returns fabricated document content or metadata",
+        "impact": "Downstream reasoning based on false premises, incorrect answers"
+      },
+      {
+        "scenario": "Context window overflow in long conversations",
+        "symptom": "ConversationalRetrievalChain truncates history beyond token limit",
+        "impact": "Loss of conversation context leads to incoherent responses"
+      },
+      {
+        "scenario": "Inconsistent output formatting across chain steps",
+        "symptom": "SequentialChain outputs malformed JSON or varying structures",
+        "impact": "Parsing failures in downstream systems and API consumers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Loop Detector",
+        "description": "Monitors AgentExecutor tool calls for repeated patterns indicating loops",
+        "code": "from langchain.agents import AgentExecutor\nfrom vex import verify\n\n@verify(test_name='agent-loop-detection')\ndef test_agent_loop(chain: AgentExecutor, input_query: str):\n    result = chain.invoke({\"input\": input_query})\n    tool_calls = chain.agent.llm_with_tools.last_token.tool_calls\n    \n    # Detect if same tool called >3 times consecutively\n    if len(tool_calls) > 3:\n        consecutive_same = all(\n            tool_calls[i].name == tool_calls[i+1].name \n            for i in range(len(tool_calls)-1)\n        )\n        if consecutive_same:\n            raise AssertionError('Agent loop detected')\n    \n    return result",
+        "language": "python"
+      },
+      {
+        "name": "RAG Hallucination Check",
+        "description": "Validates RetrievalQA source documents against LLM-generated content",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.schema import Document\n\n@verify(test_name='rag-hallucination')\ndef test_rag_hallucination(retriever_chain: RetrievalQA, query: str):\n    result = retriever_chain({\"query\": query})\n    \n    generated_content = result['result']\n    source_docs = result['source_documents']\n    \n    # Check if generated content contains phrases not in source docs\n    source_text = ' '.join([doc.page_content for doc in source_docs])\n    hallucinated_phrases = [\n        phrase for phrase in generated_content.split('. ')\n        if phrase.strip() and phrase.lower() not in source_text.lower()\n    ]\n    \n    if len(hallucinated_phrases) > 2:\n        raise AssertionError(f'Hallucination detected: {hallucinated_phrases[:3]}')\n    \n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Context Window Monitor",
+        "description": "Tracks token usage in ConversationalRetrievalChain to prevent overflow",
+        "code": "from langchain.chains import ConversationalRetrievalChain\nfrom langchain.callbacks import get_openai_callback\n\n@verify(test_name='context-overflow')\ndef test_context_window(chain: ConversationalRetrievalChain, chat_history, query):\n    with get_openai_callback() as cb:\n        result = chain({\"question\": query, \"chat_history\": chat_history})\n    \n    total_tokens = cb.total_tokens\n    if total_tokens > 12000:  # Near GPT-4 limit\n        raise AssertionError(f'Context overflow: {total_tokens} tokens used')\n    \n    return {'result': result, 'tokens_used': total_tokens}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Iterations Guard",
+        "description": "Prevents tool call loops with AgentExecutor max_iterations",
+        "code": "from langchain.agents import AgentExecutor, create_react_agent\nfrom langchain.tools import Tool\n\n# Safe agent configuration\nagent_executor = AgentExecutor(\n    agent=react_agent,\n    tools=tools,\n    max_iterations=5,  # Prevents infinite loops\n    max_execution_time=60,  # 60s timeout\n    handle_parsing_errors=True,\n    verbose=True\n)\n\n# Wrap with Vex verification\nresult = vex.verify(lambda: agent_executor.invoke({\"input\": query}))",
+        "language": "python"
+      },
+      {
+        "name": "RAG Grounding Fix",
+        "description": "Enforces strict citation and source verification in RetrievalQA",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.prompts import PromptTemplate\n\n# Grounded RAG prompt\nrag_prompt = PromptTemplate(\n    input_variables=[\"context\", \"question\"],\n    template=\"\"\"Answer using ONLY the provided context. \n    If answer not in context, say \"I don't know\". \n    Cite sources with [1], [2] etc.\n\n    Context: {context}\n    Question: {question}\n    Answer:\"\"\"\n)\n\nqa_chain = RetrievalQA.from_chain_type(\n    llm=llm,\n    chain_type=\"stuff\",\n    retriever=vectorstore.as_retriever(),\n    chain_type_kwargs={\"prompt\": rag_prompt},\n    return_source_documents=True\n)",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Memory Trimmer",
+        "description": "Automatically trims chat history to prevent context overflow",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\nfrom langchain.chains import ConversationalRetrievalChain\n\n# Token-aware memory\nmemory = ConversationSummaryBufferMemory(\n    llm=llm,\n    max_token_limit=4000,  # Auto-trims when exceeded\n    memory_key=\"chat_history\",\n    return_messages=True\n)\n\nconversation_chain = ConversationalRetrievalChain.from_llm(\n    llm=llm,\n    retriever=vectorstore.as_retriever(),\n    memory=memory,\n    max_tokens_limit=10000  # Safety buffer\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex transforms LangChain agent testing from manual debugging to automated reliability pipelines. By wrapping chain.invoke() and agent_executor.invoke() calls with vex.verify(), you catch tool loops, hallucinations, and context issues before they reach production. Vex's LangChain integration automatically instruments callbacks to monitor token usage, tool call patterns, and output consistency across agent executions.\n\nThe platform runs comprehensive test suites covering your four key failure modes, generating actionable remediation code and confidence scores for each chain. Vex's agent-specific detectors analyze execution traces to identify subtle issues like cyclic tool dependencies that traditional unit tests miss. Integration takes minutes with pip install vex-sdk, and results integrate directly into your CI/CD workflows.\n\nBeyond detection, Vex auto-generates fixed chain configurations with optimal parameters for your specific use case, reducing iteration cycles from days to minutes.",
+      "code": "from vex import verify\nfrom langchain.agents import AgentExecutor\nfrom langchain.chains import RetrievalQA, ConversationalRetrievalChain\n\n# Comprehensive agent testing suite\n@verify(test_name='full-agent-suite', run_parallel=True)\ndef test_langchain_agent_pipeline(agent: AgentExecutor, rag_chain: RetrievalQA, conv_chain):\n    # Test 1: Agent loop detection\n    agent_result = agent.invoke({\"input\": \"What's the weather?\"})\n    \n    # Test 2: RAG hallucination check\n    rag_result = rag_chain({\"query\": \"Company revenue 2024?\"})\n    \n    # Test 3: Context overflow\n    conv_result = conv_chain({\"question\": \"Follow up on previous\", \"chat_history\": []})\n    \n    return {\n        'agent': agent_result,\n        'rag': rag_result,\n        'conversation': conv_result\n    }\n\n# Run automated testing\nresults = test_langchain_agent_pipeline(my_agent, my_rag, my_conv_chain)\nprint('✅ All LangChain agent tests passed with Vex verification')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today with pip install vex-sdk and eliminate LangChain agent failures before they impact users"
+    }
+  }
+}

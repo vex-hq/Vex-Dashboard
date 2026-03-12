@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in BeeAI Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "BeeAI rag-retrieval-quality",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI agents, RAG Retrieval Quality Optimization issues manifest as poor chunk relevance during tool calls and memory retrieval, leading to hallucinated responses and degraded agent performance. BeeAI's memory system and tool integration amplify these problems when vector stores return irrelevant context, causing agents to reason over noisy data. This deep-dive covers detection patterns specific to BeeAI's event system and APIs.",
+    "howItManifests": [
+      {
+        "scenario": "Long-context tool calls with irrelevant chunks",
+        "symptom": "BeeAI's `ToolContext` returns chunks with cosine similarity < 0.7",
+        "impact": "Agent generates incorrect tool parameters, causing API failures"
+      },
+      {
+        "scenario": "Memory retrieval during multi-turn conversations",
+        "symptom": "BeeAI `MemoryRetriever` scores drop below 0.6 for session history",
+        "impact": "Agent loses conversation context, repeats questions"
+      },
+      {
+        "scenario": "Hybrid search failing on semantic queries",
+        "symptom": "BeeAI `VectorStore.query()` returns empty or mismatched results",
+        "impact": "Fallback to parametric generation creates hallucinations"
+      },
+      {
+        "scenario": "Chunk size mismatch with embedding model",
+        "symptom": "BeeAI `DocumentChunker` produces chunks > 512 tokens for granite embeddings",
+        "impact": "Truncated embeddings cause retrieval drift"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Score Monitoring",
+        "description": "Capture BeeAI VectorStore query events and alert on average similarity < 0.75",
+        "code": "from beeai import Agent\nfrom vex_sdk import VexListener\n\nclass RetrievalQualityListener(VexListener):\n    def on_retrieval_complete(self, event):\n        scores = [hit.score for hit in event.retrieval_results]\n        avg_score = sum(scores) / len(scores)\n        if avg_score < 0.75:\n            self.vex.capture_metric('rag_retrieval_score', avg_score)\n            self.vex.flag_issue('LOW_RETRIEVAL_QUALITY', f'Avg score: {avg_score}')\n\nagent = Agent()\nagent.add_event_listener(RetrievalQualityListener())",
+        "language": "python"
+      },
+      {
+        "name": "Chunk Relevance Validator",
+        "description": "Validate BeeAI ToolContext chunks contain query keywords using cosine similarity",
+        "code": "from beeai.tools import ToolContext\nfrom vex_sdk import VexListener\nimport numpy as np\nfrom sklearn.metrics.pairwise import cosine_similarity\n\nclass ChunkValidator(VexListener):\n    def on_tool_context_ready(self, event: ToolContext):\n        query_emb = event.query_embedding\n        chunk_embs = [chunk.embedding for chunk in event.chunks]\n        similarities = cosine_similarity([query_emb], chunk_embs)[0]\n        \n        low_relevance_chunks = sum(s < 0.7 for s in similarities)\n        if low_relevance_chunks / len(event.chunks) > 0.3:\n            self.vex.flag_issue('IRRELEVANT_CHUNKS', \n                f'{low_relevance_chunks}/{len(event.chunks)} chunks < 0.7 similarity')",
+        "language": "python"
+      },
+      {
+        "name": "Memory Retrieval Drift Detector",
+        "description": "Monitor BeeAI MemoryRetriever score decay over conversation turns",
+        "code": "from beeai.memory import MemoryRetriever\nfrom vex_sdk import VexListener\n\nclass MemoryDriftDetector(VexListener):\n    def __init__(self):\n        self.session_scores = {}\n    \n    def on_memory_retrieval(self, event):\n        session_id = event.session_id\n        scores = [doc.score for doc in event.documents]\n        avg_score = sum(scores) / len(scores)\n        \n        if session_id not in self.session_scores:\n            self.session_scores[session_id] = []\n        self.session_scores[session_id].append(avg_score)\n        \n        if len(self.session_scores[session_id]) > 5:\n            trend = np.mean(self.session_scores[session_id][-3:]) - np.mean(self.session_scores[session_id][:3])\n            if trend < -0.1:\n                self.vex.flag_issue('MEMORY_DRIFT', f'Score trend: {trend:.3f}')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Chunk Size Optimization",
+        "description": "Adjust BeeAI DocumentChunker size based on embedding model limits",
+        "code": "from beeai.document import DocumentChunker\nfrom beeai.embeddings import GraniteEmbedding\n\nchunker = DocumentChunker(\n    chunk_size=384,  # Optimized for granite-3b\n    chunk_overlap=64,\n    embedding_model=GraniteEmbedding(model='ibm/granite-3b')\n)\n\n# Register with agent\nagent.document_processor = chunker\n\n# Vex validation\nvex.listener.on_chunking_complete(lambda event: \n    vex.capture_metric('chunk_token_count', \n        sum(len(c.text.split()) for c in event.chunks)))",
+        "language": "python"
+      },
+      {
+        "name": "Hybrid Search with Reranking",
+        "description": "Combine BeeAI keyword + vector search with cross-encoder reranking",
+        "code": "from beeai.retrievers import HybridRetriever\nfrom sentence_transformers import CrossEncoder\n\nreranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')\n\nclass RerankedHybridRetriever(HybridRetriever):\n    def retrieve(self, query, k=5):\n        # Get top 20 candidates\n        candidates = super().retrieve(query, k=20)\n        \n        # Rerank\n        pairs = [[query, doc.text] for doc in candidates]\n        scores = reranker.predict(pairs)\n        \n        # Return top k\n        ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)\n        return [doc for doc, score in ranked[:k]]\n\nagent.retriever = RerankedHybridRetriever()",
+        "language": "python"
+      },
+      {
+        "name": "Query Rewrite for Better Retrieval",
+        "description": "Automatically rewrite vague queries using BeeAI's LLM before retrieval",
+        "code": "from beeai.tools import Tool\nfrom beeai.llm import GraniteLLM\n\nrewrite_llm = GraniteLLM(model='ibm/granite-3b')\n\nclass OptimizedRetriever:\n    def __init__(self, retriever):\n        self.retriever = retriever\n    \n    def retrieve(self, query, **kwargs):\n        # Rewrite query for better retrieval\n        rewrite_prompt = f\"\"\"\n        Rewrite this query to maximize retrieval quality:\n        Original: {query}\n        Optimized:\n        \"\"\"\n        \n        rewritten = rewrite_llm.generate(rewrite_prompt, max_tokens=50)\n        return self.retriever.retrieve(rewritten, **kwargs)\n\nagent.retriever = OptimizedRetriever(agent.retriever)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex integrates directly with BeeAI's event system as a listener, capturing retrieval scores, chunk relevance, and memory drift in real-time. It automatically baselines healthy retrieval patterns from your production traffic and alerts when scores deviate beyond 2σ. Remediation workflows trigger dynamic retriever reconfiguration, chunker optimization, and query rewriting without agent restarts.\n\nVex's BeeAI integration provides production-grade observability with one-line setup. It captures 100% of retrieval events, computes sliding window baselines, and executes auto-remediation through BeeAI's configuration API. Teams see retrieval quality dashboards and receive Slack alerts with one-click fixes.",
+      "code": "from vex_sdk import Vex\nfrom beeai import Agent\n\n# One-line Vex + BeeAI integration\nvex = Vex(api_key='vex-xxxxx')\nagent = Agent()\n\n@vex.listener()\nclass BeeAIRAGMonitor:\n    def on_retrieval(self, event):\n        # Auto-baseline retrieval quality\n        vex.baseline('rag_avg_score', event.avg_score)\n        \n        # Auto-remediate low quality\n        if event.avg_score < vex.baseline('rag_avg_score') - 2 * vex.std('rag_avg_score'):\n            agent.retriever = OptimizedRetriever(agent.retriever)\n            vex.notify('Auto-upgraded retriever due to quality drift')\n        \n# Deploy\nagent.add_event_listener(vex.listener())\nagent.run()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install beeai-framework vex-sdk` and enable RAG optimization in 3 lines of code."
+    }
+  }
+}

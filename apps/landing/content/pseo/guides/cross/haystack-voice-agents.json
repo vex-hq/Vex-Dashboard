@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Haystack + Vex Guardrails",
+    "description": "Learn how to build voice agents with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack voice agents",
+      "Haystack guardrails",
+      "voice agents reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Haystack enables real-time conversational AI pipelines that process speech-to-text, reason with LLMs, and generate text-to-speech responses. Guardrails are essential due to the high-stakes nature of voice interactions, where latency must stay sub-second while ensuring response safety, coherence, and factual accuracy. Vex integration provides runtime verification to catch hallucinations, irrelevance, and safety violations before they reach users.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Haystack",
+      "description": "Voice agents in Haystack follow a modular pipeline architecture optimized for low latency. Audio input is transcribed via a speech-to-text component (e.g., Whisper), feeding into a retrieval-augmented generation (RAG) pipeline with vector retrievers and LLM generators. The output passes through safety filters before text-to-speech synthesis (e.g., ElevenLabs or Piper). Custom components handle session state for conversation coherence.\n\nThe pipeline enforces strict latency budgets: STT <200ms, retrieval <100ms, generation <400ms, TTS <200ms. Haystack's async execution and connection pooling ensure sub-second end-to-end latency. Vex slots in as a verification component post-generation to validate outputs against multiple criteria before TTS.\n\nKey to reliability is pipeline orchestration via Haystack's Pipeline class, with streaming support for partial outputs and error recovery mechanisms.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Audio Input   │───▶│ Speech-to-Text   │───▶│   Haystack RAG   │\n│     (Mic)       │    │   (Whisper)      │    │ Retriever+LLM    │\n└─────────────────┘    └──────────────────┘    │                  │\n                                               │   + Vex Guard    │\n┌─────────────────┐    ┌──────────────────┐    │   (Verify)      │\n│ Conversation    │◀───│ Text-to-Speech   │◀───│                  │\n│     State       │    │   (ElevenLabs)   │    └──────────────────┘\n└─────────────────┘    └──────────────────┘\n\nLatency Budget: STT(200ms) → RAG(500ms) → Vex(50ms) → TTS(200ms) = <1s"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "STT returns audio chunks instead of text, breaking retriever input expectations",
+        "severity": "critical",
+        "mitigation": "Vex type validation component enforces Document/List[Document] contracts"
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Voice queries retrieve off-topic docs due to acoustic noise or query ambiguity",
+        "severity": "high",
+        "mitigation": "Vex semantic relevance scoring with cosine threshold >0.75"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM fabricates medical/legal advice outside RAG context in voice responses",
+        "severity": "critical",
+        "mitigation": "Vex context faithfulness verification using entailment models"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "Retriever or generator exceeds 500ms, breaking real-time voice interaction",
+        "severity": "high",
+        "mitigation": "Vex timeout enforcement with fallback responses"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent Pipeline",
+        "description": "Core Haystack pipeline with STT → RAG → TTS. Missing safety checks.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.utils import ComponentDevice\n\n# Voice pipeline without guardrails\nvoice_pipeline = Pipeline()\nvoice_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever(document_store))\nvoice_pipeline.add_component(\"generator\", OpenAIGenerator(api_key=\"os.getenv('OPENAI_API_KEY')\"))\nvoice_pipeline.connect(\"retriever\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Response for Low Latency",
+        "description": "Async streaming ensures sub-second perceived latency for voice UX.",
+        "code": "import asyncio\nfrom haystack import Pipeline\n\nasync def stream_voice_response(audio_text: str):\n    result = await voice_pipeline.arun(\n        query=audio_text,\n        generate_kwargs={\"stream\": True}\n    )\n    async for token in result[\"generation\"][\"streams\"]:\n        yield token  # Stream to TTS incrementally",
+        "language": "python"
+      },
+      {
+        "title": "Conversation State Management",
+        "description": "Maintains context across voice turns using session store.",
+        "code": "from haystack.components.builders import ChatPromptBuilder\n\nprompt_builder = ChatPromptBuilder(\n    template=\"\"\"Conversation History:\\n{{ history }}\\nUser: {{ query }}\\nAssistant:\"\"\",\n    history_template=\"{{ messages }}\"\n)\nvoice_pipeline.add_component(\"prompt_builder\", prompt_builder)\nvoice_pipeline.connect(\"chat_history\", \"prompt_builder\")",
+        "language": "python"
+      },
+      {
+        "title": "Latency Monitoring Wrapper",
+        "description": "Wraps components to enforce real-time constraints.",
+        "code": "import time\nfrom haystack import Pipeline\n\nclass LatencyMonitor:\n    def __init__(self, max_latency=0.5):\n        self.max_latency = max_latency\n    \n    async def __call__(self, **kwargs):\n        start = time.time()\n        result = await self.wrapped_component(**kwargs)\n        if time.time() - start > self.max_latency:\n            raise TimeoutError(\"Latency budget exceeded\")\n        return result",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Custom Verification Component",
+        "description": "Add Vex as pipeline component for multi-check verification.",
+        "code": "from vex import Vex\nfrom haystack import component\n\n@component\nclass VexVerifier:\n    def __init__(self):\n        self.vex = Vex(api_key=\"your-vex-key\")\n    \n    @component.output_types(verified=str, score=float)\n    async def run(self, response: str, context: list, query: str) -> dict:\n        checks = [\n            \"response_appropriateness\",\n            \"context_faithfulness\",\n            \"safety_filter\",\n            \"latency_budget\"\n        ]\n        verdict = await self.vex.verify(\n            input=query,\n            output=response,\n            context=context,\n            checks=checks\n        )\n        return {\n            \"verified\": response if verdict.passed else \"BLOCKED\",\n            \"score\": verdict.score\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Pipeline with Vex Integration",
+        "description": "Full pipeline inserting Vex post-generation, pre-TTS.",
+        "code": "voice_pipeline = Pipeline()\nvoice_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever(store))\nvoice_pipeline.add_component(\"generator\", OpenAIGenerator())\nvoice_pipeline.add_component(\"vex\", VexVerifier())\nvoice_pipeline.add_component(\"tts\", TextToSpeech())\n\nvoice_pipeline.connect(\"retriever\", \"generator\")\nvoice_pipeline.connect(\"generator\", \"vex\")\nvoice_pipeline.connect(\"vex.verified\", \"tts.text\")\n\n# Run with safety\nresult = voice_pipeline.run(query=transcribed_speech)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Latency + Safety Checks",
+        "description": "Vex enforces both functional and non-functional requirements.",
+        "code": "async def safe_voice_turn(audio_input: bytes, session_id: str):\n    transcribed = await stt_pipeline.run(audio_input)\n    \n    result = await voice_pipeline.arun(\n        query=transcribed[\"text\"],\n        session_id=session_id\n    )\n    \n    if result[\"vex\"][\"verified\"] == \"BLOCKED\":\n        return await tts.synthesize(\"I cannot answer that safely.\")\n    \n    return await tts.synthesize(result[\"tts\"][\"audio\"])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Voice Agents",
+      "description": "Add Vex verification to your voice pipelines today for production-grade reliability."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Smolagents Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Smolagents agent-auth",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, AI Agent Authentication and Authorization issues manifest when agents generate code that bypasses or incorrectly handles auth mechanisms, such as using hardcoded credentials or skipping OAuth flows in tool calls. The framework's code-generation approach amplifies risks as agents produce executable Python that interacts with APIs without proper token validation or scope checking. This leads to credential leakage, unauthorized API access, and privilege escalation in multi-agent workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Agent generates API call with hardcoded API key",
+        "symptom": "Code contains literal strings like 'Bearer sk-12345...' in requests",
+        "impact": "Immediate credential exposure in logs and version control"
+      },
+      {
+        "scenario": "Tool call skips OAuth token refresh logic",
+        "symptom": "Expired token used without refresh_token flow",
+        "impact": "Silent auth failures cascade through multi-step reasoning"
+      },
+      {
+        "scenario": "Agent assumes admin privileges in permission checks",
+        "symptom": "Missing scope validation before resource access",
+        "impact": "Privilege escalation to unauthorized endpoints"
+      },
+      {
+        "scenario": "Multi-agent handoff without auth context propagation",
+        "symptom": "Downstream agents lack valid session tokens",
+        "impact": "Workflow failure after first auth-dependent step"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Hardcoded Credential Scanner",
+        "description": "Detects API keys, tokens, and secrets in generated agent code using regex patterns specific to common auth providers",
+        "code": "import re\n\ndef scan_hardcoded_credentials(code: str) -> list:\n    patterns = [\n        r'Bearer\\s+[a-zA-Z0-9_-]{20,}',  # Generic bearer\n        r'[sk|ak]-[a-zA-Z0-9]{48}',       # OpenAI/Anthropic\n        r'ghp_[a-zA-Z0-9]{36}',           # GitHub\n        r'AIza[0-9A-Za-z_-]{35}'          # Google\n    ]\n    findings = []\n    for pattern in patterns:\n        matches = re.finditer(pattern, code)\n        for match in matches:\n            findings.append({\n                'type': 'hardcoded_credential',\n                'match': match.group(),\n                'line': code[:match.start()].count('\\n') + 1\n            })\n    return findings\n\n# Usage\nagent_code = agent.run('call weather API')\nprint(scan_hardcoded_credentials(agent_code))",
+        "language": "python"
+      },
+      {
+        "name": "Missing OAuth Flow Detector",
+        "description": "Identifies API calls lacking token refresh or scope validation patterns in generated code",
+        "code": "def detect_missing_oauth_flow(code: str) -> dict:\n    import ast\n    tree = ast.parse(code)\n    \n    api_calls = []\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):\n            if node.func.attr in ['get', 'post', 'request']:\n                api_calls.append(node)\n    \n    missing_auth = []\n    for call in api_calls:\n        # Check for auth headers or token params\n        has_auth = any(\n            isinstance(arg, ast.Constant) and 'auth' in str(arg.value).lower() or\n            isinstance(arg, ast.Constant) and 'token' in str(arg.value).lower()\n            for arg in ast.walk(call)\n        )\n        if not has_auth:\n            missing_auth.append(call)\n    \n    return {'missing_oauth_calls': len(missing_auth), 'total_calls': len(api_calls)}",
+        "language": "python"
+      },
+      {
+        "name": "Privilege Escalation Pattern Matcher",
+        "description": "Detects code assuming elevated permissions without scope validation",
+        "code": "PRIVILEGE_WORDS = ['admin', 'root', 'superuser', 'owner', 'all']\nADMIN_ENDPOINTS = ['/admin', '/users', '/delete', '/modify']\n\ndef detect_privilege_escalation(code: str) -> list:\n    lines = code.split('\\n')\n    issues = []\n    for i, line in enumerate(lines):\n        has_privilege = any(word in line.lower() for word in PRIVILEGE_WORDS)\n        has_admin_endpoint = any(endpoint in line for endpoint in ADMIN_ENDPOINTS)\n        no_scope_check = 'scope' not in line.lower() and 'permission' not in line.lower()\n        \n        if (has_privilege or has_admin_endpoint) and no_scope_check:\n            issues.append({\n                'line': i + 1,\n                'code': line.strip(),\n                'risk': 'potential_privilege_escalation'\n            })\n    return issues",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Secure Credential Vault Integration",
+        "description": "Replace hardcoded credentials with environment variable loading and secret management",
+        "code": "import os\nfrom dotenv import load_dotenv\n\nclass SecureAuth:\n    def __init__(self):\n        load_dotenv()\n    \n    @property\n    def api_key(self):\n        key = os.getenv('API_KEY')\n        if not key:\n            raise ValueError('API_KEY not set in environment')\n        return key\n    \n    def get_headers(self):\n        return {'Authorization': f'Bearer {self.api_key}'}\n\n# In smolagents tool\ndef weather_tool(query):\n    auth = SecureAuth()\n    response = requests.get(\n        'https://api.weather.com/v1/current',\n        headers=auth.get_headers(),\n        params={'q': query}\n    )\n    return response.json()",
+        "language": "python"
+      },
+      {
+        "name": "OAuth Token Manager Wrapper",
+        "description": "Automatic token refresh and validation for API calls in agent-generated code",
+        "code": "import requests\nfrom requests_oauthlib import OAuth2Session\n\nclass OAuthManager:\n    def __init__(self, client_id, client_secret, token_url):\n        self.client_id = client_id\n        self.client_secret = client_secret\n        self.token_url = token_url\n        self.token = None\n    \n    def ensure_valid_token(self):\n        if not self.token or self.token.get('expires_at', 0) < time.time() + 60:\n            self.token = self._refresh_token()\n    \n    def _refresh_token(self):\n        oauth = OAuth2Session(self.client_id)\n        token = oauth.fetch_token(\n            self.token_url,\n            client_secret=self.client_secret,\n            refresh_token=self.token.get('refresh_token')\n        )\n        token['expires_at'] = time.time() + token['expires_in']\n        return token\n    \n    def make_request(self, method, url, **kwargs):\n        self.ensure_valid_token()\n        return requests.request(method, url, headers={'Authorization': f'Bearer {self.token[\"access_token\"]}'}, **kwargs)",
+        "language": "python"
+      },
+      {
+        "name": "Scoped Permission Guard",
+        "description": "Runtime permission validation before executing sensitive operations",
+        "code": "from typing import Dict, List\n\nclass PermissionGuard:\n    def __init__(self, user_scopes: List[str]):\n        self.user_scopes = set(user_scopes)\n    \n    def require_scopes(self, required_scopes: List[str], operation: str):\n        missing = set(required_scopes) - self.user_scopes\n        if missing:\n            raise PermissionError(f'Missing scopes for {operation}: {missing}')\n    \n    def admin_only(func):\n        @wraps(func)\n        def wrapper(self, *args, **kwargs):\n            self.require_scopes(['admin'], func.__name__)\n            return func(self, *args, **kwargs)\n        return wrapper\n\n# Usage in smolagents\nguard = PermissionGuard(['read:weather', 'write:reports'])\n@guard.admin_only\ndef delete_user_data(user_id):\n    # sensitive operation\n    pass",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex provides continuous verification of Smolagents workflows by wrapping agent.run() calls with vex.verify(), automatically detecting auth vulnerabilities in generated code before execution. It scans for hardcoded credentials, missing OAuth patterns, and privilege escalation risks using the detection methods above, blocking unsafe code execution. Remediation templates are automatically applied, replacing vulnerable patterns with secure credential management and OAuth flows while preserving agent reasoning capabilities.\n\nThe integration requires only pip install smolagents vex-sdk and a single wrapper around existing agent code. Vex maintains full context of multi-step reasoning chains, ensuring auth fixes don't break downstream tool calls or workflow logic. Security policies are customizable per agent type (code agents, tool agents) with automatic rollback to safe fallbacks on verification failure.",
+      "code": "from smolagents import Agent\nfrom vex_sdk import verify\n\n# Install: pip install smolagents vex-sdk\n\nagent = Agent(\n    model='gpt-4',\n    tools=[weather_tool, email_tool]\n)\n\n@verify(\n    policy='agent-auth-security',\n    block_on=['hardcoded_credentials', 'missing_oauth'],\n    auto_fix=True\n)\ndef secure_agent_run(prompt: str):\n    \"\"\"Vex-wrapped agent execution with auth verification\"\"\"\n    result = agent.run(prompt)\n    return result\n\n# Usage - automatically detects and fixes auth issues\nresponse = secure_agent_run('Get weather for NYC and email report')\nprint(response)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to automatically secure all your Smolagents auth flows with one line of code."
+    }
+  }
+}

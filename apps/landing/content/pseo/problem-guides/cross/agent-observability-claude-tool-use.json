@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Claude Tool Use Agents",
+    "description": "How to detect and fix ai agent observability in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Claude Tool Use agent-observability",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, AI agent observability challenges arise from opaque tool execution chains, parallel tool resolutions, and extended reasoning loops that obscure failure points. Early tool failures cascade through multi-step workflows, while parallel calls produce conflicting data without clear reconciliation, leading to unreliable outputs. Vex integration via wrapping Anthropic's messages.create() tool_use responses enables precise observability into these patterns.",
+    "howItManifests": [
+      {
+        "scenario": "Tool use chains producing cascading errors from early tool failures",
+        "symptom": "Initial tool call (e.g., API fetch) returns 404, but subsequent tools parse invalid data, leading to malformed final response",
+        "impact": "Agent hallucinates results or loops indefinitely, wasting tokens and compute"
+      },
+      {
+        "scenario": "Parallel tool calls returning conflicting results without resolution",
+        "symptom": "Two weather APIs return different temperatures (72°F vs 22°C); agent picks arbitrarily without validation",
+        "impact": "Inconsistent factual outputs erode user trust and downstream decision accuracy"
+      },
+      {
+        "scenario": "Extended thinking producing reasoning inconsistent with final output",
+        "symptom": "Thought trace shows 'User prefers metric units' but final tool call uses imperial units",
+        "impact": "Debugging impossible; reasoning drift leads to subtle but critical errors"
+      },
+      {
+        "scenario": "Computer use agent performing unintended actions on screen elements",
+        "symptom": "Claude clicks 'Delete' button instead of 'Save' due to similar UI labels; no intent validation",
+        "impact": "Irreversible data loss or security violations in screen automation workflows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cascade Error Tracer",
+        "description": "Detects tool chain failures by tracing error propagation through Claude's tool_use blocks",
+        "code": "import anthropic\n\nclient = anthropic.Anthropic()\n\nmessage = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    max_tokens=1024,\n    tools=[...],\n    messages=[...]\n)\n\n# Detect cascade: check if any tool input contains prior tool error\nfor block in message.content:\n    if block.type == 'tool_use':\n        prior_errors = any('error' in str(c) for c in message.content[:message.content.index(block)])\n        if prior_errors:\n            print(f'🚨 CASCADE DETECTED: Tool {block.name} after error')\n            break",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Conflict Scanner",
+        "description": "Identifies conflicting parallel tool results by semantic similarity clustering",
+        "code": "def detect_parallel_conflicts(content_blocks):\n    tool_results = [b for b in content_blocks if b.type == 'tool_result']\n    conflicts = []\n    for i, res1 in enumerate(tool_results):\n        for res2 in tool_results[i+1:]:\n            if abs(float(res1.content) - float(res2.content)) > 5:  # Threshold\n                conflicts.append((res1.tool_use_id, res2.tool_use_id))\n    return conflicts\n\n# Usage\nconflicts = detect_parallel_conflicts(message.content)\nif conflicts:\n    print(f'🚨 PARALLEL CONFLICT: {conflicts}')",
+        "language": "python"
+      },
+      {
+        "name": "Thought-Output Drift Detector",
+        "description": "Compares reasoning tokens against final tool parameters for consistency",
+        "code": "import re\n\ndef detect_thought_drift(message):\n    thoughts = [b.text for b in message.content if b.type == 'text']\n    final_tool = next((b for b in reversed(message.content) if b.type == 'tool_use'), None)\n    \n    thought_intent = re.search(r'units?:\\s*([a-zA-Z]+)', ' '.join(thoughts))\n    tool_intent = re.search(r'units?:\\s*([a-zA-Z]+)', final_tool.input if final_tool else '')\n    \n    return thought_intent.group(1) != tool_intent.group(1) if thought_intent and tool_intent else False\n\nif detect_thought_drift(message):\n    print('🚨 THOUGHT DRIFT DETECTED')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Error Boundary Wrapper",
+        "description": "Stops cascade by validating each tool result before next call",
+        "code": "def safe_tool_chain(client, messages, tools):\n    while True:\n        response = client.messages.create(\n            model=\"claude-3-5-sonnet-20240620\",\n            max_tokens=1024,\n            tools=tools,\n            messages=messages\n        )\n        \n        last_content = response.content[-1]\n        if last_content.type == 'tool_result' and 'error' in last_content.content.lower():\n            messages.append({\"role\": \"user\", \"content\": \"Tool failed. Stop and report error.\"})\n            break\n        \n        if not any(b.type == 'tool_use' for b in response.content):\n            break\n        \n        messages.extend(response.content)\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Result Validator",
+        "description": "Forces Claude to reconcile parallel tool outputs explicitly",
+        "code": "system_prompt = \"\"\"\nWhen using parallel tools:\n1. Always validate results for consistency\n2. If results conflict >5%, request authoritative source\n3. Explicitly state resolution logic\n\"\"\"\n\nresponse = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    system=system_prompt,\n    tools=tools,\n    messages=messages,\n    tool_choice=\"auto\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Intent Confirmation Gate",
+        "description": "Requires explicit confirmation before destructive screen actions",
+        "code": "def guarded_computer_use(client, screen_desc, action):\n    confirmation_prompt = f\"\"\"\nScreen: {screen_desc}\nProposed action: {action}\n\nCRITICAL: Confirm this is exactly correct. Respond ONLY 'CONFIRMED' or 'CORRECTED: [new action]'.\n\"\"\"\n    \n    confirm_resp = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=20,\n        messages=[{\"role\": \"user\", \"content\": confirmation_prompt}]\n    )\n    \n    return 'CONFIRMED' in confirm_resp.content[0].text.upper()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex automates Claude Tool Use observability by wrapping messages.create() calls with vex.verify(), providing real-time detection of cascade errors, parallel conflicts, thought drift, and unintended actions. The SDK analyzes tool_use blocks, tool_result payloads, and reasoning traces against predefined reliability specs, surfacing failures with precise stack traces and confidence scores. Remediation workflows trigger automatic retries, human-in-loop escalation, or fallback strategies, reducing MTTR from hours to seconds.\n\nIntegration requires pip install anthropic vex-sdk, then wrapping your agent loop. Vex maintains full message history context while injecting observability without modifying core logic. Dashboards provide drill-down into failure patterns across deployments.",
+      "code": "import anthropic\nimport vex\n\nclient = anthropic.Anthropic()\nvex_client = vex.Vex(api_key=\"your-vex-key\")\n\n@vex_client.verify(\n    spec={\n        \"no_cascades\": True,\n        \"parallel_consistency\": 0.9,\n        \"thought_alignment\": True,\n        \"no_unintended_actions\": True\n    }\n)\ndef reliable_claude_agent(messages, tools):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        tools=tools,\n        messages=messages\n    )\n    return response\n\n# Usage\nresult = reliable_claude_agent(messages, tools)\n# Vex auto-detects & reports issues",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK today and eliminate Claude Tool Use failures with one line of code."
+    }
+  }
+}

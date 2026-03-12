@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in LangGraph Agents",
+    "description": "How to detect and fix pii filtering for ai agents in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "LangGraph pii-filtering",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, PII Filtering failures manifest when stateful graphs propagate sensitive data like emails, phone numbers, or SSNs across nodes without sanitization, especially in cyclical workflows where unfiltered PII recirculates indefinitely. Parallel agent branches often merge raw user inputs containing PII into shared state, corrupting downstream LLM calls and external API integrations. Human-in-the-loop nodes fail to catch PII when conditional edges bypass review breakpoints, leading to data exposure in persistent checkpoints.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclical customer support agent recirculates raw chat logs",
+        "symptom": "State contains unredacted emails/phones after multiple agent turns",
+        "impact": "PII logged to persistent checkpoints and external APIs"
+      },
+      {
+        "scenario": "Parallel research agents merge scraped personal data",
+        "symptom": "Shared state accumulates SSNs, addresses from multiple branches",
+        "impact": "Downstream LLM calls expose PII in embeddings and vector stores"
+      },
+      {
+        "scenario": "Human review breakpoint bypassed by confidence routing",
+        "symptom": "High-confidence paths skip PII review, forward raw data directly",
+        "impact": "Unvetted PII reaches final output and knowledge base"
+      },
+      {
+        "scenario": "Checkpoint deserialization loads historical PII into fresh runs",
+        "symptom": "Restored state contains legacy customer data from prior sessions",
+        "impact": "Cross-contamination between user sessions exposes private data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "State PII Scanner Node",
+        "description": "Injects a detection node that scans graph state for PII patterns before/after every major transition",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.sqlite import SqliteSaver\nfrom pydantic import BaseModel, Field\nimport re\n\nclass AgentState(TypedDict):\n    messages: Annotated[list, 'add']\n    customer_data: str\n    pii_detected: bool\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b[A-Z]\\d[A-Z] \\d[A-Z]\\d\\b'\n]\n\ndef scan_for_pii(state: AgentState) -> AgentState:\n    text = ' '.join([str(m) for m in state['messages']]) + state.get('customer_data', '')\n    pii_found = any(re.search(pattern, text) for pattern in PII_PATTERNS)\n    return {'pii_detected': pii_found, **state}\n\n# Usage: Add to graph\nworkflow = StateGraph(AgentState)\nworkflow.add_node('pii_scan', scan_for_pii)\nworkflow.add_edge('agent', 'pii_scan')\nworkflow.add_conditional_edges('pii_scan', lambda s: 'review' if s['pii_detected'] else 'next')",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint PII Auditor",
+        "description": "Scans all persisted checkpoints for PII leakage across graph executions",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\nimport sqlite3\nimport re\n\ndef audit_checkpoints(db_path: str):\n    PII_PATTERNS = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b'\n    ]\n    \n    conn = sqlite3.connect(db_path)\n    cursor = conn.cursor()\n    \n    cursor.execute('SELECT thread_id, checkpoint FROM checkpoints')\n    violations = []\n    \n    for thread_id, checkpoint_blob in cursor.fetchall():\n        checkpoint = json.loads(checkpoint_blob)\n        state_text = json.dumps(checkpoint)\n        for pattern in PII_PATTERNS:\n            if re.search(pattern, state_text):\n                violations.append({'thread_id': thread_id, 'checkpoint': checkpoint})\n                break\n    \n    print(f'Found {len(violations)} PII violations in checkpoints')\n    return violations\n\nauditor = SqliteSaver.from_conn_string(':memory:')\n# Run: audit_checkpoints('checkpoints.db')",
+        "language": "python"
+      },
+      {
+        "name": "Runtime State Monitor",
+        "description": "Intercepts graph.invoke() to log and alert on PII in state transitions",
+        "code": "from functools import wraps\nimport json\nimport re\n\ndef pii_monitor(func):\n    @wraps(func)\n    def wrapper(*args, **kwargs):\n        result = func(*args, **kwargs)\n        state = result.get('config', {}).get('state', {})\n        state_json = json.dumps(state)\n        \n        PII_PATTERNS = [r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b']\n        pii_matches = [m.group() for pattern in PII_PATTERNS for m in [re.search(pattern, state_json)] if m]\n        \n        if pii_matches:\n            print(f'🚨 PII detected in state: {pii_matches}')\n        \n        return result\n    return wrapper\n\n# Usage\n@pii_monitor\ndef run_agent(graph, input):\n    return graph.invoke(input)\n\n# Or wrap existing\nsafe_invoke = pii_monitor(graph.invoke)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Sanitization Node",
+        "description": "Adds a mandatory PII redaction node that scrubs state before LLM calls and checkpoints",
+        "code": "import re\nfrom typing import TypedDict\n\nclass AgentState(TypedDict):\n    messages: list\n    customer_data: str\n\nPHONE_REDACT = re.compile(r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b')\nEMAIL_REDACT = re.compile(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b')\n\nclass PIISanitizer:\n    def __call__(self, state: AgentState) -> AgentState:\n        # Redact PII\n        cleaned_data = PHONE_REDACT.sub('[PHONE]', state['customer_data'])\n        cleaned_data = EMAIL_REDACT.sub('[EMAIL]', cleaned_data)\n        \n        # Clean messages\n        cleaned_messages = []\n        for msg in state['messages']:\n            cleaned_text = PHONE_REDACT.sub('[PHONE]', str(msg))\n            cleaned_text = EMAIL_REDACT.sub('[EMAIL]', cleaned_text)\n            cleaned_messages.append(cleaned_text)\n        \n        return {\n            **state,\n            'messages': cleaned_messages,\n            'customer_data': cleaned_data,\n            'pii_scrubbed': True\n        }\n\n# Add to graph\nworkflow = StateGraph(AgentState)\nworkflow.add_node('sanitize_pii', PIISanitizer())\nworkflow.add_edge('user_input', 'sanitize_pii')\nworkflow.add_edge('sanitize_pii', 'agent')",
+        "language": "python"
+      },
+      {
+        "name": "Vex-Wrapped Invocation",
+        "description": "Wraps all graph.invoke() calls with Vex PII filtering guardrails",
+        "code": "from vex_sdk import verify\nimport langgraph\n\n# Install: pip install langgraph vex-sdk\n\nagent_graph = StateGraph(AgentState)  # Your existing graph\n\n@verify(guards=['pii-filter', 'data-privacy'])\ndef safe_agent_invoke(input_data, config=None):\n    \"\"\"Vex-protected graph invocation\"\"\"\n    result = agent_graph.invoke(input_data, config)\n    return result\n\n# Usage\nresponse = safe_agent_invoke({\n    'messages': [{'role': 'user', 'content': 'My email is john@company.com call 555-1234'}],\n    'customer_data': 'SSN: 123-45-6789'\n})\n\n# Vex auto-redacts PII before processing and blocks violations",
+        "language": "python"
+      },
+      {
+        "name": "PII-Aware State Schema",
+        "description": "Uses Pydantic models with built-in PII validation and redaction",
+        "code": "from pydantic import BaseModel, field_validator\nfrom typing import List, Optional\nimport re\n\nclass SanitizedMessage(BaseModel):\n    role: str\n    content: str\n    \n    @field_validator('content')\n    @classmethod\n    def redact_pii(cls, v):\n        # Auto-redact common PII\n        v = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]', v)\n        v = re.sub(r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b', '[PHONE]', v)\n        return v\n\nclass SafeAgentState(BaseModel):\n    messages: List[SanitizedMessage]\n    customer_data: Optional[str] = None\n    \n    @field_validator('customer_data')\n    @classmethod\n    def sanitize_customer_data(cls, v):\n        if v:\n            v = re.sub(r'\\b\\d{3}-\\d{2}-\\d{4}\\b', '[SSN]', v)\n            v = re.sub(r'\\b\\d{5}(?:-|\\s)?\\d{4}\\b', '[ZIP]', v)\n        return v\n\n# Use in LangGraph\nclass AgentState(TypedDict):\n    state: SafeAgentState\n\n# Pydantic auto-sanitizes on state updates",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex automates PII filtering for LangGraph agents by wrapping graph.invoke() calls with pre-configured guardrails that detect and redact 50+ PII patterns including emails, phones, SSNs, and addresses before they reach LLMs or checkpoints. The platform continuously monitors state transitions across cyclical workflows, flagging cyclic PII accumulation and parallel branch contamination without requiring code changes. Vex provides one-click remediation that injects sanitization nodes and enforces human review for high-risk PII flows, reducing manual auditing by 95%.\n\nIntegration takes <5 minutes: pip install vex-sdk, decorate your invoke function with @verify(guards=['pii-filter']), and Vex handles real-time detection, redaction, and compliance reporting. The platform maintains audit trails for every state transition and automatically blocks graph execution when critical PII is detected, preventing data exposure across your entire agent fleet.",
+      "code": "from vex_sdk import verify\nfrom langgraph.graph import StateGraph\nfrom typing import TypedDict\n\nclass AgentState(TypedDict):\n    messages: list\n    customer_data: str\n\n# Your existing LangGraph agent\nagent_graph = StateGraph(AgentState)\n# ... add your nodes and edges\n\n@verify(guards=[\n    'pii-filter',\n    'data-privacy',\n    'ssn-detection',\n    'email-protection',\n    'phone-redaction'\n])\ndef production_agent(input_data: dict, config=None):\n    \"\"\"Vex auto-protects against all PII leakage patterns\"\"\"\n    return agent_graph.invoke(input_data, config)\n\n# Usage - Vex auto-redacts before execution\nresult = production_agent({\n    'messages': ['Contact john.doe@company.com at 555-123-4567'],\n    'customer_data': 'SSN 123-45-6789 address 123 Main St'\n})\n\n# Vex Report: ✅ PII auto-redacted, execution allowed\n# Violations blocked with auto-remediation",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate PII risks across all your LangGraph agents in 5 minutes"
+    }
+  }
+}

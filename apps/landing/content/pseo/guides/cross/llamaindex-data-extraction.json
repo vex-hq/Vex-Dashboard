@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llamaindex",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with LlamaIndex + Vex Guardrails",
+    "description": "Learn how to build data extraction with LlamaIndex + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LlamaIndex data extraction",
+      "LlamaIndex guardrails",
+      "data extraction reliability",
+      "Vex LlamaIndex",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "LlamaIndex enables powerful data extraction from unstructured documents by indexing, retrieving, and using schema-guided LLMs to pull structured outputs. However, issues like irrelevant retrievals, hallucinations, outdated indexes, and chunking errors can compromise accuracy in production. Vex provides runtime verification to ensure schema compliance, field accuracy, completeness, and type consistency, making your extractions reliable at scale.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with LlamaIndex",
+      "description": "The architecture begins with document ingestion, where unstructured PDFs, docs, or web content are parsed and split into chunks. LlamaIndex builds a vector index (e.g., using embeddings from OpenAI or HuggingFace) for semantic search. At query time, a retriever fetches relevant chunks based on the user's extraction request, which is paired with a Pydantic schema defining the expected structured output.\n\nA query engine combines retrieval with an LLM (like GPT-4 or Llama-3) instructed to extract fields per the schema. The synthesizer generates JSON output, validated against the schema. For production, metadata filters and reranking improve relevance, while async processing handles scale.\n\nVex wraps the query engine to verify outputs against criteria like field presence, data types, and factual grounding in retrieved context.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│ Unstructured    │───▶│ LlamaIndex       │───▶│ Schema-Guided    │\n│ Documents       │    │ Vector Index     │    │ LLM Extraction   │\n│ (PDFs, Docs)    │    │ + Retriever      │    │ (JSON Output)    │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                   │                       │\n                                   ▼                       ▼\n                          ┌──────────────────┐    ┌──────────────────┐\n                          │ Vex Verification │◀──▶│ Validation       │\n                          │ (Schema, Types,  │    │ (Completeness,   │\n                          │ Accuracy)        │    │ Accuracy)        │\n                          └──────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Retrieved context irrelevant to query",
+        "description": "Retriever returns chunks unrelated to the extraction schema, leading to hallucinated or empty fields.",
+        "severity": "high",
+        "mitigation": "Use Vex to check semantic similarity between retrieved context and extracted fields."
+      },
+      {
+        "name": "Synthesizer hallucinating beyond source documents",
+        "description": "LLM invents data not grounded in retrieved chunks, violating field accuracy.",
+        "severity": "critical",
+        "mitigation": "Vex verifies extracted values appear verbatim or paraphrased in source context."
+      },
+      {
+        "name": "Index staleness causing outdated responses",
+        "description": "Old documents in index produce obsolete extractions for evolving data sources.",
+        "severity": "medium",
+        "mitigation": "Vex flags extractions with timestamps older than a freshness threshold."
+      },
+      {
+        "name": "Chunk boundary errors losing critical context",
+        "description": "Key data split across chunks gets truncated, causing incomplete schema fields.",
+        "severity": "high",
+        "mitigation": "Vex ensures completeness by cross-referencing multi-chunk context coverage."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set Up LlamaIndex Vector Index",
+        "description": "Load documents, create embeddings index for retrieval.",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings\nfrom llama_index.llms.openai import OpenAI\n\nSettings.llm = OpenAI(model=\"gpt-4o-mini\")\ndocuments = SimpleDirectoryReader(\"data\").load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine()",
+        "language": "python"
+      },
+      {
+        "title": "Define Pydantic Schema for Extraction",
+        "description": "Create structured output schema for data extraction.",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date YYYY-MM-DD\")\n    total_amount: float = Field(..., description=\"Total USD amount\")\n    vendor: Optional[str] = Field(None, description=\"Vendor name\")\n\nresponse_synthesis = index.as_query_engine(\n    response_mode=\"compact\",\n    output_cls=Invoice\n)",
+        "language": "python"
+      },
+      {
+        "title": "Query Engine for Schema-Guided Extraction",
+        "description": "Extract structured data from query with schema enforcement.",
+        "code": "response = response_synthesis.query(\n    \"Extract invoice details from this document\"\n)\nprint(response.response)  # Pydantic model instance\nprint(response.get_formatted_sources())",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Node Index Setup",
+        "description": "LlamaIndex TS equivalent for document indexing.",
+        "code": "import { VectorStoreIndex, Document } from 'llamaindex';\nimport { OpenAI } from '@llamaindex/llms/openai';\n\nconst documents = [new Document({ text: 'Invoice #123... $5000' })];\nconst index = await VectorStoreIndex.fromDocuments(documents);\nconst retriever = index.asRetriever();\nconst nodes = await retriever.retrieve('Extract invoice');\nconsole.log(nodes);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap query_engine with Vex Verify (Python)",
+        "description": "Add schema compliance and completeness checks to extraction pipeline.",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        vex.schema_compliance(model=Invoice),\n        vex.field_accuracy(source=\"{query_engine.get_response().source_nodes}\"),\n        vex.completeness(fields=[\"invoice_number\", \"total_amount\"]),\n        vex.type_consistency()\n    ],\n    risk_profile=\"medium\"\n)\ndef extract_invoice(query: str) -> Invoice:\n    return query_engine.query(query)\n\nresult = extract_invoice(\"Extract invoice details\")\nif result.verified:\n    print(result.value)\nelse:\n    print(\"Extraction failed verification:\", result.issues)",
+        "language": "python"
+      },
+      {
+        "title": "Verify Field Accuracy Against Context (Python)",
+        "description": "Ensure extracted values are grounded in retrieved document chunks.",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        vex.field_accuracy(\n            fields=[\"total_amount\", \"invoice_number\"],\n            source=\"{response.source_nodes}\",\n            threshold=0.9\n        ),\n        vex.freshness(max_age_days=30)\n    ]\n)\ndef safe_extraction(query: str):\n    response = query_engine.query(query)\n    return Invoice(**response.response)\n\nverified_invoice = safe_extraction(\"Extract from invoice PDF\")",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification Wrapper",
+        "description": "Integrate Vex SDK for schema and type verification in Node.js.",
+        "code": "import { verify } from 'vex-sdk';\n\nimport { InvoiceSchema } from './schemas';\n\nconst extractInvoice = async (query: string) => {\n  const response = await queryEngine.query({\n    query,\n    outputSchema: InvoiceSchema\n  });\n\n  const result = await verify({\n    checks: [\n      'schemaCompliance',\n      { fieldAccuracy: { fields: ['invoiceNumber', 'totalAmount'], threshold: 0.9 } },\n      'typeConsistency',\n      'completeness'\n    ],\n    riskProfile: 'medium',\n    payload: response\n  });\n\n  return result.verified ? result.value : null;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LlamaIndex Data Extraction",
+      "description": "Integrate Vex today to achieve 99%+ extraction accuracy with automatic verification."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Azure AI Agent Service Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Azure AI Agent Service tool-loop-detection",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, Tool Loop Detection identifies when agents enter infinite cycles of redundant tool calls, such as repeatedly invoking the same Bing Search or File Search tools without progressing the conversation. This manifests through excessive agent thread token consumption and stalled response times as the service's orchestration layer fails to detect repetitive tool invocation patterns. The issue is exacerbated by Azure's grounding capabilities which can trigger continuous search loops when validation logic is absent.",
+    "howItManifests": [
+      {
+        "scenario": "Bing Search grounding loops",
+        "symptom": "Agent repeatedly calls `search.bing` tool with identical queries",
+        "impact": "Thread token limit exceeded, conversation stalls after 10+ identical searches"
+      },
+      {
+        "scenario": "File Search metadata loops",
+        "symptom": "Continuous `search.files` calls returning Azure metadata instead of content",
+        "impact": "50%+ increase in API costs, no user value delivered"
+      },
+      {
+        "scenario": "Azure OpenAI function calling loops",
+        "symptom": "Same `azure_openai.chat.completions` tool called >5 times consecutively",
+        "impact": "Agent thread timeout, user receives 'Thread exceeded token limit' error"
+      },
+      {
+        "scenario": "Enterprise policy validation loops",
+        "symptom": "Repeated `validate_policy` tool calls without state advancement",
+        "impact": "Compliance checks fail due to rate limiting, security audit violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Run Tool Call Pattern Analysis",
+        "description": "Monitors Azure AI Agent Service thread runs for repetitive tool call patterns using the Azure SDK",
+        "code": "from azure.ai.projects import ProjectsClient\nfrom azure.identity import DefaultAzureCredential\n\nclient = ProjectsClient(credential=DefaultAzureCredential(), endpoint=\"https://your-project.api.azure.com\")\n\nthread_id = \"thread-123\"\ndef detect_tool_loops(thread_id):\n    runs = client.threads.list_runs(thread_id)\n    tool_calls = []\n    for run in runs:\n        for step in run.steps:\n            for tool_call in step.tool_calls or []:\n                tool_calls.append({\n                    'tool': tool_call.type,\n                    'name': tool_call.function.name if tool_call.function else None,\n                    'timestamp': step.created_at\n                })\n    \n    # Detect loops: same tool >5 times in 10 minutes\n    recent_calls = tool_calls[-20:]  # Last 20 calls\n    from collections import Counter\n    tool_freq = Counter([call['name'] or call['tool'] for call in recent_calls])\n    \n    loops = {tool: count for tool, count in tool_freq.items() if count >= 5}\n    return len(loops) > 0, loops\n\nhas_loops, loop_tools = detect_tool_loops(thread_id)\nif has_loops:\n    print(f'Tool loop detected: {loop_tools}')",
+        "language": "python"
+      },
+      {
+        "name": "Token Consumption Rate Monitor",
+        "description": "Tracks thread token usage velocity to detect loops before limits are hit",
+        "code": "import time\nfrom azure.ai.projects import ProjectsClient\n\nclient = ProjectsClient(credential=DefaultAzureCredential())\n\ndef monitor_token_velocity(thread_id, window_minutes=5):\n    start_time = time.time() - (window_minutes * 60)\n    runs = client.threads.list_runs(thread_id, limit=50)\n    \n    total_tokens = 0\n    for run in runs:\n        if run.created_at > start_time:\n            total_tokens += (run.usage.total_tokens or 0)\n    \n    tokens_per_minute = total_tokens / window_minutes\n    # Alert threshold: >5000 tokens/min indicates potential loop\n    return tokens_per_minute > 5000\n\nis_looping = monitor_token_velocity(\"thread-123\")\nif is_looping:\n    print('⚠️ High token velocity - potential tool loop')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Sequence Pattern Matcher",
+        "description": "TypeScript detector for Azure AI Agent Service WebSocket event streams",
+        "code": "import { ProjectsClient } from '@azure/ai-projects';\n\nconst client = new ProjectsClient('https://your-project.api.azure.com', new DefaultAzureCredential());\n\ninterface ToolCall {\n  tool: string;\n  name?: string;\n  timestamp: number;\n}\n\nconst toolHistory: ToolCall[] = [];\n\nconst MAX_HISTORY = 50;\nconst LOOP_THRESHOLD = 5;\n\nfunction detectLoopPattern(threadId: string): boolean {\n  // Stream run events\n  const stream = client.threads.streamRun(threadId);\n  \n  stream.on('step_delta', (step) => {\n    if (step.tool_calls) {\n      step.tool_calls.forEach((toolCall) => {\n        toolHistory.push({\n          tool: toolCall.type,\n          name: toolCall.function?.name,\n          timestamp: Date.now()\n        });\n        \n        if (toolHistory.length > MAX_HISTORY) {\n          toolHistory.shift();\n        }\n      });\n    }\n  });\n  \n  // Check for loops every 10 events\n  setInterval(() => {\n    const recent = toolHistory.slice(-20);\n    const toolCounts = recent.reduce((acc, call) => {\n      const key = call.name || call.tool;\n      acc[key] = (acc[key] || 0) + 1;\n      return acc;\n    }, {} as Record<string, number>);\n    \n    const hasLoop = Object.values(toolCounts).some(count => count >= LOOP_THRESHOLD);\n    if (hasLoop) {\n      console.log('🔄 Tool loop detected:', toolCounts);\n      return true;\n    }\n  }, 10000);\n  \n  return false;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication Middleware",
+        "description": "Intercepts and blocks duplicate tool calls within time windows",
+        "code": "from azure.ai.projects import ProjectsClient\nimport time\nfrom typing import Dict, Set\n\nclass ToolLoopGuard:\n    def __init__(self):\n        self.tool_cache: Dict[str, Set[str]] = {}\n        self.cache_ttl = 300  # 5 minutes\n    \n    def should_execute(self, thread_id: str, tool_name: str, tool_args: str) -> bool:\n        cache_key = f'{thread_id}:{tool_name}'\n        tool_signature = f'{tool_name}:{hash(str(tool_args))}'  \n        \n        now = time.time()\n        if cache_key not in self.tool_cache:\n            self.tool_cache[cache_key] = set()\n        \n        # Clean expired entries\n        self.tool_cache[cache_key] = {\n            sig for sig in self.tool_cache[cache_key] \n            if now - self.tool_cache[cache_key][sig] < self.cache_ttl\n        }\n        \n        if tool_signature in self.tool_cache[cache_key]:\n            print(f'⏭️ Skipping duplicate tool: {tool_name}')\n            return False\n        \n        self.tool_cache[cache_key][tool_signature] = now\n        return True\n\n# Integrate with agent middleware\nguard = ToolLoopGuard()\n\ndef agent_middleware(thread_id, tool_call):\n    if not guard.should_execute(thread_id, tool_call.function.name, tool_call.function.arguments):\n        return {'role': 'tool', 'content': 'Tool call blocked to prevent loop', 'tool_call_id': tool_call.id}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Max Tool Calls Per Thread Enforcer",
+        "description": "Hard limit on tool calls per thread with graceful degradation",
+        "code": "from azure.ai.projects import ProjectsClient\n\nclass ToolLimitEnforcer:\n    def __init__(self, max_tools_per_thread=20):\n        self.max_tools = max_tools_per_thread\n        self.thread_counters = {}\n    \n    def check_limit(self, thread_id: str) -> bool:\n        if thread_id not in self.thread_counters:\n            self.thread_counters[thread_id] = 0\n        \n        if self.thread_counters[thread_id] >= self.max_tools:\n            return False\n        \n        self.thread_counters[thread_id] += 1\n        return True\n    \n    def get_status(self, thread_id: str) -> dict:\n        remaining = max(0, self.max_tools - self.thread_counters.get(thread_id, 0))\n        return {'remaining_tools': remaining, 'limit': self.max_tools}\n\nenforcer = ToolLimitEnforcer()\n\ndef before_tool_call(thread_id: str, tool_call):\n    if not enforcer.check_limit(thread_id):\n        return {\n            'role': 'assistant',\n            'content': f'Tool limit exceeded. Status: {enforcer.get_status(thread_id)}. Please rephrase your request.'\n        }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Loop Recovery Response Generator",
+        "description": "TypeScript handler that injects recovery messages when loops detected",
+        "code": "class LoopRecoveryHandler {\n  private toolCounts: Map<string, number> = new Map();\n  private MAX_CALLS = 5;\n  \n  shouldRecover(threadId: string, toolName: string): string | null {\n    const key = `${threadId}:${toolName}`;\n    const count = (this.toolCounts.get(key) || 0) + 1;\n    this.toolCounts.set(key, count);\n    \n    if (count >= this.MAX_CALLS) {\n      return `🔄 Loop detected for tool '${toolName}'. Switching to summary mode:\\n\\nSummary of previous results:\\n• Key findings from recent tool calls\\n• No new information from repeated searches\\n• Continuing with available data...`;\n    }\n    \n    return null;\n  }\n  \n  resetThread(threadId: string) {\n    // Reset counters for new conversation turn\n    Array.from(this.toolCounts.keys())\n      .filter(key => key.startsWith(threadId))\n      .forEach(key => this.toolCounts.delete(key));\n  }\n}\n\nconst recovery = new LoopRecoveryHandler();\n\n// Azure AI Agent Service event handler\nexport async function handleAgentRun(threadId: string, run: AgentRun) {\n  for (const step of run.steps) {\n    for (const toolCall of step.tool_calls || []) {\n      const recoveryMsg = recovery.shouldRecover(threadId, toolCall.function?.name || toolCall.type);\n      if (recoveryMsg) {\n        // Inject recovery message\n        await injectAssistantMessage(threadId, recoveryMsg);\n        recovery.resetThread(threadId);\n        break;\n      }\n    }\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically detecting tool loops by analyzing thread run events and tool call patterns in real-time. Using the `vex-sdk`, it monitors token consumption velocity, tool call frequency, and argument similarity to identify loops before they exhaust quotas or timeout threads. \n\nWhen loops are detected, Vex automatically injects recovery responses and enforces tool call limits, maintaining conversation flow while preventing cost overruns. The platform provides dashboards showing loop frequency by tool type and automatic remediation success rates, enabling teams to optimize agent reliability at scale.\n\nIntegration requires only `pip install azure-ai-projects vex-sdk` and 3 lines of configuration code, with Vex handling the full detection-remediation cycle without modifying core agent logic.",
+      "code": "from vex_sdk import VexAgentGuard\nfrom azure.ai.projects import ProjectsClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nclient = ProjectsClient(credential=DefaultAzureCredential())\n\n# Vex middleware for Azure AI Agent Service\nvex_guard = VexAgentGuard(\n    azure_client=client,\n    detectors=[\n        \"tool-loop-frequency\",\n        \"token-velocity\",\n        \"argument-duplication\"\n    ],\n    remediation=[\n        \"deduplicate-tools\",\n        \"inject-recovery\",\n        \"enforce-limits\"\n    ],\n    alert_channels=[\"teams\", \"email\"]\n)\n\n# Protect all agent threads\ndef protected_run_thread(thread_id: str, assistant_id: str):\n    with vex_guard.monitor(thread_id):\n        return client.beta.threads.runs.create(\n            thread_id=thread_id,\n            assistant_id=assistant_id\n        )\n\n# Auto-remediates loops and reports metrics\nmetrics = vex_guard.get_metrics()\nprint(f'Loops blocked: {metrics[\"loops_blocked\"]}')\nprint(f'Tokens saved: {metrics[\"tokens_saved\"]}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops across all your Azure AI Agent Service deployments in minutes."
+    }
+  }
+}

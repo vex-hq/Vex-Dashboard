@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build code generation with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK code generation",
+      "Vercel AI SDK guardrails",
+      "code generation reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with Vercel AI SDK enables powerful streaming UIs for iterative code creation, but introduces high risks like malicious code injection and execution failures. Vex provides essential guardrails to verify code safety, syntax, and sandbox execution before deployment. This guide shows how to integrate Vex middleware into your Vercel AI SDK workflows for reliable code generation.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Vercel AI SDK",
+      "description": "The architecture starts with a Vercel AI SDK streamText call that generates code via an LLM agent, often using structured tools for sandbox execution and testing. The generated code is streamed to React Server Components for real-time UI updates, with iterative refinement based on test results. Vex middleware intercepts generateText/streamText calls to validate outputs against safety and syntax rules before they reach the UI or executor.\n\nA typical flow involves: 1) User prompt → AI SDK agent → Vex verification → Sandbox execution → Test validation → Refined code output. This ensures consistency across providers like OpenAI or Anthropic while mitigating edge timeouts on complex tasks.\n\nEdge functions handle streaming to minimize latency, but require Vex to prevent partial hallucinations from propagating to users.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   User Prompt   │───▶│ Vercel AI SDK    │───▶│   Vex Guard   │\n│     (RSC)       │    │ streamText()     │    │   Middleware  │\n└─────────────────┘    │ + Agent Tools    │    └──────────────┘\n                       └──────────────────┘         │\n                                                    ▼\n                                             ┌──────────────┐\n                                             │ Sandbox Exec │──▶ Tests\n                                             │   + Tests    │\n                                             └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Incomplete code snippets stream to UI before full generation, causing syntax errors or unsafe partial code execution",
+        "severity": "critical",
+        "mitigation": "Vex buffers and validates complete structured outputs before streaming"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Unverified sandbox execution results shown to users, potentially exposing malicious behavior",
+        "severity": "high",
+        "mitigation": "Vex verifies tool outputs match expected schemas and safety constraints"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLMs produce varying code formats, breaking downstream parsers and executors",
+        "severity": "high",
+        "mitigation": "Vex normalizes structured outputs to consistent JSON schemas"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Long-running code validation and iteration exceed Vercel edge limits",
+        "severity": "medium",
+        "mitigation": "Vex async verification with configurable timeouts and partial result handling"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Stream with Vercel AI SDK",
+        "description": "Set up streaming code generation using generateText with tool calls for sandbox execution",
+        "code": "import { generateText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst sandboxExecute = tool({\n  description: 'Execute code in sandbox',\n  parameters: z.object({\n    code: z.string().describe('Code to execute'),\n  }),\n  execute: async ({ code }) => {\n    // Sandbox execution logic\n    const result = await executeInSandbox(code);\n    return { output: result, passed: result.includes('PASS') };\n  },\n});\n\nexport async function generateCode(prompt: string) {\n  const { text, toolResults } = await generateText({\n    model: 'gpt-4o',\n    prompt,\n    tools: { sandboxExecute },\n    maxTokens: 4000,\n  });\n  return { code: text, tests: toolResults };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming UI with React Server Components",
+        "description": "Stream code generation results to React UI with useChat hook",
+        "code": "import { useChat } from 'ai/react';\n\nexport function CodeGenerator() {\n  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({\n    api: '/api/code-gen',\n    initialMessages: [{ role: 'user', content: 'Write a React component' }],\n  });\n\n  return (\n    <div className=\"code-gen-ui\">\n      {messages.map((m) => (\n        <div key={m.id} className={m.role === 'assistant' ? 'code-output' : ''}>\n          {m.content}\n        </div>\n      ))}\n      <form onSubmit={handleSubmit}>\n        <input value={input} onChange={handleInputChange} />\n      </form>\n    </div>\n  );\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Agent with Iterative Refinement Loop",
+        "description": "Implement agent loop that refines code based on test failures",
+        "code": "import { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\n\nexport async function agentLoop(prompt: string) {\n  let code = '';\n  let iteration = 0;\n  const maxIterations = 3;\n\n  while (iteration < maxIterations) {\n    const result = await streamText({\n      model: 'gpt-4o',\n      prompt: `${prompt}\\nPrevious code: ${code}\\nFix any test failures.`,\n    });\n\n    code = await result.text;\n    const testResult = await runTests(code);\n\n    if (testResult.passed) break;\n    iteration++;\n  }\n\n  return { code, iterations };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "API Route Handler for Edge Functions",
+        "description": "Vercel API route that handles code generation requests",
+        "code": "import { createNextRouteAPIHandler } from 'uploadthing/next';\n\nimport { generateObject, generateText } from 'ai';\n\nexport const runtime = 'edge';\n\nexport async function POST(req: Request) {\n  try {\n    const { prompt } = await req.json();\n    const { object } = await generateObject({\n      model: 'gpt-4o',\n      schema: z.object({\n        code: z.string(),\n        explanation: z.string(),\n      }),\n      prompt,\n    });\n\n    return Response.json({ code: object.code, explanation: object.explanation });\n  } catch (error) {\n    return Response.json({ error: 'Generation failed' }, { status: 500 });\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText/streamText",
+        "description": "Wrap Vercel AI SDK calls with Vex verification for code safety and syntax",
+        "code": "import { createVex } from '@vex_dev/sdk/vercel';\nimport { generateText, streamText } from 'ai';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n});\n\nexport async function safeGenerateCode(prompt: string) {\n  const verifier = await vex.verifier({\n    name: 'code-generation',\n    checks: [\n      'code_safety',\n      'syntax_validity',\n      'no_credential_leakage',\n      'dependency_safety',\n    ],\n  });\n\n  const result = await verifier.run(\n    generateText.bind(null, {\n      model: 'gpt-4o',\n      prompt,\n    })\n  );\n\n  return result.value;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Structured Output Validation with Vex",
+        "description": "Ensure consistent code output format across LLM providers",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\nimport { createVex } from '@vex_dev/sdk/vercel';\n\nconst vex = createVex({ /* config */ });\n\nconst codeSchema = z.object({\n  code: z.string().refine(isValidSyntax, 'Invalid syntax'),\n  tests: z.array(z.string()),\n});\n\nexport async function verifiedCodeGen(prompt: string) {\n  const verifier = await vex.verifier({\n    name: 'structured-code',\n    schema: codeSchema,\n  });\n\n  const result = await verifier.run(async () =>\n    generateObject({\n      model: 'gpt-4o',\n      schema: codeSchema,\n      prompt,\n    })\n  );\n\n  return result.value.object;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming with Vex Buffering",
+        "description": "Buffer partial streams and validate complete code before UI display",
+        "code": "import { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\nimport { createVex } from '@vex_dev/sdk/vercel';\n\nexport async function safeStreamCode(prompt: string) {\n  const vex = createVex({ /* config */ });\n  const streamValue = createStreamableValue('');\n\n  (async () => {\n    const verifier = await vex.verifier({\n      name: 'code-stream',\n      checks: ['code_safety'],\n    });\n\n    const result = await verifier.run(\n      streamText.bind(null, { model: 'gpt-4o', prompt })\n    );\n\n    if (result.passed) {\n      streamValue.update(result.value);\n    } else {\n      streamValue.update('Code failed safety checks');\n    }\n    streamValue.done();\n  })();\n\n  return streamValue.value;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Code Generation",
+      "description": "Add Vex middleware today to protect your users from malicious code generation."
+    }
+  }
+}

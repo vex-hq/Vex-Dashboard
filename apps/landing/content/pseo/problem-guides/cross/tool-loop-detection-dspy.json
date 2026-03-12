@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in DSPy Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in DSPy agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "DSPy tool-loop-detection",
+      "DSPy reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In DSPy agents, Tool Loop Detection identifies infinite or excessive cycles where agents repeatedly invoke the same tools without progressing toward task completion, often due to optimized prompts overfitting to training examples that encourage redundant tool calls. This manifests uniquely in DSPy's composable module architecture, where ChainOfThought or ReAct modules can enter loops during `forward()` execution as the LM generates repetitive tool-calling signatures. Such loops waste tokens, exceed budget limits, and cause timeouts in production deployments.",
+    "howItManifests": [
+      {
+        "scenario": "ReAct module with tool selection",
+        "symptom": "Agent calls `search_tool` repeatedly with identical queries in a loop",
+        "impact": "Token usage explodes; task never completes"
+      },
+      {
+        "scenario": "Multi-hop tool chain in ChainOfThought",
+        "symptom": "Module outputs identical tool call signatures across iterations",
+        "impact": "Infinite loop until max_steps exceeded; wrong final answer"
+      },
+      {
+        "scenario": "Optimized signature with tool_choice",
+        "symptom": "Overfitted prompt always selects same tool regardless of context",
+        "impact": "Stuck in single-tool feedback loop; ignores task requirements"
+      },
+      {
+        "scenario": "Composed agent with nested modules",
+        "symptom": "Inner module loops trigger parent module recursion",
+        "impact": "Stack overflow or timeout; assertion violations cascade"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Signature Tracker",
+        "description": "Tracks repeated tool call patterns within DSPy module forward passes",
+        "code": "import dspy\n\nclass ToolLoopDetector:\n    def __init__(self, max_repeats=3):\n        self.tool_history = {}\n        self.max_repeats = max_repeats\n    \n    def check_loop(self, tool_call):\n        tool_sig = (tool_call.get('name'), tool_call.get('args', {}))\n        count = self.tool_history.get(tool_sig, 0) + 1\n        self.tool_history[tool_sig] = count\n        return count >= self.max_repeats\n    \n# Usage in DSPy module\nclass LoopAwareReAct(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.detector = ToolLoopDetector()\n    \n    def forward(self, **kwargs):\n        # ... tool calling logic\n        if self.detector.check_loop(tool_call):\n            raise ValueError(f'Tool loop detected: {tool_call}')\n        return response",
+        "language": "python"
+      },
+      {
+        "name": "State Hash Monitor",
+        "description": "Detects loops by hashing agent state (context + tool history) across forward calls",
+        "code": "import dspy\nimport hashlib\n\nclass StateLoopDetector:\n    def __init__(self, window=5):\n        self.state_hashes = []\n        self.window = window\n    \n    def update_and_check(self, context, tool_history):\n        state_str = f'{context}|{tool_history}'\n        state_hash = hashlib.md5(state_str.encode()).hexdigest()\n        \n        self.state_hashes.append(state_hash)\n        if len(self.state_hashes) > self.window:\n            self.state_hashes.pop(0)\n        \n        return len(set(self.state_hashes)) < len(self.state_hashes)\n\n# Integrate in DSPy forward\nclass SafeAgent(dspy.Module):\n    def forward(self, question):\n        detector = StateLoopDetector()\n        for step in range(10):\n            if detector.update_and_check(question, self.history):\n                dspy.warn('State loop detected', level='ERROR')\n                break\n            response = self.predict(question)\n        return response",
+        "language": "python"
+      },
+      {
+        "name": "Call Stack Analyzer",
+        "description": "Inspects DSPy module call stack for recursive tool invocation patterns",
+        "code": "import dspy\nimport inspect\n\nclass StackLoopDetector:\n    def __init__(self):\n        self.call_stack = []\n    \n    def enter_module(self, module_name, tool_call):\n        self.call_stack.append((module_name, tool_call))\n        if len(self.call_stack) > 1 and self.call_stack[-2:] == self.call_stack[-4:-2]:\n            return True\n        return False\n    \n    def exit_module(self):\n        self.call_stack.pop()\n\n# DSPy wrapper\noriginal_forward = dspy.Module.forward\n\ndef monitored_forward(self, *args, **kwargs):\n    detector = StackLoopDetector()\n    if detector.enter_module(self.__class__.__name__, kwargs.get('tool_call')):\n        raise RuntimeError('Recursive tool loop detected')\n    try:\n        return original_forward(self, *args, **kwargs)\n    finally:\n        detector.exit_module()\n\ndspy.Module.forward = monitored_forward",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Blacklist",
+        "description": "Prevents repeated tool calls by maintaining episodic memory of recent invocations",
+        "code": "class LoopProofReAct(dspy.Signature):\n    '''Answer questions by reasoning and using tools.'''\n    question = dspy.InputField()\n    recent_tools = dspy.InputField(desc='JSON list of recent tool calls')\n    thought = dspy.OutputField()\n    tool_call = dspy.OutputField(desc='JSON {\"name\": str, \"args\": dict} or null')\n    answer = dspy.OutputField()\n\nclass BlacklistAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.react = dspy.ChainOfThought(LoopProofReAct)\n        self.blacklist = set()\n    \n    def forward(self, question):\n        recent_tools = list(self.blacklist)[-3:]  # last 3 tools\n        pred = self.react(question=question, recent_tools=str(recent_tools))\n        \n        if pred.tool_call and pred.tool_call not in self.blacklist:\n            tool_sig = (pred.tool_call.get('name'), str(pred.tool_call.get('args')))\n            self.blacklist.add(tool_sig)\n        elif pred.tool_call:\n            pred.tool_call = None  # Block repeat\n            pred.answer = 'Cannot proceed: tool repetition detected.'\n        \n        return dspy.Prediction(answer=pred.answer, tool_call=pred.tool_call)",
+        "language": "python"
+      },
+      {
+        "name": "Diversity-Promoting Prompt",
+        "description": "Injects explicit instructions to avoid tool repetition in DSPy signatures",
+        "code": "class AntiLoopSignature(dspy.Signature):\n    '''IMPORTANT: Never call the same tool twice in a row. '''\n    question = dspy.InputField()\n    last_tool = dspy.InputField(default=None, desc='Previous tool name or null')\n    recent_actions = dspy.InputField(default='[]')\n    \n    reasoning = dspy.OutputField(desc='''\n    - Do NOT repeat the last_tool\n    - Try different approach if stuck\n    - If repeating tools, switch to final answer\n    ''')\n    \n    action = dspy.OutputField(desc='''\n    JSON: {\"tool\": \"name\", \"params\": {}} OR {\"answer\": \"final\"}\n    ''' )\n\n# Usage\nagent = dspy.ChainOfThought(AntiLoopSignature)\npred = agent(question=question, last_tool=last_tool, recent_actions=recent_actions)",
+        "language": "python"
+      },
+      {
+        "name": "Max Steps Circuit Breaker",
+        "description": "Hard limit on tool calls with graceful degradation in DSPy module composition",
+        "code": "class BoundedAgent(dspy.Module):\n    def __init__(self, max_tool_calls=5):\n        super().__init__()\n        self.max_tool_calls = max_tool_calls\n        self.tool_count = 0\n    \n    def forward(self, question):\n        self.tool_count = 0\n        context = question\n        \n        while self.tool_count < self.max_tool_calls:\n            pred = self.lm(question=context)\n            if not pred.tool_call:\n                return dspy.Prediction(answer=pred.answer)\n            \n            # Execute tool\n            result = self.execute_tool(pred.tool_call)\n            context += f'\\nTool result: {result}'\n            self.tool_count += 1\n        \n        dspy.warn(f'Max tool calls ({self.max_tool_calls}) exceeded')\n        return dspy.Prediction(answer='Task requires too many tool calls.')\n    \n    def execute_tool(self, tool_call):\n        # Tool execution logic\n        return 'mock_result'",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade automation for DSPy tool loop detection by wrapping module `forward()` calls with `vex.verify()`, automatically capturing execution traces, tool call histories, and state transitions. It employs statistical anomaly detection on tool invocation patterns and state hash sequences, flagging loops before they consume excessive tokens or timeout. \n\nRemediation happens inline: Vex injects diversity constraints into DSPy signatures, enforces tool call budgets, and applies gradient-free prompt optimization to break cyclic patterns—all without retraining. The platform surfaces root causes through DSPy-specific visualizations of module composition graphs and LM prediction distributions.\n\nIntegration requires only `pip install dspy vex-sdk` and a single decorator, enabling zero-config monitoring across DSPy programs in development, staging, and production environments.",
+      "code": "import dspy\nimport vex\n\n# Install: pip install dspy vex-sdk\n\n@dspy.wrap.with_module(vex.verify())  # Auto-detects tool loops\nclass ProductionReActAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.predict = dspy.ChainOfThought('question -> tool_call, answer')\n    \n    @vex.verify(  # Vex monitors forward() for loops\n        assertions={\n            'tool_diversity': 'len(set(tool_calls)) > 1',\n            'no_repeat_tools': 'tool_history[-1] != tool_history[-2]',\n            'progress_made': 'len(context) < 2 * len(question)'\n        },\n        max_tool_calls=5\n    )\n    def forward(self, question):\n        tool_history = []\n        context = question\n        \n        for _ in range(10):\n            pred = self.predict(context)\n            if not pred.tool_call:\n                return pred\n            \n            result = self.call_tool(pred.tool_call)\n            tool_history.append(pred.tool_call)\n            context += f'\\n{result}'\n        \n        return dspy.Prediction(answer='Loop prevented by Vex')\n    \n    def call_tool(self, tool_call):\n        return 'tool_result'\n\n# Vex auto-generates fix\nagent = ProductionReActAgent()\nresult = agent(question='What is 2+2?')  # Vex prevents loops automatically",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops in your DSPy agents with one line of code."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build research agents with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK research agents",
+      "OpenAI Agents SDK guardrails",
+      "research agents reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Research Agents with OpenAI's Agents SDK enables multi-step web search, analysis, and synthesis workflows for reliable information retrieval. Guardrails are essential to prevent handoff loops, validate tool outputs, and ensure claim accuracy in production systems. Vex integrates seamlessly as output guardrails to mitigate common failures and verify research quality.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with OpenAI Agents SDK",
+      "description": "Research Agents typically feature a Supervisor Agent that orchestrates specialized sub-agents: Search Agent (web queries), Analysis Agent (fact extraction), and Synthesis Agent (summary generation). Handoffs occur via the SDK's agent.run() with context passing, enabling iterative refinement. Tracing spans multi-agent chains for debugging.\n\nThe workflow starts with user queries routed to Search Agent using tools like Tavily or Serper, then passes raw results to Analysis Agent for claim extraction and source verification. Finally, Synthesis Agent compiles verified insights with recency and bias checks. Vex guardrails wrap each agent's output to validate before handoff.\n\nThis modular design scales for complex research but introduces risks like unvalidated search results propagating errors or infinite handoff loops between verification agents.",
+      "diagram": "User Query\n    ↓\n[Supervisor Agent]\n    ├──→ [Search Agent] ──(raw results)──→\n    ├──→ [Analysis Agent] ──(claims+sources)──→\n    └──→ [Synthesis Agent] ──(final report)──→\n         ↑ Vex Guardrails on each handoff\n         Tracing spans entire workflow"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Supervisor endlessly routes between Search and Analysis agents due to incomplete context or vague handoff instructions",
+        "severity": "critical",
+        "mitigation": "Vex loop detection guardrail with max iterations and cycle breaking"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious queries trick research agents into bypassing source verification or returning unvalidated claims",
+        "severity": "high",
+        "mitigation": "Vex input sanitization and output validation independent of agent prompts"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "Search tool returns outdated/irrelevant results passed directly to synthesis without recency or relevance checks",
+        "severity": "high",
+        "mitigation": "Vex data quality checks on tool outputs before agent processing"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Partial traces lose context during agent handoffs, making debugging synthesis errors impossible",
+        "severity": "medium",
+        "mitigation": "Vex unified tracing spans across all agent boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Agent Setup",
+        "description": "Initialize Supervisor and specialized agents with handoff instructions using OpenAI Agents SDK",
+        "code": "from agents import Agent, Runner\nfrom openai import OpenAI\n\nclient = OpenAI()\n\nsearch_agent = Agent(\n    name=\"Search Agent\",\n    instructions=\"Find authoritative sources for research queries using web search tools\",\n    model=\"gpt-4o\",\n    tools=[\"tavily_search\"]\n)\n\nanalysis_agent = Agent(\n    name=\"Analysis Agent\",\n    instructions=\"Extract claims, verify sources, check recency and bias from search results\",\n    model=\"gpt-4o\"\n)\n\nsupervisor = Agent(\n    name=\"Research Supervisor\",\n    instructions=\"Orchestrate search → analysis → synthesis workflow\",\n    sub_agents=[search_agent, analysis_agent]\n)\n\nrunner = Runner(client)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Step Research Workflow",
+        "description": "Execute orchestrated workflow with context passing between agents",
+        "code": "async def run_research(query: str):\n    result = await runner.run(\n        supervisor,\n        \"Research: \" + query,\n        context={\"max_iterations\": 5}\n    )\n    \n    # Extract final synthesis\n    synthesis = result.final_output\n    return {\n        \"query\": query,\n        \"sources\": result.artifacts.get('sources', []),\n        \"summary\": synthesis\n    }\n\n# Usage\nresearch_result = await run_research(\"Latest AI safety research\")",
+        "language": "python"
+      },
+      {
+        "title": "Search Tool Integration",
+        "description": "Configure Tavily search tool for web research with result limits",
+        "code": "from agents.tools import tool\n\n@tool\nasync def tavily_search(query: str, max_results: int = 5):\n    \"\"\"Search the web using Tavily API\"\"\"\n    results = await client.tools.call_tool(\n        \"tavily_search\",\n        arguments={\"query\": query, \"max_results\": max_results}\n    )\n    return [{\n        \"url\": r['url'],\n        \"title\": r['title'],\n        \"content\": r['content'],\n        \"published\": r.get('published_date')\n    } for r in results]",
+        "language": "python"
+      },
+      {
+        "title": "Handoff Context Management",
+        "description": "Pass verified sources between agents while maintaining trace context",
+        "code": "async def orchestrated_research(query: str):\n    # Step 1: Search\n    search_results = await runner.run(search_agent, query)\n    \n    # Step 2: Analysis with search context\n    analysis_input = f\"Analyze these results: {search_results.output}\"\n    verified_claims = await runner.run(analysis_agent, analysis_input)\n    \n    return verified_claims.output",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail Wrapper",
+        "description": "Wrap each agent output with Vex verification for research quality",
+        "code": "from vex_sdk import VexGuardrail, GuardrailConfig\n\n# Configure research-specific guardrails\nresearch_guardrail = VexGuardrail(\n    config=GuardrailConfig(\n        risk_profile=\"medium\",\n        verifications=[\n            \"source_verification\",\n            \"claim_accuracy\",\n            \"recency_checks\",\n            \"bias_detection\"\n        ],\n        max_iterations=5\n    )\n)\n\nasync def guarded_agent_run(agent, input):\n    raw_output = await runner.run(agent, input)\n    verified_output = await research_guardrail.verify(raw_output.final_output)\n    return verified_output",
+        "language": "python"
+      },
+      {
+        "title": "Loop Prevention Guardrail",
+        "description": "Prevent infinite handoffs with Vex cycle detection",
+        "code": "async def safe_handoff(supervisor, query, context={}):\n    context[\"vex_session\"] = \"research-\" + str(uuid.uuid4())\n    \n    result = await runner.run(\n        supervisor,\n        query,\n        context=context,\n        tools=[research_guardrail.as_tool()]\n    )\n    \n    if research_guardrail.detects_loop(result):\n        return \"Research terminated: excessive iterations detected\"\n    \n    return result.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Source Verification Pipeline",
+        "description": "Vex validates search results before analysis agent consumption",
+        "code": "async def verify_search_results(search_output):\n    verification_result = await research_guardrail.verify(\n        search_output,\n        checks=[\n            \"source_reputation\",  # Domain authority\n            \"recency_30d\",        # Published within 30 days\n            \"content_quality\"     # No obvious spam\n        ]\n    )\n    \n    if not verification_result.passed:\n        raise ValueError(f\"Search failed verification: {verification_result.issues}\")\n    \n    return search_output\n\n# Integrate in workflow\nverified_sources = await verify_search_results(search_results)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Research Agents",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your research workflows from failure modes."
+    }
+  }
+}

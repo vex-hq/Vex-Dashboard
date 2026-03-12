@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Flowise Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Flowise hallucination-detection",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, AI agent hallucinations manifest as fabricated facts or illogical responses in chatflows, often due to unvalidated intermediate outputs from LLM chains, irrelevant vector store retrievals, silent custom tool failures, or context loss in multi-agent handoffs. These issues are amplified in Flowise's drag-and-drop interface where developers may overlook validation nodes between components. Vex provides structured detection by intercepting Flowise's execution traces at key checkpoints.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains producing unvalidated intermediate outputs",
+        "symptom": "LLM Chain node outputs JSON with missing fields or fabricated data structures",
+        "impact": "Downstream Conditional Router nodes route to wrong branches, causing incorrect final responses"
+      },
+      {
+        "scenario": "Vector store retrieval returning low-relevance documents",
+        "symptom": "Retriever node returns documents with similarity scores < 0.7 but no filtering applied",
+        "impact": "LLM generates answers based on irrelevant context, producing confident but wrong factual claims"
+      },
+      {
+        "scenario": "Custom tool nodes failing silently without error propagation",
+        "symptom": "Custom Function Tool returns empty string or null without throwing errors",
+        "impact": "Agent continues execution with missing data, hallucinating tool results in final response"
+      },
+      {
+        "scenario": "Multi-agent sequential flow losing context between agent handoffs",
+        "symptom": "Agent handoff nodes drop memory context, causing subsequent agents to generate unrelated responses",
+        "impact": "Final answer contradicts earlier conversation context, appearing as hallucination"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Intermediate Output Schema Validation",
+        "description": "Detects hallucinated JSON structures from LLM Chain nodes by validating against expected schemas",
+        "code": "import { ChatFlow } from 'flowise/dist/src';\nimport { z } from 'zod';\n\nconst userSchema = z.object({\n  name: z.string().min(1),\n  age: z.number().int().min(18),\n  email: z.string().email()\n});\n\nconst detectSchemaHallucination = (nodeOutputs: any[]) => {\n  const llmChainOutputs = nodeOutputs.filter(n => n.nodeType === 'LLMChain');\n  return llmChainOutputs.map(output => {\n    try {\n      const parsed = userSchema.parse(output.json);\n      return { valid: true, output };\n    } catch (error) {\n      return {\n        valid: false,\n        hallucination: true,\n        error: (error as any).message,\n        output,\n        nodeId: output.nodeId\n      };\n    }\n  }).filter(r => !r.valid);\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Relevance Score Threshold Check",
+        "description": "Monitors Conversational Retrieval QA Chain nodes for low-relevance document retrieval",
+        "code": "const detectLowRelevanceDocs = (retrieverOutputs: any[]) => {\n  const issues: any[] = [];\n  retrieverOutputs.forEach(output => {\n    if (output.nodeType === 'ConversationalRetrievalQAChain') {\n      const docs = output.sourceDocuments || [];\n      const lowRelevance = docs.filter(doc => \n        (doc.metadata?.score || 0) < 0.7\n      );\n      if (lowRelevance.length > 0) {\n        issues.push({\n          hallucination: true,\n          type: 'low_relevance_docs',\n          scoreThreshold: 0.7,\n          badDocs: lowRelevance.length,\n          totalDocs: docs.length,\n          nodeId: output.nodeId\n        });\n      }\n    }\n  });\n  return issues;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Custom Tool Empty Response Monitor",
+        "description": "Flags custom function tools returning empty/null results without errors",
+        "code": "const detectSilentToolFailures = (toolOutputs: any[]) => {\n  return toolOutputs\n    .filter(output => output.nodeType === 'CustomTool' || output.nodeType === 'FunctionTool')\n    .map(output => {\n      const result = output.result || output.output || '';\n      if (!result || result === '' || result === null || result === undefined) {\n        return {\n          hallucination: true,\n          type: 'silent_tool_failure',\n          toolName: output.toolName,\n          emptyResult: true,\n          nodeId: output.nodeId\n        };\n      }\n      return null;\n    })\n    .filter(Boolean) as any[];\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add Output Parser Node",
+        "description": "Insert structured output parser after LLM Chain nodes to enforce schema compliance",
+        "code": "// In Flowise Chatflow configuration\nconst fixSchemaValidation = {\n  addNode: {\n    type: 'OutputParserNode',\n    data: {\n      nodeName: 'User Data Parser',\n      schema: JSON.stringify({\n        type: 'object',\n        properties: {\n          name: { type: 'string' },\n          age: { type: 'number' },\n          email: { type: 'string', format: 'email' }\n        },\n        required: ['name', 'age', 'email']\n      })\n    },\n    connections: {\n      from: 'LLMChain_1',\n      to: 'ConditionalRouter_1'\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Retriever Filtering Node",
+        "description": "Add Document Filter node after retriever with minimum similarity threshold",
+        "code": "// Configure Document Filter Node in Flowise\nconst retrieverFilterConfig = {\n  nodeType: 'DocumentFilterNode',\n  data: {\n    nodeName: 'Relevance Filter',\n    minSimilarity: 0.75,\n    maxDocs: 4,\n    filterType: 'similarity'\n  },\n  edges: [\n    { source: 'VectorStoreRetriever_1', target: 'Relevance Filter' },\n    { source: 'Relevance Filter', target: 'LLMChain_2' }\n  ]\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Error Boundary Wrapper",
+        "description": "Wrap custom tools with error boundary that returns structured failure responses",
+        "code": "// Custom Tool with error handling\nconst safeCustomTool = {\n  name: 'safe_api_tool',\n  description: 'Calls API with error handling',\n  func: async (input: string) => {\n    try {\n      const result = await fetch(`/api/${input}`);\n      if (!result.ok) {\n        throw new Error(`API failed: ${result.status}`);\n      }\n      const data = await result.json();\n      return {\n        success: true,\n        data,\n        timestamp: new Date().toISOString()\n      };\n    } catch (error) {\n      return {\n        success: false,\n        error: error.message,\n        retryable: true\n      };\n    }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates directly as a callback handler in Flowise chatflows, automatically intercepting node outputs during execution. It runs the three detection methods above against every LLMChain, Retriever, and Tool node execution, flagging hallucinations in real-time with precise node-level attribution. \n\nWhen hallucinations are detected, Vex can automatically trigger remediation flows like re-running with corrected prompts, injecting validation nodes, or routing to human-in-the-loop review. The platform maintains execution lineage, enabling pattern analysis across deployments to prevent recurring hallucination types.\n\nVex's Flowise integration requires zero code changes—just add the callback in chatflow configuration. It captures full execution traces including intermediate outputs, metadata scores, and context windows for comprehensive hallucination root cause analysis.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport type { ChatFlow, INodeExecutionData } from 'flowise/dist/src';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\nconst flowiseCallback = {\n  onNodeExecution: async (data: INodeExecutionData) => {\n    // Run all three detection methods\n    const hallucinations = [\n      detectSchemaHallucination([data]),\n      detectLowRelevanceDocs([data]),\n      detectSilentToolFailures([data])\n    ].flat();\n\n    if (hallucinations.length > 0) {\n      await vex.capture({\n        type: 'hallucination',\n        flowId: data.flowId,\n        nodeId: data.nodeId,\n        nodeType: data.nodeType,\n        issues: hallucinations,\n        input: data.input,\n        output: data.output,\n        metadata: {\n          chatflowId: data.flowId,\n          timestamp: new Date().toISOString()\n        }\n      });\n    }\n  }\n};\n\n// Add to Flowise chatflow configuration\nchatflow.callbacks = [flowiseCallback];",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 minutes to automatically detect and remediate Flowise hallucinations across all your chatflows."
+    }
+  }
+}

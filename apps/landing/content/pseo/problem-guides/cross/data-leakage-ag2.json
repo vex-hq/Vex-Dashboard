@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in AG2 Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "AG2 data-leakage",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, sensitive data leakage in AI agents often occurs during multi-agent group chats where agents inadvertently share PII, API keys, or confidential info extracted from tools or user inputs across conversation threads. This is exacerbated by AG2's enhanced group chat capabilities, where speaker selection and conversation spiraling can propagate leaked data to unintended participants. Without proper message hooks, data flows freely between agents, leading to exposure in logs, responses, or subsequent tool calls.",
+    "howItManifests": [
+      {
+        "scenario": "Group chat with code execution agent",
+        "symptom": "Code agent extracts API key from database query and includes it in group chat message",
+        "impact": "All group participants receive the key; logged in conversation history"
+      },
+      {
+        "scenario": "Speaker selection in debate group",
+        "symptom": "Agent parses user-uploaded document containing PII and broadcasts summary with emails/phone numbers",
+        "impact": "Competing agents store and potentially re-share sensitive customer data"
+      },
+      {
+        "scenario": "Conversation spiraling off-topic",
+        "symptom": "Research agent pulls internal docs and shares credentials while chasing tangential research query",
+        "impact": "Leak persists in long-running conversation thread accessible to all agents"
+      },
+      {
+        "scenario": "Consensus-building in multi-agent workflow",
+        "symptom": "Agents collectively analyze sensitive dataset; one agent outputs raw records during consensus round",
+        "impact": "Group consensus message contains unredacted PII visible to human overseers and logs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex Pattern Scanning for Common Secrets",
+        "description": "Scans agent messages for API keys, passwords, and PII patterns using regex before speaker selection",
+        "code": "import re\n\ndef detect_secrets(message: str) -> list:\n    patterns = [\n        r'ak[a-zA-Z0-9]{20,}',\n        r'key-[a-zA-Z0-9]{32}',\n        r'\\b(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})\\b',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b'\n    ]\n    findings = []\n    for pattern in patterns:\n        matches = re.finditer(pattern, message)\n        for match in matches:\n            findings.append({\n                'type': 'potential_secret',\n                'match': match.group(),\n                'start': match.start(),\n                'end': match.end()\n            })\n    return findings",
+        "language": "python"
+      },
+      {
+        "name": "AG2 Message Hook Interception",
+        "description": "Registers hook on AG2 group chat to inspect messages before broadcast to all participants",
+        "code": "from ag2 import GroupChat, GroupChatManager\n\ndef leakage_hook(message, sender, recipient):\n    if 'api_key' in message.lower() or len(message) > 1000:\n        print(f'🚨 LEAK DETECTED: {sender.name} -> {recipient}')\n        return {'block': True, 'reason': 'sensitive_data'}\n    return {'block': False}\n\n# Register on group chat\ngroupchat = GroupChat(agents=[agent1, agent2], messages=[], max_round=10)\ngroupchat.register_message_hook(leakage_hook)\nmanager = GroupChatManager(groupchat=groupchat)",
+        "language": "python"
+      },
+      {
+        "name": "Cross-Agent Data Flow Tracking",
+        "description": "Tracks sensitive data propagation across AG2 speaker turns using message lineage",
+        "code": "class LeakTracker:\n    def __init__(self):\n        self.sensitive_markers = set()\n        self.flow_map = {}\n    \n    def mark_sensitive(self, message_id: str, agent_id: str):\n        self.sensitive_markers.add(message_id)\n        self.flow_map[message_id] = agent_id\n    \n    def check_propagation(self, message: str, message_id: str, sender_id: str):\n        if any(marker in message for marker in self.sensitive_markers):\n            return f'PROPAGATION ALERT: {sender_id} re-sharing sensitive data'\n        return None\n\ntracker = LeakTracker()\n# Use in AG2 message processing",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "AG2 Message Redaction Filter",
+        "description": "Automatically redacts PII and secrets from messages before group chat broadcast",
+        "code": "import re\nfrom ag2 import register_message_hook\n\ndef redact_message(message: str) -> str:\n    replacements = {\n        r'\\b(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})\\b': '[EMAIL_REDACTED]',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b': '[SSN_REDACTED]',\n        r'(?i)(api[_\\s]*key|secret|password)[\\s:=]+[^\\s]+': r'\\1=[REDACTED]'\n    }\n    for pattern, replacement in replacements.items():\n        message = re.sub(pattern, replacement, message)\n    return message\n\n@register_message_hook\ndef safe_message(message, sender):\n    return redact_message(message.content)",
+        "language": "python"
+      },
+      {
+        "name": "Selective Speaker Data Masking",
+        "description": "Masks sensitive data based on AG2 speaker role and recipient group",
+        "code": "from ag2 import Agent\n\nclass SafeSpeakerAgent(Agent):\n    def __init__(self, *args, sensitive_roles=['researcher', 'coder'], **kwargs):\n        super().__init__(*args, **kwargs)\n        self.sensitive_roles = sensitive_roles\n    \n    def generate_reply(self, messages, sender, config):\n        if sender.role in self.sensitive_roles:\n            # Mask before group broadcast\n            masked_messages = [self.mask_sensitive(msg) for msg in messages]\n            reply = super().generate_reply(masked_messages, sender, config)\n        else:\n            reply = super().generate_reply(messages, sender, config)\n        return reply\n    \n    def mask_sensitive(self, message):\n        return message.replace('api_key=', 'api_key=[MASKED]').replace('password=', 'password=[MASKED]')",
+        "language": "python"
+      },
+      {
+        "name": "AG2 Group Chat Termination on Leak",
+        "description": "Immediately halts group chat and notifies on detected leakage",
+        "code": "from ag2 import GroupChatManager\n\ndef emergency_stop_hook(message, sender, groupchat):\n    if detect_secrets(message):\n        print('🚨 SENSITIVE LEAK DETECTED - TERMINATING GROUP CHAT')\n        groupchat.terminate()\n        return {'action': 'terminate', 'alert': 'Data leak detected'}\n    return {'action': 'continue'}\n\n# Apply to AG2 group manager\ngroupchat_manager.register_global_hook(emergency_stop_hook)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a message hook in AG2 group chats, automatically scanning every agent message for PII, API keys, and propagation patterns before speaker selection or broadcast. It provides real-time blocking, redaction, and alerting while maintaining conversation flow with masked data. Vex's AG2-specific patterns detect leakage unique to multi-agent dynamics like cross-speaker data sharing and spiraling conversations.\n\nThe platform automatically generates remediation code, tracks leakage across conversation rounds, and provides audit trails for compliance. Vex hooks into AG2's enhanced group chat APIs to enforce role-based data masking and emergency termination rules, preventing sensitive data from ever reaching logs or human overseers.",
+      "code": "from vex_sdk import Vex\nvex = Vex(api_key='your-vex-key')\n\nfrom ag2 import GroupChat\n\n@vex.hook('ag2_message_pre_send')\ndef prevent_leakage(message, sender, recipients):\n    issues = vex.scan(message.content, rules=['pii', 'secrets', 'ag2_propagation'])\n    if issues:\n        vex.alert(f'Leak detected in {sender.name}: {issues}')\n        return vex.redact(message.content)\n    return message.content\n\n# Auto-register on all AG2 group chats\nGroupChat.register_vex_hook(vex)\n\n# Vex auto-generates monitoring dashboard\nvex.deploy_monitor('ag2-sensitive-leakage', agents=['*'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install ag2 vex-sdk` and eliminate sensitive data leakage in your AG2 agents instantly."
+    }
+  }
+}

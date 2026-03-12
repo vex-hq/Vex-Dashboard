@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build code generation with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents code generation",
+      "n8n AI Agents guardrails",
+      "code generation reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "n8n AI Agents enable powerful code generation workflows where LLMs produce, test, and refine code iteratively within sandboxed environments. However, these agentic chains introduce high risks like malicious code injection, credential leaks in generated scripts, and infinite recursion from unvalidated outputs. Vex provides essential guardrails to verify code safety, syntax, and execution integrity before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with n8n AI Agents",
+      "description": "Typical n8n code generation workflows start with a trigger (webhook/HTTP request) feeding user prompts to an AI Agent node configured with tools for code generation, sandbox execution, and testing. The agent uses a language model (e.g., OpenAI/Groq) to generate code, which passes to a Code Sandbox node for execution and a validation node for test assertions. Iterative refinement loops back through memory nodes if tests fail, with final approved code output to deployment nodes like GitHub or serverless functions.\n\nMemory window nodes maintain conversation context across iterations, while credential nodes (e.g., API keys) are injected securely. Failure modes emerge when unvalidated AI outputs trigger recursive loops or expose secrets in tool parameters. Vex integrates as a webhook node post-AI Agent to intercept and verify outputs before sandbox execution.\n\nThis architecture excels for rapid prototyping but demands rigorous safety checks given the high-risk nature of executing AI-generated code.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Webhook       │───▶│  AI Agent Node   │───▶│   Vex Webhook   │\n│   Trigger       │    │ (Code Gen +      │    │   (Guardrails)  │\n└─────────────────┘    │  Tools)          │    └───────────────┘\n                       └──────────────────┘           │\n                                                      ▼\n                                               ┌─────────────────┐\n                                               │  Code Sandbox   │──▶┌─────────────────┐\n                                               │  Execution      │   │ Test Validator  │\n                                               └─────────────────┘   └─────────────────┘\n                                                              │\n                                                              ▼\n                                                       ┌─────────────────┐\n                                                       │ Iterative Loop  │\n                                                       │   (Memory)      │\n                                                       └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Recursive Agent Execution",
+        "description": "Workflow trigger chains cause infinite loops when AI nodes output triggers that re-execute the workflow without termination conditions.",
+        "severity": "critical",
+        "mitigation": "Insert Vex webhook to validate output structure and detect recursion patterns before passing to next nodes."
+      },
+      {
+        "name": "Unvalidated Code Output",
+        "description": "AI-generated code bypasses syntax/safety checks before sandbox execution, risking malicious payloads or runtime errors.",
+        "severity": "critical",
+        "mitigation": "Vex verifies syntax validity, scans for dangerous patterns (eval, fs.write), and confirms test coverage."
+      },
+      {
+        "name": "Credential Leakage",
+        "description": "Generated code or tool parameters inadvertently expose API keys/credentials from n8n credential nodes.",
+        "severity": "high",
+        "mitigation": "Vex redacts and scans for credential patterns in code strings and execution traces."
+      },
+      {
+        "name": "Stale Memory Context",
+        "description": "Memory window nodes inject outdated conversation history, leading to context drift and flawed code iterations.",
+        "severity": "high",
+        "mitigation": "Vex validates memory payloads for recency and relevance before agent re-processing."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n AI Agent Node for Code Generation",
+        "description": "Configure the AI Agent node with a code generation tool that produces executable TypeScript/Python.",
+        "code": "{\n  \"nodes\": [{\n    \"parameters\": {\n      \"agent\": \"toolsAgent\",\n      \"model\": \"gpt-4o\",\n      \"tools\": [{\n        \"type\": \"code\",\n        \"name\": \"generateCode\",\n        \"description\": \"Generate executable code for the task\",\n        \"schema\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"code\": { \"type\": \"string\" },\n            \"language\": { \"type\": \"string\", \"enum\": [\"typescript\", \"python\"] }\n          }\n        }\n      }],\n      \"prompt\": \"Generate TypeScript code to fetch weather data from OpenWeatherMap API\"\n    },\n    \"type\": \"n8n-nodes-langchain.agent\"\n  }],\n  \"connections\": { \"AI Agent\": { \"main\": [[{ \"node\": \"Vex Webhook\" }]] } }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Webhook Node Setup",
+        "description": "Add Vex webhook after AI Agent to intercept code output for verification.",
+        "code": "// n8n webhook node configuration\nconst vexWebhookUrl = \"https://api.vex.dev/v1/verify\";\n\nreturn {\n  method: \"POST\",\n  url: vexWebhookUrl,\n  body: {\n    sessionId: \"{{ $json.sessionId }}\",\n    payload: $json,\n    checks: [\"code_safety\", \"syntax_validity\", \"no_secrets\", \"sandbox_safe\"]\n  },\n  headers: {\n    \"Authorization\": \"Bearer \" + $env.VEX_API_KEY,\n    \"Content-Type\": \"application/json\"\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Code Sandbox Node with Vex Approval",
+        "description": "Only execute code after Vex verification passes all checks.",
+        "code": "// Conditional execution after Vex webhook\nif ($json.vex?.approved !== true) {\n  throw new Error(`Vex blocked unsafe code: ${$json.vex.reason}`);\n}\n\nreturn {\n  code: $json.payload.code,\n  language: $json.payload.language,\n  timeout: 10000,\n  sandbox: true\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Test Validation Loop",
+        "description": "IFTTT-style loop that feeds test failures back to AI Agent via memory node.",
+        "code": "// Test results node\nconst testsPassed = $json.tests.every(t => t.passed);\n\nif (!testsPassed) {\n  return {\n    feedback: $json.tests.map(t => t.error).join('\\n'),\n    action: \"retry\",\n    memory: {\n      previousCode: $json.code,\n      testFailures: $json.tests\n    }\n  };\n}\n\nreturn { status: \"approved\", deploy: $json.code };",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install Vex SDK in n8n",
+        "description": "Add Vex verification using TypeScript SDK in a Code node before sandbox execution.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'n8n-code-gen'\n});\n\nconst result = await vex.verify({\n  sessionId: $input.first().json.sessionId,\n  payload: {\n    code: $input.first().json.code,\n    language: 'typescript'\n  },\n  checks: [\n    'code_safety',\n    'syntax_validity',\n    'no_credential_leakage',\n    'sandbox_execution_safe',\n    'dependency_safety'\n  ]\n});\n\nreturn {\n  vexId: result.id,\n  approved: result.approved,\n  reason: result.reason,\n  safeCode: result.verifiedPayload\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Real-time Code Safety Check",
+        "description": "Verify generated code blocks malicious patterns and secret exposure.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: $env.VEX_API_KEY });\n\nconst check = await vex.check({\n  type: 'code_safety',\n  payload: {\n    code: $input.code,\n    context: 'n8n AI agent output',\n    riskProfile: 'high'\n  }\n});\n\nif (!check.safe) {\n  return {\n    block: true,\n    violations: check.issues,\n    remediation: check.suggestions\n  };\n}\n\nreturn { safe: true, verifiedCode: check.payload };",
+        "language": "typescript"
+      },
+      {
+        "title": "Sandbox Execution Guardrail",
+        "description": "Pre-validate sandbox inputs and monitor execution traces.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst session = new Vex.Session('code-gen-session');\n\nawait session.record({\n  step: 'pre-sandbox',\n  payload: {\n    code: $input.code,\n    deps: $input.dependencies || [],\n    timeout: 30\n  }\n});\n\nconst sandboxCheck = await session.verify({\n  checks: ['execution_sandboxing', 'dependency_safety'],\n  maxMemory: '256MB',\n  allowedImports: ['axios', 'lodash']\n});\n\nreturn {\n  sandboxApproved: sandboxCheck.approved,\n  traceId: sandboxCheck.traceId,\n  executionPlan: sandboxCheck.plan\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Code Generation",
+      "description": "Add Vex guardrails to your n8n workflows today to prevent code injection and credential leaks - start with our free tier."
+    }
+  }
+}

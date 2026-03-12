@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build code generation with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents code generation",
+      "Amazon Bedrock Agents guardrails",
+      "code generation reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable enterprise-grade code generation workflows by combining LLMs with knowledge bases, action groups for sandbox execution, and guardrails for safety. In code generation use cases, agents iteratively refine code through testing and validation, but risks like credential leakage, unsafe dependencies, and syntax errors can lead to production incidents. Vex provides post-processing verification on agent responses to ensure code safety, validity, and compliance before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Amazon Bedrock Agents",
+      "description": "The architecture starts with a Bedrock Agent configured with a knowledge base containing code patterns and best practices. User prompts trigger the agent via invoke_agent(), which orchestrates action groups: one for code generation, another for sandbox execution using Lambda, and a third for test validation. Guardrails filter responses, but gaps remain in domain-specific code safety checks.\n\nThe agent maintains session state across multi-turn interactions for iterative refinement. Code is generated, executed in a Lambda sandbox, validated against test cases, and refined until passing all checks. Responses flow back through guardrails before reaching the client.\n\nVex integrates as a post-processing layer, wrapping invoke_agent() responses with vex.verify() to catch failure modes like malformed Lambda responses and policy violations that Bedrock guardrails miss.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Prompt   │───▶│ Bedrock Agent    │───▶│ Vex Verification│\n└─────────────────┘    │ - Knowledge Base │    │ - Code Safety   │\n                       │ - Action Groups   │    │ - Syntax Check  │\n                       │   * Code Gen     │    │ - No Credentials│\n                       │   * Sandbox Exec │    └───────────────┘\n                       │   * Test Validate│             │\n                       └──────────────────┘             ▼\n                                                       │\n                       ┌──────────────────┐    ┌──────────────┐\n                       │ Lambda Functions │◀───┤ Verified     │\n                       │ - Sandbox        │    │ Code Output   │\n                       │ - Testing        │    └──────────────┘\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups return JSON that doesn't match agent schema expectations, causing agent routing failures",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() with vex.verify() using JSON schema validation policies"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Code patterns split across chunk boundaries are not retrieved, leading to incomplete or incorrect code generation",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks ensure generated code matches known safe patterns"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Bedrock guardrails miss code-specific risks like credential patterns or unsafe dependencies",
+        "severity": "critical",
+        "mitigation": "Custom Vex policies scan for regex patterns like AWS keys, eval() usage, and dangerous imports"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Context loss causes agent to regenerate invalid code instead of refining previous iterations",
+        "severity": "high",
+        "mitigation": "Vex session persistence and state validation across agent invocations"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation for Code Generation",
+        "description": "Invoke Bedrock Agent with code generation prompt and handle the response structure",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef invoke_code_agent(prompt: str, session_id: str):\n    response = bedrock_agent.invoke_agent(\n        agentId='YOUR_AGENT_ID',\n        agentAliasId='YOUR_AGENT_ALIAS_ID',\n        sessionId=session_id,\n        inputText=prompt\n    )\n    \n    # Stream response\n    full_response = ''\n    for event in response['completion']:\n        if 'chunk' in event:\n            full_response += event['chunk']['bytes'].decode()\n    \n    return json.loads(full_response)['outputText']",
+        "language": "python"
+      },
+      {
+        "title": "Lambda Action Group for Sandbox Code Execution",
+        "description": "Lambda function that safely executes generated code in a sandbox environment",
+        "code": "import json\nimport subprocess\nimport tempfile\nimport os\n\ndef lambda_handler(event, context):\n    code = event['code']\n    \n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    \n    try:\n        result = subprocess.run(\n            ['python', temp_file],\n            capture_output=True,\n            text=True,\n            timeout=30\n        )\n        os.unlink(temp_file)\n        \n        return {\n            'statusCode': 200,\n            'body': json.dumps({\n                'stdout': result.stdout,\n                'stderr': result.stderr,\n                'returncode': result.returncode\n            })\n        }\n    except subprocess.TimeoutExpired:\n        os.unlink(temp_file)\n        return {\n            'statusCode': 408,\n            'body': json.dumps({'error': 'Execution timeout'})\n        }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Client with Session Management",
+        "description": "TypeScript client for multi-turn code generation conversations",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\ninterface CodeResponse {\n  code: string;\n  explanation: string;\n  testsPassed: boolean;\n}\n\nexport async function invokeCodeAgent(\n  prompt: string,\n  sessionId: string\n): Promise<CodeResponse> {\n  const command = new InvokeAgentCommand({\n    agentId: 'YOUR_AGENT_ID',\n    agentAliasId: 'YOUR_AGENT_ALIAS_ID',\n    sessionId,\n    inputText: prompt,\n    enableTrace: true\n  });\n  \n  const response = await client.send(command);\n  let fullOutput = '';\n  \n  for await (const chunk of response.completion!) {\n    if (chunk.chunk?.bytes) {\n      fullOutput += Buffer.from(chunk.chunk.bytes).toString();\n    }\n  }\n  \n  return JSON.parse(fullOutput) as CodeResponse;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Setup for Code Patterns",
+        "description": "Configure knowledge base with safe code patterns and best practices",
+        "code": "import boto3\n\nbedrock_agent = boto3.client('bedrock-agent')\n\n# Create knowledge base with code patterns\ndef create_code_kb():\n    response = bedrock_agent.create_knowledge_base(\n        name='code-patterns-kb',\n        roleArn='arn:aws:iam::ACCOUNT:role/BedrockKBRole',\n        knowledgeBaseConfiguration={\n            'type': 'VECTOR',\n            'vectorKnowledgeBaseConfiguration': {\n                'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'\n            }\n        },\n        storageConfiguration={\n            'type': 'OPENSEARCH_SERVERLESS',\n            'opensearchServerlessConfiguration': {\n                'collectionArn': 'arn:aws:aoss:us-east-1:ACCOUNT:collection/CODE_COLLECTION',\n                'vectorIndexName': 'code_patterns',\n                'fieldMapping': {\n                    'vectorField': 'embedding',\n                    'textField': 'text',\n                    'metadataField': 'metadata'\n                }\n            }\n        }\n    )\n    return response['knowledgeBaseId']",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Verification for Code Safety",
+        "description": "Wrap Bedrock Agent response with comprehensive code safety checks",
+        "code": "from vex_sdk import Vex\n\nvex = Vex(api_key=\"YOUR_VEX_API_KEY\")\n\ndef safe_code_generation(prompt: str, session_id: str):\n    # Get raw agent response\n    raw_code = invoke_code_agent(prompt, session_id)\n    \n    # Vex verification with code-specific policies\n    verified = vex.verify(\n        input=raw_code,\n        policies=[\n            \"code-safety\",\n            \"syntax-validity\",\n            \"no-credential-leakage\",\n            \"dependency-safety\",\n            {\n                \"name\": \"no_eval_exec\",\n                \"type\": \"regex_deny\",\n                \"pattern\": r\"(eval\\(|exec\\(|__import__\\()\"\n            },\n            {\n                \"name\": \"no_aws_creds\",\n                \"type\": \"regex_deny\",\n                \"pattern\": r\"(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\"\n            }\n        ],\n        context={\"session_id\": session_id, \"use_case\": \"code-generation\"}\n    )\n    \n    if verified.is_safe:\n        return verified.output\n    else:\n        return f\"Blocked unsafe code: {verified.violations}\"",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Wrapper for Agent Responses",
+        "description": "TypeScript integration with detailed violation reporting",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: 'YOUR_VEX_API_KEY' });\n\nexport async function verifyAgentCode(\n  agentResponse: string,\n  sessionId: string\n): Promise<{ isSafe: boolean; code?: string; violations?: string[] }> {\n  const result = await vex.verify({\n    input: agentResponse,\n    policies: [\n      'code-safety',\n      'syntax-validity',\n      'no-credential-leakage',\n      'execution-sandboxing',\n      {\n        name: 'no_system_calls',\n        type: 'regex_deny',\n        pattern: 'os.system|subprocess.call|Popen'\n      },\n      {\n        name: 'safe_dependencies',\n        type: 'dependency_allowlist',\n        allowed: ['numpy', 'pandas', 'requests', 'json']\n      }\n    ],\n    context: {\n      sessionId,\n      riskProfile: 'high',\n      useCase: 'code-generation'\n    }\n  });\n  \n  return {\n    isSafe: result.isSafe,\n    code: result.isSafe ? result.output : undefined,\n    violations: result.violations\n  };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Turn Session State Validation",
+        "description": "Maintain and validate session context across agent iterations",
+        "code": "from vex_sdk import Vex\n\nvex = Vex(api_key=\"YOUR_VEX_API_KEY\")\n\nclass CodeAgentSession:\n    def __init__(self, session_id: str):\n        self.session_id = session_id\n        self.history = []\n    \n    def generate_and_verify(self, prompt: str):\n        # Agent invocation\n        raw_code = invoke_code_agent(prompt, self.session_id)\n        \n        # Verify with session context\n        verified = vex.verify(\n            input=raw_code,\n            policies=[\n                \"code-safety\",\n                {\n                    \"name\": \"session_consistency\",\n                    \"type\": \"semantic_similarity\",\n                    \"reference\": self.history[-1] if self.history else None,\n                    \"threshold\": 0.8\n                }\n            ],\n            context={\n                \"session_id\": self.session_id,\n                \"iteration\": len(self.history),\n                \"previous_code\": self.history[-1] if self.history else None\n            }\n        )\n        \n        if verified.is_safe:\n            self.history.append(verified.output)\n        \n        return verified",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Code Generation",
+      "description": "Integrate Vex verification today to eliminate code generation risks and ensure production-ready outputs from your Bedrock Agents."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with AG2 + Vex Guardrails",
+    "description": "Learn how to build code generation with AG2 + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AG2 code generation",
+      "AG2 guardrails",
+      "code generation reliability",
+      "Vex AG2",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation workflows with AG2 enables multi-agent collaboration where LLMs iteratively generate, test, and refine code in a sandboxed environment. Guardrails are essential to prevent off-topic drifts, harmful code outputs, and security risks like credential leakage or unsafe dependencies. Vex integration provides runtime verification to ensure safe, valid code generation at scale.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with AG2",
+      "description": "The typical AG2 code generation architecture features a CodeGenerator agent that produces Python code based on user requirements, a CodeExecutor agent that runs it in a sandbox, and a Tester agent that validates outputs against specs. Agents communicate via group chat, with the manager selecting speakers to iterate until tests pass. This loop handles syntax errors, runtime failures, and refinement needs.\n\nKey components include sandboxed execution (using restricted environments like E2B or Docker), automated test suites for functional validation, and safety checks for malicious patterns. The high-risk nature demands verification at each stage to mitigate exploits.\n\nAG2's enhanced group chat ensures consensus on code quality, but requires hooks for real-time monitoring.",
+      "diagram": "User Request\n     |\n[GroupChat: CodeGenerator -> CodeExecutor -> Tester]\n     |                           ^\n     |                           |\n   Vex Hooks ------------------|\n     |\nSandbox Exec + Tests\n     |\nRefined Code Output"
+    },
+    "risks": [
+      {
+        "name": "Malicious Code Injection",
+        "description": "Agents generate code with exec() calls, file writes, or network requests that could harm the host system",
+        "severity": "critical",
+        "mitigation": "Vex sandbox verification + static analysis for dangerous patterns"
+      },
+      {
+        "name": "Credential Leakage",
+        "description": "Generated code embeds API keys or secrets from conversation context",
+        "severity": "critical",
+        "mitigation": "Vex regex scanning + context redaction"
+      },
+      {
+        "name": "Unsafe Dependencies",
+        "description": "Code installs malicious pip packages or uses vulnerable libraries",
+        "severity": "high",
+        "mitigation": "Vex dependency whitelisting + install-time scanning"
+      },
+      {
+        "name": "Infinite Refinement Loop",
+        "description": "Group chat spirals with agents disagreeing on fixes, consuming resources",
+        "severity": "medium",
+        "mitigation": "Vex conversation drift detection + iteration limits"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic AG2 Code Generation Group",
+        "description": "Set up the core multi-agent group with generator, executor, and tester",
+        "code": "from ag2 import GroupChat, GroupChatManager\nfrom ag2.agentchat import UserProxyAgent\n\n# Agents\ngenerator = AssistantAgent(name=\"CodeGenerator\", llm_config={\"config_list\":[{\"model\":\"gpt-4o\"}]})\nexecutor = AssistantAgent(name=\"CodeExecutor\", llm_config={\"config_list\":[{\"model\":\"gpt-4o\"}]})\ntester = AssistantAgent(name=\"Tester\", llm_config={\"config_list\":[{\"model\":\"gpt-4o\"}]})\n\n# Group chat\ngroupchat = GroupChat(agents=[generator, executor, tester], messages=[], max_round=12)\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"config_list\":[{\"model\":\"gpt-4o\"}]})\n\nuser_proxy = UserProxyAgent(name=\"User\", human_input_mode=\"NEVER\")\nuser_proxy.initiate_chat(manager, message=\"Write Python code to process CSV data and return summary stats.\")",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Code Execution",
+        "description": "Implement safe execution using subprocess sandboxing",
+        "code": "import subprocess\nimport tempfile\nimport os\n\ndef sandbox_execute(code: str) -> dict:\n    with tempfile.TemporaryDirectory() as tmpdir:\n        filepath = os.path.join(tmpdir, 'script.py')\n        with open(filepath, 'w') as f:\n            f.write(code)\n        \n        result = subprocess.run(\n            ['python', filepath],\n            capture_output=True,\n            text=True,\n            timeout=30,\n            cwd=tmpdir\n        )\n        return {\n            'stdout': result.stdout,\n            'stderr': result.stderr,\n            'returncode': result.returncode\n        }\n\n# In executor agent:\nexec_result = sandbox_execute(generated_code)\nif exec_result['returncode'] == 0:\n    groupchat.messages.append(f\"Execution successful: {exec_result['stdout']}\")\nelse:\n    groupchat.messages.append(f\"Execution failed: {exec_result['stderr']}\")",
+        "language": "python"
+      },
+      {
+        "title": "Automated Test Validation",
+        "description": "Tester agent runs pytest suite against generated code",
+        "code": "import pytest\nimport sys\n\ndef run_tests(code: str, test_cases: list) -> bool:\n    # Write code to temp file\n    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:\n        f.write(code.encode())\n        code_path = f.name\n    \n    # Create test file\n    test_path = code_path.replace('.py', '_test.py')\n    test_content = '''\nimport pytest\nimport sys\nsys.path.insert(0, ''' + repr(os.path.dirname(code_path)) + ''')\n'''\n    for case in test_cases:\n        test_content += case + '\\n'\n    \n    with open(test_path, 'w') as f:\n        f.write(test_content)\n    \n    # Run pytest\n    result = subprocess.run([\"pytest\", test_path, \"-v\"], capture_output=True, text=True)\n    os.unlink(code_path)\n    os.unlink(test_path)\n    return \"FAILED\" not in result.stdout",
+        "language": "python"
+      },
+      {
+        "title": "Iteration Termination Logic",
+        "description": "Manager decides when to terminate based on test success",
+        "code": "class CodeGenManager(GroupChatManager):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.success_criteria = [\"tests passed\", \"all checks green\", \"code validated\"]\n    \n    def select_speaker(self, last_speaker, groupchat):\n        last_message = groupchat.messages[-1]['content'].lower()\n        if any(criteria in last_message for criteria in self.success_criteria):\n            return None  # Terminate\n        return super().select_speaker(last_speaker, groupchat)\n\nmanager = CodeGenManager(groupchat=groupchat)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Message Hook",
+        "description": "Add Vex as a message hook to all agents for real-time verification",
+        "code": "from vex_sdk import VexClient, GuardrailPolicy\n\nvex = VexClient(api_key=\"your-vex-api-key\")\n\n# High-risk policy for code gen\npolicy = GuardrailPolicy(\n    risk_profile=\"high\",\n    verifications=[\n        \"code_safety\",\n        \"syntax_validity\",\n        \"no_credential_leakage\",\n        \"execution_sandboxing\",\n        \"dependency_safety\"\n    ]\n)\n\n# Register hook on all agents\ndef vex_message_hook(message):\n    if 'code' in message.lower():\n        result = vex.verify_message(message, policy)\n        if not result.approved:\n            return f\"[VEX BLOCKED] {result.reason}: {message}\"\n    return message\n\ngenerator.register_message_hook(vex_message_hook)\nexecutor.register_message_hook(vex_message_hook)\ntester.register_message_hook(vex_message_hook)",
+        "language": "python"
+      },
+      {
+        "title": "Code Safety Pre-Execution Check",
+        "description": "Vex scans code before sandbox execution with specific rules",
+        "code": "def vex_code_safety_check(code: str) -> dict:\n    policy = {\n        \"block_patterns\": [\n            r\"exec\\(\", r\"eval\\(\", r\"__import__\\('os'\\)\",\n            r\"open\\(.*'w'\\)\", r\"requests\\.get\\(\",\n            r\"pip\\.|subprocess\"\n        ],\n        \"dependency_whitelist\": [\"pandas\", \"numpy\", \"matplotlib\"],\n        \"max_file_size\": 1024\n    }\n    \n    result = vex.verify_code(code, policy)\n    return {\n        'safe': result.approved,\n        'issues': result.issues,\n        'sanitized_code': result.sanitized_code\n    }\n\n# In executor:\ncheck = vex_code_safety_check(generated_code)\nif not check['safe']:\n    groupchat.messages.append(f\"Code rejected: {check['issues']}\")\n    return\nexec_result = sandbox_execute(check['sanitized_code'])",
+        "language": "python"
+      },
+      {
+        "title": "Group Chat Drift Detection",
+        "description": "Vex monitors conversation to prevent off-topic spiraling",
+        "code": "def vex_drift_monitor(groupchat):\n    conversation = \" \".join([m['content'] for m in groupchat.messages[-10:]])\n    \n    drift_check = vex.verify_conversation(\n        conversation,\n        context=\"code generation for CSV processing\",\n        max_rounds=15\n    )\n    \n    if drift_check.drift_detected:\n        return f\"[VEX ALERT] Conversation drifting. Focus: {drift_check.suggested_refocus}\"\n    \n    if len(groupchat.messages) > 12:\n        return \"[VEX] Max iterations reached. Terminating.\"\n    \n    return None\n\n# Add to manager select_speaker:\ndef select_speaker(self, last_speaker, groupchat):\n    drift_alert = vex_drift_monitor(groupchat)\n    if drift_alert:\n        groupchat.messages.append({\"content\": drift_alert, \"role\": \"VEX_MONITOR\"})\n    return super().select_speaker(last_speaker, groupchat)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AG2 Code Generation",
+      "description": "Install Vex today with `pip install ag2 vex-sdk` and register your message hooks to protect production code generation workflows."
+    }
+  }
+}

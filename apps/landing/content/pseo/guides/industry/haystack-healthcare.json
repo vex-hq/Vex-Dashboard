@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "industry": "healthcare",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Haystack Guardrails for Healthcare",
+    "description": "Compliance guide for Haystack agents in healthcare. Meet HIPAA, FDA 21 CFR Part 11 requirements with Vex guardrails.",
+    "keywords": [
+      "Haystack healthcare",
+      "healthcare AI compliance",
+      "Haystack guardrails",
+      "healthcare AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Healthcare teams using Haystack for RAG pipelines process sensitive PHI, where failures like hallucinations or irrelevant retrievals can lead to misdiagnoses and patient harm. Compliance with HIPAA, FDA 21 CFR Part 11, and HITECH demands auditable AI decisions and data isolation. Vex provides runtime guardrails to catch these failures before they impact care delivery.",
+    "complianceRequirements": [
+      {
+        "regulation": "HIPAA",
+        "description": "Protects PHI from unauthorized disclosure; requires de-identification before LLM processing and audit trails for all access.",
+        "howVexHelps": "Monitors data flows to block unde-identified PHI from reaching LLMs, logs all pipeline decisions with tamper-proof audit trails."
+      },
+      {
+        "regulation": "FDA 21 CFR Part 11",
+        "description": "Mandates electronic records be trustworthy, auditable, and compliant with signature requirements for clinical decisions.",
+        "howVexHelps": "Captures pipeline execution traces with input/output validation, ensuring AI-assisted decisions meet electronic record standards."
+      },
+      {
+        "regulation": "HITECH Act",
+        "description": "Strengthens HIPAA with breach notification and increased penalties; requires patient data isolation within processing environments.",
+        "howVexHelps": "Enforces data residency checks and alerts on exfiltration attempts, preventing PHI from leaving secure boundaries."
+      },
+      {
+        "regulation": "SOC 2 Type II",
+        "description": "Requires demonstrated controls for security, availability, and confidentiality over 6+ months of operation.",
+        "howVexHelps": "Provides continuous compliance monitoring with failure rate dashboards and automated control evidence collection."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Hallucinated Treatment Recommendations",
+        "description": "Generator produces dangerous medical advice beyond retrieved context, leading to incorrect prescriptions.",
+        "severity": "critical",
+        "example": "Patient receives metformin recommendation despite documented allergy due to hallucinated dosage info."
+      },
+      {
+        "name": "PHI Leakage to External LLMs",
+        "description": "Unde-identified patient data transmitted to cloud APIs, violating HIPAA data isolation rules.",
+        "severity": "critical",
+        "example": "Patient name and diagnosis sent to OpenAI GPT-4 during query processing."
+      },
+      {
+        "name": "Irrelevant Document Retrieval",
+        "description": "Retriever returns outdated protocols or wrong patient records, causing treatment errors.",
+        "severity": "high",
+        "example": "Pediatric dosage retrieved for adult patient due to embedding mismatch."
+      },
+      {
+        "name": "Silent Component Failures",
+        "description": "Custom de-identification component fails without error, allowing PHI through pipeline.",
+        "severity": "high",
+        "example": "NER model crashes but pipeline continues with raw clinical notes."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Vex Guardrail Component for PHI De-identification",
+        "description": "Custom Haystack component using Vex to block pipelines if PHI detected before LLM processing.",
+        "code": "from haystack import Pipeline, component\nfrom vex import Guardrail, GuardrailResult\nfrom typing import Any\n\n@component\nclass VexPHIComponent:\n    def __init__(self):\n        self.phi_guardrail = Guardrail('healthcare-phi-v1')\n\n    @component.output_types(rejected=bool, alert=str)\n    def run(self, text: str) -> dict:\n        result = self.phi_guardrail.run(text)\n        if result.risk == 'high':\n            return {'rejected': True, 'alert': 'PHI detected - blocking LLM access'}\n        return {'rejected': False, 'alert': ''}\n\n# Usage in pipeline\np = Pipeline()\np.add_component('vex_phi', VexPHIComponent())\np.connect('vex_phi.rejected', 'end')",
+        "language": "python"
+      },
+      {
+        "title": "Retriever Relevance Scoring with Vex",
+        "description": "Validates retrieved documents meet medical relevance thresholds before generator access.",
+        "code": "from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom vex import Guardrail\n\nclass VexRetriever:\n    def __init__(self, retriever):\n        self.retriever = retriever\n        self.relevance_guard = Guardrail('medical-relevance-v1')\n\n    def run(self, query: str, top_k: int = 5):\n        docs = self.retriever.run(query=query, top_k=top_k)['documents']\n        scored_docs = []\n        for doc in docs:\n            score = self.relevance_guard.run(f\"Query: {query}\\nDoc: {doc.content}\")['score']\n            if score > 0.7:\n                scored_docs.append(doc)\n        return {'documents': scored_docs}\n\n# Integrate into Haystack pipeline\nretriever = VexRetriever(InMemoryEmbeddingRetriever(document_store))",
+        "language": "python"
+      },
+      {
+        "title": "Hallucination Detection Post-Generator",
+        "description": "Vex validates generator output stays grounded in retrieved context, blocking hallucinated responses.",
+        "code": "from haystack.components.generators import OpenAIGenerator\nfrom vex import Guardrail\n\n@component\nclass VexHallucinationCheck:\n    def __init__(self):\n        self.hallucination_guard = Guardrail('healthcare-hallucination-v1')\n\n    @component.output_types(valid=str, risk_score=float, explanation=str)\n    def run(self, generated_text: str, context_docs: list) -> dict:\n        context = '\\n'.join([doc.content for doc in context_docs])\n        result = self.hallucination_guard.run({\n            'response': generated_text,\n            'context': context\n        })\n        return {\n            'valid': generated_text if result.risk < 0.3 else '',\n            'risk_score': result.risk,\n            'explanation': result.explanation\n        }\n\n# Pipeline wiring\np.add_component('generator', OpenAIGenerator())\np.add_component('vex_hallucination', VexHallucinationCheck())\np.connect('generator', 'vex_hallucination.generated_text')\np.connect('retriever', 'vex_hallucination.context_docs')",
+        "language": "python"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Haystack in Healthcare: A Scenario",
+      "scenario": "Dr. Patel's hospital deployed a Haystack RAG pipeline for antibiotic stewardship, retrieving antimicrobial guidelines and generating treatment recommendations from patient EMR data. The pipeline used a clinical embedding retriever against internal guideline documents and an OpenAI generator for natural language recommendations. During beta testing, the system recommended azithromycin for a penicillin-allergic patient because the retriever surfaced an irrelevant allergy protocol from pediatrics, and the generator hallucinated dosage instructions not present in any retrieved context.\n\nWithout compliance guardrails, this error reached the clinical interface. PHI flowed through the pipeline without de-identification checks, and no audit trail captured the retrieval-generation mismatch. The hospital faced a potential HIPAA violation when logs revealed patient names in API calls to OpenAI.",
+      "outcome": "Vex guardrails transformed the deployment. The PHI detection component blocked 97% of unde-identified queries before LLM processing. Relevance scoring rejected the pediatric document, forcing re-retrieval of adult protocols. Hallucination detection flagged the azithromycin recommendation with 0.87 risk score, providing explainability: 'Generated dosage conflicts with all retrieved contexts.'\n\nThe pipeline achieved 99.2% compliance rate over 3 months, with full audit trails satisfying FDA 21 CFR Part 11. Dr. Patel's team gained confidence in AI-assisted decisions, reducing antibiotic misuse by 23% while maintaining SOC 2 controls."
+    },
+    "cta": {
+      "heading": "Comply with Healthcare Regulations Using Vex",
+      "description": "Add Vex guardrails to your Haystack pipelines today to prevent patient harm and HIPAA violations."
+    }
+  }
+}

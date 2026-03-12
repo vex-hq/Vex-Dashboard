@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with DSPy + Vex Guardrails",
+    "description": "Learn how to build agentic rag with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy agentic rag",
+      "DSPy guardrails",
+      "agentic rag reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming Agentic RAG systems by composing optimizable modules for query planning, multi-source retrieval, and synthesis with attribution. These autonomous agents excel at complex reasoning but risk hallucinations, unfaithful citations, and flawed query plans that erode trust. Vex provides runtime verification to catch these failures, ensuring production-grade reliability without retraining.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with DSPy",
+      "description": "Agentic RAG with DSPy typically starts with a Router module that plans optimal queries based on user intent, followed by parallel Retriever modules querying vector stores, web search, and knowledge graphs. A Synthesizer module then grades retrieved contexts for relevance, merges cross-source information, and generates cited responses. An optional Critic module self-evaluates for hallucinations and citation accuracy, enabling iterative refinement.\n\nDSPy's optimization loop tunes these modules against metrics like source faithfulness and answer correctness. The agent's autonomy comes from ChainOfThought and ReAct patterns, but this introduces risks of reasoning drift and composition failures. Vex wraps critical forward() calls to verify outputs match architectural intent.",
+      "diagram": "User Query\n    ↓\n[Router/Planner] ──→ Query Plan\n    ↓\n[Parallel Retrievers]\n    ├── Vector DB ──→ ctx1\n    ├── Web Search ─→ ctx2  \n    └── KG ────────→ ctx3\n    ↓\n[Synthesizer + Citer] ──→ Cited Response\n    ↓\n[Critic] ───────────────→ Verified Output"
+    },
+    "risks": [
+      {
+        "name": "Source Faithfulness Drift",
+        "description": "Optimized synthesizer modules paraphrase retrieved content instead of faithfully extracting, especially after DSPy optimization",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks between citations and claims"
+      },
+      {
+        "name": "Query Planning Hallucinations",
+        "description": "Router generates plausible but irrelevant subqueries that retrieve noise",
+        "severity": "high",
+        "mitigation": "Vex verifies query relevance against original intent"
+      },
+      {
+        "name": "Cross-Source Inconsistency",
+        "description": "Synthesizer fabricates consensus when sources conflict",
+        "severity": "high",
+        "mitigation": "Vex consistency scoring across retrieved contexts"
+      },
+      {
+        "name": "Citation Fabrication",
+        "description": "Agent cites non-existent or misrepresented sources",
+        "severity": "critical",
+        "mitigation": "Vex exact-match verification of cited chunks"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "DSPy Router Module for Query Planning",
+        "description": "Basic ReAct-style planner that decomposes complex questions into subqueries",
+        "code": "import dspy\nclass Router(dspy.Signature):\n    '''Plan optimal retrieval queries.'''\n    question: str = dspy.InputField()\n    plan: str = dspy.OutputField(desc='JSON list of 2-4 subqueries')\n\nclass QueryPlanner(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.router = dspy.ChainOfThought(Router)\n    \n    def forward(self, question):\n        return self.router(question=question)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Source Retriever",
+        "description": "Parallel retrieval from vector DB and web search with relevance grading",
+        "code": "class MultiRetriever(dspy.Module):\n    def __init__(self, vectorstore, websearch):\n        super().__init__()\n        self.vs = vectorstore\n        self.web = websearch\n        self.grade = dspy.ChainOfThought('query:str -> relevant:bool')\n    \n    def forward(self, plan):\n        subqueries = json.loads(plan)\n        contexts = []\n        for q in subqueries:\n            vs_results = self.vs.search(q, k=3)\n            web_results = self.web.search(q)\n            graded = [self.grade(query=q, context=c)['relevant'] \n                     for c in vs_results + web_results]\n            contexts.extend([c for c,g in zip(vs_results+web_results,graded) if g])\n        return {'contexts': contexts[:8]}",
+        "language": "python"
+      },
+      {
+        "title": "Faithful Synthesizer with Attribution",
+        "description": "Generates answers strictly from retrieved contexts with inline citations",
+        "code": "class Synthesizer(dspy.Signature):\n    '''Answer using ONLY provided context with [1],[2] citations.'''\n    contexts: list[str] = dspy.InputField()\n    question: str = dspy.InputField()\n    answer: str = dspy.OutputField()\n    citations: str = dspy.OutputField(desc='JSON {\"[1]\": \"exact quote\", ...}')\n\nclass CitedGenerator(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = dspy.ChainOfThought(Synthesizer)\n    \n    def forward(self, contexts, question):\n        pred = self.generate(contexts='\\n---\\n'.join(contexts), question=question)\n        return pred",
+        "language": "python"
+      },
+      {
+        "title": "Self-Critique Module",
+        "description": "Evaluates generated answer for hallucinations and citation accuracy",
+        "code": "class Critic(dspy.Signature):\n    '''Rate 0-10: faithfulness, helpfulness, citation accuracy.'''\n    question: str = dspy.InputField()\n    answer: str = dspy.InputField()\n    contexts: list[str] = dspy.InputField()\n    score: str = dspy.OutputField(desc='JSON {\"faithfulness\":8,\"citations\":9}')\n\nclass SelfCritic(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.critic = dspy.ChainOfThought(Critic)\n    \n    def forward(self, question, answer, contexts):\n        return self.critic(question=question, answer=answer, contexts=contexts)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Source Faithfulness",
+        "description": "Wrap synthesizer to ensure generated claims match retrieved contexts",
+        "code": "import vex\n\nclass VerifiedSynthesizer(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = CitedGenerator()\n    \n    @vex.verify(\n        assertions=[\n            {'type': 'semantic_similarity', 'min_score': 0.85, \n             'a_field': 'answer', 'b_field': 'contexts'},\n            {'type': 'citation_verification', 'citations_field': 'citations',\n             'contexts_field': 'contexts'}\n        ]\n    )\n    def forward(self, contexts, question):\n        return self.generate(contexts=contexts, question=question)",
+        "language": "python"
+      },
+      {
+        "title": "Validate Query Planning",
+        "description": "Ensure planned subqueries align with original user intent",
+        "code": "@vex.verify(\n    assertions=[\n        {'type': 'query_relevance', 'min_overlap': 0.7,\n         'original': 'question', 'generated': 'plan'},\n        {'type': 'json_schema', 'field': 'plan',\n         'schema': {'type': 'array', 'items': {'type': 'string'}}}\n    ]\n)\ndef verified_planner(self, question):\n    plan = self.router(question=question)\n    # Extract subqueries from plan\n    subqueries = json.loads(plan['plan'])\n    return {'question': question, 'plan': plan['plan'], 'subqueries': subqueries}",
+        "language": "python"
+      },
+      {
+        "title": "Cross-Source Consistency Check",
+        "description": "Verify synthesized answer doesn't contradict any source",
+        "code": "class VerifiedMultiRetriever(dspy.Module):\n    def forward(self, plan):\n        retrievals = self.retrieve(plan)  # original retrieval logic\n        \n        @vex.verify(\n            assertions=[\n                {'type': 'consistency_check',\n                 'target': 'contexts', 'min_agreement': 0.8},\n                {'type': 'no_contradictions', 'contexts_field': 'contexts'}\n            ]\n        )\n        def verify_retrievals():\n            return retrievals\n        \n        return verify_retrievals()",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Agentic RAG",
+      "description": "Add Vex verification to your DSPy modules in 3 lines of code and eliminate hallucination risk today."
+    }
+  }
+}

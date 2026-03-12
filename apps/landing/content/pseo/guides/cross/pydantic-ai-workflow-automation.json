@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI workflow automation",
+      "Pydantic AI guardrails",
+      "workflow automation reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Pydantic AI enables building robust, type-safe AI agents for workflow automation, handling multi-step tasks with structured outputs and tool integrations. Guardrails are essential to catch validation failures, ensure action correctness, and prevent costly errors in production workflows involving API calls and human approvals. Vex integrates seamlessly as a result validator to verify agent outputs against business rules and rollback unsafe actions.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Pydantic AI",
+      "description": "The architecture centers on an orchestrator agent that decomposes complex workflows into sequential steps executed by specialized sub-agents. Each step involves tool calls to external APIs (CRM, payment systems), conditional branching based on structured outputs, and human-in-the-loop approval gates. Pydantic models enforce output schemas while Vex validators check business invariants like idempotency and permissions.\n\nData flows from user requests through the orchestrator to tool agents, with intermediate results persisted in a workflow state store. Rollback mechanisms use transaction logs to reverse API actions on validation failures. Streaming responses are validated incrementally to catch mid-generation errors early.\n\nThis setup supports medium-risk workflows like order processing, where action correctness and permission validation prevent financial losses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│  Orchestrator    │\n│                 │    │  Agent (Pydantic)│\n└─────────────────┘    │                  │\n                       │  ┌────────────┐   │\n                       │▶│Tool Agents  │◀─┼─Vex Validators\n                       │  │(API Calls)  │   │\n                       │  └────────────┘   │\n                       └──────────────────┘\n                              │\n                       ┌──────────────────┐\n                       │ Human Approval   │◀─Workflow State\n                       │     Gate         │  Store\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Result validator rejecting valid but unexpected model outputs",
+        "description": "Pydantic models reject semantically correct but structurally unexpected responses, halting workflows",
+        "severity": "high",
+        "mitigation": "Vex result validators with flexible schema matching and fallback parsing"
+      },
+      {
+        "name": "Tool retry logic masking persistent underlying errors",
+        "description": "Retries succeed on transient errors but fail idempotency checks on repeated API calls",
+        "severity": "medium",
+        "mitigation": "Vex idempotency verification before retry with transaction rollback"
+      },
+      {
+        "name": "Dependency injection context not available in nested tool calls",
+        "description": "Sub-agents lose workflow context (user permissions, transaction IDs) during nested execution",
+        "severity": "critical",
+        "mitigation": "Vex context propagation validator ensuring all tools receive complete state"
+      },
+      {
+        "name": "Streaming structured responses failing mid-generation validation",
+        "description": "Partial streaming outputs fail Pydantic validation, corrupting workflow state",
+        "severity": "high",
+        "mitigation": "Vex incremental streaming validators with graceful degradation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Workflow Orchestrator with Pydantic AI",
+        "description": "Define a multi-step order processing agent with structured tool outputs",
+        "code": "from pydantic_ai import Agent, tool\nfrom pydantic import BaseModel, Field\n\nclass OrderStep(BaseModel):\n    step: str\n    status: str\n    order_id: str\n\nclass WorkflowOrchestrator(Agent):\n    def __init__(self):\n        super().__init__(\n            model='gpt-4o',\n            result_model=OrderStep,\n            instructions='Execute order workflow: validate→process→ship'\n        )\n\n    @tool\n    def validate_order(self, order_data: str) -> str:\n        return 'VALIDATED'\n\n    @tool\n    def process_payment(self, order_id: str) -> str:\n        return f'PAID: {order_id}'\n\n    @tool\n    def ship_order(self, order_id: str) -> str:\n        return f'SHIPPED: {order_id}'",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Approval Gate",
+        "description": "Implement conditional approval step with external review integration",
+        "code": "from pydantic_ai import Agent, tool\nimport requests\n\nclass ApprovalAgent(Agent):\n    def __init__(self):\n        super().__init__(\n            model='gpt-4o',\n            result_model=dict,\n            instructions='Request human approval for high-value orders'\n        )\n\n    @tool\n    def request_approval(self, order_id: str, amount: float) -> dict:\n        if amount > 1000:\n            response = requests.post(\n                'https://approval-api.example.com/review',\n                json={'order_id': order_id, 'amount': amount}\n            )\n            return {'approved': response.json()['approved'], 'reviewer': response.json()['user']}\n        return {'approved': True, 'reviewer': 'auto'}",
+        "language": "python"
+      },
+      {
+        "title": "Idempotent API Tool with Transaction Context",
+        "description": "Ensure safe retries with transaction IDs and rollback capability",
+        "code": "from pydantic_ai import Agent, tool\nfrom typing import Dict, Any\nimport uuid\n\nclass SafePaymentAgent(Agent):\n    def __init__(self):\n        super().__init__(model='gpt-4o')\n\n    @tool\n    def process_payment_idempotent(self, order_id: str, ctx: Dict[str, Any]) -> Dict[str, str]:\n        tx_id = ctx.get('transaction_id', str(uuid.uuid4()))\n        \n        # Check idempotency\n        if self.check_transaction_exists(tx_id):\n            return {'status': 'IDEMPOTENT_SUCCESS', 'tx_id': tx_id}\n        \n        # Process payment\n        result = self.safe_payment_api(order_id, tx_id)\n        ctx['transaction_id'] = tx_id  # Persist context\n        return result\n\n    def check_transaction_exists(self, tx_id: str) -> bool:\n        # Implementation-specific idempotency check\n        return False",
+        "language": "python"
+      },
+      {
+        "title": "Structured Streaming Workflow Results",
+        "description": "Handle streaming outputs with incremental validation",
+        "code": "from pydantic_ai import Agent\nfrom pydantic import BaseModel\n\nclass StreamingWorkflowResult(BaseModel):\n    steps: list[str] = Field(default_factory=list)\n    final_status: str\n\nclass StreamingOrchestrator(Agent):\n    def __init__(self):\n        super().__init__(\n            model='gpt-4o',\n            result_model=StreamingWorkflowResult,\n            stream=True,\n            instructions='Stream workflow progress step-by-step'\n        )\n\n    async def execute_streaming(self, task: str):\n        async for chunk in self.run(task):\n            # Incremental validation on each chunk\n            partial_result = StreamingWorkflowResult.model_validate(chunk)\n            yield partial_result\n\norchestrator = StreamingOrchestrator()\n# Usage: async for step in orchestrator.execute_streaming('process order 123')",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Result Validator on Agent Definition",
+        "description": "Add Vex as primary result validator to catch unexpected outputs",
+        "code": "from vex_sdk import VexValidator\nfrom pydantic_ai import Agent\n\n# Define Vex validator for workflow correctness\nworkflow_validator = VexValidator(\n    name=\"workflow-action-validator\",\n    rules=[\n        {\n            \"type\": \"action_correctness\",\n            \"condition\": \"result.step in ['VALIDATED', 'PAID', 'SHIPPED']\",\n            \"error_message\": \"Invalid workflow step detected\"\n        },\n        {\n            \"type\": \"permission_check\",\n            \"condition\": \"ctx.user.permissions.contains(result.action)\",\n            \"error_message\": \"Insufficient permissions\"\n        }\n    ]\n)\n\nclass ValidatedOrchestrator(Agent):\n    def __init__(self):\n        super().__init__(\n            model='gpt-4o',\n            result_validators=[workflow_validator],\n            context_providers=['user_permissions', 'transaction_state']\n        )",
+        "language": "python"
+      },
+      {
+        "title": "Idempotency and Rollback Validator",
+        "description": "Verify idempotency and enable transaction rollback on failure",
+        "code": "from vex_sdk import VexValidator\n\nidempotency_validator = VexValidator(\n    name=\"idempotency-rollback\",\n    risk_profile=\"medium\",\n    rules=[\n        {\n            \"type\": \"idempotency_check\",\n            \"condition\": \"!self.has_side_effects(result) || self.verify_idempotent(ctx.transaction_id)\",\n            \"rollback\": {\n                \"type\": \"api_rollback\",\n                \"endpoint\": \"https://api.example.com/rollback/{ctx.order_id}\",\n                \"method\": \"POST\"\n            }\n        },\n        {\n            \"type\": \"duplicate_detection\",\n            \"condition\": \"ctx.transaction_id not in self.seen_transactions\",\n            \"action\": \"block_and_log\"\n        }\n    ]\n)\n\n# Attach to agent\nagent.result_validators.append(idempotency_validator)",
+        "language": "python"
+      },
+      {
+        "title": "Context Propagation Validator for Nested Calls",
+        "description": "Ensure dependency injection context flows through nested tool execution",
+        "code": "from vex_sdk import VexValidator\n\ncontext_validator = VexValidator(\n    name=\"nested-context-propagation\",\n    rules=[\n        {\n            \"type\": \"context_check\",\n            \"required\": [\"user_id\", \"tenant_id\", \"transaction_id\"],\n            \"condition\": \"all(key in ctx for key in self.required)\",\n            \"error_message\": \"Missing workflow context in nested call\"\n        },\n        {\n            \"type\": \"permission_inheritance\",\n            \"condition\": \"ctx.permissions == parent_ctx.permissions\",\n            \"action\": \"propagate_context\"\n        }\n    ],\n    context_providers=[\n        \"auth.user\",\n        \"workflow.transaction\",\n        \"tenant.config\"\n    ]\n)\n\n# Global registration\nAgent.default_validators.append(context_validator)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI Workflow Automation",
+      "description": "Install Vex today with `pip install vex-sdk` and add production-grade validation to your Pydantic AI workflows in minutes."
+    }
+  }
+}

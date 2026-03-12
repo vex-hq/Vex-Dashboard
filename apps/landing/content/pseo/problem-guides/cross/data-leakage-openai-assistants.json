@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "OpenAI Assistants API data-leakage",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, sensitive data leakage occurs when agents inadvertently expose PII, API keys, or confidential information through function calls, code interpreter outputs, or file search results. This is exacerbated by the API's persistent thread context, where leaked data accumulates across interactions, and by hallucinated function arguments that bypass schema validation. Without proactive safeguards, agents can propagate sensitive data to external tools or retain it indefinitely in threads.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter executing unsafe operations in sandbox",
+        "symptom": "Agent prints database credentials or PII to console during debugging",
+        "impact": "Logs containing secrets become accessible via API retrieval or monitoring tools"
+      },
+      {
+        "scenario": "File search retrieving irrelevant or outdated documents",
+        "symptom": "Search returns files with embedded API keys or customer data",
+        "impact": "Sensitive file contents injected into assistant responses and thread history"
+      },
+      {
+        "scenario": "Thread context growing beyond model limits silently",
+        "symptom": "Historical messages containing leaked data persist and influence future responses",
+        "impact": "Cumulative leakage amplifies risk of re-exposure in long-running conversations"
+      },
+      {
+        "scenario": "Function call arguments hallucinated outside valid schema",
+        "symptom": "Agent passes unredacted PII or tokens in tool call parameters",
+        "impact": "External APIs receive raw sensitive data, enabling unauthorized access"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Scan Run Messages for PII Patterns",
+        "description": "Retrieve assistant run messages and regex-match for common PII patterns like SSNs, emails, and API keys",
+        "code": "import re\nimport openai\n\nclient = openai.OpenAI()\n\nthread_id = 'thread_abc123'\nrun = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id='run_xyz789')\n\nmessages = client.beta.threads.messages.list(thread_id=thread_id)\npii_patterns = [\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n    r'\\b(sk-\\w{48})\\b'  # OpenAI API key\n]\n\nleaks = []\nfor msg in messages.data:\n    content = msg.content[0].text.value if msg.content else ''\n    for pattern in pii_patterns:\n        if re.search(pattern, content):\n            leaks.append({'message_id': msg.id, 'content': content[:100]})\n\nprint('Detected leaks:', leaks)",
+        "language": "python"
+      },
+      {
+        "name": "Inspect Function Call Arguments",
+        "description": "Parse tool calls in run steps for sensitive data using schema validation and content scanning",
+        "code": "import openai\nimport json\n\nclient = openai.OpenAI()\n\nrun_steps = client.beta.threads.runs.steps.list(\n    thread_id='thread_abc123',\n    run_id='run_xyz789'\n)\n\nfor step in run_steps.data:\n    for tool_call in step.step_details.tool_calls:\n        if tool_call.type == 'function':\n            args = json.loads(tool_call.function.arguments)\n            # Check for sensitive fields\n            if 'api_key' in args or 'password' in args:\n                print(f'Leak in tool call {tool_call.id}: {args}')\n            # Regex scan args values\n            import re\n            for value in args.values():\n                if re.search(r'\\b(sk-\\w{48}|\\d{3}-\\d{2}-\\d{4})\\b', str(value)):\n                    print(f'PII detected in args: {value}')",
+        "language": "python"
+      },
+      {
+        "name": "Monitor File Search Tool Outputs",
+        "description": "Extract file search annotations from messages and scan retrieved content for secrets",
+        "code": "const OpenAI = require('openai');\nconst openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\n\nasync function detectFileLeaks(threadId) {\n  const messages = await openai.beta.threads.messages.list(threadId);\n  \n  for (const msg of messages.data) {\n    if (msg.annotations?.some(ann => ann.type === 'file_citation')) {\n      for (const ann of msg.annotations) {\n        if (ann.type === 'file_citation') {\n          const fileContent = await openai.files.content(ann.file_citation.file_id).text();\n          const piiRegex = /\\b\\d{3}-\\d{2}-\\d{4}\\b|\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g;\n          const matches = fileContent.match(piiRegex);\n          if (matches) {\n            console.log(`Leak in file ${ann.file_citation.file_id}:`, matches.slice(0, 5));\n          }\n        }\n      }\n    }\n  }\n}\n\ndetectFileLeaks('thread_abc123');",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Redact PII Before Thread Storage",
+        "description": "Pre-process user messages to anonymize PII before creating thread messages",
+        "code": "import re\nimport openai\n\ndef redact_pii(text):\n    patterns = {\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b': '[SSN]',\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b': '[EMAIL]',\n        r'\\b(sk-\\w+|ak-\\w+)\\b': '[API_KEY]'\n    }\n    for pattern, replacement in patterns.items():\n        text = re.sub(pattern, replacement, text)\n    return text\n\nclient = openai.OpenAI()\n\n# Redact before sending to thread\nuser_input = \"Contact support@company.com or use API key sk-abc123def456\"\nredacted_input = redact_pii(user_input)\n\nmessage = client.beta.threads.messages.create(\n    thread_id='thread_abc123',\n    role='user',\n    content=redacted_input\n)",
+        "language": "python"
+      },
+      {
+        "name": "Validate Function Arguments Server-Side",
+        "description": "Implement function tool that strips sensitive data from arguments before execution",
+        "code": "def safe_api_call(api_key: str, endpoint: str, payload: dict) -> str:\n    # Strip API key from logs/execution\n    safe_payload = {k: v if k != 'api_key' else '[REDACTED]' for k, v in payload.items()}\n    \n    # Execute with actual key (stored securely)\n    import requests\n    response = requests.post(f'https://api.example.com{endpoint}', \n                           json=payload, \n                           headers={'Authorization': f'Bearer {api_key}'},\n                           timeout=30)\n    return response.text\n\n# Register as OpenAI function tool\ntools = [{\n    'type': 'function',\n    'function': {\n        'name': 'safe_api_call',\n        'description': 'Make safe API calls',\n        'parameters': {\n            'type': 'object',\n            'properties': {\n                'api_key': {'type': 'string'},\n                'endpoint': {'type': 'string'},\n                'payload': {'type': 'object'}\n            }\n        }\n    }\n}]",
+        "language": "python"
+      },
+      {
+        "name": "Thread Context Pruning",
+        "description": "Periodically scan and delete messages containing sensitive data from threads",
+        "code": "const OpenAI = require('openai');\nconst openai = new OpenAI();\n\nconst piiRegex = /\\b\\d{3}-\\d{2}-\\d{4}\\b|\\b(sk-\\w{48})\\b/g;\n\nasync function pruneSensitiveThread(threadId) {\n  const messages = await openai.beta.threads.messages.list(threadId);\n  \n  for (const msg of messages.data) {\n    const content = msg.content[0]?.text?.value || '';\n    if (piiRegex.test(content)) {\n      await openai.beta.threads.messages.del(threadId, msg.id);\n      console.log(`Pruned sensitive message: ${msg.id}`);\n    }\n  }\n}\n\n// Run after every 10 interactions\nsetInterval(() => pruneSensitiveThread('thread_abc123'), 60000);",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI Assistants run completion events, automatically scanning all messages, tool calls, and file citations for PII patterns and schema violations. It employs ML-powered entity recognition alongside regex heuristics to detect even contextually embedded secrets that evade simple patterns. When leakage is detected, Vex can trigger automated remediation like thread pruning, function argument redaction, or assistant pausing.\n\nThe platform provides real-time dashboards showing leakage trends by thread, tool type, and severity, with one-click fixes that inject redaction logic into your existing assistant configuration. Vex's policy engine lets you define custom sensitivity rules specific to your domain, ensuring comprehensive coverage across code interpreter outputs, file searches, and function calling.\n\nIntegration takes minutes via the Vex SDK, with zero-downtime deployment and automatic scaling to match your OpenAI usage patterns.",
+      "code": "import openai\nfrom vex_sdk import VexClient\n\n# Install: pip install openai vex-sdk\nclient = openai.OpenAI()\nvex = VexClient(api_key='vex_123')\n\n@vex.webhook('openai_run_complete')\ndef check_leakage(event):\n    thread_id = event['data']['thread_id']\n    run_id = event['data']['run_id']\n    \n    # Fetch run context\n    messages = client.beta.threads.messages.list(thread_id)\n    run_steps = client.beta.threads.runs.steps.list(thread_id, run_id)\n    \n    # Vex scans everything automatically\n    results = vex.scan({\n        'messages': [m.content[0].text.value for m in messages.data],\n        'tool_calls': [step.step_details.tool_calls for step in run_steps.data],\n        'framework': 'openai_assistants'\n    })\n    \n    if results['leakage_detected']:\n        # Auto-remediate\n        for msg_id in results['sensitive_messages']:\n            client.beta.threads.messages.del(thread_id, msg_id)\n        vex.notify('PII leakage auto-remediated')\n        return {'status': 'remediated'}\n    \n    return {'status': 'clean'}\n\n# Deploy webhook\nvex.deploy_webhook(check_leakage, target='openai:run.completed')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with Vex's OpenAI integration in 5 minutes - prevent data leaks before they happen."
+    }
+  }
+}

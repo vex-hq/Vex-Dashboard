@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in BeeAI Agents",
+    "description": "How to detect and fix ai agent memory management in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "BeeAI memory-management",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI, AI agent memory management issues arise from its persistent memory stores that accumulate conversation history and tool outputs without automatic pruning, leading to unbounded growth during long sessions. Tool validation gaps expose agents to injection attacks via unescaped memory writes, while serialization errors occur when persisting complex agent states across sessions. Granite model output inconsistencies further exacerbate memory bloat as malformed responses get stored without validation.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support agent",
+        "symptom": "Agent.memory_store.size() exceeds 500MB after 2 hours",
+        "impact": "OOM errors crash agent, 30% session abandonment"
+      },
+      {
+        "scenario": "Tool calling with user input",
+        "symptom": "Memory contains executable code: 'import os; os.system(\"rm -rf\")'",
+        "impact": "Remote code execution via stored tool payloads"
+      },
+      {
+        "scenario": "Agent state checkpointing to Redis",
+        "symptom": "TypeError: cannot pickle 'BeeAgentMemory' object",
+        "impact": "Complete loss of conversation context on restart"
+      },
+      {
+        "scenario": "Granite model response handling",
+        "symptom": "Memory flooded with '[INVALID_FORMAT]' strings",
+        "impact": "95% memory usage on valid conversation data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Growth Monitor",
+        "description": "Tracks BeeAI agent memory size over time and alerts on exponential growth",
+        "code": "from beeai import Agent\nfrom beeai.memory import MemoryStore\n\ndef detect_memory_growth(agent: Agent, session_id: str, threshold_mb: int = 100) -> bool:\n    memory_store = agent.get_memory_store(session_id)\n    current_size = memory_store.size_mb()\n    \n    # Get historical sizes\n    history = memory_store.get_size_history(hours=1)\n    if len(history) < 3:\n        return False\n    \n    # Check growth rate\n    growth_rate = (history[-1] - history[0]) / len(history)\n    return current_size > threshold_mb and growth_rate > 10",
+        "language": "python"
+      },
+      {
+        "name": "Tool Injection Scanner",
+        "description": "Scans BeeAI memory for dangerous code patterns from tool outputs",
+        "code": "import re\nfrom beeai.memory import MemoryStore\n\ndef detect_tool_injection(memory_store: MemoryStore, session_id: str) -> list[str]:\n    entries = memory_store.get_recent_entries(session_id, limit=100)\n    dangerous_patterns = [\n        r'\\b(exec|eval|system|open|__import__)\\b',\n        r'os\\.(system|pop(?:en|en2))',\n        r'rm\\s+-rf',\n        r'base64\\.(?:b64decode|decodebytes)'\n    ]\n    \n    injections = []\n    for entry in entries:\n        for pattern in dangerous_patterns:\n            if re.search(pattern, entry.content, re.IGNORECASE):\n                injections.append(entry.id)\n    return injections",
+        "language": "python"
+      },
+      {
+        "name": "Serialization Health Check",
+        "description": "Tests BeeAI agent state serialization before production deployment",
+        "code": "import pickle\nfrom beeai import Agent\n\ndef test_serialization(agent: Agent, session_id: str) -> bool:\n    try:\n        state = agent.get_full_state(session_id)\n        pickled = pickle.dumps(state)\n        restored = pickle.loads(pickled)\n        \n        # Verify critical fields\n        return (state['memory_hash'] == restored['memory_hash'] and\n                len(state['tool_history']) == len(restored['tool_history']))\n    except (pickle.PickleError, KeyError, AttributeError):\n        return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Sliding Window Memory Pruner",
+        "description": "Automatically trims BeeAI memory to recent K interactions",
+        "code": "from beeai.memory import MemoryStore\nfrom typing import Callable\n\ndef create_memory_pruner(max_entries: int = 100) -> Callable:\n    def pruner(memory_store: MemoryStore, session_id: str):\n        entries = memory_store.get_all_entries(session_id)\n        if len(entries) > max_entries:\n            # Keep most recent + highest relevance scores\n            recent = entries[-max_entries//2:]\n            relevant = sorted(\n                entries[:-max_entries//2], \n                key=lambda e: e.relevance_score, reverse=True\n            )[:max_entries//2]\n            \n            to_delete = [e.id for e in entries if e.id not in \n                        {r.id for r in recent + relevant}]\n            memory_store.delete_entries(session_id, to_delete)\n    return pruner\n\n# Usage\nagent.add_memory_hook(create_memory_pruner(100))",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Output Sanitizer",
+        "description": "Strips dangerous content before BeeAI memory storage",
+        "code": "import re\nimport html\nfrom beeai.tools import ToolOutput\n\ndef sanitize_tool_output(output: ToolOutput) -> str:\n    content = output.content\n    \n    # Escape HTML/JS\n    content = html.escape(content)\n    \n    # Remove dangerous patterns\n    dangerous = [\n        r'<script[^>]*>.*?</script>',\n        r'\\b(?:exec|eval|system)\\b',\n        r'os\\.(?:system|popen)',\n        r'rm\\s+-rf'\n    ]\n    for pattern in dangerous:\n        content = re.sub(pattern, '[REDACTED]', content, flags=re.IGNORECASE|re.DOTALL)\n    \n    # Limit size\n    return content[:10000]\n\n# Register with BeeAI agent\ntool_output_sanitizer = sanitize_tool_output",
+        "language": "python"
+      },
+      {
+        "name": "Granite Format Normalizer",
+        "description": "Standardizes Granite model outputs for consistent BeeAI memory storage",
+        "code": "from beeai.models import GraniteModel\nfrom typing import Any, Dict\n\ndef normalize_granite_output(model_output: Dict[str, Any]) -> Dict[str, str]:\n    normalized = {'content': '', 'is_valid': True}\n    \n    if 'choices' in model_output and model_output['choices']:\n        raw_text = model_output['choices'][0]['message']['content']\n        \n        # Fix common Granite format issues\n        raw_text = re.sub(r'\\n\\s*\\n', '\\n', raw_text.strip())\n        raw_text = re.sub(r'\\[INVALID_FORMAT\\]', '', raw_text)\n        \n        normalized['content'] = raw_text[:8000]  # Truncate\n    else:\n        normalized['is_valid'] = False\n        normalized['content'] = 'No valid response from Granite model'\n    \n    return normalized\n\n# BeeAI integration\ngranite_model = GraniteModel(output_processor=normalize_granite_output)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates directly with BeeAI's event system to monitor memory growth, detect injection attempts, and validate serialization in real-time. By registering as an event listener on agent events like 'memory_write', 'tool_executed', and 'state_checkpoint', Vex automatically applies detection rules and suggests fixes without code changes. The platform provides automated remediation through dynamic memory pruning and content sanitization, reducing MTTR from hours to seconds.\n\nVex's BeeAI integration captures full memory snapshots and tool execution traces, enabling root cause analysis of memory issues. Machine learning models trained on BeeAI failure patterns predict memory exhaustion 30+ minutes in advance, triggering proactive interventions. Integration takes <5 minutes via a single pip install and configuration.",
+      "code": "from vex_sdk import Vex\nfrom beeai import Agent\n\n# Install: pip install beeai-framework vex-sdk\n\nvex = Vex(api_key=\"your-vex-key\")\n\n@vex.register_detector(\n    framework=\"beeai\",\n    issue_type=\"memory_management\",\n    severity=\"HIGH\"\n)\ndef beeai_memory_issues(agent: Agent, event_data: dict) -> dict:\n    if event_data['event_type'] == 'memory_write':\n        memory_size = agent.get_memory_store(event_data['session_id']).size_mb()\n        if memory_size > 150:\n            return {\n                'issue': 'UNBOUNDED_MEMORY_GROWTH',\n                'severity': 'CRITICAL',\n                'fix': 'apply_sliding_window_pruner',\n                'metadata': {'size_mb': memory_size}\n            }\n    \n    elif event_data['event_type'] == 'tool_executed':\n        if detect_tool_injection(agent.get_memory_store(event_data['session_id'])):\n            return {\n                'issue': 'TOOL_INJECTION_DETECTED',\n                'severity': 'CRITICAL',\n                'fix': 'enable_output_sanitizer'\n            }\n    return None\n\n# Auto-register with all BeeAI agents\nagent.add_event_listener(vex.event_handler)\nvex.start_monitoring()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to automatically detect and remediate BeeAI memory issues across all your agents."
+    }
+  }
+}

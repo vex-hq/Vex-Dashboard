@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in OpenAI Assistants API Agents",
+    "description": "How to detect and fix ai agent observability in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "OpenAI Assistants API agent-observability",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Observability in OpenAI Assistants API is challenging due to its managed runtime where threads accumulate state, tools like code interpreter and file search run in black-box sandboxes, and function calls occur without intermediate visibility. Problems manifest as silent thread bloat exceeding context limits, unsafe code execution evading sandbox detection, irrelevant file retrievals polluting responses, and hallucinated function arguments bypassing schema validation. Without proper monitoring, these issues cascade into unreliable agent behavior and degraded performance.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter executing unsafe operations in sandbox",
+        "symptom": "Run status completes as 'completed' but output contains suspicious patterns like 'rm -rf', network calls, or file writes outside /tmp",
+        "impact": "Potential data exfiltration or sandbox escape despite OpenAI's protections"
+      },
+      {
+        "scenario": "File search retrieving irrelevant or outdated documents",
+        "symptom": "Tool_calls array shows file_search with vector store hits but response cites wrong versions or unrelated files",
+        "impact": "Hallucinated answers based on stale/incorrect context degrade accuracy"
+      },
+      {
+        "scenario": "Thread context growing beyond model limits silently",
+        "symptom": "Thread message count > 100 but no truncation errors; responses become incoherent",
+        "impact": "Context overflow causes model to ignore recent instructions"
+      },
+      {
+        "scenario": "Function call arguments hallucinated outside valid schema",
+        "symptom": "Required fields missing or extra unknown fields in tool_calls[].function.arguments",
+        "impact": "Downstream function failures crash agent workflows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Unsafe Code Interpreter Patterns",
+        "description": "Parse run output for dangerous shell commands and network activity patterns",
+        "code": "import re\n\ndef detect_unsafe_code(run):\n    output = run.last_error or run.outputs[0].logs if run.outputs else ''\n    \n    dangerous_patterns = [\n        r'rm\\s+-rf',\n        r'curl\\s+[^\\s]+\\.\\{[^}]+\\}',\n        r'nc\\s+[^\\s]+\\s+[^\\s]+',\n        r'/etc/passwd',\n        r'whoami',\n        r'wget\\s+http'\n    ]\n    \n    for pattern in dangerous_patterns:\n        if re.search(pattern, output, re.IGNORECASE):\n            return {'alert': 'UNSAFE_CODE_DETECTED', 'pattern': pattern}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Validate Function Call Schema Compliance",
+        "description": "Check tool_calls arguments against declared function schemas",
+        "code": "def validate_function_schema(run, assistant_tools):\n    alerts = []\n    if not run.required_action:\n        return alerts\n    \n    for tool_call in run.required_action.submit_tool_outputs.tool_calls:\n        func_name = tool_call.function.name\n        func_schema = next(t for t in assistant_tools if t.function.name == func_name)\n        \n        try:\n            args = json.loads(tool_call.function.arguments)\n            # Check required properties\n            required = func_schema.function.parameters.properties\n            missing = [k for k in func_schema.function.parameters.required if k not in args]\n            if missing:\n                alerts.append({'error': 'MISSING_REQUIRED_ARGS', 'missing': missing})\n        except json.JSONDecodeError:\n            alerts.append({'error': 'INVALID_JSON_ARGS'})\n    \n    return alerts",
+        "language": "python"
+      },
+      {
+        "name": "Alert on Thread Context Overflow",
+        "description": "Track thread message count and detect context window violations",
+        "code": "async function detectThreadBloat(threadId: string, client: OpenAI): Promise<boolean> {\n  const messages = await client.beta.threads.messages.list(threadId);\n  const messageCount = messages.data.length;\n  const tokenEstimate = messageCount * 4000; // Conservative estimate\n  \n  if (messageCount > 100 || tokenEstimate > 120000) {\n    console.warn(`Thread ${threadId} bloat detected: ${messageCount} msgs, ~${tokenEstimate} tokens`);\n    return true;\n  }\n  return false;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Auto-Truncate Bloated Threads",
+        "description": "Delete oldest messages when thread exceeds safe limits",
+        "code": "async def truncate_thread(client, thread_id, max_messages=80):\n    messages = client.beta.threads.messages.list(thread_id)\n    if len(messages.data) > max_messages:\n        # Keep 20 most recent messages\n        to_delete = messages.data[max_messages-20:]\n        for msg in to_delete:\n            client.beta.threads.messages.delete(thread_id, msg.id)\n        print(f'Truncated thread {thread_id} from {len(messages.data)} to ~{max_messages} messages')\n\n# Call before each run\ntruncate_thread(client, thread_id)",
+        "language": "python"
+      },
+      {
+        "name": "Reject Unsafe Code Outputs",
+        "description": "Fail runs with dangerous code patterns and force human review",
+        "code": "def safe_code_interpreter_guard(run):\n    if run.status == 'completed' and run.outputs:\n        output = run.outputs[0].logs\n        unsafe_patterns = [r'rm\\s+-rf', r'/etc/', r'curl.*exec']\n        \n        for pattern in unsafe_patterns:\n            if re.search(pattern, output, re.IGNORECASE):\n                # Fail the run and require human intervention\n                run.submit_tool_outputs(tool_outputs=[\n                    {\n                        'tool_call_id': 'code_interpreter',\n                        'output': 'SECURITY_VIOLATION: Unsafe code detected. Human review required.'\n                    }\n                ])\n                return False\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Strict Function Argument Validation",
+        "description": "Pre-validate tool call arguments before execution",
+        "code": "function validateToolArgs(toolCalls: any[], tools: any[]): boolean {\n  for (const toolCall of toolCalls) {\n    const toolDef = tools.find(t => t.function?.name === toolCall.function.name);\n    if (!toolDef) continue;\n    \n    try {\n      const args = JSON.parse(toolCall.function.arguments);\n      const schema = toolDef.function.parameters;\n      \n      // Validate required fields\n      for (const reqField of schema.required || []) {\n        if (!(reqField in args)) {\n          throw new Error(`Missing required field: ${reqField}`);\n        }\n      }\n    } catch (e) {\n      console.error('Invalid tool args:', e.message);\n      return false;\n    }\n  }\n  return true;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex provides continuous observability for OpenAI Assistants by integrating as a webhook on run completion events, automatically detecting all four failure modes across your agent deployments. It analyzes thread state, tool_calls, annotations, and output logs in real-time using specialized detectors for sandbox escapes, schema violations, context bloat, and retrieval quality. Vex automatically applies remediations like thread truncation, tool output rejection, and generates detailed dashboards showing MTTR and failure patterns across all assistants.\n\nThe platform eliminates manual monitoring by providing instant Slack/Teams alerts, automated rollback of problematic runs, and ML-powered anomaly detection that adapts to your specific agent patterns. Integration takes 5 minutes and works with both Python and Node.js clients.",
+      "code": "import openai\nfrom vex_sdk import VexClient\n\n# Install: pip install openai vex-sdk\nclient = openai.OpenAI()\nvex = VexClient(api_key=\"vex-your-key\")\n\n@vex.webhook('/openai-run-complete')\ndef monitor_assistant_run(event):\n    run = event['run']\n    thread_id = event['thread_id']\n    \n    # Vex auto-detects all 4 failure modes\n    results = vex.verify_run({\n        'provider': 'openai',\n        'run_id': run.id,\n        'thread_id': thread_id,\n        'tool_calls': run.required_action.submit_tool_outputs.tool_calls if run.required_action else [],\n        'output': run.outputs[0].logs if run.outputs else '',\n        'message_count': len(client.beta.threads.messages.list(thread_id).data)\n    })\n    \n    if results.issues:\n        # Auto-remediate\n        if results.issues.context_bloat:\n            truncate_thread(client, thread_id)\n        vex.notify_slack(f\"🚨 Agent failure in {thread_id}: {results.summary}\")\n    \n    return {'status': 'verified'}\n\n# Deploy webhook\nvex.deploy_webhook('openai-assistants-monitor')\n\n# Attach to assistant runs\nassistant = client.beta.assistants.create(\n    tools=[...],\n    tool_resources={\n        \"code_interpreter\": {},\n        \"file_search\": {\"vector_store_ids\": [vs_id]}\n    },\n    run_webhook='https://your-vex-webhook.com/openai-run-complete'\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with Vex's OpenAI Assistants observability in 5 minutes - zero code changes required."
+    }
+  }
+}

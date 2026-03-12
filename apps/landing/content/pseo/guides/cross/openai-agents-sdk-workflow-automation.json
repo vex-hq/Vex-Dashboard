@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build workflow automation with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK workflow automation",
+      "OpenAI Agents SDK guardrails",
+      "workflow automation reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building workflow automation with OpenAI Agents SDK enables multi-agent systems for complex task execution with seamless handoffs and API integrations. Guardrails are essential to prevent agent loops, prompt injections, and unvalidated tool outputs that can derail production workflows. Vex provides output validation to ensure action correctness, permissions, and idempotency in your automation pipelines.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with OpenAI Agents SDK",
+      "description": "The typical architecture features a Supervisor Agent that orchestrates specialized Worker Agents for tasks like data retrieval, API calls, conditional logic, and human approvals. Each agent uses the OpenAI Agents SDK's handoff mechanism to delegate subtasks, with built-in tracing for monitoring execution paths. API integrations handle external services while human-in-the-loop steps require approval gates.\n\nThis creates a directed acyclic graph (DAG) of agent interactions where the Supervisor validates outputs before final execution. Vex integrates as output guardrails on each agent to catch failures early in the chain. Tracing spans across handoffs ensure full visibility into multi-agent flows.",
+      "diagram": "Supervisor Agent\n    |\n    +--> Data Agent --> API Agent\n    |                     |\n    +--> Logic Agent --> Approval Agent (Human-in-loop)\n                          |\n                    +--> Executor Agent\n\n[VEX Guardrails on each agent output]"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Supervisor fails to terminate cycles when Data Agent and Logic Agent ping-pong invalid responses",
+        "severity": "critical",
+        "mitigation": "Vex validates handoff instructions with cycle detection and termination rules"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious inputs trick agents into skipping approval steps or making unauthorized API calls",
+        "severity": "high",
+        "mitigation": "Vex semantic guardrails detect injection patterns before agent consumption"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "API Agent passes malformed JSON to Logic Agent, causing downstream parsing failures",
+        "severity": "high",
+        "mitigation": "Vex schema validation ensures structured outputs match expected formats"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Partial visibility when handoffs fail silently between agents",
+        "severity": "medium",
+        "mitigation": "Vex spans trace across all agent boundaries with structured logging"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Supervisor Agent with Handoff Logic",
+        "description": "Central orchestrator that routes tasks to specialized agents based on workflow state",
+        "code": "from openai_agents import Agent, Supervisor\nfrom vex_sdk import VexGuardrail\n\nsupervisor = Supervisor(\n    name=\"Workflow Supervisor\",\n    instructions=\"Route tasks: data->api->logic->approval->execute\",\n    guardrail=VexGuardrail(\n        rules=[\n            \"no_cycles: handoff_count < 5\",\n            \"valid_handoff: output contains 'next_agent'\"\n        ]\n    )\n)\n\ndata_agent = Agent(name=\"DataAgent\", tools=[fetch_data_tool])\napi_agent = Agent(name=\"APIAgent\", tools=[call_api_tool])\n\nsupervisor.add_agents([data_agent, api_agent])",
+        "language": "python"
+      },
+      {
+        "title": "API Integration Agent with Validation",
+        "description": "Handles external API calls with Vex ensuring idempotency and permissions",
+        "code": "from openai_agents import Agent, tool\nfrom vex_sdk import VexGuardrail\n\n@tool\ndef process_payment(amount: float, user_id: str) -> dict:\n    \"\"\"Process payment with idempotency checks\"\"\"\n    return {'status': 'success', 'idempotency_key': f'pay_{user_id}'}\n\napi_agent = Agent(\n    name=\"PaymentAPI\",\n    tools=[process_payment],\n    guardrail=VexGuardrail(\n        rules=[\n            \"permission: user_id in approved_users\",\n            \"idempotent: idempotency_key exists\",\n            \"amount_positive: amount > 0\"\n        ]\n    )\n)",
+        "language": "python"
+      },
+      {
+        "title": "Conditional Logic Agent",
+        "description": "Evaluates business rules and routes to approval or execution",
+        "code": "from openai_agents import Agent\n\nlogic_agent = Agent(\n    name=\"BusinessLogic\",\n    instructions=\"\"\"Evaluate conditions:\n    - High value (>1000) -> human approval\n    - Low risk -> direct execute\n    - Invalid -> reject\"\"\",\n    guardrail=VexGuardrail(\n        rules=[\n            \"action_correct: decision in ['approve', 'reject', 'execute']\",\n            \"logic_complete: all_conditions_evaluated\"\n        ]\n    )\n)",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Approval Agent",
+        "description": "Pends high-risk actions for human review with Vex validation",
+        "code": "from openai_agents import Agent\n\napproval_agent = Agent(\n    name=\"HumanApproval\",\n    instructions=\"Flag for human review if risk_score > 0.7\",\n    guardrail=VexGuardrail(\n        rules=[\n            \"approval_pending: risk_score > 0.7 implies status='pending'\",\n            \"no_bypass: cannot approve without human_review=True\"\n        ],\n        human_review=True\n    )\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Output Guardrail on Every Agent",
+        "description": "Wrap all agent responses with Vex for action correctness validation",
+        "code": "from vex_sdk import Vex\n\nvex = Vex(api_key=\"your-vex-key\")\n\ndef guarded_agent_response(agent, input):\n    response = agent.run(input)\n    \n    # Vex validates before handoff\n    validated = vex.guardrail.check({\n        'action': response.action,\n        'output': response.content,\n        'context': {'workflow_step': agent.name}\n    }, rules=[\n        \"action_correctness: action matches workflow_state\",\n        \"no_injection: no_prompt_injection(response.content)\",\n        \"schema_valid: response matches expected_schema\"\n    ])\n    \n    return validated.response if validated.safe else None",
+        "language": "python"
+      },
+      {
+        "title": "Permission & Idempotency Checks",
+        "description": "Vex validates API calls before execution with rollback capability",
+        "code": "def safe_api_call(api_payload):\n    result = vex.guardrail.check(api_payload, rules=[\n        \"permission_check: user_has_permission(api_payload.user_id, api_payload.action)\",\n        \"idempotency: check_idempotency_key(api_payload.key)\",\n        \"rollback_ready: transaction supports rollback\"\n    ])\n    \n    if result.safe:\n        return make_api_call(api_payload)\n    else:\n        # Auto-rollback on failure\n        rollback_transaction(api_payload)\n        return {'error': 'Vex blocked unsafe action'}",
+        "language": "python"
+      },
+      {
+        "title": "Full Workflow Tracing",
+        "description": "Trace handoffs across entire agent chain with Vex spans",
+        "code": "from vex_sdk import VexSpan\n\n@vex.span(name=\"workflow_execution\")\ndef run_full_workflow(task):\n    with VexSpan(\"supervisor\"):\n        supervisor_out = supervisor.run(task)\n    \n    with VexSpan(\"data_agent\", parent=\"supervisor\"):\n        data_out = guarded_agent_response(data_agent, supervisor_out)\n    \n    with VexSpan(\"api_agent\", parent=\"data_agent\"):\n        api_out = guarded_agent_response(api_agent, data_out)\n    \n    vex.flush()  # Send traces\n    return api_out",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Workflow Automation",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your production workflows from agent failures."
+    }
+  }
+}

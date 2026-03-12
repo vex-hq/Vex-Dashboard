@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK ai email assistant",
+      "Vercel AI SDK guardrails",
+      "ai email assistant reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Build a production-ready AI Email Assistant using Vercel AI SDK to handle intent detection, draft generation, attachment processing, and send approvals with seamless streaming UIs. Guardrails are essential for this high-risk use case to prevent PII leaks, inappropriate tone, invalid recipients, and hallucinated content that could damage professional relationships or expose confidential data. Vex provides runtime verification to ensure safe, reliable email operations at scale.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Vercel AI SDK",
+      "description": "The AI Email Assistant processes incoming emails through a Vercel Edge Function that uses Vercel AI SDK's generateText or streamText for intent classification (reply, forward, archive). It extracts PII, detects attachments, generates context-aware drafts, and routes to approval workflows. React Server Components stream responses to the UI while maintaining structured tool calls for recipient validation and content verification.\n\nThe agentic flow involves sequential LLM calls: first for intent/tone analysis, second for draft generation with RAG over user templates, and third for final safety checks before send approval. Vex middleware wraps these calls to verify outputs against business rules like domain whitelisting and confidentiality filters.\n\nEdge deployment ensures low latency, but complex agent tasks risk timeouts and inconsistent structured outputs across providers like OpenAI and Anthropic.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Incoming      │───▶│ Vercel Edge Fn   │───▶│ Vex Middleware  │\n│   Email API     │    │ + AI SDK         │    │   + Guardrails  │\n└─────────────────┘    │ generateText()   │    └──────────┬──────┘\n                       │ streamText()     │               │\n                       │ Tool Calls       │               ▼\n                       └──────────┬──────┘       ┌─────────────────┐\n                                  │              │ LLM Provider    │\n                       ┌──────────▼──────┐       │ (OpenAI/Groq)   │\n                       │ React Server    │◀──────└─────────────────┘\n                       │ Components UI   │\n                       └─────────────────┘\n\nEmail Flow: Intent → Draft → PII Filter → Approval → Send"
+    },
+    "risks": [
+      {
+        "name": "PII Exposure in Drafts",
+        "description": "LLM hallucinations include sensitive data like SSNs or internal project names in email drafts",
+        "severity": "critical",
+        "mitigation": "Vex PII entity extraction and redaction before streaming to UI"
+      },
+      {
+        "name": "Inappropriate Recipient Targeting",
+        "description": "Agent suggests wrong recipients or external domains violating company policy",
+        "severity": "high",
+        "mitigation": "Domain whitelisting and recipient validation in Vex structured output schema"
+      },
+      {
+        "name": "Tone Inappropriateness",
+        "description": "Streaming responses generate sarcastic, aggressive, or overly casual tone for professional emails",
+        "severity": "high",
+        "mitigation": "Vex sentiment analysis and tone classification guardrails"
+      },
+      {
+        "name": "Edge Timeout on Complex Tasks",
+        "description": "Multi-step agent workflows with attachment analysis exceed Vercel Edge limits",
+        "severity": "medium",
+        "mitigation": "Vex task decomposition and async verification patterns"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Email Intent Detection with Streaming",
+        "description": "Classify email intent using Vercel AI SDK streamText with tool calls for categorization",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nimport type { EmailIntent } from './types';\n\nconst intentTools = {\n  classifyIntent: {\n    description: 'Classify email intent',\n    parameters: z.object({\n      intent: z.enum(['reply', 'forward', 'archive', 'delegate']),\n      priority: z.enum(['low', 'medium', 'high', 'urgent']),\n    }),\n  },\n};\n\nexport async function detectEmailIntent(emailContent: string) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools: {\n      classifyIntent: intentTools.classifyIntent,\n    },\n    prompt: `Analyze this email and classify intent: ${emailContent}`,\n  });\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Draft Generation with Context",
+        "description": "Generate email drafts using RAG over user templates and conversation history",
+        "code": "import { generateText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nexport async function generateDraft({\n  intent,\n  conversationHistory,\n  userTemplates,\n  recipient,\n}: {\n  intent: EmailIntent;\n  conversationHistory: string;\n  userTemplates: string[];\n  recipient: string;\n}) {\n  const result = await generateText({\n    model: openai('gpt-4o'),\n    system: `You are a professional email assistant. Generate appropriate draft for ${intent}. Match user's tone from templates.`,\n    prompt: `History: ${conversationHistory}\\nTemplates: ${userTemplates.join('\\n')}\\nTo: ${recipient}`,\n    maxTokens: 1000,\n  });\n\n  return result.text;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Attachment Processing Agent",
+        "description": "Analyze attachments and extract relevant context for email responses",
+        "code": "import { streamText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst analyzeAttachment = tool({\n  description: 'Analyze email attachment',\n  parameters: z.object({\n    filename: z.string(),\n    contentType: z.string(),\n    summary: z.string().describe('Key points from attachment'),\n    actionRequired: z.boolean(),\n  }),\n});\n\nexport async function processAttachments(attachments: Array<{filename: string; content: Buffer}>) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools: { analyzeAttachment },\n    prompt: 'Process these email attachments and determine response actions',\n    toolChoice: 'auto',\n  });\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Send Approval Workflow",
+        "description": "Final validation before sending with structured output for approval UI",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst approvalSchema = z.object({\n  safeToSend: z.boolean(),\n  confidence: z.number().min(0).max(1),\n  issues: z.array(z.string()),\n  suggestedEdits: z.string().optional(),\n});\n\nexport async function validateSend(draft: string, recipient: string) {\n  const { object } = await generateObject({\n    model: openai('gpt-4o'),\n    schema: approvalSchema,\n    prompt: `Validate this draft for sending to ${recipient}: ${draft}`,\n  });\n\n  return object;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText",
+        "description": "Wrap generateText calls with Vex for PII filtering and tone verification",
+        "code": "import { createVex } from '@vex_dev/sdk/server';\nimport { generateText } from 'ai';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n});\n\nexport async function safeGenerateDraft(params: GenerateDraftParams) {\n  const guardrail = await vex.guardrail('email-draft-safety', {\n    rules: {\n      pii: { entities: ['EMAIL_ADDRESS', 'PHONE_NUMBER', 'SSN'] },\n      tone: { sentiment: 'positive|neutral', toxicity: '<0.1' },\n      length: { min: 50, max: 2000 },\n    },\n  });\n\n  const result = await generateText(params);\n  const verified = await guardrail.verify({ input: params.prompt, output: result.text });\n  \n  if (!verified.pass) {\n    throw new Error(`Draft failed verification: ${verified.issues.join(', ')}`);\n  }\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming with Partial Hallucination Protection",
+        "description": "Protect streamText from partial hallucinations using Vex streaming verification",
+        "code": "import { createVex } from '@vex_dev/sdk/server';\nimport { streamText } from 'ai';\n\nconst vex = createVex({ /* config */ });\n\nexport async function safeStreamIntentDetection(emailContent: string) {\n  const streamGuardrail = await vex.streamGuardrail('email-intent-stream', {\n    windowSize: 50,\n    rules: {\n      hallucination: { probability: '<0.05' },\n      pii: { blockOnMatch: true },\n    },\n  });\n\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    prompt: `Classify intent: ${emailContent}`,\n  });\n\n  return streamGuardrail.verifyStream(result.textStream);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Structured Output Validation",
+        "description": "Ensure consistent tool call schemas across LLM providers with Vex",
+        "code": "import { createVex } from '@vex_dev/sdk/server';\nimport { generateObject } from 'ai';\n\nconst vex = createVex({ /* config */ });\n\nexport async function safeRecipientValidation(emailData: EmailData) {\n  const schemaGuardrail = await vex.schemaGuardrail('email-recipient-schema', {\n    schema: {\n      recipientDomain: { pattern: '^(company\\.com|partner\\.org)$' },\n      recipientCount: { max: 10 },\n    },\n    providers: ['openai', 'anthropic'],\n  });\n\n  const result = await generateObject({\n    model: openai('gpt-4o'),\n    schema: recipientSchema,\n    prompt: `Validate recipients for: ${JSON.stringify(emailData)}`,\n  });\n\n  return schemaGuardrail.verify(result.object);\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK AI Email Assistant",
+      "description": "Add Vex guardrails today to protect your email assistant from PII leaks, tone violations, and unreliable outputs - start with our free tier."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llamaindex",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with LlamaIndex + Vex Guardrails",
+    "description": "Learn how to build voice agents with LlamaIndex + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LlamaIndex voice agents",
+      "LlamaIndex guardrails",
+      "voice agents reliability",
+      "Vex LlamaIndex",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Voice Agents with LlamaIndex enables real-time conversational AI by connecting speech-to-text pipelines to indexed knowledge bases for grounded LLM responses. Guardrails are essential due to the high-stakes, low-latency nature of voice interactions where irrelevant retrievals, hallucinations, or delays can break user trust and conversation flow. Vex provides runtime verification to ensure response quality, safety, and performance in this critical pipeline.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with LlamaIndex",
+      "description": "Voice Agents process audio input through a real-time speech-to-text (STT) service like Deepgram or Whisper Live, converting speech to text with sub-second latency. The transcribed query is then routed to a LlamaIndex query engine, which retrieves relevant context from vector/index stores (e.g., FAISS, Pinecone) and generates a grounded LLM response. The response is verified for quality and safety before text-to-speech (TTS) synthesis via services like ElevenLabs or Cartesia, completing the loop in under 500ms.\n\nLlamaIndex handles retrieval-augmented generation (RAG) by chunking documents, embedding them, and enabling semantic search. Common setups use VectorStoreIndex for fast retrieval and OpenAI/Groq LLMs for reasoning. Vex integrates at the query engine to catch failures before TTS, preserving low-latency guarantees.\n\nThe pipeline demands strict latency budgets: STT (<200ms), retrieval+LLM (<200ms), verification (<50ms), TTS (<100ms). Stateless conversation history via LlamaIndex chat engines maintains coherence across turns.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ LlamaIndex      │\n│     Input        │    │   (Deepgram)     │    │ Query Engine    │\n└─────────────────┘    └──────────────┬──┘    │ + Vex Verify    │\n                                     │        └──────────────┬──┘\n                        ┌────────────▼──┐              │\n                        │ Conversation   │◀─────────────┘\n                        │   Memory       │\n                        └──────────────┘\n                                     │\n                        ┌────────────▼──┐    ┌─────────────────┐\n                        │   Text-to-    │◀───│   Speakers      │\n                        │ Speech (TTS)  │    │     Output      │\n                        │ (ElevenLabs)  │    └─────────────────┘\n                        └────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Retrieved context irrelevant to query",
+        "description": "LlamaIndex retrieves semantically similar but topically irrelevant chunks, leading to hallucinated or off-topic voice responses.",
+        "severity": "critical",
+        "mitigation": "Vex semantic relevance checks between query and retrieved context before LLM generation."
+      },
+      {
+        "name": "Synthesizer hallucinating beyond source documents",
+        "description": "LLM generates plausible but factually incorrect responses not grounded in retrieved context, damaging trust in voice agents.",
+        "severity": "critical",
+        "mitigation": "Vex faithfulness verification ensuring response stays within retrieved document scope."
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "Retrieval + LLM inference exceeds 300ms, causing unnatural conversation pauses in real-time voice interactions.",
+        "severity": "high",
+        "mitigation": "Vex performance guards with strict timeout enforcement and fallback responses."
+      },
+      {
+        "name": "Chunk boundary errors losing critical context",
+        "description": "Document chunking splits key information across boundaries, causing incomplete or misleading retrievals.",
+        "severity": "high",
+        "mitigation": "Vex context completeness checks and metadata enrichment for boundary-aware retrieval."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "LlamaIndex VectorStoreIndex Setup",
+        "description": "Create a production-ready index from your knowledge base with optimal chunking for voice agent retrieval.",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings\nfrom llama_index.embeddings.openai import OpenAIEmbedding\n\n# Configure embeddings\nSettings.embed_model = OpenAIEmbedding(model=\"text-embedding-3-small\")\n\n# Load documents\ndocuments = SimpleDirectoryReader(\"data/\").load_data()\n\n# Create index with voice-optimized chunk size\nindex = VectorStoreIndex.from_documents(\n    documents,\n    chunk_size=512,  # Smaller chunks for voice latency\n    chunk_overlap=50\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=3,\n    streaming=True  # Enable streaming for low latency\n)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time STT to LlamaIndex Pipeline",
+        "description": "Connect Deepgram STT to LlamaIndex query engine with conversation memory.",
+        "code": "import asyncio\nfrom deepgram import DeepgramClient, PrerecordedOptions\nfrom llama_index.core.memory import ChatMemoryBuffer\n\nasync def voice_pipeline(audio_data, query_engine):\n    # STT\n    deepgram = DeepgramClient(\"YOUR_DEEPGRAM_KEY\")\n    options = PrerecordedOptions(\n        model=\"nova-2\",\n        smart_format=True,\n        language=\"en\"\n    )\n    response = await deepgram.listen.prerecorded.do(audio_data, options)\n    query = response.results.channels[0].alternatives[0].transcript\n    \n    # Query with memory\n    memory = ChatMemoryBuffer.from_defaults(token_limit=2000)\n    response = await query_engine.aquery(query, memory=memory)\n    \n    return response.response",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript LlamaIndex Query Client",
+        "description": "Node.js client for LlamaIndex serving voice agent backend.",
+        "code": "import { LlamaIndex } from 'llamaindex';\n\nconst index = await LlamaIndex.VectorStoreIndex.fromDocuments([\n  // Your documents\n]);\n\nconst queryEngine = index.asQueryEngine({\n  similarityTopK: 3,\n  streaming: true\n});\n\nexport async function handleVoiceQuery(\n  transcript: string,\n  conversationHistory: string[]\n): Promise<string> {\n  const response = await queryEngine.query({\n    query: transcript,\n    chatHistory: conversationHistory,\n  });\n  \n  return response.response;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "TTS Integration with Latency Monitoring",
+        "description": "ElevenLabs TTS with performance tracking for voice pipeline.",
+        "code": "import time\nimport requests\n\ndef synthesize_speech(text: str, voice_id: str) -> bytes:\n    start_time = time.time()\n    \n    response = requests.post(\n        \"https://api.elevenlabs.io/v1/text-to-speech/\" + voice_id,\n        headers={\"xi-api-key\": \"YOUR_KEY\"},\n        json={\n            \"text\": text,\n            \"model_id\": \"eleven_monolingual_v1\",\n            \"voice_settings\": {\n                \"stability\": 0.5,\n                \"similarity_boost\": 0.8\n            }\n        }\n    )\n    \n    latency = time.time() - start_time\n    if latency > 0.1:  # 100ms budget\n        print(f\"TTS latency warning: {latency*1000:.0f}ms\")\n    \n    return response.content",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap LlamaIndex Query Engine with Vex",
+        "description": "Protect voice responses with comprehensive Vex verification including latency and safety.",
+        "code": "from vex import verify\nfrom llama_index.core import VectorStoreIndex\n\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine()\n\ndef safe_voice_query(query: str) -> str:\n    @verify(\n        guards=[\n            \"response.appropriateness > 0.9\",\n            \"latency.total < 300ms\",\n            \"safety.nsfw == false\",\n            \"response.coherent_with_context\"\n        ],\n        fallback=\"I need more context to answer accurately.\"\n    )\n    def protected_query():\n        return str(query_engine.query(query))\n    \n    return protected_query()",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification Middleware",
+        "description": "Express middleware for voice API endpoints with Vex guards.",
+        "code": "import { verify } from 'vex-sdk';\n\nimport express from 'express';\nconst app = express();\n\napp.post('/voice-query', verify({\n  guards: [\n    'response.appropriateness > 0.9',\n    'latency.total < 300',\n    'safety.nsfw == false',\n    'conversation.coherence > 0.8'\n  ],\n  fallback: 'Let me clarify that for you.'\n}), async (req, res) => {\n  const { transcript } = req.body;\n  \n  // LlamaIndex query\n  const response = await llamaindexQuery(transcript);\n  \n  res.json({ response });\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Real-time Latency Budget Enforcement",
+        "description": "Vex monitors end-to-end voice pipeline latency with automatic fallbacks.",
+        "code": "from vex import verify\nimport time\n\n@verify(\n    guards=[\n        \"latency.stt < 200ms\",\n        \"latency.retrieval < 100ms\",\n        \"latency.llm < 150ms\",\n        \"latency.verification < 50ms\"\n    ],\n    fallback=\"One moment while I process that...\"\n)\nasync def full_voice_pipeline(audio: bytes, query_engine):\n    stt_start = time.time()\n    transcript = await stt(audio)  # Deepgram\n    stt_latency = time.time() - stt_start\n    \n    retrieval_start = time.time()\n    response = str(query_engine.query(transcript))\n    retrieval_latency = time.time() - retrieval_start\n    \n    return response",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LlamaIndex Voice Agents",
+      "description": "Add Vex verification to your voice pipeline today and achieve production-grade reliability with one line of code."
+    }
+  }
+}

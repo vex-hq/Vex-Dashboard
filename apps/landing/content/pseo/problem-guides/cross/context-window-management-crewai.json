@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in CrewAI Agents",
+    "description": "How to detect and fix context window management for ai agents in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "CrewAI context-window-management",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, Context Window Management issues arise when agents pass increasingly verbose conversation histories, tool outputs, and task contexts between crew members, quickly exhausting LLM token limits. This leads to truncated inputs, forgotten prior decisions, and degraded performance in multi-agent workflows. CrewAI's sequential task delegation exacerbates the problem as each agent appends its full reasoning and outputs without trimming.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running research crew with sequential delegation",
+        "symptom": "Agent conversation_history exceeds 100k tokens after 5-6 handoffs",
+        "impact": "LLM returns 'context_length_exceeded' errors or incoherent responses"
+      },
+      {
+        "scenario": "Code review crew with tool-heavy agents",
+        "symptom": "Tool outputs (code diffs, logs) accumulate without summarization",
+        "impact": "Later agents receive truncated inputs and hallucinate fixes"
+      },
+      {
+        "scenario": "Customer support escalation crew",
+        "symptom": "Each agent prepends full chat history to their response",
+        "impact": "Senior agents lose context of original customer issue"
+      },
+      {
+        "scenario": "Planning crew with iterative refinement",
+        "symptom": "Task descriptions grow exponentially with each replan",
+        "impact": "Final execution agent misinterprets drifted objectives"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Monitoring",
+        "description": "Track input token counts per agent task and flag when approaching 80% of model limit",
+        "code": "from crewai import Agent, Task, Crew\nfrom tiktoken import get_encoding\n\nencoding = get_encoding('cl100k_base')\n\nclass TokenMonitor:\n    def __init__(self, model_limit=128000):\n        self.model_limit = model_limit\n        self.threshold = model_limit * 0.8\n    \n    def check_context(self, task, agent):\n        # Simulate context accumulation\n        context = task.description + agent.goal + str(task.context.get('history', ''))\n        tokens = len(encoding.encode(context))\n        if tokens > self.threshold:\n            print(f'⚠️  {agent.role}: {tokens} tokens ({tokens/self.model_limit*100:.1f}%)')\n            return False\n        return True\n\ntoken_monitor = TokenMonitor()\n\n# Usage in crew\ndef monitored_execute(crew):\n    for task in crew.tasks:\n        if not token_monitor.check_context(task, task.agent):\n            raise ValueError('Context window overflow detected')\n    return crew.kickoff()",
+        "language": "python"
+      },
+      {
+        "name": "Context Drift Detection",
+        "description": "Compare semantic similarity between original task and accumulated context",
+        "code": "from crewai import Task\nfrom sentence_transformers import SentenceTransformer, util\nimport numpy as np\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\nclass ContextDriftDetector:\n    def __init__(self, threshold=0.7):\n        self.threshold = threshold\n    \n    def detect_drift(self, original_task: Task, current_context: str):\n        original_emb = model.encode(original_task.description)\n        context_emb = model.encode(current_context[-2000:])  # Last 2000 chars\n        similarity = util.cos_sim(original_emb, context_emb).item()\n        \n        print(f'Context drift: {similarity:.3f} (threshold: {self.threshold})')\n        return similarity < self.threshold\n    \n# Usage\ndetector = ContextDriftDetector()\n\n# In task callback\nif detector.detect_drift(task, task.context.get('history', '')):\n    print('🚨 Context drift detected - task objective lost')\n    task.context['needs_summary'] = True",
+        "language": "python"
+      },
+      {
+        "name": "Loop Detection in Delegation",
+        "description": "Track agent delegation patterns to detect context-bloated loops",
+        "code": "from crewai import Crew\nfrom collections import defaultdict, deque\n\nclass DelegationLoopDetector:\n    def __init__(self, max_handoffs=10):\n        self.max_handoffs = max_handoffs\n        self.delegation_chains = defaultdict(deque)\n    \n    def track_delegation(self, from_agent, to_agent, context_size):\n        chain_key = f'{from_agent.role}->{to_agent.role}'\n        self.delegation_chains[chain_key].append(context_size)\n        \n        if len(self.delegation_chains[chain_key]) > self.max_handoffs:\n            avg_size = sum(self.delegation_chains[chain_key]) / len(self.delegation_chains[chain_key])\n            if avg_size > 50000:  # Growing context\n                print(f'🔄 Loop detected: {chain_key} avg {avg_size:.0f} tokens')\n                return False\n        return True\n    \n# Global detector\ndetector = DelegationLoopDetector()\n\n# In CrewAI callback\ndef on_task_complete(task, context_size):\n    if hasattr(task, 'previous_agent'):\n        return detector.track_delegation(task.previous_agent, task.agent, context_size)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Summarization",
+        "description": "Automatically summarize conversation history before each agent handoff",
+        "code": "from crewai import Agent, Task\nfrom langchain.prompts import PromptTemplate\nfrom langchain.llms import OpenAI\n\nsummarizer = OpenAI(temperature=0)\nSUMMARY_PROMPT = \"\"\"\nSummarize the key decisions, context, and unresolved issues from this conversation:\n{conversation}\n\nKeep under 1000 tokens. Focus on:\n1. Original objectives\n2. Key findings/decisions\n3. Pending actions\n4. Context for next agent\n\nSummary:\n\"\"\"\n\nclass ContextManager:\n    def summarize_context(self, full_history: str, max_tokens=4000):\n        if len(full_history) < max_tokens:\n            return full_history\n        \n        prompt = SUMMARY_PROMPT.format(conversation=full_history[-8000:])\n        summary = summarizer(prompt)\n        return f'SUMMARY:\\n{summary}\\n\\nRECENT:{full_history[-2000:]}'\n    \n# Integrate with CrewAI tasks\nclass ManagedTask(Task):\n    def prepare_context(self):\n        if 'history' in self.context:\n            self.context['history'] = ContextManager().summarize_context(\n                self.context['history']\n            )\n        return super().prepare_context()",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budgeted Outputs",
+        "description": "Enforce strict token limits on agent outputs to prevent context explosion",
+        "code": "from crewai import Agent\nimport tiktoken\n\nencoding = tiktoken.get_encoding('cl100k_base')\n\nclass TokenBudgetAgent(Agent):\n    def __init__(self, *args, max_output_tokens=2000, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_output_tokens = max_output_tokens\n    \n    def _generate_response(self, prompt):\n        response = super()._generate_response(prompt)\n        tokens = encoding.encode(response)\n        \n        if len(tokens) > self.max_output_tokens:\n            # Truncate and add summary\n            truncated = encoding.decode(tokens[:self.max_output_tokens-100])\n            summary_prompt = f'Summarize this truncated response (max 100 tokens): {truncated}'\n            summary = self.llm(summary_prompt)\n            response = f'{truncated}\\n...[truncated - see summary]\\n{summary}'\n        \n        print(f'📏 Output: {len(encoding.encode(response))} tokens')\n        return response\n\n# Usage\nresearcher = TokenBudgetAgent(\n    role='Researcher',\n    goal='Research efficiently',\n    max_output_tokens=1500,  # Conservative budget\n    verbose=True\n)",
+        "language": "python"
+      },
+      {
+        "name": "Hierarchical Context Storage",
+        "description": "Store context in layered summaries instead of full history",
+        "code": "from crewai import Crew\nfrom typing import Dict, List\n\nclass HierarchicalContext:\n    def __init__(self):\n        self.layers = {\n            'summary': '',      # 500 tokens\n            'recent': '',       # 2000 tokens\n            'full': []          # List of compressed chunks\n        }\n    \n    def add_message(self, message: str, agent_role: str):\n        # Always keep recent\n        self.layers['recent'] += f'{agent_role}: {message}\\n'\n        self.layers['recent'] = self.layers['recent'][-4000:]\n        \n        # Update summary every 3 messages\n        if len(self.layers['full']) % 3 == 0:\n            self.update_summary()\n    \n    def update_summary(self):\n        summary = self.summarize(self.layers['recent'])\n        self.layers['summary'] = summary\n        self.layers['full'].append({\n            'chunk': summary,\n            'tokens': len(summary)\n        })\n    \n    def get_context_for_agent(self, max_tokens=8000) -> str:\n        context = self.layers['summary'] + '\\n\\n' + self.layers['recent']\n        return context[-max_tokens:]\n\n# CrewAI integration\ncontext_store = HierarchicalContext()\n\ncrew = Crew(\n    agents=[...],\n    tasks=[...],\n    context={'shared_context': context_store}\n)\n\ndef task_callback(task):\n    context_store.add_message(task.output, task.agent.role)\n    task.context = context_store.get_context_for_agent()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback in CrewAI tasks, automatically monitoring token counts, detecting delegation loops, and context drift across your entire crew execution. When issues are detected, Vex can trigger automatic summarization, context truncation, or even agent replanning without manual intervention.\n\nThe Vex SDK provides production-grade observability with real-time dashboards showing context growth patterns per agent role, delegation chains, and token budgets. Remediation policies can be configured declaratively - for example, 'auto-summarize when tokens > 70% limit' or 'fail-fast on detected loops.'\n\nVex captures full execution traces including intermediate agent states, making root-cause analysis trivial even in complex multi-agent orchestrations.",
+      "code": "from crewai import Agent, Task, Crew\nfrom vex_sdk import Vex\n\n# Install: pip install crewai vex-sdk\nvex = Vex(api_key='your-vex-key')\n\n# Define context window reliability policy\n@vex.policy(\n    name='crewai-context-window',\n    metrics=['token_usage', 'context_drift', 'delegation_loops'],\n    remediation='auto_summarize',\n    threshold={'tokens': 0.8}  # 80% of model limit\n)\ndef monitor_context_window(task: Task, agent: Agent, context: dict):\n    '''Vex automatically extracts metrics from CrewAI execution'''\n    pass\n\n# Agents with Vex integration\nresearcher = Agent(\n    role='Researcher',\n    goal='Research without context overflow',\n    callbacks=[monitor_context_window],\n    verbose=True\n)\n\n# Tasks automatically monitored\ntask1 = Task(\n    description='Research topic',\n    agent=researcher,\n    context={'history': []}  # Vex tracks growth\n)\n\ncrew = Crew(agents=[researcher], tasks=[task1])\n\n# Vex wraps execution\nwith vex.span('crew-execution'):\n    result = crew.kickoff()\n\n# View issues in Vex dashboard\nprint('Check Vex dashboard for context issues:', vex.dashboard_url)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk` and one line of code to make your CrewAI agents context-window proof."
+    }
+  }
+}

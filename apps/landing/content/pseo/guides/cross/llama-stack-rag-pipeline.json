@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack rag pipeline",
+      "Llama Stack guardrails",
+      "rag pipeline reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG Pipeline with Llama Stack enables efficient document retrieval, context assembly, and LLM synthesis for accurate, source-attributed responses. However, common pitfalls like hallucinated associations, irrelevant context, and unfaithful citations can undermine reliability in high-risk applications. Integrating Vex guardrails ensures source faithfulness, hallucination detection, and citation accuracy through post-processing verification.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Llama Stack",
+      "description": "The RAG Pipeline with Llama Stack starts with a vector search over a memory bank of embedded documents, retrieving top-k relevant chunks. These are assembled into a prompt context and fed to the Llama model via the standardized Llama Stack client, which handles safety shielding, tool calls, and memory management. The LLM synthesizes a response with source attributions, but failures in retrieval relevance or schema conformance can propagate errors.\n\nLlama Stack's agentic loop manages iterative refinement, but turn limits and safety false positives often halt progress prematurely. Vex integration wraps the final agent response with verify() to check for hallucination, context relevance, and citation fidelity before delivery.\n\nThis architecture leverages Llama Stack's memory bank for persistent document storage and retrieval, ensuring scalable RAG while exposing verifiable outputs for guardrail enforcement.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vector Search    │───▶│ Context Assembly │\n└─────────────────┘    │ (Memory Bank)    │    │ + Prompting      │\n                       └──────────────────┘    └──────────┬─────────┘\n                                     │                │ Vex.verify()\n                                     ▼                ▼\n                              ┌──────────────────┐    ┌──────────────────┐\n                              │ Llama Stack      │    │ Final Response   │\n                              │ Agent Loop       │◀───│ w/ Citations    │\n                              └──────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Safety shield filtering producing false positives on benign content",
+        "description": "Llama Stack's built-in safety layer blocks harmless RAG outputs containing technical terms mistaken for violations.",
+        "severity": "high",
+        "mitigation": "Wrap responses with Vex verify() using custom safety schemas that whitelist domain-specific terminology."
+      },
+      {
+        "name": "Agentic loop turn limits exceeded without meaningful resolution",
+        "description": "RAG refinement loops exceed max turns when retrieval yields noisy context, preventing convergence.",
+        "severity": "critical",
+        "mitigation": "Monitor loop progress with Vex metrics and enforce early termination with relevance thresholds."
+      },
+      {
+        "name": "Tool runtime responses not conforming to expected schema",
+        "description": "Vector search tools return malformed metadata, breaking citation attribution in synthesis.",
+        "severity": "high",
+        "mitigation": "Validate tool outputs against Pydantic schemas before context assembly using Vex assertions."
+      },
+      {
+        "name": "Memory bank retrieval hallucinating document associations",
+        "description": "Vector search associates query with irrelevant or fabricated document chunks.",
+        "severity": "critical",
+        "mitigation": "Enforce source faithfulness checks with Vex verify() on retrieved context matches."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Setup Llama Stack Client and Memory Bank",
+        "description": "Initialize the Llama Stack client and populate memory bank with document embeddings for RAG retrieval.",
+        "code": "from llama_stack_client import LlamaStack\nfrom vex import Verify\n\n# Initialize Llama Stack\nclient = LlamaStack(\n    model='llama-3.2-11b',\n    base_url='https://api.llamastack.ai',\n    api_key='your-api-key'\n)\n\n# Populate memory bank\nawait client.memory.create_documents([\n    {'id': 'doc1', 'content': 'Q3 earnings up 15%', 'embedding': [0.1, 0.2, ...]},\n    {'id': 'doc2', 'content': 'Revenue growth steady', 'embedding': [0.3, 0.4, ...]}\n])\n\nvex = Verify(api_key='vex-key')",
+        "language": "python"
+      },
+      {
+        "title": "Vector Search and Context Retrieval",
+        "description": "Execute semantic search over memory bank and assemble context for LLM prompting.",
+        "code": "async def retrieve_context(query: str, top_k: int = 3):\n    query_emb = await client.embedding.create([query])\n    results = await client.memory.search(\n        query_embeddings=query_emb,\n        limit=top_k,\n        namespace='rag_docs'\n    )\n    context = '\\n'.join([f\"[DOC:{doc['id']}]: {doc['content']}\" for doc in results])\n    return context, [doc['id'] for doc in results]\n\nquery = \"What was Q3 earnings growth?\"\ncontext, source_ids = await retrieve_context(query)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Agent Loop with Llama Stack",
+        "description": "Run agentic synthesis loop with retrieved context, handling tool calls and safety checks.",
+        "code": "async def rag_synthesize(query: str, context: str, source_ids: list):\n    messages = [{\"role\": \"user\", \"content\": f\"Context: {context}\\n\\nQuery: {query}\\nAnswer with citations [DOC:id].\"}]\n    \n    response = await client.chat.completions.create(\n        messages=messages,\n        tools=[{\"type\": \"memory_search\"}],\n        max_turns=5\n    )\n    return response.choices[0].message.content",
+        "language": "python"
+      },
+      {
+        "title": "Basic RAG Pipeline Orchestration",
+        "description": "Orchestrate full pipeline from query to attributed response without guardrails.",
+        "code": "async def basic_rag_pipeline(query: str):\n    context, source_ids = await retrieve_context(query)\n    response = await rag_synthesize(query, context, source_ids)\n    return {\n        'response': response,\n        'sources': source_ids,\n        'context_used': context[:500] + '...'\n    }\n\nresult = await basic_rag_pipeline(\"Q3 earnings?\")\nprint(result['response'])",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Source Faithfulness",
+        "description": "Ensure response content directly reflects retrieved context without hallucination.",
+        "code": "from vex import Verify, assertions\n\nasync def verify_faithfulness(pipeline_result):\n    check = await vex.verify(\n        assertion=assertions.source_faithfulness(\n            response=pipeline_result['response'],\n            context=pipeline_result['context_used'],\n            threshold=0.85  # 85% overlap required\n        ),\n        risk_profile='high'\n    )\n    return check.passes\n\nis_faithful = await verify_faithfulness(result)\nassert is_faithful, 'Faithfulness check failed'",
+        "language": "python"
+      },
+      {
+        "title": "Validate Citation Accuracy",
+        "description": "Confirm all citations in response match actual retrieved document IDs.",
+        "code": "async def verify_citations(pipeline_result):\n    check = await vex.verify(\n        assertion=assertions.citation_accuracy(\n            response=pipeline_result['response'],\n            expected_sources=pipeline_result['sources'],\n            citation_pattern=r'\\[DOC:(\\w+)\\]'\n        ),\n        risk_profile='high'\n    )\n    return {\n        **pipeline_result,\n        'citations_valid': check.passes,\n        'missing_cites': check.evidence.get('missing', [])\n    }\n\nverified_result = await verify_citations(result)",
+        "language": "python"
+      },
+      {
+        "title": "Full Vex-Protected RAG Pipeline",
+        "description": "Complete pipeline with comprehensive verification before response delivery.",
+        "code": "async def secure_rag_pipeline(query: str):\n    # Run basic pipeline\n    result = await basic_rag_pipeline(query)\n    \n    # Sequential verification\n    faithful = await verify_faithfulness(result)\n    verified = await verify_citations(result)\n    \n    if faithful and verified['citations_valid']:\n        return verified\n    else:\n        raise ValueError(f\"Verification failed: {verified.get('missing_cites', [])} missing\")\n\n# Production usage\nsecure_result = await secure_rag_pipeline(\"Q3 earnings growth?\")\nprint(f\"✅ Verified: {secure_result['response']}\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack RAG Pipeline",
+      "description": "Install Vex SDK today and wrap your agent responses with verify() to eliminate RAG reliability risks."
+    }
+  }
+}

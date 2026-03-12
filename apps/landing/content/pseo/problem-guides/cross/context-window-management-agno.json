@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "agno",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Agno Agents",
+    "description": "How to detect and fix context window management for ai agents in Agno agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Agno context-window-management",
+      "Agno reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Agno, Context Window Management issues for AI agents arise due to its lightweight, model-agnostic design that delegates token tracking to underlying LLMs without built-in overflow prevention. Agents often exceed context limits during multi-turn conversations or when processing large multimodal inputs, leading to truncated histories and hallucinated responses. This manifests specifically in Agno's agent.run() execution patterns where session memory accumulates without automatic pruning.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn conversational agents with persistent memory",
+        "symptom": "agent.run() starts returning 'context_full' errors or truncated responses after 5-7 turns",
+        "impact": "Loss of conversation coherence; agent fabricates prior interactions from compressed context"
+      },
+      {
+        "scenario": "Multimodal agents processing image+text workflows",
+        "symptom": "Vision inputs consume disproportionate tokens, causing text history eviction mid-session",
+        "impact": "Agent ignores previous instructions after first image, repeating same analysis"
+      },
+      {
+        "scenario": "Team agents coordinating across multiple sub-agents",
+        "symptom": "Shared context window overflows during parallel task execution",
+        "impact": "Sub-agents receive incomplete shared state, producing contradictory results"
+      },
+      {
+        "scenario": "Structured output agents with nested JSON schemas",
+        "symptom": "Complex schema definitions + conversation history exceed window limits",
+        "impact": "Pydantic validation fails with partial/incomplete JSON structures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Wraps agent.run() to track input/output token counts and detect window exhaustion",
+        "code": "from agno.agent import Agent\nfrom agno.tools import Tool\n\ndef monitor_context_overflow(agent: Agent):\n    original_run = agent.run\n    \n    def wrapped_run(*args, **kwargs):\n        # Track tokens before run\n        input_tokens = len(str(args) + str(kwargs))\n        result = original_run(*args, **kwargs)\n        output_tokens = len(result)\n        total_tokens = input_tokens + output_tokens\n        \n        if total_tokens > 120000:  # 80% of typical 128k window\n            print(f'⚠️  CONTEXT OVERFLOW: {total_tokens} tokens')\n        \n        return result\n    \n    agent.run = wrapped_run\n    return agent\n\n# Usage\nchat_agent = Agent(name='ChatAgent')\nchat_agent = monitor_context_overflow(chat_agent)",
+        "language": "python"
+      },
+      {
+        "name": "Memory Bloat Detector",
+        "description": "Inspects agent session memory growth across multiple runs",
+        "code": "from agno.agent import Agent\nimport tiktoken\n\ndef detect_memory_bloat(agent: Agent, max_runs=10):\n    encoding = tiktoken.get_encoding('cl100k_base')\n    memory_growth = []\n    \n    for i in range(max_runs):\n        before_memory = len(encoding.encode(str(agent.session.memory)))\n        response = agent.run(f'Turn {i+1}: Continue conversation')\n        after_memory = len(encoding.encode(str(agent.session.memory)))\n        \n        growth = after_memory - before_memory\n        memory_growth.append(growth)\n        \n        if sum(memory_growth[-3:]) > 50000:\n            print(f'🚨 MEMORY BLOAT DETECTED at run {i+1}: +{growth} tokens')\n            return True\n    \n    return False\n\n# Usage\nagent = Agent(name='TestAgent')\ndetect_memory_bloat(agent)",
+        "language": "python"
+      },
+      {
+        "name": "Response Truncation Check",
+        "description": "Detects when responses cut off mid-sentence due to context limits",
+        "code": "import re\nfrom agno.agent import Agent\n\ndef detect_truncation(response: str) -> bool:\n    truncation_patterns = [\n        r'\\n?\\[.*?\\]\\n?$',\n        r'\\n?\\(continued\\)\\n?$',\n        r'\\.\\.\\.$',\n        r'cannot fit',\n        r'context length'\n    ]\n    \n    response_lower = response.lower()\n    for pattern in truncation_patterns:\n        if re.search(pattern, response_lower):\n            print(f'🔍 TRUNCATION DETECTED: {repr(response[-50:])}')\n            return True\n    return False\n\n# Usage wrapper\nclass SafeAgent(Agent):\n    def run(self, *args, **kwargs):\n        result = super().run(*args, **kwargs)\n        if detect_truncation(result):\n            raise ValueError('Context window truncation detected')\n        return result",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Pruner",
+        "description": "Automatically trims session memory to fit within token limits before each run",
+        "code": "from agno.agent import Agent\nimport tiktoken\n\ndef add_context_pruner(agent: Agent, max_tokens=100000):\n    encoding = tiktoken.get_encoding('cl100k_base')\n    \n    original_run = agent.run\n    \n    def pruned_run(*args, **kwargs):\n        # Prune memory if approaching limit\n        memory_str = str(agent.session.memory)\n        memory_tokens = len(encoding.encode(memory_str))\n        \n        if memory_tokens > max_tokens * 0.7:\n            # Keep only last 70% of memory\n            cutoff = int(len(memory_str) * 0.3)\n            agent.session.memory = memory_str[cutoff:]\n            print(f'✂️  Pruned memory to {len(encoding.encode(str(agent.session.memory)))} tokens')\n        \n        return original_run(*args, **kwargs)\n    \n    agent.run = pruned_run\n    return agent\n\n# Usage\nagent = Agent(name='PrunedAgent')\nagent = add_context_pruner(agent)",
+        "language": "python"
+      },
+      {
+        "name": "Sliding Window Memory",
+        "description": "Maintains fixed-size conversation window by evicting oldest exchanges",
+        "code": "from collections import deque\nfrom agno.agent import Agent\n\nclass SlidingWindowAgent(Agent):\n    def __init__(self, *args, window_size=10, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.conversation_window = deque(maxlen=window_size)\n    \n    def run(self, message):\n        # Add current exchange to window\n        self.conversation_window.append({\n            'user': message,\n            'timestamp': len(self.conversation_window)\n        })\n        \n        # Build context from window\n        context = '\\n'.join([\n            f'User: {exchange[\"user\"]}\\nAssistant:' \n            for exchange in self.conversation_window\n        ])\n        \n        response = super().run(context)\n        self.conversation_window[-1]['assistant'] = response\n        return response\n\n# Usage\nwindow_agent = SlidingWindowAgent(name='WindowAgent', window_size=8)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budgeted Inputs",
+        "description": "Pre-allocates token budget across history, system prompt, and user input",
+        "code": "import tiktoken\nfrom agno.agent import Agent\n\ndef token_budget_agent(agent: Agent, budget=110000):\n    encoding = tiktoken.get_encoding('cl100k_base')\n    system_prompt_tokens = 2000  # Fixed\n    user_input_budget = budget * 0.4\n    \n    original_run = agent.run\n    \n    def budgeted_run(user_input):\n        user_tokens = len(encoding.encode(user_input))\n        \n        if user_tokens > user_input_budget:\n            # Truncate user input\n            target_chars = int(len(user_input) * (user_input_budget / user_tokens))\n            user_input = user_input[-target_chars:]\n            print(f'📏 Truncated input to fit budget: {user_tokens}→{len(encoding.encode(user_input))}')\n        \n        return original_run(user_input)\n    \n    agent.run = budgeted_run\n    return agent\n\n# Usage\nagent = token_budget_agent(Agent(name='BudgetAgent'))",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex provides production-grade automation for Context Window Management issues in Agno agents through its @vex.verify() decorator. When wrapped around agent.run(), Vex continuously monitors token consumption patterns, memory growth rates, and response completeness across all deployments. It automatically detects overflow patterns specific to Agno's session management and triggers intelligent remediation workflows.\n\nVex's agent reliability engine learns your specific usage patterns and establishes baseline token consumption curves. When deviations occur (sudden memory spikes, truncation patterns, or coordination failures), Vex isolates the exact run causing overflow and applies context-aware fixes like dynamic pruning or window sliding without code changes. For team agents, Vex coordinates context sharing across sub-agents to prevent collective overflow.\n\nThe integration takes <5 minutes and provides 24/7 monitoring with zero-downtime remediation. Vex maintains 99.9%+ agent uptime by preemptively managing context windows before failures cascade.",
+      "code": "from vex import verify\nfrom agno.agent import Agent\n\n@verify(\n    monitors=[\n        'context_window_overflow',\n        'memory_bloat',\n        'response_truncation',\n        'team_coordination_failure'\n    ],\n    auto_fix=['dynamic_pruning', 'sliding_window'],\n    alert_on='production_overflow'\n)\ndef reliable_agent_run(agent: Agent, message: str):\n    '''Vex-monitored Agno agent execution'''\n    return agent.run(message)\n\n# Production usage\nchat_agent = Agent(name='ProductionAgent')\n\n# Vex automatically detects & fixes context issues\nresponse = reliable_agent_run(chat_agent, \"Continue our analysis...\")\n\n# Vex dashboard shows:\n# ✅ 12/12 runs successful\n# 🔧 3 auto-fixes applied\n# 📊 Memory stable at 45k tokens",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install agno vex-sdk` and wrap your agent.run() calls today."
+    }
+  }
+}

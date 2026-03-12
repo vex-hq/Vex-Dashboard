@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Azure AI Agent Service agent-auth",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, AI Agent Authentication and Authorization problems manifest when agents bypass enterprise RBAC policies during tool calls, access unapproved grounding data sources, or execute actions without proper token validation. Agents integrated with Azure OpenAI and enterprise connectors often fail to enforce least-privilege access, leading to unauthorized data retrieval or execution of privileged operations. These issues are particularly acute in multi-tenant environments where agent threads share authentication contexts without proper isolation.",
+    "howItManifests": [
+      {
+        "scenario": "Agent executes Bing Search grounding without enterprise content filter approval",
+        "symptom": "Search results contain public data violating DLP policies",
+        "impact": "Compliance violations and potential data leakage to unauthorized domains"
+      },
+      {
+        "scenario": "File search tool returns Azure Blob metadata instead of filtered content",
+        "symptom": "Agent processes internal file paths and SAS tokens in responses",
+        "impact": "Exposure of storage account credentials and internal file structure"
+      },
+      {
+        "scenario": "Agent thread exceeds token limits while caching auth tokens",
+        "symptom": "401 Unauthorized errors during long-running conversations",
+        "impact": "Session termination and loss of conversation context"
+      },
+      {
+        "scenario": "Tool calls execute without validating caller's Azure AD group membership",
+        "symptom": "Agents perform admin operations from user-initiated threads",
+        "impact": "Privilege escalation and unauthorized resource modification"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Unauthorized Tool Token Usage",
+        "description": "Detect when agent tools execute without proper Azure AD token validation",
+        "code": "from azure.ai.projects import AgentClient\nfrom azure.identity import DefaultAzureCredential\n\nclient = AgentClient(\n    endpoint=\"https://your-project.agents.azure.com\",\n    credential=DefaultAzureCredential()\n)\n\nthreads = client.list_threads()\nfor thread in threads:\n    messages = client.list_messages(thread.id)\n    for msg in messages:\n        if 'tool_calls' in msg.content:\n            for tool in msg.content['tool_calls']:\n                if 'azure_blob' in tool.function.name and not msg.metadata.get('auth_validated'):\n                    print(f\"🚨 Unauthorized blob access in thread {thread.id}: {tool.function.name}\")\n                    print(f\"Missing auth validation metadata: {msg.metadata}\")",
+        "language": "python"
+      },
+      {
+        "name": "Validate Grounding Data Policy Compliance",
+        "description": "Check Bing Search and file search results against enterprise DLP policies",
+        "code": "import re\nfrom azure.ai.projects.types import MessageContent\n\ndef validate_grounding_content(message: MessageContent) -> bool:\n    dlp_patterns = [\n        r'azure://[^\\s]+\\.blob\\.core\\.windows\\.net',\n        r'https://www\\.bing\\.com/search\\?q=(?!approved)',\n        r'\\\\azure-fileshare\\\\(?!approved-)'\n    ]\n    \n    content = message.content\n    for pattern in dlp_patterns:\n        if re.search(pattern, content, re.IGNORECASE):\n            print(f\"🚨 DLP violation in message {message.id}: {pattern}\")\n            return False\n    return True\n\n# Usage in agent middleware\nif not validate_grounding_content(incoming_message):\n    raise ValueError(\"Grounding data violates enterprise policy\")",
+        "language": "python"
+      },
+      {
+        "name": "Token Limit and Auth Drift Detection",
+        "description": "Monitor thread token usage and auth token expiration",
+        "code": "import asyncio\nfrom azure.ai.projects import AgentRuntime\n\nasync def monitor_thread_auth_drift(runtime: AgentRuntime):\n    while True:\n        stats = await runtime.get_thread_stats()\n        for thread_id, stat in stats.items():\n            if stat.token_count > stat.max_tokens * 0.9:\n                print(f\"⚠️ Thread {thread_id} at {stat.token_count}/{stat.max_tokens} tokens\")\n            \n            if stat.auth_expires_in < 300:  # 5 minutes\n                print(f\"🚨 Thread {thread_id} auth expires in {stat.auth_expires_in}s\")\n                await runtime.refresh_thread_auth(thread_id)\n        \n        await asyncio.sleep(60)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Enforce RBAC Middleware for Tool Calls",
+        "description": "Add Azure AD group validation before tool execution",
+        "code": "from azure.ai.projects import AgentMiddleware\nfrom azure.identity import DefaultAzureCredential\nfrom azure.mgmt.authorization import AuthorizationManagementClient\n\nclass AuthRBACMiddleware(AgentMiddleware):\n    def __init__(self):\n        self.credential = DefaultAzureCredential()\n        self.auth_client = AuthorizationManagementClient(self.credential)\n    \n    async def before_tool_call(self, thread_id: str, tool_call):\n        caller_principal = self.get_caller_principal(thread_id)\n        \n        required_role = \"Storage Blob Data Contributor\"\n        if \"azure_blob\" in tool_call.function.name:\n            has_role = await self.check_role_assignment(\n                caller_principal, \n                tool_call.function.arguments.get(\"resource_group\"),\n                required_role\n            )\n            if not has_role:\n                raise PermissionError(f\"Missing {required_role} for blob operations\")\n        \n        return tool_call\n    \n    async def check_role_assignment(self, principal_id, scope, role):\n        # Implementation checks Azure RBAC assignments\n        assignments = self.auth_client.role_assignments.list_for_scope(scope)\n        return any(a.role_definition_name == role for a in assignments)",
+        "language": "python"
+      },
+      {
+        "name": "Enterprise Policy Grounding Filter",
+        "description": "Filter grounding data sources and validate content",
+        "code": "from typing import List\nfrom azure.ai.projects import AgentExtension\n\nclass EnterpriseGroundingFilter(AgentExtension):\n    APPROVED_SOURCES = [\n        \"https://approved.bing.com\",\n        \"azure://approved-storage.blob.core.windows.net\"\n    ]\n    \n    def filter_grounding_sources(self, sources: List[str]) -> List[str]:\n        return [s for s in sources if any(approved in s for approved in self.APPROVED_SOURCES)]\n    \n    def validate_grounding_content(self, content: str) -> bool:\n        banned_patterns = [\n            r'sas_token=[^\\s]+',\n            r'azure://(?!approved)',\n            r'\\\\internal-share\\\\'\n        ]\n        return not any(re.search(p, content) for p in banned_patterns)\n    \n# Register with agent\nagent.add_extension(EnterpriseGroundingFilter())",
+        "language": "python"
+      },
+      {
+        "name": "Graceful Token Limit Handler",
+        "description": "Implement token-aware conversation truncation and auth refresh",
+        "code": "from azure.ai.projects import AgentRuntime\n\nclass TokenSafeAgentRuntime(AgentRuntime):\n    async def send_message(self, thread_id: str, content: str):\n        thread_stats = await self.get_thread_stats(thread_id)\n        \n        if thread_stats.token_count > thread_stats.max_tokens * 0.8:\n            # Truncate oldest messages\n            old_messages = await self.list_messages(thread_id, limit=10)\n            await self.delete_messages([m.id for m in old_messages[:5]])\n            \n            # Refresh auth if expiring\n            if thread_stats.auth_expires_in < 600:\n                await self.refresh_thread_auth(thread_id)\n        \n        return await super().send_message(thread_id, content)\n    \n    async def refresh_thread_auth(self, thread_id: str):\n        credential = DefaultAzureCredential()\n        token = credential.get_token(\"https://management.azure.com/.default\")\n        await self.update_thread_auth(thread_id, token.token)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically scanning all agent threads for authentication drift, RBAC violations, and grounding policy breaches. It employs real-time monitoring of tool calls, token usage patterns, and Azure AD principal validation, providing instant alerts and automated remediation workflows. Vex's agent-specific detectors catch issues before they impact production conversations, while its remediation engine can dynamically refresh tokens, truncate conversations, and enforce policy-compliant grounding sources.\n\nThe platform maintains full audit trails of auth decisions and integrates with Azure Sentinel for enterprise security operations. Vex reduces mean-time-to-detection from hours to seconds by analyzing agent metadata streams and correlating them with Azure RBAC state, ensuring continuous compliance without manual intervention. Configuration is declarative via YAML policies that mirror your enterprise security posture.",
+      "code": "from vex_sdk import VexAgentMonitor\nfrom azure.ai.projects import AgentClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex_monitor = VexAgentMonitor(\n    azure_tenant_id=\"your-tenant-id\",\n    policies={\n        \"auth_drift\": {\n            \"threshold\": 300,  # 5min token expiry\n            \"auto_remediate\": True\n        },\n        \"rbac_violations\": {\n            \"roles\": [\"Storage Blob Data Contributor\", \"Cognitive Services Contributor\"],\n            \"block_on_violation\": True\n        },\n        \"grounding_dlp\": {\n            \"banned_patterns\": [r'sas_token', r'azure://(?!approved)'],\n            \"approved_sources\": [\"https://approved.bing.com\"]\n        }\n    }\n)\n\n# Integrate with Azure Agent Service\nclient = AgentClient(endpoint=\"https://your-project.agents.azure.com\")\n\n@vex_monitor.trace()\ndef monitored_agent_thread(thread_id):\n    # All tool calls, grounding, and auth events auto-monitored\n    messages = client.list_messages(thread_id)\n    for msg in messages:\n        if msg.content.get('tool_calls'):\n            vex_monitor.validate_tool_auth(msg)\n    return messages\n\n# Vex auto-generates compliance reports and remediation actions\nvex_monitor.start_azure_monitoring(client)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AI agent auth vulnerabilities in under 5 minutes: pip install vex-sdk"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Instructor Agents",
+    "description": "How to detect and fix context window management for ai agents in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Instructor context-window-management",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor, Context Window Management issues for AI Agents manifest as structured output validation failures when prompts, system instructions, or conversation history exceed the model's token limit, causing truncated inputs or forced retries. Agents wrapping `client.chat.completions.create()` with `vex.verify()` experience cascading failures like 'Structured output validation retries exhausted' when context bloat overwhelms the window. This leads to partial Pydantic extractions, hallucinated enum values, and inconsistent nested object parsing as the model struggles with incomplete context.",
+    "howItManifests": [
+      {
+        "scenario": "Long conversation history in agent loops",
+        "symptom": "Structured output validation retries exhausted after 3 attempts",
+        "impact": "Agent halts with unrecoverable validation error, missing critical fields"
+      },
+      {
+        "scenario": "Verbose system prompts + large user messages",
+        "symptom": "Partial extraction missing required nested fields",
+        "impact": "Downstream agent actions fail due to incomplete Pydantic models"
+      },
+      {
+        "scenario": "Accumulated tool call history in multi-turn flows",
+        "symptom": "Model hallucinating enum values outside schema",
+        "impact": "Validation fails silently, producing garbage enum values"
+      },
+      {
+        "scenario": "Deep nested schema extraction with bloated context",
+        "symptom": "Nested object extraction producing inconsistent depth",
+        "impact": "Partial object trees break dependent agent logic"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Exceeded Monitor",
+        "description": "Detects when total input tokens exceed 90% of model context window before Instructor call",
+        "code": "from instructor import Instructor\nfrom openai import OpenAI\nclient = Instructor(OpenAI())\n\ndef detect_context_bloat(messages, model='gpt-4o-mini'):\n    from tiktoken import encoding_for_model\n    enc = encoding_for_model(model)\n    total_tokens = sum(len(enc.encode(msg['content'] or '')) for msg in messages)\n    \n    limits = {'gpt-4o-mini': 128000, 'gpt-4o': 128000}\n    limit = limits.get(model, 128000)\n    \n    return {\n        'exceeds_threshold': total_tokens > limit * 0.9,\n        'current_tokens': total_tokens,\n        'max_tokens': limit,\n        'pct_used': total_tokens / limit\n    }\n\n# Usage\nresult = detect_context_bloat(messages)",
+        "language": "python"
+      },
+      {
+        "name": "Instructor Retry Exhaustion Detector",
+        "description": "Captures Instructor's internal retry exhaustion from validation failures",
+        "code": "import instructor\nfrom instructor.retry import backoff\n\nclass ContextBloatError(Exception):\n    pass\n\n@backoff(max_retries=3)\ndef safe_structured_call(client, messages, response_model):\n    try:\n        return client.chat.completions.create(\n            messages=messages,\n            response_model=response_model,\n            temperature=0\n        )\n    except instructor.retry.RetryError as e:\n        if 'Structured output validation retries exhausted' in str(e):\n            raise ContextBloatError('Context window likely exceeded causing validation failures')\n        raise\n\n# Wrap your agent calls\nresponse = safe_structured_call(client, messages, YourPydanticModel)",
+        "language": "python"
+      },
+      {
+        "name": "Pydantic Partial Fill Detection",
+        "description": "Detects when Instructor returns partial Pydantic models with missing required fields",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass AgentResponse(BaseModel):\n    action: str\n    confidence: float\n    details: Optional[str] = None\n\nclass PartialFillDetector:\n    def __init__(self, model):\n        self.model = model\n    \n    def is_partial(self, obj):\n        fields = self.model.model_fields\n        missing = []\n        for field_name, field_info in fields.items():\n            if not getattr(obj, field_name, None) and not field_info.is_optional():\n                missing.append(field_name)\n        return {\n            'is_partial': len(missing) > 0,\n            'missing_fields': missing,\n            'fill_ratio': 1 - len(missing) / len(fields)\n        }\n\n# Usage\ndetector = PartialFillDetector(AgentResponse)\nresult = detector.is_partial(response)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncation",
+        "description": "Automatically truncates conversation history to fit within token limits while preserving recent context",
+        "code": "from tiktoken import encoding_for_model\n\ndef truncate_context(messages, model='gpt-4o-mini', max_tokens=100000):\n    enc = encoding_for_model(model)\n    \n    # Calculate system prompt tokens (keep always)\n    system_tokens = len(enc.encode(messages[0]['content'])) if messages[0].get('role') == 'system' else 0\n    available_tokens = max_tokens - system_tokens - 1000  # Reserve for response\n    \n    # Keep last N messages until we fit\n    current_messages = [messages[0]] if messages[0].get('role') == 'system' else []\n    current_tokens = system_tokens\n    \n    for msg in reversed(messages[1:]):\n        msg_tokens = len(enc.encode(msg['content'] or ''))\n        if current_tokens + msg_tokens < available_tokens:\n            current_messages.insert(0, msg)\n            current_tokens += msg_tokens\n        else:\n            break\n    \n    return current_messages\n\n# Before Instructor call\nmessages = truncate_context(messages)\nresponse = client.chat.completions.create(\n    messages=messages,\n    response_model=YourModel\n)",
+        "language": "python"
+      },
+      {
+        "name": "Sliding Window Summarization",
+        "description": "Replaces old conversation turns with AI-generated summaries to preserve intent within token limits",
+        "code": "from instructor import Instructor\n\nclass ConversationSummarizer:\n    def __init__(self, client):\n        self.client = Instructor(client)\n    \n    def summarize_history(self, messages, max_history_messages=5):\n        if len(messages) <= max_history_messages:\n            return messages\n        \n        # Extract conversation for summarization\n        history = messages[1:max_history_messages]  # Skip system\n        summary_prompt = [\n            {'role': 'system', 'content': 'Summarize this conversation in 2-3 sentences preserving key decisions and context:'},\n            *history\n        ]\n        \n        class Summary(BaseModel):\n            summary: str\n        \n        summary = self.client.chat.completions.create(\n            messages=summary_prompt,\n            response_model=Summary\n        )\n        \n        return [messages[0], {'role': 'system', 'content': f\"Conversation summary: {summary.summary}\"}] + messages[-2:]\n\nsummarizer = ConversationSummarizer(client)\nmessages = summarizer.summarize_history(messages)",
+        "language": "python"
+      },
+      {
+        "name": "Adaptive Mode Selection",
+        "description": "Dynamically switches to smaller models or lower max_tokens when context approaches limits",
+        "code": "def select_optimal_config(messages, preferred_model='gpt-4o-mini'):\n    from tiktoken import encoding_for_model\n    enc = encoding_for_model(preferred_model)\n    token_count = sum(len(enc.encode(msg.get('content', ''))) for msg in messages)\n    \n    configs = [\n        {'model': 'gpt-4o-mini', 'max_tokens': 120000, 'threshold': 0.9},\n        {'model': 'gpt-4o-mini', 'max_tokens': 80000, 'threshold': 0.7},\n        {'model': 'gpt-4o-mini-turbo', 'max_tokens': 40000, 'threshold': 0.5}\n    ]\n    \n    for config in configs:\n        if token_count < config['max_tokens'] * config['threshold']:\n            return config\n    \n    return configs[-1]  # Fallback\n\n# Usage\nconfig = select_optimal_config(messages)\nresponse = client.chat.completions.create(\n    model=config['model'],\n    messages=messages,\n    max_tokens=config['max_tokens'],\n    response_model=YourModel\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automatically detects Context Window Management failures in Instructor agents by monitoring token usage patterns, Instructor retry exhaustion signals, and Pydantic validation error rates across your agent deployments. When context bloat is detected, Vex applies intelligent truncation strategies, dynamic model selection, and conversation summarization without requiring code changes to your Instructor integrations.\n\nThe platform wraps your existing `client.chat.completions.create()` calls with `vex.verify()`, providing real-time token monitoring, automatic remediation, and fallback strategies. Vex learns your agent's context patterns and preemptively applies fixes before validation failures occur, maintaining 99.9% uptime for structured extraction.",
+      "code": "from vex_sdk import verify\nfrom instructor import Instructor\nfrom openai import OpenAI\n\nclient = Instructor(OpenAI())\n\n@vex.verify(\n    failure_modes=[\n        'Structured output validation retries exhausted',\n        'Context window exceeded',\n        'Partial Pydantic extraction'\n    ],\n    auto_fix=['context_truncation', 'model_downgrade', 'history_summarization']\n)\ndef agent_task(messages, response_model):\n    return client.chat.completions.create(\n        messages=messages,\n        response_model=response_model,\n        temperature=0\n    )\n\n# Vex automatically handles context management\nresult = agent_task(messages, AgentResponse)\n\n# Vex provides diagnostics\nprint(result.vex_diagnostics.get('context_management', {}))",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get instant Context Window Management protection for your Instructor agents - start your free trial at vex.ai"
+    }
+  }
+}

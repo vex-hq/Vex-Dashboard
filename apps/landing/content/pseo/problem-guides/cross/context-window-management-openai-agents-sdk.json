@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix context window management for ai agents in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "OpenAI Agents SDK context-window-management",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, Context Window Management failures manifest as agents accumulating excessive conversation history, tool outputs, and handoff metadata within the Runner's state, quickly exceeding token limits during multi-turn interactions. This is exacerbated by the SDK's automatic state persistence across agent handoffs and retries, where untrimmed messages bloat the context fed to models like GPT-4o. Specialized agents in handoff chains compound the issue, each appending verbose outputs without truncation.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent research workflow with 5 specialized agents",
+        "symptom": "Runner state exceeds 100k tokens after 8-10 handoffs",
+        "impact": "Agents hallucinate or fail with 'context_length_exceeded' errors"
+      },
+      {
+        "scenario": "Customer support agent with conversation history",
+        "symptom": "Previous 20+ customer turns included in every tool call",
+        "impact": "$500+ in unnecessary token spend per conversation"
+      },
+      {
+        "scenario": "Code generation agent with iterative refinement",
+        "symptom": "Full conversation history + all code versions in context",
+        "impact": "Model ignores recent instructions, generates wrong code"
+      },
+      {
+        "scenario": "Data analysis pipeline with multiple chart generations",
+        "symptom": "Every dataframe preview and chart description retained",
+        "impact": "Final summary agent receives 80% noise, 20% relevant data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Monitoring",
+        "description": "Track context length before each agent invocation using tiktoken",
+        "code": "import tiktoken\nenc = tiktoken.encoding_for_model('gpt-4o')\n\ndef check_context_length(messages):\n    token_count = sum(len(enc.encode(msg['content'])) for msg in messages)\n    print(f'Current context: {token_count} tokens')\n    return token_count > 120000",
+        "language": "python"
+      },
+      {
+        "name": "Runner State Inspection",
+        "description": "Inspect Runner.step() inputs to detect history accumulation",
+        "code": "from agents import Runner\n\ndef monitor_runner_state(runner: Runner):\n    state = runner.get_state()\n    msg_count = len(state['messages'])\n    if msg_count > 50:\n        print(f'⚠️  Message explosion: {msg_count} messages in state')\n    return msg_count",
+        "language": "python"
+      },
+      {
+        "name": "Handoff Context Bloat Detector",
+        "description": "Detect when handoff messages exceed 30% of total context",
+        "code": "def detect_handoff_bloat(messages):\n    handoff_markers = ['handoff_to', 'received_from', 'agent_transfer']\n    handoff_tokens = 0\n    total_tokens = 0\n    \n    for msg in messages:\n        tokens = len(enc.encode(msg['content']))\n        total_tokens += tokens\n        if any(marker in msg['content'].lower() for marker in handoff_markers):\n            handoff_tokens += tokens\n    \n    bloat_ratio = handoff_tokens / total_tokens\n    return bloat_ratio > 0.3",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Selective Message Pruning",
+        "description": "Keep only last N turns + critical system/tool messages",
+        "code": "def prune_context(messages, max_messages=25):\n    # Keep system messages and recent conversation\n    system_msgs = [m for m in messages if m.get('role') == 'system']\n    recent_msgs = messages[-max_messages:]\n    return system_msgs + recent_msgs",
+        "language": "python"
+      },
+      {
+        "name": "Runner Context Truncator",
+        "description": "Wrap Runner with automatic truncation before each step",
+        "code": "from agents import Runner\n\nclass ContextAwareRunner:\n    def __init__(self, agent):\n        self.runner = Runner(agent)\n    \n    def step(self, input):\n        state = self.runner.get_state()\n        state['messages'] = prune_context(state['messages'])\n        self.runner.set_state(state)\n        return self.runner.step(input)",
+        "language": "python"
+      },
+      {
+        "name": "Summary Compression",
+        "description": "Compress old conversation into single summary message",
+        "code": "async def compress_history(messages):\n    if len(messages) < 20:\n        return messages\n    \n    history = messages[1:-10]  # Skip system/recent\n    summary_prompt = f\"Summarize this conversation in 200 words: {' '.join(m['content'] for m in history)}\"\n    \n    summary = await client.chat.completions.create(\n        model='gpt-4o-mini',\n        messages=[{'role': 'user', 'content': summary_prompt}]\n    )\n    \n    return [messages[0]] + [{'role': 'system', 'content': f'Conversation summary: {summary.choices[0].message.content}'}] + messages[-10:]",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automatically detects context window exhaustion patterns by monitoring token counts, message accumulation rates, and handoff bloat across all OpenAI Agents SDK Runners. It injects as output guardrails on each agent, validating context health before consumption and triggering automatic truncation or summarization when thresholds are exceeded. Vex's agent-specific policies track per-agent context growth, preventing specialized agents from poisoning downstream handoffs with excessive state.\n\nIntegration requires adding VexGuardrail to each agent's output validator. Vex maintains rolling baselines of healthy context sizes per agent type, alerting when deviations exceed 2σ. Remediation runs automatically via Vex's context compression pipeline, preserving critical reasoning traces while eliminating noise. Tracing integrates natively with Agents SDK observability.",
+      "code": "from vex_sdk import VexGuardrail\nfrom agents import Agent, Runner\n\n# Install: pip install openai-agents vex-sdk\n\nresearch_agent = Agent(\n    name=\"Researcher\",\n    instructions=\"...\",\n    output_guardrail=VexGuardrail(\n        policy_id=\"ctx-window-openai-agents\",\n        max_tokens=120000,\n        auto_compress=True,\n        handoff_limit=0.25\n    )\n)\n\nanalysis_agent = Agent(\n    name=\"Analyzer\",\n    instructions=\"...\",\n    output_guardrail=VexGuardrail(\"ctx-window-openai-agents\")\n)\n\n# Vex auto-instruments all handoffs\nrunner = Runner([research_agent, analysis_agent])\nresult = runner.run(\"Analyze market trends\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of VexGuardrail to eliminate context window failures forever: `pip install vex-sdk`"
+    }
+  }
+}

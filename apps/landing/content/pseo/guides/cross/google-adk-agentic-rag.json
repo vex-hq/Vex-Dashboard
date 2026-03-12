@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Google ADK + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK agentic rag",
+      "Google ADK guardrails",
+      "agentic rag reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Agentic RAG with Google's Agent Development Kit (ADK) enables multi-agent systems that autonomously plan retrieval queries, fetch from diverse sources, and synthesize attributed responses using Gemini models. However, multi-agent delegation, model switching, and long-session state management introduce critical failure modes like circular dependencies and hallucinated citations. Vex guardrails provide runtime verification for source faithfulness, query accuracy, and consistency, ensuring reliable production deployment.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Google ADK",
+      "description": "The Agentic RAG architecture in Google ADK features a Planner Agent that decomposes user queries into sub-queries, delegates to specialized Retriever Agents for vector stores and knowledge bases, and routes to a Synthesizer Agent for response generation with citations. Each agent maintains session state across Gemini model interactions, with tools for query execution and chunk retrieval. The workflow handles multi-hop reasoning by iteratively refining retrieval plans based on intermediate results.\n\nRetriever Agents interface with multiple sources (Pinecone, enterprise search, web APIs) while the Synthesizer enforces attribution formatting. Session state tracks query lineage and source metadata to prevent duplication. Gemini model switching between agents requires consistent output schemas to avoid delegation failures.\n\nThis modular design excels at complex knowledge tasks but risks circular delegation loops, state corruption in long conversations, and format mismatches between tool responses.",
+      "diagram": "User Query\n    ↓\n[Planner Agent] → decompose → [sub-queries]\n    ↓\n[Retriever Agent 1] → Pinecone/VectorDB\n    ↓\n[Retriever Agent 2] → Enterprise Search\n    ↓\n[Synthesizer Agent] → attribution + response\n    ↓\nFinal Answer w/ Citations"
+    },
+    "risks": [
+      {
+        "name": "Circular Delegation Loops",
+        "description": "Planner Agent delegates to Retriever which re-delegates back to Planner, creating infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation DAG structure and terminates cycles"
+      },
+      {
+        "name": "Hallucinated Source Attribution",
+        "description": "Synthesizer Agent fabricates citations not present in retrieved chunks",
+        "severity": "critical",
+        "mitigation": "Vex performs source faithfulness checks against retrieved context"
+      },
+      {
+        "name": "Query Planning Drift",
+        "description": "Planner generates irrelevant sub-queries diverging from original intent",
+        "severity": "high",
+        "mitigation": "Vex validates query alignment with semantic similarity thresholds"
+      },
+      {
+        "name": "Cross-Source Inconsistency",
+        "description": "Different retrievers return conflicting facts about same entity",
+        "severity": "high",
+        "mitigation": "Vex detects and flags entity conflicts across sources"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Planner Agent with Query Decomposition",
+        "description": "Core Planner Agent that decomposes complex queries into retrievable sub-queries",
+        "code": "from google_adk import Agent, Tool\nfrom vex import Vex\n\nplanner_agent = Agent(\n    name=\"planner\",\n    model=\"gemini-2.0-flash\",\n    instruction=\"Decompose complex queries into 3-5 atomic retrieval sub-queries.\"\n)\n\n@planner_agent.tool\ndef decompose_query(query: str) -> list[str]:\n    \"\"\"Return list of atomic sub-queries.\"\"\"\n    return [\n        f\"Find definitions for {query}\",\n        f\"Recent updates about {query}\",\n        f\"Key examples of {query}\"\n    ]\n\nplanner_agent.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Retriever Agent with Multi-Source Tools",
+        "description": "Retriever Agent executing parallel retrieval across vector stores and APIs",
+        "code": "retriever_agent = Agent(\n    name=\"retriever\",\n    model=\"gemini-2.0-flash\",\n    instruction=\"Execute retrieval from assigned sources only. Preserve source metadata.\"\n)\n\n@retriever_agent.tool\ndef pinecone_retrieve(query: str, top_k: int = 5) -> list[dict]:\n    \"\"\"Retrieve from Pinecone vector store.\"\"\"\n    results = pinecone_client.query(\n        vector=embed(query),\n        top_k=top_k,\n        include_metadata=True\n    )\n    return [{\n        'content': match['metadata']['text'],\n        'source': match['metadata']['source'],\n        'score': match['score']\n    } for match in results['matches']]\n\nretriever_agent.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Synthesizer with Citation Tracking",
+        "description": "Final synthesis agent that generates attributed responses",
+        "code": "synthesizer_agent = Agent(\n    name=\"synthesizer\",\n    model=\"gemini-2.0-pro\",\n    instruction=\"Synthesize from provided chunks ONLY. Use [1], [2] citation format.\"\n)\n\n@synthesizer_agent.tool\ndef format_citations(chunks: list[dict]) -> str:\n    \"\"\"Return numbered citation list for synthesis.\"\"\"\n    return \"\\n\".join([f\"[{i+1}] {chunk['source']}\" for i, chunk in enumerate(chunks)])\n\n@synthesizer_agent.tool\ndef verify_attribution(text: str, chunks: list[str]) -> bool:\n    \"\"\"Verify all claims in text are supported by chunks.\"\"\"\n    return True  # Simplified\n\nsynthesizer_agent.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Workflow Orchestration",
+        "description": "Orchestrator coordinating the full Agentic RAG pipeline",
+        "code": "from google_adk import Workflow\n\nworkflow = Workflow(agents=[planner_agent, retriever_agent, synthesizer_agent])\n\n@workflow.entrypoint\ndef agentic_rag(query: str):\n    \"\"\"Full Agentic RAG pipeline.\"\"\"\n    sub_queries = planner_agent.run(query)\n    \n    all_chunks = []\n    for sub_query in sub_queries:\n        chunks = retriever_agent.run(sub_query)\n        all_chunks.extend(chunks)\n    \n    response = synthesizer_agent.run({\n        'query': query,\n        'chunks': all_chunks\n    })\n    \n    return response",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Before-Agent Callback Setup",
+        "description": "Install Vex callback to verify inputs before every agent execution",
+        "code": "import vex\nfrom google_adk import Callback\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"vex_your_key\")\n\n@Callback.before_agent\ndef vex_guardrail(ctx):\n    \"\"\"Vex verification before agent execution.\"\"\"\n    agent_name = ctx.agent.name\n    input_data = ctx.input\n    session_id = ctx.session_id\n    \n    # High-risk verifications for Agentic RAG\n    results = vex_client.verify(\n        session_id=session_id,\n        verifications=[\n            \"source_faithfulness\",\n            \"hallucination_detection\",\n            \"query_planning_accuracy\",\n            \"cross_source_consistency\",\n            \"citation_verification\"\n        ],\n        context={\n            \"agent\": agent_name,\n            \"input\": input_data,\n            \"retrieval_sources\": ctx.get(\"sources\", [])\n        },\n        risk_profile=\"high\"\n    )\n    \n    if not all(r.pass for r in results):\n        raise Exception(f\"Vex blocked: {results}\")\n    \n# Register globally\nworkflow.add_callback(vex_guardrail)",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Custom Vex verification ensuring synthesis stays faithful to retrieved sources",
+        "code": "def source_faithfulness_verification(ctx):\n    \"\"\"Vex custom verification for RAG faithfulness.\"\"\"\n    generated_text = ctx.input.get(\"synthesis\")\n    source_chunks = ctx.context.get(\"retrieval_sources\", [])\n    \n    result = vex_client.verify_single(\n        name=\"source_faithfulness\",\n        input=generated_text,\n        reference_documents=[c[\"content\"] for c in source_chunks],\n        threshold=0.85  # 85% chunk coverage required\n    )\n    \n    return {\n        \"pass\": result[\"faithfulness_score\"] > 0.85,\n        \"score\": result[\"faithfulness_score\"],\n        \"missing_coverage\": result[\"unsupported_spans\"]\n    }\n\n# Register as custom verification\nvex_client.register_verification(source_faithfulness_verification)",
+        "language": "python"
+      },
+      {
+        "title": "Delegation Cycle Detection",
+        "description": "Prevent circular dependencies in multi-agent delegation",
+        "code": "def cycle_detection_guardrail(ctx):\n    \"\"\"Detect circular delegation patterns.\"\"\"\n    session_state = vex_client.get_session(ctx.session_id)\n    recent_calls = session_state.get(\"agent_calls\", [])[-10:]  # Last 10 calls\n    \n    # Check for cycles\n    call_chain = [call[\"agent_name\"] for call in recent_calls]\n    for i in range(len(call_chain) - 3):\n        if (call_chain[i] == ctx.agent.name and \n            call_chain[i+1] == call_chain[i+2] == call_chain[i+3]):\n            return {\n                \"pass\": False,\n                \"reason\": f\"Circular delegation detected: {call_chain[i:]} repeating\",\n                \"remediation\": \"terminate_session\"\n            }\n    \n    return {\"pass\": True}\n\nvex_client.register_verification(cycle_detection_guardrail, trigger=\"before_agent\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Agentic RAG",
+      "description": "Deploy production-ready Agentic RAG with Vex guardrails in minutes - start your free trial now."
+    }
+  }
+}

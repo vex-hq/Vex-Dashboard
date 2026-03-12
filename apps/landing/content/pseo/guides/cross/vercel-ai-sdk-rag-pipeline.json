@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK rag pipeline",
+      "Vercel AI SDK guardrails",
+      "rag pipeline reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with Vercel AI SDK enables fast, streaming document retrieval and synthesis for AI-powered apps. Guardrails are essential to prevent hallucinations, ensure source faithfulness, and maintain citation accuracy in high-risk production environments. Vex integrates seamlessly to verify outputs against retrieved context before streaming to users.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Vercel AI SDK",
+      "description": "The RAG pipeline starts with user queries triggering vector search across document embeddings to retrieve relevant chunks. Retrieved context is assembled and injected into a prompt for the LLM via Vercel AI SDK's generateText or streamText functions. The LLM synthesizes responses with source attribution, streamed to React Server Components for real-time UI updates.\n\nVercel AI SDK handles provider-agnostic streaming (OpenAI, Anthropic, etc.) while edge functions execute retrieval and synthesis. Common patterns use `createStreamableValue` for UI binding and `streamText` for progressive rendering. Failures occur when partial streams hallucinate or citations mismatch sources.\n\nVex middleware wraps these streaming calls to validate context relevance, detect hallucinations, and enforce citation accuracy before content reaches users.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Query    │───▶│ Vector Search    │───▶│ Context Assembly│\n└─────────────────┘    │ (Pinecone/Supabase)│    │ + Prompting     │\n                       └──────────────────┘    └──────────────┬──┘\n                                      │                    │\n                       ┌──────────────┼────────────────────┼──────────────┐\n                       │              ▼                    ▼              │\n                ┌───────▼──────┐ ┌───▼──────┐ ┌───▼──────────────┐        │\n                │ Vercel AI SDK│ │   Vex    │ │ LLM Synthesis    │        │\n                │ streamText   │ │Middleware│ │ + Citations      │        │\n                └───────┬──────┘ └──────────┘ └──────────────────┘        │\n                       │                                                  │\n                       └──────────────┬────────────────────────────────────┘\n                                      │\n                           ┌──────────▼──────────┐\n                           │ Streaming UI (RSC)  │\n                           │ createStreamableValue│\n                           └──────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Incomplete context in early stream chunks causes LLM to fabricate details before full retrieval completes",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks each chunk against retrieved documents before streaming"
+      },
+      {
+        "name": "Citation accuracy drift",
+        "description": "LLM generates incorrect source references that don't match actual retrieved chunks",
+        "severity": "high",
+        "mitigation": "Vex citation validation traces every reference to source offsets and content"
+      },
+      {
+        "name": "Context relevance failures",
+        "description": "Vector search returns semantically drifted documents that don't answer the query",
+        "severity": "high",
+        "mitigation": "Vex relevance scoring rejects low-confidence context before LLM synthesis"
+      },
+      {
+        "name": "Edge function timeouts on complex retrieval",
+        "description": "Large document sets or slow vector search exceed Vercel edge timeouts during streaming",
+        "severity": "medium",
+        "mitigation": "Vex async verification with timeout-aware middleware prevents hanging streams"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG with Vercel AI SDK streamText",
+        "description": "Core streaming RAG pattern retrieving context and generating attributed responses",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\nimport { createVectorStoreAgent } from './rag-store';\n\nconst store = createVectorStoreAgent();\n\nexport async function streamRAG(query: string) {\n  const results = await store.similaritySearch(query, 5);\n  const context = results.map((doc) => doc.pageContent).join('\\n\\n');\n\n  const { textStream } = await streamText({\n    model: openai('gpt-4o'),\n    prompt: `Answer using ONLY this context:\\n\\n${context}\\n\\nQuery: ${query}\\n\\nInclude [1], [2] citations.`\n  });\n\n  return textStream;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "React Server Component Streaming UI",
+        "description": "Bind RAG stream to RSC with createStreamableValue for real-time updates",
+        "code": "import { createStreamableValue } from 'ai/rsc';\nimport { streamRAG } from './rag-stream';\n\nexport default async function RAGChat({ query }: { query: string }) {\n  const [messages, setMessages] = createStreamableValue('');\n\n  (async () => {\n    try {\n      const stream = await streamRAG(query);\n      for await (const chunk of stream) {\n        setMessages((current) => current + chunk);\n      }\n    } catch (error) {\n      setMessages('Error generating response');\n    }\n  })();\n\n  return <div>{messages.value}</div>;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store Integration (Pinecone)",
+        "description": "Document embedding and similarity search for RAG context retrieval",
+        "code": "import { Pinecone } from '@pinecone-database/pinecone';\nimport { OpenAIEmbeddings } from '@langchain/openai';\n\nconst pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! });\nconst embeddings = new OpenAIEmbeddings();\n\nconst index = pinecone.index('rag-docs');\n\nexport async function createVectorStoreAgent() {\n  return {\n    async similaritySearch(query: string, k: number) {\n      const queryEmbedding = await embeddings.embedQuery(query);\n      const results = await index.query({\n        vector: queryEmbedding,\n        topK: k,\n        includeMetadata: true\n      });\n      return results.matches!.map((match) => ({\n        pageContent: match.metadata!.text as string,\n        metadata: { source: match.metadata!.source }\n      }));\n    }\n  };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Source Attribution Prompting",
+        "description": "Structured prompt enforcing citation format and context restriction",
+        "code": "const RAG_PROMPT = `\nYou are a helpful assistant. Answer the QUERY using ONLY the CONTEXT below.\n\nCONTEXT:\n{{CONTEXT}}\n\nQUERY: {{QUERY}}\n\nGuidelines:\n1. Use ONLY information from CONTEXT - no external knowledge\n2. Cite sources after each fact: [1], [2], etc.\n3. Sources listed at end: [1] filename.pdf p.5\n4. If unsure, say \"I don't have enough context\"\n\nRESPONSE:\n`;\n\nexport function formatRAGPrompt(query: string, context: string[]) {\n  const numberedContext = context.map((doc, i) => `\\n[${i + 1}] ${doc}`).join('');\n  return RAG_PROMPT\n    .replace('{{CONTEXT}}', numberedContext)\n    .replace('{{QUERY}}', query);\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for streamText",
+        "description": "Wrap Vercel AI SDK streams with Vex verification for RAG safety",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { streamText } from 'ai';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!\n});\n\nexport async function streamRAGWithVex(query: string, context: any[]) {\n  const result = await vex.verify({\n    useCase: 'rag-pipeline',\n    inputs: { query },\n    context: {\n      sources: context,\n      faithfulness: true,\n      hallucination: 'strict',\n      citations: true\n    },\n    async ({ pass, reject }) => {\n      const { textStream } = await streamText({\n        model: openai('gpt-4o'),\n        prompt: formatRAGPrompt(query, context)\n      });\n\n      return {\n        stream: textStream,\n        pass,\n        reject\n      };\n    }\n  });\n\n  return result.verifiedStream;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Relevance + Hallucination Guardrails",
+        "description": "Vex validates retrieved context relevance before LLM processing",
+        "code": "import { createVex } from '@vex_dev/sdk';\n\nconst vex = createVex({ /* config */ });\n\nexport async function validateRAGContext(query: string, docs: any[]) {\n  const { verdict, score } = await vex.run({\n    useCase: 'rag-context-check',\n    inputs: { query },\n    context: { documents: docs },\n    checks: [\n      {\n        type: 'relevance',\n        threshold: 0.8,\n        rejectLow: true\n      },\n      {\n        type: 'hallucination',\n        mode: 'strict',\n        sources: docs.map(d => d.pageContent)\n      }\n    ]\n  });\n\n  if (!verdict.pass) {\n    throw new Error(`Context validation failed: ${verdict.reason}`);\n  }\n\n  return docs.filter((_, i) => verdict.relevantIndices.includes(i));\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Citation Accuracy Verification",
+        "description": "Extract and validate all citations against source documents",
+        "code": "import { createVex } from '@vex_dev/sdk';\n\nconst vex = createVex({ /* config */ });\n\nexport async function verifyCitations(response: string, sources: any[]) {\n  const { verdict } = await vex.run({\n    useCase: 'rag-citations',\n    inputs: { response },\n    context: {\n      sources: sources.map(s => ({ content: s.pageContent, source: s.metadata.source })),\n      extractCitations: true\n    },\n    checks: [\n      {\n        type: 'citations',\n        requireAll: true,\n        validateContent: true,\n        sourceMatch: 'exact'\n      }\n    ]\n  });\n\n  return {\n    citationsValid: verdict.pass,\n    missing: verdict.missingCitations,\n    invalid: verdict.invalidCitations\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK RAG Pipeline",
+      "description": "Add Vex middleware today to eliminate RAG hallucinations and ensure production-grade reliability."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-assistants",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with OpenAI Assistants API + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with OpenAI Assistants API + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Assistants API rag pipeline",
+      "OpenAI Assistants API guardrails",
+      "rag pipeline reliability",
+      "Vex OpenAI Assistants API",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with OpenAI Assistants API enables powerful document retrieval, vector search, and LLM synthesis with built-in tools like file search and code interpreter. However, risks like hallucinated citations, irrelevant context retrieval, and thread bloat can undermine reliability and trust. Vex provides essential verification layers for source faithfulness, hallucination detection, and citation accuracy to ensure production-grade performance.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with OpenAI Assistants API",
+      "description": "The OpenAI Assistants API manages RAG pipelines through threads, assistants, and runs. Users upload documents to vector stores, which the assistant's file search tool queries during runs. The code interpreter handles any computation, while function calling enables custom retrieval logic. Context is assembled from retrieved chunks and synthesized by the LLM with source attribution via citations.\n\nTypical flow: 1) Create assistant with file search enabled and vector store attached 2) Start thread and add user message 3) Create run which triggers retrieval, synthesis, and tool calls 4) Poll for completion and extract response with citations. This managed runtime abstracts infrastructure but introduces opaque failure modes around retrieval quality and context limits.\n\nVerification occurs post-run via webhooks, analyzing annotations, citations, and retrieved context against ground truth sources.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Assistant API   │───▶│   Vector Store    │\n│                 │    │  (Thread/Run)     │    │ (File Search)     │\n└─────────────────┘    │                    │    └──────────────────┘\n                       │   ┌──────────────┐ │         ▲\n                       │   │ Code Interp  │ │         │ Retrieved\n                       │   │   Sandbox    │ │         │ Chunks\n                       └─▶└──────────────┘ │         │\n                             ┌──────────────┘         │\n                       ┌─────▼──────────────────────┐ │\n                       │ Vex Webhook Verification   │◀┘\n                       │ (Faithfulness/Citations)   │\n                       └────────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Code interpreter executing unsafe operations in sandbox",
+        "description": "Assistant may generate malicious code during data processing or visualization",
+        "severity": "critical",
+        "mitigation": "Vex sandbox execution monitoring and taint tracking on code interpreter outputs"
+      },
+      {
+        "name": "File search retrieving irrelevant or outdated documents",
+        "description": "Vector store returns semantically drifted chunks that mislead synthesis",
+        "severity": "high",
+        "mitigation": "Vex context relevance scoring with semantic similarity thresholds"
+      },
+      {
+        "name": "Thread context growing beyond model limits silently",
+        "description": "Long-running threads accumulate messages exceeding context window without truncation",
+        "severity": "high",
+        "mitigation": "Vex thread length monitoring with automatic summarization triggers"
+      },
+      {
+        "name": "Function call arguments hallucinated outside valid schema",
+        "description": "LLM generates invalid retrieval parameters leading to empty or wrong results",
+        "severity": "medium",
+        "mitigation": "Vex function calling schema validation and parameter hallucination detection"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Create RAG Assistant with Vector Store",
+        "description": "Initialize assistant with file search enabled and attach uploaded documents to vector store",
+        "code": "import openai\nimport os\n\nclient = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))\n\n# Upload documents\nfile_streams = [open(f'doc_{i}.pdf', 'rb') for i in range(1, 4)]\nfile_ids = [client.files.create(file=f, purpose='assistants').id for f in file_streams]\n\n# Create vector store\nvector_store = client.beta.vector_stores.create(name='RAG Docs')\nclient.beta.vector_stores.files.batch_create(\n    vector_store_id=vector_store.id, file_ids=file_ids\n)\n\n# Create RAG assistant\nassistant = client.beta.assistants.create(\n    name='RAG Assistant',\n    instructions='Answer using only the provided documents. Cite sources.',\n    model='gpt-4-turbo-preview',\n    tools=[{'type': 'file_search'}],\n    tool_resources={'file_search': {'vector_store_ids': [vector_store.id]}}\n)\nprint(f'Assistant ID: {assistant.id}, Vector Store: {vector_store.id}')",
+        "language": "python"
+      },
+      {
+        "title": "Run RAG Query with Citations",
+        "description": "Execute query through thread and extract response with source annotations",
+        "code": "thread = client.beta.threads.create()\n\nmessage = client.beta.threads.messages.create(\n    thread_id=thread.id,\n    role='user',\n    content='What are the key findings from the Q3 earnings report?'\n)\n\nrun = client.beta.threads.runs.create(\n    thread_id=thread.id,\n    assistant_id=assistant.id\n)\n\n# Poll for completion\nwhile run.status in ['queued', 'in_progress']:\n    run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)\n    time.sleep(1)\n\nmessages = client.beta.threads.messages.list(thread_id=thread.id)\nresponse = messages.data[0].content[0].text\nannotations = messages.data[0].content[0].annotations\n\ncitations = []\nfor annotation in annotations:\n    if annotation.type == 'file_citation':\n        file_citation = annotation.file_citation\n        citations.append({\n            'text': annotation.text,\n            'file_id': file_citation.file_id,\n            'quote': file_citation.quote\n        })\nprint('Response:', response.value)\nprint('Citations:', citations)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Assistant Creation",
+        "description": "Equivalent TypeScript setup using OpenAI Node SDK",
+        "code": "import OpenAI from 'openai';\n\nconst openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\n\n// Create vector store and upload files\nasync function createRAGAssistant() {\n  const fileIds = await Promise.all([\n    'doc1.pdf', 'doc2.pdf', 'doc3.pdf'\n  ].map(async (filePath) => {\n    const file = await openai.files.create({\n      file: fs.createReadStream(filePath),\n      purpose: 'assistants'\n    });\n    return file.id;\n  }));\n\n  const vectorStore = await openai.beta.vectorStores.create({\n    name: 'RAG Documents'\n  });\n\n  await openai.beta.vectorStores.files.batchCreate(vectorStore.id, {\n    file_ids: fileIds\n  });\n\n  const assistant = await openai.beta.assistants.create({\n    name: 'RAG Assistant',\n    instructions: 'Use only provided documents. Always cite sources.',\n    model: 'gpt-4-turbo-preview',\n    tools: [{ type: 'file_search' }],\n    tool_resources: {\n      file_search: { vector_store_ids: [vectorStore.id] }\n    }\n  });\n\n  console.log('Assistant ID:', assistant.id);\n  return assistant.id;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "TypeScript Run Polling with Citations",
+        "description": "Poll run status and extract annotated citations in TypeScript",
+        "code": "async function runRAGQuery(threadId: string, assistantId: string) {\n  const run = await openai.beta.threads.runs.create(threadId, {\n    assistant_id: assistantId\n  });\n\n  // Poll until complete\n  let status = run.status;\n  while (status === 'queued' || status === 'in_progress') {\n    await new Promise(resolve => setTimeout(resolve, 1000));\n    const updatedRun = await openai.beta.threads.runs.retrieve(\n      threadId,\n      run.id\n    );\n    status = updatedRun.status;\n  }\n\n  const messages = await openai.beta.threads.messages.list(threadId);\n  const message = messages.data[0];\n  \n  const citations = message.content[0].annotations\n    ?.filter((a: any) => a.type === 'file_citation')\n    .map((a: any) => ({\n      text: a.text,\n      fileId: a.file_citation.file_id,\n      quote: a.file_citation.quote\n    })) || [];\n\n  return {\n    response: message.content[0].text?.value,\n    citations\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Webhook for Run Completion",
+        "description": "Register Vex verification webhook on assistant run completion events",
+        "code": "from vex import Vex\nfrom openai import OpenAI\nimport os\n\nvex_client = Vex(api_key=os.getenv('VEX_API_KEY'))\nopenai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))\n\n# Create verification suite for RAG\nsuite = vex_client.suites.create(\n    name='OpenAI RAG Verification',\n    checks=[\n        'source_faithfulness',\n        'hallucination_detection',\n        'context_relevance',\n        'citation_accuracy'\n    ]\n)\n\n# Register webhook on assistant\nassistant = openai_client.beta.assistants.update(\n    assistant_id='asst_xxx',\n    webhook_url=f'{vex_client.webhook_url}/openai-assistants',\n    webhook_secret=os.getenv('VEX_WEBHOOK_SECRET'),\n    metadata={'vex_suite_id': suite.id}\n)\n\nprint(f'Webhook registered. Suite ID: {suite.id}')",
+        "language": "python"
+      },
+      {
+        "title": "Vex RAG Check Configuration",
+        "description": "Configure specific RAG verification checks with custom thresholds",
+        "code": "rag_suite_config = {\n    'source_faithfulness': {\n        'threshold': 0.9,\n        'method': 'rouge_l'\n    },\n    'hallucination_detection': {\n        'threshold': 0.05,\n        'model': 'vex-hallucination-v1'\n    },\n    'context_relevance': {\n        'threshold': 0.7,\n        'embedding_model': 'text-embedding-3-small',\n        'top_k': 3\n    },\n    'citation_accuracy': {\n        'require_all_claims_cited': True,\n        'quote_overlap_threshold': 0.8\n    }\n}\n\n# Update suite with RAG-specific config\nupdated_suite = vex_client.suites.update(\n    suite_id=suite.id,\n    config=rag_suite_config\n)\n\n# Test with sample run output\nresult = vex_client.verify({\n    'suite_id': suite.id,\n    'input': 'What are Q3 earnings?',\n    'output': 'Revenue grew 15%...',\n    'citations': [\n        {'text': 'Revenue section', 'file_id': 'file-abc123', 'quote': '15% growth'}\n    ],\n    'retrieved_context': ['Q3 report chunks...']\n})\nprint('RAG Score:', result.overall_score)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Webhook Handler",
+        "description": "Handle OpenAI run completion events and trigger Vex verification",
+        "code": "import { Vex } from '@vex/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\n// Express webhook endpoint\nexport const openaiWebhook = async (req: Request, res: Response) => {\n  const event = req.body;\n  \n  if (event.object === 'thread.run.completed') {\n    const runId = event.id;\n    const threadId = event.thread_id;\n    \n    // Fetch run output\n    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\n    const messages = await openai.beta.threads.messages.list(threadId);\n    const message = messages.data[0];\n    \n    // Extract RAG artifacts\n    const citations = message.content[0].annotations\n      ?.filter((a: any) => a.type === 'file_citation') || [];\n    \n    // Verify with Vex\n    const result = await vex.verify({\n      suite_id: 'vex_rag_suite_123',\n      input: message.content[0].text?.value || '',\n      output: message.content[0].text?.value || '',\n      citations: citations.map((c: any) => ({\n        text: c.text,\n        fileId: c.file_citation.file_id,\n        quote: c.file_citation.quote\n      })),\n      metadata: { run_id: runId, thread_id: threadId }\n    });\n    \n    // Alert on failure\n    if (result.overall_score < 0.8) {\n      await sendAlert(`RAG verification failed: ${result.overall_score}`);\n    }\n  }\n  \n  res.status(200).json({ received: true });\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Assistants API RAG Pipeline",
+      "description": "Add Vex verification in 5 minutes to eliminate RAG hallucinations and ensure citation accuracy - start your free trial today."
+    }
+  }
+}

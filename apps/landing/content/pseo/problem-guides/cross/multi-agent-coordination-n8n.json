@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in n8n AI Agents Agents",
+    "description": "How to detect and fix multi-agent coordination failure in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "n8n AI Agents multi-agent-coordination",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, Multi-Agent Coordination Failure occurs when interconnected AI agent nodes in workflows fail to synchronize state, leading to cascading errors like infinite loops or inconsistent decision-making. This manifests uniquely through n8n's node-based execution model where AI Agent outputs flow directly into trigger chains without validation, causing recursive executions. Common triggers include unvalidated tool calls between agents and stale memory injection from Memory Window nodes.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node triggers another AI Agent via webhook, creating infinite loop visible in execution logs as repeating node IDs",
+        "impact": "Workflow consumes all quota and crashes with 'Maximum execution time exceeded' error"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Agent returns malformed JSON to HTTP Request node, causing 400 errors in downstream actions",
+        "impact": "Partial workflow success with data loss and inconsistent agent handoffs"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "AI Agent tool calls log API keys in plain text within n8n execution history",
+        "impact": "Security breach exposing sensitive credentials to workflow viewers"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Chat Memory node injects previous conversation state into new agent threads",
+        "impact": "Agents make decisions based on outdated context, producing hallucinated responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Execution Detector",
+        "description": "Scans n8n workflow JSON for AI Agent nodes that trigger other AI Agents via HTTP/webhook nodes",
+        "code": "import { Node } from 'n8n-workflow';\n\nfunction detectRecursiveAgents(workflow: any): string[] {\n  const aiAgentNodes = workflow.nodes.filter((node: Node) => \n    node.type.includes('n8n-nodes-langchain.agent') || node.name.includes('AI Agent')\n  );\n  const triggerChains = [];\n  \n  aiAgentNodes.forEach((agentNode: Node) => {\n    workflow.nodes.forEach((downstream: Node) => {\n      if (downstream.parameters.webhookUrl?.includes(agentNode.id) || \n          downstream.parameters.url?.includes('agent')) {\n        triggerChains.push(`Recursive loop: ${agentNode.name} -> ${downstream.name}`);\n      }\n    });\n  });\n  \n  return triggerChains;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Staleness Checker",
+        "description": "Identifies Memory Window nodes connected to multiple AI Agent conversation threads",
+        "code": "function detectStaleMemory(workflow: any): string[] {\n  const memoryNodes = workflow.nodes.filter((node: any) => \n    node.type === 'n8n-nodes-base.chatMemory' || node.name.includes('Memory')\n  );\n  const issues = [];\n  \n  memoryNodes.forEach((memoryNode: any) => {\n    const connectedAgents = workflow.connections[memoryNode.id]?.main?.length || 0;\n    if (connectedAgents > 1) {\n      issues.push(`Stale memory risk: ${memoryNode.name} shared across ${connectedAgents} agents`);\n    }\n  });\n  \n  return issues;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Credential Exposure Scanner",
+        "description": "Detects API keys passed through AI Agent tool parameters in workflow definitions",
+        "code": "function scanCredentialExposure(workflow: any): string[] {\n  const exposures = [];\n  workflow.nodes.forEach((node: any) => {\n    if (node.type.includes('agent') && node.parameters.tools) {\n      node.parameters.tools.forEach((tool: any) => {\n        if (tool.apiKey || tool.parameters?.match(/sk-\\w{48}/)) {\n          exposures.push(`Exposed credential in ${node.name}.${tool.name}`);\n        }\n      });\n    }\n  });\n  return exposures;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add Execution Guard Rails",
+        "description": "Insert IF node after AI Agent to prevent recursive triggers",
+        "code": "// Add this IF node configuration after AI Agent\nconst ifNodeConfig = {\n  name: 'Prevent Recursion',\n  type: 'n8n-nodes-base.if',\n  position: [660, 300],\n  parameters: {\n    conditions: {\n      options: {\n        caseSensitive: true,\n        leftValue: '={{ $json.executionCount }}',\n        operator: { type: 'number', operation: 'largerEqual' },\n        rightValue: 3\n      }\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Output Validation Wrapper",
+        "description": "Code node to validate AI Agent JSON before downstream actions",
+        "code": "// Code node to place after AI Agent\nconst validationCode = `// Validate AI Agent output\nconst output = $input.all()[0].json;\n\nif (!output.tool_calls || !Array.isArray(output.tool_calls)) {\n  throw new Error('Invalid AI Agent output: missing tool_calls array');\n}\n\nreturn [{ json: { validated: true, data: output } }];`;\n\nconst codeNodeConfig = {\n  name: 'Validate Agent Output',\n  type: 'n8n-nodes-base.code',\n  parameters: { jsCode: validationCode }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Tool Parameter Masking",
+        "description": "Environment variable injection for agent tools to prevent credential logging",
+        "code": "// Update AI Agent tool configuration\nconst secureToolConfig = {\n  type: 'tool',\n  name: 'secureApiCall',\n  parameters: {\n    apiKey: '={{ $env.API_KEY }}', // Uses n8n env vars\n    endpoint: 'https://api.example.com',\n    method: 'POST'\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after n8n AI Agent nodes, automatically scanning for coordination failures in real-time. It analyzes execution traces, workflow JSON, and agent outputs using pattern matching against known failure signatures like recursive triggers and stale memory injection. When issues are detected, Vex can auto-remediate by injecting validation nodes or blocking faulty executions.\n\nThe Vex SDK provides n8n-specific detectors for the four primary failure modes, with zero-config setup via npm install. Detection runs on every agent execution, providing workflow reliability scores and automatic fixes without manual intervention.\n\nIntegration takes <2 minutes: add Vex webhook after AI Agents, configure with your workflow ID, and enable auto-remediation rules for production workflows.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { getWorkflowExecution } from 'n8n-workflow';\n\nconst vex = new Vex({\n  projectId: 'your-vex-project',\n  webhookSecret: process.env.VEX_WEBHOOK_SECRET\n});\n\n// Webhook node code for n8n\nexport default defineWebhookHandler(async (req, res) => {\n  const execution = await getWorkflowExecution();\n  const aiAgentOutput = execution.nodes['AI Agent'].output;\n  \n  // Vex detects coordination failures\n  const issues = await vex.detect({\n    framework: 'n8n',\n    executionData: execution,\n    agentOutput: aiAgentOutput,\n    checks: ['recursive-execution', 'stale-memory', 'credential-exposure']\n  });\n  \n  if (issues.length > 0) {\n    // Auto-fix: inject validation\n    await vex.remediate({\n      workflowId: execution.workflow.id,\n      fixes: ['add-output-validation', 'prevent-recursion']\n    });\n    return res.json({ status: 'blocked', issues });\n  }\n  \n  res.json({ status: 'pass', score: 0.98 });\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex webhook to your n8n workflows today and eliminate multi-agent coordination failures automatically."
+    }
+  }
+}

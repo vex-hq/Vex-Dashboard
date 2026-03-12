@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "OpenAI Agents SDK agent-auth",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, AI Agent Authentication and Authorization problems manifest when agents lack proper credential validation during handoffs or tool calls, allowing unauthorized access to sensitive APIs or data sources. This is exacerbated by the framework's seamless multi-agent handoff patterns where auth tokens are passed without verification, and tool outputs bypass security checks before consumption. Without explicit guardrails, agents can escalate privileges through prompt injection or inherit unauthorized scopes from parent agents.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent handoff without auth token validation",
+        "symptom": "Child agent inherits parent agent's API token without scope verification",
+        "impact": "Privilege escalation - admin agent hands off to user-facing agent with full permissions"
+      },
+      {
+        "scenario": "Tool call returns unvalidated auth tokens",
+        "symptom": "Agent extracts and reuses tokens from database query results",
+        "impact": "Token theft - sensitive credentials exposed in agent reasoning traces"
+      },
+      {
+        "scenario": "Prompt injection bypasses auth guardrails",
+        "symptom": "User injects 'ignore auth checks' instruction during handoff",
+        "impact": "Complete auth bypass - agent executes unauthorized API calls"
+      },
+      {
+        "scenario": "Shared session tokens across agent instances",
+        "symptom": "Multiple parallel agents use same auth context without isolation",
+        "impact": "Cross-tenant data access - agents leak data between customers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Auth Token Propagation Monitor",
+        "description": "Detects when auth tokens flow through agent handoffs without validation using OpenAI Agents SDK tracing",
+        "code": "from openai_agents import Agent, trace\n\n@trace\ndef detect_auth_propagation(agent_chain):\n    auth_patterns = ['Bearer', 'api_key', 'access_token', 'session_id']\n    \n    for step in agent_chain.trace.steps:\n        if step.input.contains_any(auth_patterns) and not step.input.contains('validate'):\n            if step.output.contains_any(auth_patterns):\n                print(f'🚨 Auth token propagated: {step.id}')\n                return {'vulnerability': 'UNVALIDATED_TOKEN_HANDOFF', 'step': step.id}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Privilege Escalation Scanner",
+        "description": "Scans agent tool calls for unauthorized scope expansion in OpenAI Agents SDK",
+        "code": "from openai_agents.tools import ToolCall\n\ndef scan_privilege_escalation(tool_calls):\n    high_risk_scopes = ['admin:*', 'write:users', 'delete:*']\n    violations = []\n    \n    for call in tool_calls:\n        if call.auth_scope and any(scope in call.auth_scope for scope in high_risk_scopes):\n            parent_scope = call.agent.parent_scope if call.agent.parent_scope else 'none'\n            if parent_scope != 'admin' and 'admin' in call.auth_scope:\n                violations.append({\n                    'tool': call.name,\n                    'escalation': f'{parent_scope} -> {call.auth_scope}',\n                    'risk': 'HIGH'\n                })\n    return violations",
+        "language": "python"
+      },
+      {
+        "name": "Guardrail Bypass Detector",
+        "description": "Identifies prompt injection attempts targeting auth checks in agent conversations",
+        "code": "from openai_agents import Conversation\n\ndef detect_guardrail_bypass(conv: Conversation):\n    bypass_phrases = [\n        'ignore auth', 'skip verification', 'bypass check',\n        'override permissions', 'force access'\n    ]\n    \n    for message in conv.messages:\n        if message.role == 'user':\n            prompt = message.content.lower()\n            if any(phrase in prompt for phrase in bypass_phrases):\n                return {\n                    'type': 'PROMPT_INJECTION',\n                    'message_id': message.id,\n                    'confidence': 0.95,\n                    'remediation': 'sanitize_input()'\n                }\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Scoped Token Validator",
+        "description": "Implement per-agent token validation middleware for OpenAI Agents SDK handoffs",
+        "code": "from openai_agents import Agent, HandoffMiddleware\nfrom typing import Dict, Any\n\nclass AuthValidator(HandoffMiddleware):\n    def __init__(self, required_scopes: list):\n        self.required_scopes = required_scopes\n    \n    async def on_handoff(self, agent: Agent, target_agent: Agent, context: Dict[str, Any]):\n        token = context.get('auth_token')\n        if token:\n            validated_scopes = await self.validate_token_scopes(token)\n            if not all(scope in validated_scopes for scope in self.required_scopes):\n                raise PermissionError(f'Missing scopes: {set(self.required_scopes) - set(validated_scopes)}')\n        \n        # Strip sensitive data before handoff\n        context.pop('auth_token', None)\n        return context\n    \n    async def validate_token_scopes(self, token: str) -> list:\n        # Integrate with your auth provider\n        return ['read:users']  # Example",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Output Sanitizer",
+        "description": "Sanitize tool outputs to prevent credential leakage in OpenAI Agents SDK",
+        "code": "from openai_agents.tools import tool\nfrom vex_sdk import Guardrail\n\n@Guardrail('auth_sanitizer')\ndef sanitize_tool_output(output: str) -> str:\n    patterns = [\n        r'Bearer\\s+[a-zA-Z0-9-_]+',  # JWT tokens\n        r'api_key:\\s*[a-zA-Z0-9]+',  # API keys\n        r'sk-\\w{48}',  # OpenAI keys\n        r'[a-f0-9]{32,}'  # Hashes/secrets\n    ]\n    \n    sanitized = output\n    for pattern in patterns:\n        sanitized = re.sub(pattern, '[REDACTED]', sanitized)\n    return sanitized\n\n@tool\ndef database_query(query: str):\n    result = execute_query(query)  # Your DB logic\n    return sanitize_tool_output(str(result))",
+        "language": "python"
+      },
+      {
+        "name": "Isolation Context Manager",
+        "description": "Create isolated auth contexts for parallel agents in OpenAI Agents SDK",
+        "code": "from openai_agents import Agent\nfrom contextlib import contextmanager\nimport uuid\n\nclass IsolatedAuthContext:\n    def __init__(self, base_token: str):\n        self.context_id = str(uuid.uuid4())\n        self.base_token = base_token\n    \n    @contextmanager\n    def agent_session(self, required_scopes: list):\n        token = self._derive_scoped_token(required_scopes)\n        agent = Agent(auth={'token': token, 'context': self.context_id})\n        try:\n            yield agent\n        finally:\n            agent.auth.clear()\n    \n    def _derive_scoped_token(self, scopes: list) -> str:\n        # JWT scope derivation logic\n        return f'{self.base_token}.{'.'.'.join(scopes)}'\n\n# Usage\nwith IsolatedAuthContext('parent_token') as ctx:\n    with ctx.agent_session(['read:users']) as user_agent:\n        result = user_agent.run('get users')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly as an output guardrail in OpenAI Agents SDK, automatically detecting authentication drift, privilege escalation, and token leakage across multi-agent handoff chains. By hooking into the SDK's tracing layer, Vex monitors every tool call, handoff, and reasoning step for auth violations without modifying core agent logic. \n\nThe platform provides production-grade remediation through dynamic policy enforcement - blocking unauthorized handoffs, auto-sanitizing sensitive outputs, and generating scoped tokens on-the-fly. Vex's ML-powered anomaly detection identifies novel bypass techniques that signature-based scanners miss, including sophisticated prompt injections targeting auth guardrails. \n\nDeployment takes minutes: install vex-sdk, add @VexGuardrail decorator to your agents, and get instant visibility into auth compliance across your entire agent fleet with zero code changes to existing workflows.",
+      "code": "pip install openai-agents vex-sdk\n\nfrom openai_agents import Agent\nfrom vex_sdk import VexGuardrail, VexMonitor\n\n# 1. Initialize Vex monitor for auth protection\nmonitor = VexMonitor(policy='agent-auth-v1')\n\n# 2. Protect all agents with Vex guardrails\n@VexGuardrail('auth-validator')\nclass SecureUserAgent(Agent):\n    def run(self, task):\n        # Vex auto-scans inputs/outputs for:\n        # - Token leakage\n        # - Privilege escalation\n        # - Prompt injection\n        result = super().run(task)\n        return monitor.validate(result)\n\n# 3. Production deployment\norchestrator = SecureUserAgent()\nresult = orchestrator.run('process user request')\n\n# Vex auto-generates compliance report\nprint(monitor.report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex guardrails to your OpenAI Agents SDK in 5 minutes and eliminate auth vulnerabilities forever."
+    }
+  }
+}

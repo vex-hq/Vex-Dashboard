@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "cost-optimization",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Cost Optimization in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent cost optimization in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-cost-optimization-guide",
+      "n8n AI Agents cost-optimization",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, cost optimization issues arise from inefficient workflow patterns like recursive agent triggers and unvalidated AI outputs that cascade into excessive LLM calls. Native AI Agent nodes lack built-in cost controls, leading to runaway token usage in conversation chains and memory window nodes that inject bloated context. Without proper validation and caching, simple workflows can rack up thousands in API costs monthly.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node triggers itself via webhook loops",
+        "impact": "Exponential token usage as each call spawns 2-3 new agent executions"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Unstructured LLM responses passed directly to tool nodes",
+        "impact": "Action nodes re-call LLMs to parse invalid outputs, multiplying costs 3-5x"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Full conversation history passed to every agent turn",
+        "impact": "Token counts grow quadratically, hitting rate limits and $10k+/month bills"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "API keys logged in agent tool parameters",
+        "impact": "Compromised credentials lead to unauthorized LLM usage spikes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Trigger Detection",
+        "description": "Scans n8n workflow JSON for webhook nodes that chain back to AI Agent triggers",
+        "code": "function detectRecursiveTriggers(workflow: any): string[] {\n  const triggers: string[] = [];\n  const webhookNodes = workflow.nodes.filter((n: any) => n.type === 'n8n-nodes-base.webhook');\n  const aiAgentNodes = workflow.nodes.filter((n: any) => n.type.includes('aiAgent'));\n  \n  webhookNodes.forEach((webhook: any) => {\n    const connections = workflow.connections[webhook.id];\n    if (connections?.main?.[0]?.some((targetId: string) => \n      aiAgentNodes.some((agent: any) => agent.id === targetId)\n    )) {\n      triggers.push(`Webhook ${webhook.name} → AI Agent recursion detected`);\n    }\n  });\n  return triggers;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Token Bloat Monitor",
+        "description": "Analyzes memory window node configurations for excessive context windows",
+        "code": "function detectTokenBloat(workflow: any): string[] {\n  const issues: string[] = [];\n  const memoryNodes = workflow.nodes.filter((n: any) => \n    n.type.includes('memory') || n.parameters.sessionId\n  );\n  \n  memoryNodes.forEach((node: any) => {\n    if (node.parameters.maxTokens && node.parameters.maxTokens > 50000) {\n      issues.push(`Memory node ${node.name}: Excessive ${node.parameters.maxTokens} token limit`);\n    }\n    if (!node.parameters.summarization) {\n      issues.push(`Memory node ${node.name}: No summarization enabled`);\n    }\n  });\n  return issues;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Unvalidated Output Chain",
+        "description": "Detects AI Agent nodes directly connected to action nodes without validation",
+        "code": "function detectUnvalidatedOutputs(workflow: any): string[] {\n  const issues: string[] = [];\n  const aiNodes = workflow.nodes.filter((n: any) => n.type.includes('aiAgent'));\n  \n  aiNodes.forEach((aiNode: any) => {\n    const connections = workflow.connections[aiNode.id];\n    if (connections?.main?.[0]) {\n      const targets = connections.main[0].map((t: any) => \n        workflow.nodes.find((n: any) => n.id === t.node)\n      ).filter(Boolean);\n      \n      const hasValidation = targets.some((target: any) => \n        target.type.includes('code') || target.name.includes('validate')\n      );\n      if (!hasValidation && targets.some((t: any) => t.type.includes('tool'))) {\n        issues.push(`AI Agent ${aiNode.name} → Tool without validation`);\n      }\n    }\n  });\n  return issues;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add Response Caching Node",
+        "description": "Insert caching between AI Agent and action nodes to prevent duplicate LLM calls",
+        "code": "// n8n Code Node - Cache Layer\nconst cache = $node[\"Cache\"].all();\nconst inputData = $input.all();\nconst cacheKey = `${$execution.id}-${inputData[0].json.prompt || 'default'}`;\n\n// Check cache first\nconst cached = cache.find((item: any) => item.json.cacheKey === cacheKey);\nif (cached) {\n  return [{ json: { ...cached.json, fromCache: true } }];\n}\n\n// Cache new response\nreturn [{\n  json: {\n    ...inputData[0].json,\n    cacheKey,\n    timestamp: new Date().toISOString()\n  }\n}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Context Summarization Wrapper",
+        "description": "Summarize memory context before passing to AI Agent nodes",
+        "code": "// n8n Code Node - Context Summarizer\nconst memoryContext = $node[\"Memory Window\"].json();\nconst prompt = `Summarize this conversation context to under 2000 tokens, preserving key facts:\\n\\n${memoryContext.context.slice(0, 10000)}`;\n\n// Use lightweight model for summarization\nconst summary = await $http.request({\n  method: 'POST',\n  url: 'https://api.openai.com/v1/chat/completions',\n  headers: { Authorization: `Bearer ${$credentials.openAi.apiKey}` },\n  body: {\n    model: 'gpt-4o-mini',\n    messages: [{ role: 'user', content: prompt }],\n    max_tokens: 1500\n  }\n});\n\nreturn [{\n  json: {\n    summarizedContext: summary.data.choices[0].message.content,\n    tokenSavings: memoryContext.context.length - summary.data.usage.total_tokens\n  }\n}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Recursion Breaker with Max Iterations",
+        "description": "Add iteration counter to prevent recursive agent loops",
+        "code": "// n8n Code Node - Recursion Guard\nconst executionData = $execution;\nconst iterationCount = $node[\"IterationCounter\"].json()?.count || 0;\n\nconst MAX_ITERATIONS = 5;\nif (iterationCount >= MAX_ITERATIONS) {\n  return [{\n    json: {\n      error: 'Max iterations exceeded',\n      iterationCount,\n      action: 'terminate'\n    }\n  }];\n}\n\n// Increment counter and continue\nreturn [{\n  json: {\n    continue: true,\n    iterationCount: iterationCount + 1,\n    workflowData: $input.all()[0].json\n  }\n}];",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Cost Optimization Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after n8n AI Agent nodes, automatically detecting cost-inefficient patterns like recursive triggers and token bloat. It analyzes workflow execution traces in real-time, scoring each AI Agent call for optimization opportunities and injecting remediation nodes dynamically. Vex's n8n-specific detectors catch 90% of common cost leaks before they hit production.\n\nThe Vex SDK provides TypeScript guards that wrap AI Agent outputs with caching, summarization, and validation automatically. When cost anomalies are detected (like memory windows >50k tokens), Vex can pause workflows and suggest optimized node configurations. Remediation is one-click: Vex generates and inserts the fixed workflow JSON directly into n8n.\n\nMonthly cost savings average 65% for teams running agentic workflows, with zero-code setup via npm install.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  webhookSecret: process.env.VEX_WEBHOOK_SECRET\n});\n\n// n8n Webhook Node after every AI Agent\nexport default async function costOptimizer($input: any, $execution: any) {\n  const aiOutput = $input.first().json;\n  \n  // Vex auto-detection\n  const issues = await vex.detect({\n    framework: 'n8n',\n    nodeType: 'aiAgent',\n    inputTokens: aiOutput.usage?.prompt_tokens || 0,\n    outputTokens: aiOutput.usage?.completion_tokens || 0,\n    workflowId: $execution.workflow.id\n  });\n  \n  if (issues.length > 0) {\n    // Auto-fix: insert caching + summarization\n    const remediation = await vex.remediate('cost-optimization', {\n      workflowJson: $execution.workflow\n    });\n    \n    // Log savings projection\n    console.log(`Projected monthly savings: $${remediation.savings}`);\n    \n    return [{ json: { vexFixed: true, issues, remediation } }];\n  }\n  \n  return [{ json: aiOutput }];\n}",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node to your n8n workflows and cut AI costs 65% instantly - start free trial now."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llamaindex",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with LlamaIndex + Vex Guardrails",
+    "description": "Learn how to build customer support with LlamaIndex + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LlamaIndex customer support",
+      "LlamaIndex guardrails",
+      "customer support reliability",
+      "Vex LlamaIndex",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with LlamaIndex enables RAG-powered responses from knowledge bases and CRM data, delivering fast, context-aware assistance. However, irrelevant retrievals, hallucinations, and policy violations can damage trust and compliance. Vex guardrails ensure response accuracy, PII safety, and consistent tone across high-stakes interactions.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with LlamaIndex",
+      "description": "The architecture starts with a LlamaIndex VectorStoreIndex built from customer knowledge base documents and CRM data exports. Queries trigger retrieval from the index, augmented by metadata filters for ticket categories. The RAG chain combines retrieved context with LLM synthesis, plus tool-calling for actions like ticket creation via Zendesk API or order lookup in Stripe. Responses are routed based on sentiment analysis and escalation triggers.\n\nKey components include chunked document ingestion with overlap to prevent boundary errors, periodic reindexing via webhooks from CRM updates, and a query engine with custom routers for multi-source retrieval. The agent handles natural language queries like 'refund my order #12345' by retrieving relevant docs, calling order lookup tools, and generating compliant responses.\n\nThis setup scales to thousands of daily queries but requires verification at the query engine output to catch retrieval failures and ensure policy adherence.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ LlamaIndex Query │\n│   (Chat UI)     │    │   Engine         │\n└─────────────────┘    │ + Router         │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ VectorStoreIndex  │◄──┐\n                       │ (Knowledge Base)  │   │\n                       └────────┬──────────┘   │\n                                │             │\n                       ┌────────▼──────────┐   │\n                       │   Tool Calling    │◄──┘\n                       │ (CRM/Stripe API)  │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Vex.verify()      │──▶┌──────────────────┐\n                       │ (Guardrails)      │  │   Final Response  │\n                       └────────────────────┘  │   (w/ Escalation) │\n                                               └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Retrieved context irrelevant to query",
+        "description": "Vector search returns docs about 'billing' for refund queries, leading to wrong advice.",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks between query and retrieved chunks before synthesis."
+      },
+      {
+        "name": "Synthesizer hallucinating beyond source documents",
+        "description": "LLM invents refund policies not present in retrieved knowledge base.",
+        "severity": "critical",
+        "mitigation": "Vex citation verification ensures all claims trace back to source documents."
+      },
+      {
+        "name": "Index staleness causing outdated responses",
+        "description": "Policy changes in CRM not reflected in index, giving incorrect escalation instructions.",
+        "severity": "high",
+        "mitigation": "Vex freshness checks against CRM webhook timestamps and reindex triggers."
+      },
+      {
+        "name": "Chunk boundary errors losing critical context",
+        "description": "Important refund deadline split across chunks, causing incomplete retrieval.",
+        "severity": "high",
+        "mitigation": "Vex context continuity analysis across retrieved chunk boundaries."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Index Construction from Knowledge Base",
+        "description": "Create VectorStoreIndex from customer support docs with metadata for filtering.",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext\nfrom llama_index.vector_stores.chroma import ChromaVectorStore\nimport chromadb\n\ndb = chromadb.PersistentClient(path=\"./chroma_db\")\nchroma_collection = db.get_or_create_collection(\"support_docs\")\nvector_store = ChromaVectorStore(chroma_collection=chroma_collection)\nstorage_context = StorageContext.from_defaults(vector_store=vector_store)\n\ndocuments = SimpleDirectoryReader(\"./support_docs\").load_data()\nindex = VectorStoreIndex.from_documents(\n    documents, storage_context=storage_context\n)\nquery_engine = index.as_query_engine(similarity_top_k=3)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Query Engine with Tool Calling",
+        "description": "Wrap query engine with tools for CRM lookup and ticket creation.",
+        "code": "from llama_index.core.tools import FunctionTool\nfrom llama_index.llms.openai import OpenAI\n\nllm = OpenAI(model=\"gpt-4\")\n\ndef lookup_order(order_id: str) -> str:\n    return f\"Order #{order_id}: Status=shipped, Total=$49.99\"\n\ndef create_ticket(customer_email: str, issue: str) -> str:\n    return f\"Ticket created for {customer_email}: {issue}\"\n\norder_tool = FunctionTool.from_defaults(fn=lookup_order)\nticket_tool = FunctionTool.from_defaults(fn=create_ticket)\nquery_engine = index.as_query_engine(\n    llm=llm,\n    tools=[order_tool, ticket_tool]\n)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Index Setup",
+        "description": "Initialize LlamaIndex in Node.js with vector store for support docs.",
+        "code": "import { VectorStoreIndex, Document } from 'llamaindex';\nimport { OpenAI } from '@llamaindex/llms/openai';\n\nconst documents = [\n  new Document({\n    text: 'Refund policy: 30 days from delivery date',\n    metadata: { category: 'billing' }\n  })\n];\n\nconst llm = new OpenAI({ model: 'gpt-4' });\nconst index = await VectorStoreIndex.fromDocuments(documents, {\n  llm,\n  embedModel: 'text-embedding-ada-002'\n});\n\nconst queryEngine = index.asQueryEngine();",
+        "language": "typescript"
+      },
+      {
+        "title": "TypeScript Tool Integration",
+        "description": "Add CRM tools to TypeScript query engine.",
+        "code": "import { FunctionTool } from 'llamaindex';\n\nconst orderLookup = async (orderId: string): Promise<string> => {\n  // Mock CRM call\n  return `Order ${orderId}: shipped, refund eligible`;\n};\n\nconst createTicket = async (email: string, issue: string): Promise<string> => {\n  return `Ticket #123 created for ${email}: ${issue}`;\n};\n\nconst orderTool = new FunctionTool({\n  name: 'order_lookup',\n  description: 'Lookup order status',\n  fn: orderLookup\n});\n\nconst ticketTool = new FunctionTool({\n  name: 'create_ticket',\n  description: 'Create support ticket',\n  fn: createTicket\n});\n\nqueryEngine = index.asQueryEngine({\n  tools: [orderTool, ticketTool]\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Verification Wrapper",
+        "description": "Wrap query_engine.query() with vex.verify() for accuracy and PII checks.",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        \"response_accuracy\",\n        \"pii_filtering\",\n        \"tone_consistency:professional\",\n        \"policy_compliance:refund_policy\",\n        \"escalation_triggers:refund>100\"\n    ]\n)\ndef safe_query(query_str: str) -> str:\n    response = query_engine.query(query_str)\n    return str(response)\n\n# Usage\nresult = safe_query(\"Can I get a refund for order #12345?\")\nif result == vex.BLOCK:\n    return \"Escalating to supervisor\"",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Async wrapper with Vex verification for Node.js LlamaIndex.",
+        "code": "import { verify } from 'vex-sdk';\n\nconst safeQuery = async (query: string): Promise<string> => {\n  const response = await queryEngine.query({ query });\n  \n  const verified = await verify({\n    input: query,\n    output: response.toString(),\n    checks: [\n      'response_accuracy',\n      'pii_filtering',\n      'tone_consistency:professional',\n      'policy_compliance',\n      'escalation_triggers'\n    ]\n  });\n  \n  if (verified === 'BLOCK') {\n    throw new Error('Response blocked - escalating');\n  }\n  \n  return verified;\n};\n\n// Usage\nconst result = await safeQuery('Refund order #12345?');",
+        "language": "typescript"
+      },
+      {
+        "title": "Python Streaming with Vex",
+        "description": "Verify streaming responses chunk-by-chunk for real-time customer support.",
+        "code": "import vex\n\nasync def stream_with_vex(query_str: str):\n    response = query_engine.query(query_str)\n    \n    async for chunk in response.async_response_iter():\n        verified_chunk = vex.verify_stream(\n            chunk,\n            checks=[\n                \"pii_filtering\",\n                \"tone_consistency:professional\"\n            ]\n        )\n        if verified_chunk != vex.BLOCK:\n            yield verified_chunk\n\n# Usage\nasync for chunk in stream_with_vex(\"Help with billing #123\"):\n    print(chunk, end='', flush=True)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LlamaIndex Customer Support",
+      "description": "Add Vex guardrails today to protect your RAG agents from compliance failures."
+    }
+  }
+}

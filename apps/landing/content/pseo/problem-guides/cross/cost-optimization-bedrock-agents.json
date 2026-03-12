@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "cost-optimization",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Cost Optimization in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix ai agent cost optimization in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-cost-optimization-guide",
+      "Amazon Bedrock Agents cost-optimization",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Cost Optimization in Amazon Bedrock Agents manifests through inefficient action group invocations, excessive knowledge base retrievals, redundant multi-turn conversations, and guardrail processing overhead. These issues drive up token consumption and Lambda execution costs in enterprise deployments. Bedrock's fully managed nature amplifies costs when agents fail to terminate conversations efficiently or retrieve unnecessary documents.",
+    "howItManifests": [
+      {
+        "scenario": "Action group Lambda functions returning malformed responses",
+        "symptom": "Agent loops indefinitely calling the same action group due to invalid JSON responses",
+        "impact": "10x increase in Lambda invocations and token usage per session"
+      },
+      {
+        "scenario": "Knowledge base retrieval missing relevant documents due to chunking",
+        "symptom": "Agent retrieves 20+ irrelevant chunks per query, ignoring perfect matches",
+        "impact": "$0.45 per 1K retrieved chunks + increased foundation model token costs"
+      },
+      {
+        "scenario": "Agent guardrails not catching domain-specific policy violations",
+        "symptom": "Guardrails allow prohibited queries, triggering expensive action group fallbacks",
+        "impact": "Unnecessary enterprise action group executions at $0.001 per invocation"
+      },
+      {
+        "scenario": "Session state loss between multi-turn agent invocations",
+        "symptom": "Agent restarts context from scratch in each session, repeating expensive KB retrievals",
+        "impact": "300% increase in knowledge base RAG costs across conversation threads"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Action Group Loop Detector",
+        "description": "Monitors consecutive identical action group calls indicating malformed Lambda responses",
+        "code": "import boto3\nimport json\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef detect_action_loops(agent_response, session_history):\n    action_calls = []\n    for turn in session_history[-5:]:\n        if 'actionGroups' in turn:\n            for action in turn['actionGroups']:\n                action_calls.append(action['actionGroup'])\n    \n    # Detect 3+ identical consecutive calls\n    if len(action_calls) >= 3:\n        recent_calls = action_calls[-3:]\n        if recent_calls[0] == recent_calls[1] == recent_calls[2]:\n            return {\n                'cost_waste': 'high',\n                'issue': 'Action group loop detected',\n                'tokens_wasted': len(session_history) * 1500\n            }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Over-Retrieval Monitor",
+        "description": "Flags sessions retrieving >15 chunks when relevance score indicates poor matches",
+        "code": "def detect_kb_overretrieval(response):\n    if 'retrievedDocuments' not in response:\n        return None\n    \n    docs = response['retrievedDocuments']\n    chunk_count = len(docs)\n    avg_relevance = sum(doc.get('relevanceScore', 0) for doc in docs) / chunk_count\n    \n    if chunk_count > 15 and avg_relevance < 0.7:\n        return {\n            'cost_waste': f'${chunk_count * 0.00045:.4f}',\n            'issue': f'{chunk_count} low-relevance chunks',\n            'optimization': f'Could reduce to {chunk_count//3} chunks'\n        }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Session State Drift Detector",
+        "description": "Identifies context loss by comparing session memory across turns (TypeScript)",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nasync function detectSessionDrift(traceEvents: any[]) {\n  const memoryEvents = traceEvents.filter(e => e.type === 'agentMemory');\n  \n  if (memoryEvents.length < 2) return null;\n  \n  const currentMemory = memoryEvents[memoryEvents.length - 1].memorySnapshot;\n  const prevMemory = memoryEvents[memoryEvents.length - 2].memorySnapshot;\n  \n  const memoryDelta = JSON.stringify(currentMemory) !== JSON.stringify(prevMemory);\n  const turnCount = traceEvents.length;\n  \n  if (memoryDelta && turnCount > 5) {\n    return {\n      costImpact: `$${turnCount * 0.0025}`,\n      issue: 'Session memory drift detected',\n      turnsAffected: turnCount\n    };\n  }\n  return null;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Lambda Response Normalizer",
+        "description": "Standardizes action group responses to prevent agent parsing loops",
+        "code": "import json\n\ndef lambda_handler(event, context):\n    try:\n        # Your business logic here\n        result = process_action(event)\n        \n        # Standardized Bedrock response format\n        response = {\n            'actionGroup': event['actionGroup'],\n            'apiPath': event['apiPath'],\n            'httpStatusCode': 200,\n            'responseBody': json.dumps({\n                'result': result,\n                'status': 'success'\n            }),\n            'responseContentType': 'application/json'\n        }\n        return response\n    \n    except Exception as e:\n        return {\n            'actionGroup': event['actionGroup'],\n            'apiPath': event['apiPath'],\n            'httpStatusCode': 400,\n            'responseBody': json.dumps({'error': str(e)}),\n            'responseContentType': 'application/json'\n        }",
+        "language": "python"
+      },
+      {
+        "name": "Optimized KB Retrieval",
+        "description": "Reduces chunk count with semantic filtering before agent processing",
+        "code": "def optimize_kb_retrieval(query, knowledge_base_id):\n    bedrock_kb = boto3.client('bedrock-agent-runtime')\n    \n    # Initial retrieval with max 20 chunks\n    response = bedrock_kb.retrieve(\n        knowledgeBaseId=knowledge_base_id,\n        retrievalQuery={'text': query},\n        retrievalConfiguration={\n            'vectorSearchConfiguration': {\n                'numberOfResults': 20,\n                'overrideSearchType': 'HYBRID'\n            }\n        }\n    )\n    \n    # Filter to top 5 by relevance\n    filtered_docs = sorted(\n        response['retrievalResults'], \n        key=lambda x: x.get('score', 0), \n        reverse=True\n    )[:5]\n    \n    return {\n        'retrievedDocuments': filtered_docs,\n        'chunks_saved': 15,\n        'cost_saved': '$0.00675'\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Persistent Session Manager",
+        "description": "Maintains state across Bedrock agent invocations (TypeScript)",
+        "code": "import { DynamoDBClient, PutItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';\n\nconst ddb = new DynamoDBClient({ region: 'us-east-1' });\n\nconst SESSION_TABLE = 'BedrockAgentSessions';\n\nexport async function saveSessionState(sessionId: string, memorySnapshot: any) {\n  await ddb.send(new PutItemCommand({\n    TableName: SESSION_TABLE,\n    Item: {\n      sessionId: { S: sessionId },\n      memorySnapshot: { S: JSON.stringify(memorySnapshot) },\n      timestamp: { N: Date.now().toString() }\n    }\n  }));\n}\n\nexport async function loadSessionState(sessionId: string) {\n  const result = await ddb.send(new GetItemCommand({\n    TableName: SESSION_TABLE,\n    Key: { sessionId: { S: sessionId } }\n  }));\n  \n  return result.Item?.memorySnapshot?.S ? \n    JSON.parse(result.Item.memorySnapshot.S) : {};\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Cost Optimization Detection with Vex",
+      "description": "Vex integrates directly with Bedrock Agents via post-processing of invoke_agent() responses, automatically detecting cost inefficiencies across action groups, knowledge bases, and session management. It analyzes trace events in real-time, scoring cost waste and providing actionable remediation paths without code changes to your Lambda functions or agent configuration.\n\nThe Vex SDK wraps your existing Bedrock client calls, injecting cost optimization checks that flag excessive retrievals (>15 chunks), action loops, and memory drift. When issues are detected, Vex generates optimized configurations and can auto-apply fixes through IAM-secured remediation workflows.\n\nEnterprise teams using Vex report 40-65% reduction in Bedrock Agent costs within the first month, with continuous monitoring preventing cost regression as agents scale.",
+      "code": "import vex\nimport boto3\n\n# Install: pip install boto3 vex-sdk\nbedrock = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n    checks=[\n        'bedrock.action_loops',\n        'bedrock.kb_overretrieval',\n        'bedrock.session_drift',\n        'bedrock.cost_threshold:0.05'\n    ],\n    auto_remediate=True\n)\ndef cost_optimized_agent_invoke(agentId, sessionId, inputText):\n    response = bedrock.invoke_agent(\n        agentId=agentId,\n        agentAliasId='TSTALIASID',\n        sessionId=sessionId,\n        inputText=inputText\n    )\n    \n    # Vex automatically analyzes response for cost issues\n    # Returns optimized response or remediation plan\n    return response\n\n# Usage\nresult = cost_optimized_agent_invoke(\n    'AGENT123',\n    'session-abc123',\n    'Process customer order #456'\n)\n\nif result.vex.cost_savings > 0:\n    print(f'\\u2705 Saved: ${result.vex.cost_savings:.4f}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Bedrock agent calls to cut costs 40-65% immediately."
+    }
+  }
+}

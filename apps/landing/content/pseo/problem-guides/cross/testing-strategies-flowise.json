@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in Flowise Agents",
+    "description": "How to detect and fix ai agent testing strategies in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "Flowise testing-strategies",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, AI Agent Testing Strategies failures manifest as unreliable chatflows where drag-and-drop nodes produce unvalidated outputs, vector stores return irrelevant documents, custom tools fail silently, and multi-agent handoffs lose critical context. These issues are particularly insidious because Flowise's low-code visual interface hides the underlying chain complexities, making traditional debugging nearly impossible. Without systematic testing, agents deployed from Flowise chatflows deliver inconsistent, low-quality responses that erode user trust.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains producing unvalidated intermediate outputs",
+        "symptom": "JSON Parse nodes or custom function nodes output malformed data that downstream LLM nodes can't process",
+        "impact": "Chatflow hangs indefinitely or produces hallucinated responses from corrupted context"
+      },
+      {
+        "scenario": "Vector store retrieval returning low-relevance documents",
+        "symptom": "Document Retrieval nodes return chunks with similarity scores below 0.7 but no filtering logic",
+        "impact": "RAG pipelines generate factually incorrect answers based on irrelevant context"
+      },
+      {
+        "scenario": "Custom tool nodes failing silently without error propagation",
+        "symptom": "Custom Function/Tool nodes throw exceptions but chatflow continues with empty results",
+        "impact": "Agents appear functional but return incomplete or cached responses"
+      },
+      {
+        "scenario": "Multi-agent sequential flow losing context between agent handoffs",
+        "symptom": "Agent → Agent handoff nodes don't preserve session memory or thread context",
+        "impact": "Conversations become disjointed; second agent lacks awareness of prior decisions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Intermediate Output Schema Validation",
+        "description": "Scan chatflow execution traces for JSON Parse or custom function nodes producing non-conforming outputs",
+        "code": "```typescript\nimport { ChatFlow } from 'flowise/dist';\n\nconst validateIntermediateOutputs = (chatflow: ChatFlow, executionTrace: any[]) => {\n  const jsonParseNodes = chatflow.nodes.filter(n => n.type === 'JsonParseNode');\n  const failures: string[] = [];\n  \n  executionTrace.forEach(trace => {\n    jsonParseNodes.forEach(node => {\n      if (trace.nodeId === node.id && trace.output) {\n        try {\n          const parsed = JSON.parse(trace.output);\n          if (!parsed.schemaVersion || typeof parsed !== 'object') {\n            failures.push(`Node ${node.id}: Invalid schema in output`);\n          }\n        } catch (e) {\n          failures.push(`Node ${node.id}: JSON parse failed`);\n        }\n      }\n    });\n  });\n  \n  return {\n    valid: failures.length === 0,\n    issues: failures\n  };\n};```",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Store Relevance Scoring",
+        "description": "Monitor Document Retrieval nodes for low similarity scores (<0.7 threshold)",
+        "code": "```typescript\nconst checkVectorRelevance = (chatflow: ChatFlow, retrievalLogs: any[]) => {\n  const retrievalNodes = chatflow.nodes.filter(n => \n    n.type.includes('Retriever') || n.type.includes('VectorStore')\n  );\n  \n  const lowRelevance: any[] = [];\n  \n  retrievalLogs.forEach(log => {\n    if (log.similarityScores) {\n      const avgScore = log.similarityScores.reduce((a: number, b: number) => a + b, 0) / log.similarityScores.length;\n      if (avgScore < 0.7) {\n        lowRelevance.push({\n          nodeId: log.nodeId,\n          avgScore,\n          docsReturned: log.documents?.length || 0\n        });\n      }\n    }\n  });\n  \n  return {\n    healthy: lowRelevance.length === 0,\n    issues: lowRelevance\n  };\n};```",
+        "language": "typescript"
+      },
+      {
+        "name": "Custom Tool Error Propagation Check",
+        "description": "Detect custom function nodes that throw errors but don't propagate to chatflow termination",
+        "code": "```typescript\nconst detectSilentToolFailures = (executionTrace: any[]) => {\n  const toolErrors: any[] = [];\n  \n  executionTrace.forEach((trace, index) => {\n    if (trace.nodeType?.includes('CustomFunction') || trace.nodeType?.includes('Tool')) {\n      if (trace.error && !trace.propagated) {\n        toolErrors.push({\n          nodeId: trace.nodeId,\n          error: trace.error.message,\n          continued: executionTrace[index + 1]?.timestamp !== undefined\n        });\n      }\n    }\n  });\n  \n  return {\n    clean: toolErrors.length === 0,\n    silentFailures: toolErrors\n  };\n};```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add Output Validation Wrapper Node",
+        "description": "Wrap JSON Parse and custom function nodes with schema validation",
+        "code": "```typescript\n// Custom Validation Node for Flowise\nimport { Node } from 'flowise/dist';\n\nexport class OutputValidatorNode extends Node {\n  constructor() {\n    super();\n    this.schema = {\n      type: 'object',\n      properties: {\n        data: { type: 'object' },\n        schemaVersion: { type: 'string', const: '1.0' }\n      },\n      required: ['data', 'schemaVersion']\n    };\n  }\n  \n  async validateInput(input: any): Promise<boolean> {\n    try {\n      const parsed = JSON.parse(input);\n      return !!parsed.schemaVersion && typeof parsed.data === 'object';\n    } catch {\n      return false;\n    }\n  }\n}```",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Store Relevance Filter",
+        "description": "Add similarity threshold filter to all retrieval nodes",
+        "code": "```typescript\n// Flowise Custom Retriever with filtering\nimport { VectorStoreRetriever } from 'flowise/dist';\n\nexport class FilteredRetriever extends VectorStoreRetriever {\n  similarityThreshold = 0.7;\n  \n  async retrieve(query: string, k: number = 4) {\n    const results = await super.retrieve(query, k * 2); // Get more, filter down\n    return results.filter(doc => doc.metadata?.similarityScore >= this.similarityThreshold)\n      .slice(0, k);\n  }\n  \n  // Add to Flowise chatflow config\n  config = {\n    ...this.config,\n    similarityThreshold: { value: 0.7, isRequired: true }\n  };\n}```",
+        "language": "typescript"
+      },
+      {
+        "name": "Error Propagation Middleware",
+        "description": "Global error handler that propagates tool failures",
+        "code": "```typescript\n// Flowise Chatflow Error Handler\nimport { ChatFlow } from 'flowise/dist';\n\nexport const withErrorPropagation = (chatflow: ChatFlow) => {\n  const originalExecute = chatflow.execute;\n  \n  chatflow.execute = async (input: any) => {\n    try {\n      return await originalExecute.call(chatflow, input);\n    } catch (error) {\n      // Check if error came from custom tool\n      if (error.nodeType?.includes('CustomFunction')) {\n        throw new Error(`Tool failure in ${error.nodeId}: ${error.message}`);\n      }\n      throw error;\n    }\n  };\n  \n  return chatflow;\n};```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates directly as a callback handler in Flowise chatflow configuration, automatically capturing execution traces from every node execution. It analyzes intermediate outputs, vector retrieval relevance, tool error propagation, and agent handoff context preservation in real-time. Vex's AI-powered test generation creates comprehensive test suites covering your specific Flowise chatflow topology, including edge cases that visual debugging misses.\n\nThe Vex SDK hooks into Flowise's execution lifecycle, providing observability into hidden failure modes like silent tool failures and context loss between agents. Automated remediation suggestions include generated validation nodes, filtered retrievers, and error propagation middleware tailored to your exact chatflow configuration. This eliminates manual testing entirely for Flowise deployments.\n\nVex continuously monitors production chatflows, alerting on regression when nodes are reconfigured via drag-and-drop. It maintains test coverage as your agents evolve, ensuring reliability without developer intervention.",
+      "code": "```typescript\nimport { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise/dist';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\n// Add Vex callback to Flowise chatflow\nexport const instrumentedChatflow = (chatflow: ChatFlow) => {\n  // Capture all node executions\n  chatflow.on('node:execute', (nodeId, input, output) => {\n    vex.capture('flowise.node_execution', {\n      chatflowId: chatflow.id,\n      nodeId,\n      nodeType: chatflow.nodes.find(n => n.id === nodeId)?.type,\n      input: JSON.stringify(input),\n      output: JSON.stringify(output),\n      timestamp: Date.now()\n    });\n  });\n  \n  // Auto-generate tests for common Flowise failure modes\n  vex.test.generate({\n    framework: 'flowise',\n    scenarios: ['intermediate_validation', 'vector_relevance', 'tool_errors', 'context_handoff'],\n    chatflowSchema: chatflow.exportSchema()\n  });\n  \n  return chatflow;\n};\n\n// Usage in Flowise server\nconst app = new FlowiseApp();\napp.chatflows.forEach(instrumentedChatflow);```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 minutes to automatically test and monitor your Flowise agents: npm install @vex_dev/sdk"
+    }
+  }
+}

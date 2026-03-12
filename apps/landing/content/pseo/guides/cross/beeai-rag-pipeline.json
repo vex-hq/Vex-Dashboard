@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with BeeAI + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI rag pipeline",
+      "BeeAI guardrails",
+      "rag pipeline reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a production RAG pipeline with BeeAI enables robust document retrieval, context assembly, and LLM synthesis with source attribution for reliable AI agents. However, common failure modes like unbounded agent memory, tool injection vulnerabilities, serialization errors, and model output inconsistencies can compromise reliability and security. Vex provides essential guardrails through event listening to verify source faithfulness, detect hallucinations, ensure context relevance, and validate citations in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with BeeAI",
+      "description": "The BeeAI RAG pipeline follows a standard retrieval-augmented generation flow: user queries trigger vector search across document embeddings, retrieving top-k relevant chunks. BeeAI's agent memory maintains conversation context while tools handle retrieval and citation assembly. Retrieved context is injected into the Granite LLM prompt for synthesis, with BeeAI's event system enabling observability at each stage.\n\nBeeAI agents orchestrate this via custom tools for vector search (using FAISS or Pinecone) and context formatting, persisting state across sessions. The framework's memory management and tool validation are critical, but require Vex monitoring to catch drift in long conversations or injection attempts. Final LLM output includes source attribution metadata for traceability.\n\nVex integrates as an event listener on BeeAI's agent events, capturing retrieval results, context assembly, and final synthesis for verification against hallucinations and citation accuracy.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vector Retrieval │───▶│ Context Assembly │\n└─────────────────┘    │ (BeeAI Tool)     │    │   (Agent Memory) │\n                       └──────────────────┘    └──────────┬─────────┘\n                                                        │\n                       ┌─────────────────┐    ┌──────────▼──────────┐\n                       │   BeeAI Agent   │◀───│   Granite LLM      │\n                       │  (Event Listener)│    │   Synthesis        │\n                       └─────────────────┘    └──────────┬─────────┘\n                                                        │\n                                                  ┌──────▼──────┐\n                                                  │ Vex Guardrails│\n                                                  │(Faithfulness, │\n                                                  │ Citations)   │\n                                                  └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long RAG conversations accumulate retrieval contexts without eviction, causing OOM errors and degraded relevance",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory events and enforces context window limits with relevance-based eviction"
+      },
+      {
+        "name": "Tool Injection via Malicious Queries",
+        "description": "Adversarial inputs bypass BeeAI tool validation, injecting false documents or bypassing retrieval",
+        "severity": "critical",
+        "mitigation": "Vex validates tool inputs/outputs against schema and detects injection patterns"
+      },
+      {
+        "name": "Hallucination Despite Retrieved Context",
+        "description": "Granite model generates unsupported claims even with relevant context provided",
+        "severity": "high",
+        "mitigation": "Vex performs source faithfulness verification on final output against retrieved chunks"
+      },
+      {
+        "name": "Citation Drift in Multi-Turn Sessions",
+        "description": "Source attribution becomes inaccurate as conversation context grows and memory serializes",
+        "severity": "high",
+        "mitigation": "Vex tracks citation lineage across agent state persistence events"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "BeeAI RAG Agent with Vector Retrieval Tool",
+        "description": "Core agent setup with FAISS vector store tool for document retrieval",
+        "code": "from beeai import Agent, Tool\nfrom beeai.memory import ConversationBufferMemory\nimport faiss\nimport numpy as np\n\n# Initialize vector store (pre-built embeddings)\ndoc_embeddings = np.random.rand(1000, 384).astype('float32')\nindex = faiss.IndexFlatL2(384)\nindex.add(doc_embeddings)\n\ndoc_chunks = [\"chunk1 text...\", \"chunk2 text...\"]  # Your documents\n\n@Tool()\ndef retrieve_docs(query: str, top_k: int = 5) -> list:\n    '''Retrieve relevant document chunks'''\n    query_emb = np.random.rand(1, 384).astype('float32')  # Your embedding model\n    distances, indices = index.search(query_emb, top_k)\n    return [{\"content\": doc_chunks[i], \"score\": float(distances[0][j])} \n            for j, i in enumerate(indices[0])]\n\nrag_agent = Agent(\n    tools=[retrieve_docs],\n    memory=ConversationBufferMemory(),\n    model=\"ibm/granite-13b-chat\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly and Synthesis Prompt",
+        "description": "Format retrieved context for Granite LLM with citation tracking",
+        "code": "def format_rag_context(retrieved_docs: list, query: str) -> str:\n    context = \"\\n\".join([\n        f\"[DOC-{i+1}] {doc['content']} (relevance: {doc['score']:.2f})\"\n        for i, doc in enumerate(retrieved_docs)\n    ])\n    prompt = f\"\"\"Answer the query using ONLY the provided context:\n\nContext:\n{context}\n\nQuery: {query}\n\nAnswer with citations like [DOC-1]:\n\"\"\"\n    return prompt\n\nrag_agent.add_prompt_template(format_rag_context)",
+        "language": "python"
+      },
+      {
+        "title": "Source Attribution in Agent Response",
+        "description": "Extract and validate citations from Granite output",
+        "code": "import re\n\ndef extract_citations(response: str) -> list:\n    citations = re.findall(r'\\[DOC-(\\d+)\\]', response)\n    return list(set(citations))\n\ndef validate_citations(response: str, retrieved_docs: list) -> dict:\n    cited_docs = extract_citations(response)\n    valid_citations = [doc for i, doc in enumerate(retrieved_docs) \n                      if str(i+1) in cited_docs]\n    return {\n        'total_cited': len(cited_docs),\n        'valid_citations': len(valid_citations),\n        'coverage': len(valid_citations) / len(cited_docs) if cited_docs else 1.0\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Turn RAG Conversation Handler",
+        "description": "Handle conversation state with memory limits",
+        "code": "class RAGConversation:\n    def __init__(self, agent):\n        self.agent = agent\n        self.max_memory_tokens = 8000\n    \n    async def chat(self, query: str):\n        # Retrieve fresh context\n        docs = await self.agent.tools[0].run(query)\n        \n        # Check memory limits\n        if self.agent.memory.token_count > self.max_memory_tokens:\n            self.agent.memory.prune_oldest()\n        \n        response = await self.agent.run(query, context=docs)\n        \n        # Validate output\n        validation = validate_citations(response, docs)\n        return {\n            'response': response,\n            'citations': validation,\n            'sources': docs\n        }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener on BeeAI Agent",
+        "description": "Capture all agent events for RAG verification pipeline",
+        "code": "from vex_sdk import Vex\nfrom beeai import AgentEvent\n\nvex = Vex(api_key=\"your-vex-key\")\n\n@vex.listener(\"beeai\")\ndef rag_verification(events: list[AgentEvent]):\n    for event in events:\n        if event.type == \"tool_call\" and event.tool_name == \"retrieve_docs\":\n            # Verify retrieval relevance\n            docs = event.tool_output\n            vex.verify_retrieval(\n                query=event.input,\n                documents=docs,\n                threshold=0.7  # Min relevance score\n            )\n        elif event.type == \"agent_response\":\n            vex.verify_rag_output(\n                response=event.output,\n                sources=event.context,\n                checks=[\"faithfulness\", \"citation_accuracy\"]\n            )",
+        "language": "python"
+      },
+      {
+        "title": "Memory Growth Guardrail with Vex",
+        "description": "Prevent unbounded memory in long RAG sessions",
+        "code": "@vex.guardrail(\"memory_safety\")\ndef check_rag_memory(event: AgentEvent):\n    if event.type == \"memory_update\":\n        memory_size = len(event.memory_state)\n        if memory_size > 10000:  # Token limit\n            return {\n                'block': True,\n                'reason': 'Memory exceeds RAG safety limit',\n                'action': 'prune_context'\n            }\n    return {'pass': True}\n\n# Register with BeeAI agent\nrag_agent.add_event_listener(check_rag_memory)",
+        "language": "python"
+      },
+      {
+        "title": "Hallucination Detection for RAG Output",
+        "description": "Verify source faithfulness and citation accuracy",
+        "code": "@vex.guardrail(\"rag_fidelity\")\ndef verify_rag_fidelity(event: AgentEvent):\n    if event.type == \"final_response\":\n        response = event.output\n        context_docs = event.context\n        \n        results = vex.evaluate({\n            'response': response,\n            'context': [doc['content'] for doc in context_docs],\n            'metrics': ['faithfulness', 'answer_relevancy', 'context_precision']\n        })\n        \n        if results['faithfulness'] < 0.8:\n            return {\n                'block': True,\n                'reason': f'Low faithfulness score: {results[\"faithfulness\"]}',\n                'evidence': results['failed_spans']\n            }\n    return {'pass': True}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI RAG Pipeline",
+      "description": "Deploy Vex guardrails today to achieve production-grade reliability for your BeeAI RAG agents."
+    }
+  }
+}

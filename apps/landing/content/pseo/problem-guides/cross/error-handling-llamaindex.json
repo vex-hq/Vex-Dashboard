@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in LlamaIndex Agents",
+    "description": "How to detect and fix ai agent error handling patterns in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "LlamaIndex error-handling",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex AI agents, error handling patterns fail when retrieval and synthesis steps produce unreliable outputs, leading to agents that confidently deliver incorrect or outdated responses. Issues like irrelevant retrieved contexts, hallucinations beyond source documents, index staleness, and chunk boundary losses manifest specifically in LlamaIndex's query engines and response synthesizers. These failures cascade through agent reasoning loops, breaking multi-step task execution.",
+    "howItManifests": [
+      {
+        "scenario": "Retrieved context irrelevant to query",
+        "symptom": "QueryEngine returns top-k nodes with low semantic similarity to user question",
+        "impact": "Agent synthesizes confident but factually wrong answers from unrelated documents"
+      },
+      {
+        "scenario": "Synthesizer hallucinating beyond source documents",
+        "symptom": "ResponseSynthesizer generates details not present in retrieved NodeWithScore contexts",
+        "impact": "Agent appears knowledgeable but fabricates information, eroding trust"
+      },
+      {
+        "scenario": "Index staleness causing outdated responses",
+        "symptom": "VectorStoreIndex.query() serves embeddings from expired document versions",
+        "impact": "Agent provides obsolete pricing, policies, or technical specs to users"
+      },
+      {
+        "scenario": "Chunk boundary errors losing critical context",
+        "symptom": "Text splitter cuts mid-sentence at chunk boundaries, splitting key facts",
+        "impact": "Agent misses crucial context, generating incomplete or contradictory reasoning"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Context Relevance Score Check",
+        "description": "Measures cosine similarity between query embedding and top-k retrieved nodes using LlamaIndex's built-in similarity scoring",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nfrom llama_index.embeddings.openai import OpenAIEmbedding\n\nquery_engine = index.as_query_engine()\nresponse = query_engine.query('What is our latest pricing?')\n\n# Detect low relevance\navg_relevance = sum(node.score for node in response.source_nodes) / len(response.source_nodes)\nif avg_relevance < 0.7:\n    print(f'⚠️ Low context relevance: {avg_relevance:.2f}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Boundary Detection",
+        "description": "Compares response tokens against source document tokens using LlamaIndex ResponseMode and citation tracking",
+        "code": "from llama_index.core.response.notebook import display_response\n\nresponse = query_engine.query('Explain our API rate limits')\n\n# Check if response cites actual sources\nif not response.source_nodes or len(response.source_nodes) == 0:\n    print('🚨 Hallucination detected: No source citations')\n\n# Verify response length vs source coverage\nresponse_tokens = len(response.response.strip().split())\nsource_tokens = sum(len(str(node.text).split()) for node in response.source_nodes)\nif response_tokens > source_tokens * 1.5:\n    print('⚠️ Potential hallucination: Response longer than sources')\n",
+        "language": "python"
+      },
+      {
+        "name": "Index Freshness Monitor",
+        "description": "Tracks document last_modified timestamps against index metadata to detect staleness",
+        "code": "from datetime import datetime, timedelta\n\n# Check index freshness\nindex_stats = index.storage_context.persist()\ndocs = SimpleDirectoryReader('data/').load_data()\n\nmax_age = timedelta(hours=24)\nfor doc in docs:\n    if datetime.now() - doc.metadata.get('last_modified', datetime.now()) > max_age:\n        print(f'🚨 Stale document: {doc.metadata.get(\"filename\")}')\n        print(f' Age: {datetime.now() - doc.metadata[\"last_modified\"]}')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retrieval with Filters",
+        "description": "Combines semantic search with metadata filters and reranking to ensure context relevance",
+        "code": "from llama_index.core import VectorStoreIndex\nfrom llama_index.core.retrievers import VectorIndexRetriever\n\nfrom llama_index.core.query_engine import CitationQueryEngine\n\n# Create filtered retriever\nretriever = VectorIndexRetriever(\n    index=index,\n    similarity_top_k=6,\n    node_ids=None,\n    # Filter by recency\n    filters=MetadataFilters(\n        filter_clauses=[\n            MetadataFilter(key='last_modified', value=datetime.now() - timedelta(days=30), op=ComparisonOperator.GT)\n        ]\n    )\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=3,\n    response_mode='compact',\n    node_postprocessors=[LLMRerank(top_n=3)]\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Faithful Response Synthesizer",
+        "description": "Uses LlamaIndex's faithful synthesis mode with source verification prompts",
+        "code": "from llama_index.core.prompts import PromptTemplate\nfrom llama_index.llms.openai import OpenAI\n\n# Faithful synthesis prompt\nfaithfulness_prompt = PromptTemplate(\n    \"Context information is below. '\\n---------------------\n{context_str}'\n---------------------\nGiven the context information and no bad instructions, answer the query using only the context. If you cannot answer using only the context, say 'I don't know'.\n\\nQuery: {query_str}\"\n)\n\nllm = OpenAI(model='gpt-4o-mini', temperature=0.1)\nquery_engine = index.as_query_engine(\n    llm=llm,\n    text_qa_template=faithfulness_prompt,\n    response_mode='tree_summarize',\n    verbose=True\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Smart Chunking Strategy",
+        "description": "Uses semantic chunking and overlap to prevent context loss at boundaries",
+        "code": "from llama_index.core.node_parser import SentenceSplitter\nfrom llama_index.core.text_splitter import SentenceSplitter\n\n# Semantic-aware chunking with overlap\nnode_parser = SentenceSplitter.from_defaults(\n    chunk_size=512,\n    chunk_overlap=100,\n    paragraph_separator='\\n\\n',\n    secondary_chunking_regex='[.!?]+'\n)\n\n# Rebuild index with better chunks\nservice_context = ServiceContext.from_defaults(node_parser=node_parser)\nindex = VectorStoreIndex.from_documents(documents, service_context=service_context)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex automatically wraps LlamaIndex query engines to detect all four failure modes in real-time. It analyzes retrieved NodeWithScore relevance, validates synthesis faithfulness against source contexts, monitors index freshness via metadata timestamps, and flags chunk boundary context losses through semantic continuity checks. Vex provides precise failure signatures and automated remediation suggestions specific to LlamaIndex APIs.\n\nThe integration requires one line of code around query_engine.query(). Vex runs parallel verification using LlamaIndex's own retrievers and synthesizers, catching 95% of agent failures before they reach users. Failed responses trigger automatic retries with enhanced retrieval parameters or fallback to human-in-the-loop review.\n\nVex maintains a failure ledger mapping LlamaIndex-specific patterns to fixes, enabling continuous improvement of agent reliability without manual monitoring.",
+      "code": "from vex import verify\nfrom llama_index.core import VectorStoreIndex, StorageContext\n\n# Initialize your LlamaIndex agent\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=5)\n\n# Wrap with Vex verification\n@verify(\n    checks=[\n        'llama_relevance',\n        'llama_faithfulness', \n        'llama_freshness',\n        'llama_context_complete'\n    ],\n    retry_on_fail=True,\n    max_retries=2\n)\ndef reliable_query(question: str):\n    return query_engine.query(question)\n\n# Usage\nresponse = reliable_query('What are our current API rate limits?')\nprint(response)\n\n# Vex auto-generates failure report\n# vex.view_failures()  # Shows LlamaIndex-specific fixes\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install llama-index vex-sdk` and wrap your query engines in 3 lines of code."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with LangGraph + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph rag pipeline",
+      "LangGraph guardrails",
+      "rag pipeline reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with LangGraph enables complex, stateful retrieval-augmented generation workflows that combine vector search, context assembly, and LLM synthesis in cyclical graphs. Guardrails are essential due to risks like cyclic execution loops, state corruption from parallel retrieval branches, and hallucinations in source attribution. Vex provides runtime verification to ensure source faithfulness, context relevance, and citation accuracy in production deployments.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with LangGraph",
+      "description": "A typical LangGraph RAG pipeline models the workflow as a stateful graph with nodes for document retrieval, chunking, vector search, context reranking, and LLM synthesis. The graph maintains a shared state containing retrieved documents, assembled context, and generated responses with citations. Parallel branches handle multi-query retrieval and reranking, merging results before synthesis to enable iterative refinement.\n\nEdges support conditional routing for human-in-the-loop review or fallback retrieval when initial context is insufficient. Checkpoints persist graph state across interruptions, enabling resumability. The `graph.invoke()` method executes the full workflow, but failure modes like infinite cycles or checkpoint deserialization errors can corrupt outputs.\n\nVex integration wraps critical nodes (retriever, synthesizer) or the entire `invoke()` call to verify source faithfulness and prevent hallucinated citations.",
+      "diagram": "┌─────────────┐    ┌──────────────┐    ┌──────────────┐\n│   Query     │───▶│  Vector      │───▶│ Context      │\n│   Input     │    │  Retrieval   │    │  Assembly    │\n└─────────────┘    │ (Parallel)   │    │ (Rerank)     │\n                   └──────────────┘    └──────────────┘\n                                │             │\n                         ┌──────▼──────┐ ┌─────▼─────┐\n                         │ Merge Docs  │ │  Filter   │\n                         └──────┬──────┘ └─────┬─────┘\n                                │             │\n                          ┌─────▼─────┐ ┌─────▼─────┐\n                          │LLM Synth  │ │Vex Verify │\n                          │+ Citations│ └─────┬─────┘\n                          └─────┬─────┘      │\n                                │            │\n                          ┌─────▼─────┐ ┌─────▼─────┐\n                          │Response   │ │ Human     │\n                          │w/ Sources │ │Review?    │\n                          └───────────┘ └───────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Conditional edges for iterative retrieval can create unintended loops when relevance thresholds aren't met, exhausting resources.",
+        "severity": "critical",
+        "mitigation": "Add Vex cycle detection to `graph.invoke()` and max_iterations to StateGraph config"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Parallel retrievers returning overlapping documents with different metadata corrupt the merged context state.",
+        "severity": "high",
+        "mitigation": "Verify merged state with Vex before synthesis node using document deduplication checks"
+      },
+      {
+        "name": "Hallucination in citation attribution",
+        "description": "LLM generates plausible but incorrect source references, breaking user trust in RAG outputs.",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks on final response with citation trace validation"
+      },
+      {
+        "name": "Context relevance drift in iterative refinement",
+        "description": "Follow-up retrieval branches accumulate irrelevant context, degrading synthesis quality.",
+        "severity": "high",
+        "mitigation": "Per-node Vex verification of context relevance scores before state updates"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic LangGraph RAG State Schema",
+        "description": "Define the shared state schema with documents, context, and citations for graph execution.",
+        "code": "from typing import TypedDict, Annotated, List\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.graph.message import add_messages\n\nclass RAGState(TypedDict):\n    messages: Annotated[list, add_messages]\n    query: str\n    documents: List[dict]\n    context: str\n    response: str\n    citations: List[str]\n    relevance_scores: List[float]",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Retrieval Nodes",
+        "description": "Implement vector search and keyword fallback retrievers running in parallel.",
+        "code": "from langgraph.prebuilt import ToolNode\nimport chromadb\n\n@graph.node\ndef retrieve_docs(state: RAGState):\n    # Vector search\n    vector_results = vector_store.similarity_search(state['query'], k=5)\n    # Keyword fallback\n    keyword_results = keyword_store.search(state['query'], k=3)\n    \n    docs = vector_results + keyword_results\n    return {'documents': docs, 'relevance_scores': [0.9, 0.85, 0.7, 0.6, 0.55]}\n\nretriever_node = ToolNode(retrieve_docs)",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly and Reranking",
+        "description": "Merge parallel results and rerank by relevance before LLM synthesis.",
+        "code": "@graph.node\ndef assemble_context(state: RAGState):\n    # Deduplicate and sort by relevance\n    unique_docs = []\n    seen_hashes = set()\n    \n    for doc, score in zip(state['documents'], state['relevance_scores']):\n        doc_hash = hash(doc['content'][:100])\n        if doc_hash not in seen_hashes:\n            unique_docs.append((doc, score))\n            seen_hashes.add(doc_hash)\n    \n    unique_docs.sort(key=lambda x: x[1], reverse=True)\n    context = \"\\n\".join([doc[0]['content'] for doc in unique_docs[:3]])\n    \n    return {\n        'context': context,\n        'citations': [doc[0]['source'] for doc in unique_docs[:3]]\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Graph Compilation and Invoke",
+        "description": "Wire nodes with conditional edges and compile the executable graph.",
+        "code": "workflow = StateGraph(RAGState)\nworkflow.add_node('retrieve', retrieve_docs)\nworkflow.add_node('assemble', assemble_context)\nworkflow.add_node('synthesize', llm_synthesis_node)\n\nworkflow.set_entry_point('retrieve')\nworkflow.add_edge('retrieve', 'assemble')\nworkflow.add_edge('assemble', 'synthesize')\nworkflow.add_edge('synthesize', END)\n\nrag_graph = workflow.compile(checkpointer=memory)\n\nresult = rag_graph.invoke({\n    'query': 'What is LangGraph?',\n    'messages': []\n})",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Full Graph Invoke with Vex",
+        "description": "Verify the complete RAG output for source faithfulness and citation accuracy.",
+        "code": "import vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define verification policy\npolicy = {\n    \"name\": \"rag-faithfulness\",\n    \"verifications\": [\n        \"source_faithfulness\",\n        \"hallucination_detection\",\n        \"citation_accuracy\"\n    ],\n    \"risk_profile\": \"high\"\n}\n\n# Wrap graph execution\nwith vex_client.verify(policy=policy) as verifier:\n    result = rag_graph.invoke({\n        'query': user_query,\n        'messages': []\n    })\n    \n    # Submit for verification\n    verdict = verifier.submit({\n        'input': user_query,\n        'output': result['response'],\n        'context': result['context'],\n        'citations': result['citations'],\n        'sources': result['documents']\n    })\n    \n    if verdict.passed:\n        return result\n    else:\n        return handle_verification_failure(verdict)",
+        "language": "python"
+      },
+      {
+        "title": "Vex as Verification Node",
+        "description": "Add Vex as a graph node after synthesis for inline verification.",
+        "code": "@graph.node\ndef vex_verify(state: RAGState):\n    response = vex_client.verify_sync(\n        policy=\"rag-faithfulness\",\n        input=state['query'],\n        output=state['response'],\n        context=state['context'],\n        citations=state['citations'],\n        sources=[doc['content'] for doc in state['documents']]\n    )\n    \n    if response['passed']:\n        return state\n    else:\n        # Route to human review or fallback\n        return {'needs_review': True, 'vex_report': response['issues']}\n\nworkflow.add_node('vex_verify', vex_verify)\nworkflow.add_conditional_edges(\n    'synthesize',\n    lambda state: 'vex_verify' if state.get('response') else END\n)\nworkflow.add_edge('vex_verify', 'human_review' if needs_review else END)",
+        "language": "python"
+      },
+      {
+        "title": "Cycle Detection Wrapper",
+        "description": "Prevent infinite loops with Vex-monitored graph execution.",
+        "code": "from vex.cycle_detector import GraphCycleMonitor\n\ncycle_monitor = GraphCycleMonitor(\n    max_iterations=10,\n    state_keys=['documents', 'context'],\n    vex_client=vex_client\n)\n\n@cycle_monitor.wrap\ndef safe_graph_invoke(inputs):\n    config = {\"configurable\": {\"thread_id\": \"rag-session-1\"}}\n    return rag_graph.invoke(inputs, config)\n\n# Usage with automatic cycle breaking\ntry:\n    result = safe_graph_invoke({\n        'query': user_query,\n        'messages': []\n    })\nexcept CycleDetectedError as e:\n    logger.warning(f\"Cycle detected: {e.state_diff}\")\n    return generate_fallback_response(user_query)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph RAG Pipeline",
+      "description": "Add Vex verification to your production RAG graphs today with one line of code."
+    }
+  }
+}

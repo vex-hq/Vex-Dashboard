@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Mastra + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra agentic rag",
+      "Mastra guardrails",
+      "agentic rag reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Agentic RAG with Mastra enables sophisticated multi-step retrieval agents that plan queries, fetch from diverse sources, and synthesize attributed responses. However, the autonomous nature of these agents introduces risks like hallucinated synthesis, unfaithful source attribution, and inconsistent cross-source reasoning. Vex provides essential guardrails as middleware to validate outputs, detect failures, and ensure reliability at every pipeline stage.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Mastra",
+      "description": "Mastra's Agentic RAG typically features a planner agent that decomposes user queries into sub-queries, routed to specialized retrievers (vector stores, web search, knowledge bases). Retrieved chunks feed a synthesizer agent that reasons across sources, generates responses with citations, and optionally refines via critique loops. Workflows orchestrate transitions with memory for context persistence.\n\nThe pipeline processes inputs through Mastra's WorkflowNode graph: Query → Plan → Retrieve → Synthesize → Validate → Respond. Agents leverage tools for retrieval and LLM calls for planning/synthesis, with Mastra's memory layer injecting prior context.\n\nVex integrates as middleware at node transitions, wrapping agent executions to verify outputs against faithfulness, consistency, and formatting specs before proceeding.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Planner Agent   │\n└─────────────────┘    │  (Decompose)     │\n                       └──────────┬───────┘\n                                  │\n                       ┌──────────▼───────┐\n                       │ Retrieval Tools  │◄───[Vex Guardrail]\n                       │ (Vector/DB/Web)  │    (Query Accuracy)\n                       └──────────┬───────┘\n                                  │\n                       ┌──────────▼───────┐\n                       │ Synthesizer LLM  │◄───[Vex Guardrail]\n                       │ (Cite & Reason)  │    (Faithfulness)\n                       └──────────┬───────┘\n                                  │\n                            ┌─────▼──────┐\n                            │ Final RAG  │\n                            │ Response   │\n                            └────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Planner outputs malformed sub-queries that fail retrievers, or synthesizer ignores retrievals",
+        "severity": "critical",
+        "mitigation": "Vex middleware schemas enforce structured outputs at each Mastra WorkflowNode transition"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Retrievers return non-standard chunk formats breaking citation tracking",
+        "severity": "high",
+        "mitigation": "Vex tool result validators parse and normalize retrieval payloads before synthesis"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Mastra memory injects outdated conversation history confusing current retrieval planning",
+        "severity": "high",
+        "mitigation": "Vex temporal consistency checks filter stale memory entries by recency and relevance"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Real-time data sources conflict with cached knowledge bases during multi-source synthesis",
+        "severity": "medium",
+        "mitigation": "Vex cross-source consistency scoring flags and resolves data conflicts pre-response"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Agentic RAG Workflow Setup",
+        "description": "Define the core workflow with planner, retriever tools, and synthesizer nodes",
+        "code": "import { Workflow, Agent, tool } from 'mastra';\n\nconst ragWorkflow = new Workflow({\n  nodes: {\n    planner: new Agent({\n      name: 'queryPlanner',\n      model: 'gpt-4o',\n      instructions: 'Decompose into subqueries with sources',\n    }),\n    retriever: new Agent({\n      tools: [searchTool, vectorSearchTool],\n    }),\n    synthesizer: new Agent({\n      instructions: 'Synthesize with citations from {{retriever.output}}',\n    }),\n  },\n  edges: [{ from: 'planner', to: 'retriever' }, { from: 'retriever', to: 'synthesizer' }],\n});\n\n@tool()\nasync function searchTool(query: string) {\n  // Vector store retrieval\n  return { chunks: [], source: 'vector_db' };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Query Planning with Subquery Generation",
+        "description": "Planner agent outputs structured subqueries for parallel retrieval",
+        "code": "const plannerAgent = new Agent({\n  instructions: `Given query: {{input.query}}\n1. Identify key entities\n2. Generate 2-4 subqueries\n3. Assign sources (web|docs|db)\nOutput JSON only.`,\n  outputParser: z.object({\n    subqueries: z.array(z.object({\n      query: z.string(),\n      source: z.enum(['web', 'docs', 'db']),\n    })),\n  }),\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Source Retrieval Tools",
+        "description": "Parallel tool calls to multiple knowledge sources with metadata",
+        "code": "@tool()\nasync function vectorSearch(query: string) {\n  const results = await vectorStore.similaritySearch(query, 5);\n  return {\n    chunks: results.map(r => ({ text: r.pageContent, metadata: r.metadata })),\n    source: 'internal_docs',\n  };\n}\n\n@tool()\nasync function webSearch(query: string) {\n  const results = await tavily.search(query);\n  return {\n    chunks: results.results.map(r => ({ text: r.content, url: r.url })),\n    source: 'web',\n  };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Synthesis with Source Attribution",
+        "description": "Final agent generates response with verifiable citations",
+        "code": "const synthesizer = new Agent({\n  instructions: `Synthesize answer from sources: {{retriever.chunks}}\nRules:\n- Cite every claim with [source_id:chunk_index]\n- Flag contradictions\n- Use only provided context`,\n  outputParser: z.object({\n    answer: z.string(),\n    citations: z.array(z.object({\n      claim: z.string(),\n      source_id: z.string(),\n      chunk_index: z.number(),\n    })),\n  }),\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for Workflow Transitions",
+        "description": "Wrap Mastra node executions with Vex verification at each step",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nconst verifiedPlanner = async (input: any) => {\n  const result = await ragWorkflow.planner.call(input);\n  \n  const check = await vex.verify({\n    data: result,\n    tests: {\n      schema: 'subquery_plan',\n      hallucination: { threshold: 0.1 },\n      query_planning_accuracy: {\n        input_query: input.query,\n        planned_queries: result.subqueries,\n      },\n    },\n  });\n  \n  if (!check.passes) throw new Error('Planning failed verification');\n  return result;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Retrieval Faithfulness Guardrail",
+        "description": "Validate retrieved chunks match planned subqueries",
+        "code": "const verifiedRetriever = async (subqueries: any[]) => {\n  const results = await Promise.all(\n    subqueries.map(async (sq) => {\n      const toolResult = sq.source === 'web' ? \n        await webSearch(sq.query) : \n        await vectorSearch(sq.query);\n      \n      const check = await vex.verify({\n        data: toolResult,\n        tests: {\n          source_faithfulness: {\n            query: sq.query,\n            retrieved_content: toolResult.chunks,\n          },\n          schema: 'retrieval_result',\n        },\n      });\n      \n      if (!check.passes) {\n        console.warn(`Failed retrieval verification for ${sq.query}`);\n      }\n      return toolResult;\n    })\n  );\n  return { chunks: results.flatMap(r => r.chunks), sources: results };\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Final Response Citation Verification",
+        "description": "Ensure synthesized answer faithfully uses verified sources",
+        "code": "const verifiedSynthesis = async (chunks: any[], sources: any[]) => {\n  const synthResult = await synthesizer.call({ chunks });\n  \n  const finalCheck = await vex.verify({\n    data: synthResult,\n    tests: {\n      hallucination_detection: {\n        response: synthResult.answer,\n        ground_truth: chunks.map(c => c.text),\n      },\n      citation_verification: {\n        citations: synthResult.citations,\n        sources,\n      },\n      cross_source_consistency: {\n        all_chunks: chunks,\n        response_claims: extractClaims(synthResult.answer),\n      },\n    },\n  });\n  \n  return finalCheck.passes ? synthResult : null;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Agentic RAG",
+      "description": "Integrate Vex middleware today to achieve production-grade reliability for your autonomous retrieval agents."
+    }
+  }
+}

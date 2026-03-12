@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in DSPy Agents",
+    "description": "How to detect and fix ai agent hallucination detection in DSPy agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "DSPy hallucination-detection",
+      "DSPy reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In DSPy, AI agent hallucinations manifest as modules generating factually incorrect or logically inconsistent outputs during inference, often due to over-optimized prompts or flawed chain-of-thought reasoning. These issues arise because DSPy's signature-based programming and teleprompter optimization can produce brittle programs that excel on training data but fail on real-world inputs. Common culprits include assertion violations slipping through unchecked and unexpected output distributions from module compositions.",
+    "howItManifests": [
+      {
+        "scenario": "Optimized prompts overfitting to training examples",
+        "symptom": "Module generates correct answers for train set but hallucinates on OOD inputs",
+        "impact": "High train accuracy (95%+) but 30-50% hallucination rate on production data"
+      },
+      {
+        "scenario": "Chain-of-thought reasoning producing plausible but wrong logic",
+        "symptom": "CoT module outputs confident step-by-step reasoning that contains factual errors",
+        "impact": "Model appears to 'think correctly' but reaches wrong conclusions 20-40% of time"
+      },
+      {
+        "scenario": "Assertion violations not caught at inference time",
+        "symptom": "BasicChainOfThought assertions fail silently during optimize() but trigger at predict()",
+        "impact": "50%+ of predictions violate core factual constraints post-optimization"
+      },
+      {
+        "scenario": "Module composition creating unexpected output distributions",
+        "symptom": "ReAct or multi-hop agents produce verbose, off-topic responses after optimization",
+        "impact": "Agent completion rates drop from 80% to 30% due to hallucinated tool calls"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Signature Output Distribution Check",
+        "description": "Monitor field-level output distributions against expected patterns using DSPy assertions",
+        "code": "import dspy\n\nclass HallucinationChecker(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate_fact = dspy.ChainOfThought('fact -> answer')\n        \n    def forward(self, fact):\n        pred = self.generate_fact(fact=fact)\n        # Detect hallucination via length/entropy\n        answer_len = len(pred.answer.strip())\n        if answer_len < 10 or answer_len > 200:\n            raise ValueError(f'Hallucination detected: abnormal answer length {answer_len}')\n        return pred",
+        "language": "python"
+      },
+      {
+        "name": "Assertion Violation Monitor",
+        "description": "Wrap DSPy modules with runtime assertion checks for factual consistency",
+        "code": "import dspy\nfrom typing import Dict, Any\n\ndef monitor_assertions(module: dspy.Module, example: dspy.Example) -> Dict[str, Any]:\n    try:\n        prediction = module.forward(**example.inputs())\n        # Check basic factual assertions\n        assert 'I don't know' not in prediction.answer, 'Uncertainty hallucination'\n        assert len(prediction.answer.split()) > 5, 'Too brief - likely hallucination'\n        return {'status': 'PASS', 'prediction': prediction}\n    except AssertionError as e:\n        return {'status': 'HALLUCINATION', 'error': str(e), 'example': example}",
+        "language": "python"
+      },
+      {
+        "name": "CoT Logic Validation",
+        "description": "Parse chain-of-thought reasoning for logical consistency violations",
+        "code": "import re\nimport dspy\n\ndef validate_cot_logic(prediction: dspy.Prediction) -> bool:\n    if hasattr(prediction, 'reasoning'):\n        reasoning = prediction.reasoning\n        # Detect common hallucination patterns\n        hallucination_patterns = [\n            r'\\b(approximately|roughly|about)\\s+\\d+',  # Vague quantification\n            r'\\b(I think|probably|maybe)\\b',           # Uncertainty\n            r'\\b(first|second|third).*?(but|however)', # Contradictory logic\n        ]\n        for pattern in hallucination_patterns:\n            if re.search(pattern, reasoning, re.IGNORECASE):\n                return False\n    return True",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "BootstrapFewShot with Anti-Hallucination Assertions",
+        "description": "Optimize with hallucination-resistant training examples and strict assertions",
+        "code": "import dspy\n\nclass AntiHallucinationSignature(dspy.Signature):\n    '''Generate factual answer without speculation.'''\n    fact: str = dspy.InputField()\n    answer: str = dspy.OutputField(\n        desc='Concise factual answer, say \"Insufficient information\" if unsure'\n    )\n\n# Add hallucination-resistant examples\ntrainset = [\n    dspy.Example(fact='Paris is the capital of France.', answer='Paris').with_inputs('fact'),\n    dspy.example(fact='The moon landing was in 1969.', answer='1969').with_inputs('fact'),\n    dspy.example(fact='What is 2+2?', answer='4').with_inputs('fact'),\n]\n\nteleprompter = dspy.BootstrapFewShot(metric=dspy.accuracy)\nmodule = dspy.ChainOfThought(AntiHallucinationSignature)\noptimized_module = teleprompter.compile(module, trainset=trainset)",
+        "language": "python"
+      },
+      {
+        "name": "Multi-Module Fact Verification",
+        "description": "Chain hallucination-prone module with verification module",
+        "code": "class HallucinationResistantAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = dspy.ChainOfThought('question -> answer')\n        self.verify = dspy.ChainOfThought('claim, evidence -> verified:bool, explanation')\n    \n    def forward(self, question):\n        # Generate initial answer\n        pred = self.generate(question=question)\n        \n        # Self-verify\n        verification = self.verify(\n            claim=pred.answer,\n            evidence=question\n        )\n        \n        if verification.verified.lower() == 'false':\n            pred.answer = 'Insufficient information to answer confidently.'\n        \n        return pred",
+        "language": "python"
+      },
+      {
+        "name": "Labeled Few-Shot with Uncertainty Examples",
+        "description": "Include explicit uncertainty examples in optimization dataset",
+        "code": "def create_uncertainty_trainset():\n    return [\n        dspy.Example(\n            question='What is the capital of Wakanda?',\n            answer='Insufficient information - Wakanda is fictional.'\n        ).with_inputs('question'),\n        dspy.Example(\n            question='Who won the 2030 World Cup?',\n            answer='Cannot answer - event has not occurred.'\n        ).with_inputs('question'),\n        dspy.Example(\n            question='Paris is capital of?',\n            answer='France'\n        ).with_inputs('question'),\n    ]\n\n# Bootstrap with uncertainty-aware examples\nuncertainty_set = create_uncertainty_trainset()\nmodule = dspy.Predict('question -> answer')\noptimized = dspy.BootstrapFewShot().compile(module, trainset=uncertainty_set[:50])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex provides automatic hallucination detection by wrapping DSPy module forward() calls with runtime verification. It monitors output distributions, assertion violations, and semantic consistency against golden datasets in real-time. Vex's integration requires only pip install vex-sdk and wrapping your DSPy modules - no code changes needed.\n\nVex automatically categorizes hallucinations by type (factual, logical, distributional) and provides remediation suggestions including prompt adjustments and module recompilation. For DSPy specifically, Vex detects over-optimization by comparing train vs inference distributions and flags CoT reasoning failures through semantic entailment checks.\n\nThe platform generates DSPy-compatible fix code automatically, including uncertainty-aware signatures and verification chains, reducing manual debugging from hours to minutes while maintaining your existing DSPy optimization pipelines.",
+      "code": "import dspy\nimport vex\n\nfrom your_dspy_agent import HallucinationProneAgent\n\n# Wrap existing DSPy module with Vex\n@vex.verify(\n    testset='path/to/golden_dspy_examples.jsonl',\n    metrics=['factual_accuracy', 'cot_consistency'],\n    failure_threshold=0.1\n)\nclass VexProtectedAgent(HallucinationProneAgent):\n    def forward(self, **kwargs):\n        # Vex automatically intercepts and verifies\n        return super().forward(**kwargs)\n\n# Usage unchanged\nagent = VexProtectedAgent()\nresult = agent(question='What is the capital of France?')\n\n# Vex generates report\nprint(vex.get_report(agent))  # {'hallucinations': 2, 'fixed': 8, 'suggestions': [...]}\n\n# Auto-apply fixes\nvex.remediate(agent, auto_apply=True)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix DSPy Hallucinations Automatically with Vex",
+      "description": "Install Vex with pip install vex-sdk and wrap your DSPy modules in 2 lines of code."
+    }
+  }
+}

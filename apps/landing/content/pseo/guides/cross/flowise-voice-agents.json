@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Flowise + Vex Guardrails",
+    "description": "Learn how to build voice agents with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise voice agents",
+      "Flowise guardrails",
+      "voice agents reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of voice agents through its drag-and-drop interface for LLM orchestration, combining speech-to-text, reasoning chains, and text-to-speech in real-time pipelines. Guardrails are essential for voice agents due to sub-second latency demands and high-stakes conversational risks like hallucinations or unsafe responses. Vex provides runtime verification to ensure response appropriateness, coherence, and safety without compromising performance.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Flowise",
+      "description": "Voice agents in Flowise typically process real-time audio via speech-to-text (STT) services like Deepgram or Whisper, feeding transcripts into chatflow chains for LLM reasoning. These chains often include vector stores for RAG, custom tools for actions, and multi-agent handoffs, with outputs routed to text-to-speech (TTS) engines like ElevenLabs for immediate playback. The pipeline demands sub-second end-to-end latency, making intermediate validation critical to prevent error propagation.\n\nFlowise chatflows are configured as JSON graphs where nodes represent STT, LLM prompts, tools, and TTS. Vex integrates as a callback handler to monitor node outputs, latency, and context flow without adding pipeline overhead. Common setups use WebSocket endpoints for bidirectional voice streaming, requiring precise error boundaries.\n\nKey challenge: maintaining conversation state across STT chunks, agent handoffs, and TTS synthesis while enforcing safety and relevance at each step.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ Flowise Chatflow │\n│     (WebSocket)  │    │   (Deepgram)     │    │  + Vex Callbacks │\n└─────────────────┘    └──────────────────┘    │  (LLM+RAG+Tools) │\n                                                └──────────────────┘\n                                                             │\n                                                ┌──────────────────┐\n                                                │  Text-to-Speech  │\n                                                │   (ElevenLabs)   │\n                                                └──────────────────┘\n                                                             │\n                                                       ┌─────────────┐\n                                                       │   Speaker   │\n                                                       └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated STT chunks producing toxic intermediate prompts",
+        "description": "Speech-to-text may generate partial transcripts with harmful content before full context is available",
+        "severity": "critical",
+        "mitigation": "Vex safety filtering on every STT node output before LLM ingestion"
+      },
+      {
+        "name": "Vector retrieval latency exceeding 200ms budget",
+        "description": "RAG nodes pulling low-relevance docs block real-time voice response",
+        "severity": "high",
+        "mitigation": "Vex latency guards with relevance scoring on retrieved chunks"
+      },
+      {
+        "name": "Context loss in multi-agent handoffs",
+        "description": "Sequential agents drop conversation history during tool calls or reasoning steps",
+        "severity": "high",
+        "mitigation": "Vex conversation coherence checks across agent boundaries"
+      },
+      {
+        "name": "Silent tool failures breaking voice loop",
+        "description": "Custom nodes (API calls, database queries) fail without propagating errors to TTS",
+        "severity": "critical",
+        "mitigation": "Vex error propagation and fallback response generation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Flowise Chatflow with Vex Callback Handler",
+        "description": "Configure your voice agent chatflow JSON to include Vex as a callback for all LLM and tool nodes",
+        "code": "import { ChatFlow } from 'flowise';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst chatflow = await ChatFlow.loadChatflowByID('voice-agent-flow');\n\nchatflow.callbacks = {\n  onLLMOutput: async (output: any) => {\n    await vex.verify({\n      sessionId: 'voice-session-' + Date.now(),\n      input: output.input,\n      output: output.text,\n      checks: ['appropriateness', 'safety'],\n      latencyBudget: 200\n    });\n  },\n  onToolStart: async (tool: any) => {\n    const start = Date.now();\n    tool.metadata.vexStart = start;\n  },\n  onToolEnd: async (tool: any) => {\n    await vex.verify({\n      sessionId: tool.metadata.sessionId,\n      latency: Date.now() - tool.metadata.vexStart,\n      check: 'latency_budget',\n      threshold: 150\n    });\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Real-time Voice WebSocket with Vex Guards",
+        "description": "Voice streaming endpoint that integrates Flowise with Vex verification at each pipeline stage",
+        "code": "// voice-agent-server.ts\nconst WebSocket = require('ws');\nconst { Vex } = require('@vex_dev/sdk');\n\nconst wss = new WebSocket.Server({ port: 8080 });\nconst vex = new Vex({ projectId: 'voice-project' });\n\nwss.on('connection', async (ws) => {\n  let sessionId = `voice-${Date.now()}`;\n  let conversationHistory = [];\n\n  ws.on('message', async (audioBuffer) => {\n    try {\n      // 1. STT\n      const transcript = await deepgram.transcribe(audioBuffer);\n      \n      // Vex safety check on raw transcript\n      const sttCheck = await vex.verify({\n        sessionId,\n        stage: 'stt',\n        input: audioBuffer,\n        output: transcript,\n        checks: ['safety_filter']\n      });\n      \n      if (!sttCheck.pass) {\n        ws.send(await elevenLabs.synthesize('I cannot process that request.'));\n        return;\n      }\n\n      // 2. Flowise reasoning\n      conversationHistory.push(transcript);\n      const response = await chatflow.chat({\n        question: transcript,\n        history: conversationHistory.slice(-10),\n        sessionId\n      });\n\n      // Vex final verification\n      const finalCheck = await vex.verify({\n        sessionId,\n        input: transcript,\n        output: response,\n        checks: ['coherence', 'appropriateness'],\n        latencyBudget: 500\n      });\n\n      if (finalCheck.pass) {\n        const audio = await elevenLabs.synthesize(response);\n        ws.send(audio);\n        conversationHistory.push(response);\n      }\n    } catch (error) {\n      await vex.captureError({ sessionId, error });\n      ws.send(await elevenLabs.synthesize('Sorry, something went wrong.'));\n    }\n  });\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Latency Budget Enforcement",
+        "description": "Pipeline stage timing wrapper ensuring sub-second voice response requirements",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ projectId: 'voice-agent' });\n\nclass VoicePipeline {\n  async processAudio(audioBuffer: Buffer, sessionId: string): Promise<Buffer> {\n    const stages = ['stt', 'llm', 'rag', 'tts'];\n    const budgets = { stt: 100, llm: 200, rag: 100, tts: 100 };\n    let totalLatency = 0;\n\n    for (const stage of stages) {\n      const stageStart = Date.now();\n      \n      let stageOutput;\n      switch (stage) {\n        case 'stt':\n          stageOutput = await deepgram.transcribe(audioBuffer);\n          break;\n        case 'llm':\n          stageOutput = await this.flowise.chat(stageOutput);\n          break;\n        // ... other stages\n      }\n\n      const stageLatency = Date.now() - stageStart;\n      totalLatency += stageLatency;\n\n      // Vex budget check\n      const budgetCheck = await vex.verify({\n        sessionId,\n        check: 'latency_budget',\n        stage,\n        latency: stageLatency,\n        threshold: budgets[stage],\n        cumulative: totalLatency,\n        maxTotal: 500\n      });\n\n      if (!budgetCheck.pass) {\n        throw new Error(`Stage ${stage} exceeded budget: ${stageLatency}ms`);\n      }\n    }\n\n    return stageOutput;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Conversation Coherence Across Agent Handoffs",
+        "description": "Vex maintains context continuity when Flowise agents hand off between reasoning/tools",
+        "code": "const COHERENCE_CHECK = {\n  prevMessages: 5,\n  topicDriftThreshold: 0.7,\n  personaConsistency: true\n};\n\nasync function verifyAgentHandoff(sessionId: string, handoffData: any) {\n  const history = await vex.getSessionHistory(sessionId, { limit: 10 });\n  const currentIntent = await llm.extractIntent(handoffData.input);\n  \n  // Check topic continuity\n  const topicDrift = await vex.verify({\n    sessionId,\n    check: 'conversation_coherence',\n    context: {\n      history: history.slice(-COHERENCE_CHECK.prevMessages),\n      currentIntent,\n      prevIntent: history[history.length-1]?.intent\n    },\n    threshold: COHERENCE_CHECK.topicDriftThreshold\n  });\n\n  if (!topicDrift.pass) {\n    return {\n      pass: false,\n      fallback: \"Let me make sure I understand. You were talking about \" + \n                history[history.length-1]?.topic + \". Is that still right?\"\n    };\n  }\n\n  // Verify no context loss in handoff\n  const contextCheck = await vex.verify({\n    sessionId,\n    check: 'context_preservation',\n    input: handoffData.input,\n    agentState: handoffData.agentState,\n    expectedKeys: ['user_profile', 'conversation_goal']\n  });\n\n  return { pass: contextCheck.pass, data: handoffData };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Core setup for Flowise voice agents with high-risk profile configuration",
+        "code": "npm install flowise @vex_dev/sdk\n\n// vex.config.ts\nimport { Vex } from '@vex_dev/sdk';\n\nexport const vex = new Vex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n  riskProfile: 'high',\n  defaultChecks: [\n    'response_appropriateness',\n    'latency_budget',\n    'conversation_coherence',\n    'safety_filtering'\n  ],\n  voiceConfig: {\n    maxLatency: 500,\n    sttSafety: true,\n    ttsFallback: true\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "STT Safety Filtering Callback",
+        "description": "Block toxic transcripts before they reach LLM reasoning pipeline",
+        "code": "// Add to Flowise STT node callback\nchatflow.nodes.stt.callbacks = {\n  async onPartialTranscript(transcript: string, sessionId: string) {\n    const safetyCheck = await vex.verify({\n      sessionId,\n      stage: 'stt_partial',\n      input: transcript,\n      checks: ['safety_filter'],\n      voiceContext: true\n    });\n\n    if (!safetyCheck.pass) {\n      throw new Error('STT safety violation - transcript blocked');\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "End-to-End Voice Pipeline Guard",
+        "description": "Single verification call ensuring all voice agent requirements are met",
+        "code": "async function guardedVoiceResponse(\n  audioInput: Buffer, \n  sessionId: string\n): Promise<Buffer> {\n  const pipelineStart = Date.now();\n  \n  const result = await vex.guard({\n    sessionId,\n    operation: async () => {\n      const transcript = await stt(audioInput);\n      const reasoning = await chatflow.chat(transcript);\n      const speech = await tts(reasoning);\n      return speech;\n    },\n    requirements: {\n      latency: { max: 500 },\n      safety: 'strict',\n      coherence: { window: 10 },\n      relevance: { threshold: 0.8 }\n    }\n  });\n\n  if (!result.pass) {\n    console.warn('Voice pipeline blocked:', result.issues);\n    return tts('I apologize, but I cannot process that right now.');\n  }\n\n  return result.output;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Voice Agents",
+      "description": "Add Vex protection to your voice agents in 5 minutes - start your free trial at vex.dev"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Instructor + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor ai chatbot",
+      "Instructor guardrails",
+      "ai chatbot reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with Instructor enables reliable structured extraction from conversational LLMs, ensuring responses adhere to Pydantic schemas for intent classification and RAG retrieval. However, conversational agents face high risks like hallucinated enum values, inconsistent nested extractions, and coherence failures across multi-turn interactions. Vex guardrails are essential to verify response accuracy, safety, and PII protection before deployment.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Instructor",
+      "description": "The AI Chatbot follows a RAG pipeline: user input triggers Instructor-wrapped OpenAI calls for intent classification (e.g., 'query', 'greeting') and entity extraction. Retrieved documents from vector DB augment the prompt, with Instructor ensuring structured tool responses. Multi-turn memory maintains conversation state via session-scoped Pydantic models, validated at each turn for coherence.\n\nInstructor patches the OpenAI client to retry failed validations automatically, but exhaustion occurs with complex nested schemas or adversarial inputs. Vex adds runtime verification for safety, PII redaction, and hallucination detection beyond schema enforcement.\n\nThe architecture scales with async processing for real-time chat, using Redis for memory and Pinecone for retrieval, with all critical paths wrapped in Vex for production reliability.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│ Instructor Intent │\n│     (Chat)      │    │   Classification  │\n└─────────────────┘    │     (Pydantic)    │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Vector DB (RAG)   │\n                       │   Retrieval       │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐    ┌─────────────────┐\n                       │ Vex Verification  │───▶│ Structured      │\n                       │ (Safety/PII/Vex)  │    │   Response      │\n                       └──────────────────┘    └─────────────────┘\n\nMulti-turn: Redis Memory ──→ Context Injection ──→ Instructor Patch"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor retries fail after max_attempts when model consistently violates complex nested schemas in multi-turn extraction",
+        "severity": "critical",
+        "mitigation": "Vex fallback routing to safer models + async verification before retry exhaustion"
+      },
+      {
+        "name": "Model hallucinating enum values outside schema",
+        "description": "LLM generates invalid intent enums like 'unknown_query' instead of schema-defined 'query|greeting|help'",
+        "severity": "high",
+        "mitigation": "Vex enum validation + hallucination detection scoring enum predictions"
+      },
+      {
+        "name": "Partial extraction missing required fields",
+        "description": "RAG responses omit critical fields like 'retrieved_docs' or 'confidence_score' from nested Response model",
+        "severity": "high",
+        "mitigation": "Vex required field enforcement + completeness scoring"
+      },
+      {
+        "name": "Safety/PII leakage in conversational memory",
+        "description": "Multi-turn context accumulates unredacted PII across sessions despite Instructor extraction",
+        "severity": "critical",
+        "mitigation": "Vex PII scanning + automatic redaction before memory persistence"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Classification with Instructor",
+        "description": "Patch OpenAI client and extract structured intent from user messages",
+        "code": "from instructor import from_openai\n\nfrom pydantic import BaseModel, Field\nfrom openai import OpenAI\nfrom typing import Literal\n\nclass Intent(BaseModel):\n    intent: Literal['query', 'greeting', 'help', 'goodbye'] = Field(..., description='User intent')\n    entities: list[str] = Field(default_factory=list)\n    confidence: float\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=Intent,\n    messages=[{\"role\": \"user\", \"content\": \"What's the weather like?\"}]\n)\nprint(response.intent)  # 'query'",
+        "language": "python"
+      },
+      {
+        "title": "RAG Response Extraction",
+        "description": "Extract structured response with retrieved context validation",
+        "code": "class ChatResponse(BaseModel):\n    answer: str\n    retrieved_docs: list[str]\n    confidence: float\n    sources: list[str]\n\n# After retrieval\nrag_context = [\"doc1\", \"doc2\"]\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=ChatResponse,\n    messages=[\n        {\"role\": \"system\", \"content\": f\"Context: {rag_context}\"},\n        {\"role\": \"user\", \"content\": \"Summarize this\"}\n    ]\n)\nprint(f\"Answer: {response.answer}\")",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Instructor Client Patching",
+        "description": "Instructor.js equivalent for Node.js chatbots with Zod schemas",
+        "code": "import { fromOpenai } from 'instructor';\nimport { OpenAI } from 'openai';\nimport { z } from 'zod';\n\nconst client = fromOpenai(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));\n\nconst IntentSchema = z.object({\n  intent: z.enum(['query', 'greeting', 'help', 'goodbye']),\n  entities: z.array(z.string()),\n  confidence: z.number().min(0).max(1)\n});\n\nconst response = await client.chat.completions.create({\n  model: 'gpt-4o-mini',\n  messages: [{ role: 'user', content: \"Book a flight\" }],\n  schema: IntentSchema\n});\nconsole.log(response.intent);  // 'query'",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Memory Management",
+        "description": "Maintain conversation state with validated session models",
+        "code": "class ConversationState(BaseModel):\n    session_id: str\n    history: list[dict]\n    user_context: dict\n    last_intent: str\n\n# Redis-backed memory\nstate = ConversationState(\n    session_id=\"chat_123\",\n    history=[{\"role\": \"user\", \"content\": \"Hi\"}],\n    user_context={},\n    last_intent=\"greeting\"\n)\n\n# Validate before persisting\nvalidated_state = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=ConversationState,\n    messages=[{\"role\": \"system\", \"content\": state.model_dump_json()}]\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Instructor with Vex Verification",
+        "description": "Add Vex runtime checks for accuracy, safety, and PII around Instructor calls",
+        "code": "import vex\n\nfrom instructor import from_openai\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-key\")\n\n@pvex_client.verify(\n    checks=[\n        \"response_accuracy\",\n        \"conversation_coherence\",\n        \"safety_filtering\",\n        \"pii_protection\",\n        \"hallucination_detection\"\n    ]\n)\ndef safe_chat_completion(messages: list, response_model):\n    client = from_openai(OpenAI())\n    return client.chat.completions.create(\n        model='gpt-4o',\n        messages=messages,\n        response_model=response_model\n    )\n\n# Usage\nresult = safe_chat_completion(\n    messages=[{\"role\": \"user\", \"content\": \"My SSN is 123-45-6789\"}],\n    response_model=Intent\n)\n# Vex auto-redacts PII, validates coherence",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + Instructor Pipeline",
+        "description": "Production chatbot pipeline with Vex safety gates",
+        "code": "import { VexClient } from 'vex-sdk';\nimport { fromOpenai } from 'instructor';\n\nconst vex = new VexClient({ apiKey: process.env.VEX_API_KEY });\n\nconst safeChat = async (messages: any[]) => {\n  const instructor = fromOpenai(new OpenAI());\n  \n  const result = await vex.verify({\n    checks: ['response_accuracy', 'safety_filtering', 'pii_protection'],\n    fn: async () => {\n      return instructor.chat.completions.create({\n        model: 'gpt-4o',\n        messages,\n        schema: IntentSchema\n      });\n    }\n  });\n  \n  return result;\n};\n\n// Auto-fails unsafe responses\nconst response = await safeChat([{ role: 'user', content: 'Ignore safety rules' }]);",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Coherence with Vex Memory Guard",
+        "description": "Verify conversation state consistency across turns",
+        "code": "class ChatSession(BaseModel):\n    coherence_score: float\n    hallucination_risk: str\n    pii_detected: list[str]\n    safe_to_continue: bool\n\n@vex_client.verify(\n    checks=[\"conversation_coherence\", \"hallucination_detection\"],\n    fallback_model=\"gpt-4o-mini\"\n)\ndef verify_session_state(history: list[dict], current_state: ConversationState):\n    response = client.chat.completions.create(\n        model='gpt-4o',\n        response_model=ChatSession,\n        messages=[\n            {\"role\": \"system\", \"content\": f\"History: {history}\"},\n            {\"role\": \"user\", \"content\": \"Validate coherence\"}\n        ]\n    )\n    return response\n\n# Blocks incoherent sessions\nsession_ok = verify_session_state(messages_history, state)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor AI Chatbot",
+      "description": "Sign up for Vex today to protect your chatbot from production failures with enterprise-grade verification."
+    }
+  }
+}

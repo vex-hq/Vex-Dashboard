@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Mastra Agents",
+    "description": "How to detect and fix ai agent memory management in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Mastra memory-management",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, AI Agent Memory Management issues manifest as stale context injection during workflow transitions, unvalidated memory retrievals corrupting agent reasoning, and sync integration data overriding fresh memory states. These problems arise from Mastra's workflow-centric architecture where memory is persisted across agent steps but lacks built-in validation between transitions. Without proper memory hygiene, agents suffer from context drift, leading to hallucinated responses and cascading workflow failures.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent receives previous step's memory with unescaped tool output containing malformed JSON",
+        "impact": "Parser errors crash workflow; agent hallucinates based on broken context"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "Memory store contains partial API responses with missing fields or invalid schemas",
+        "impact": "Downstream agent steps make decisions on incomplete data, causing erratic behavior"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent pulls conversation history from 2 sessions ago during active workflow",
+        "impact": "Agent confuses user identities and conversation state, generating irrelevant responses"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "CRM sync injects bulk contact data into agent memory mid-conversation",
+        "impact": "Agent reasoning overwhelmed by irrelevant data, ignores user query entirely"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Schema Validation Check",
+        "description": "Detects malformed memory objects by validating against expected TypeScript interfaces before workflow transitions",
+        "code": "import { AgentContext, WorkflowStep } from 'mastra';\n\ntype ValidMemory = {\n  conversationId: string;\n  timestamp: number;\n  userIntent: string;\n  toolOutputs: Array<{name: string; data: unknown}>;\n};\n\nfunction detectMemorySchemaIssues(ctx: AgentContext): boolean {\n  const memory = ctx.memory.get('session') as unknown;\n  \n  if (!isValidMemorySchema(memory)) {\n    console.error('❌ Memory schema violation:', validateMemorySchema(memory));\n    return true; // Issue detected\n  }\n  return false;\n}\n\nfunction isValidMemorySchema(data: unknown): data is ValidMemory {\n  return typeof data === 'object' && data !== null &&\n    'conversationId' in data && typeof (data as any).conversationId === 'string' &&\n    'timestamp' in data && typeof (data as any).timestamp === 'number';\n}\n\n// Hook into Mastra workflow\nconst step: WorkflowStep = {\n  name: 'validateMemory',\n  execute: async (ctx) => {\n    if (detectMemorySchemaIssues(ctx)) {\n      throw new Error('Memory validation failed');\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Stale Context Timestamp Audit",
+        "description": "Identifies memory entries older than workflow session threshold (5 minutes)",
+        "code": "import { AgentContext } from 'mastra';\n\nfunction detectStaleContext(ctx: AgentContext): Array<string> {\n  const issues: string[] = [];\n  const now = Date.now();\n  const SESSION_THRESHOLD = 5 * 60 * 1000; // 5 minutes\n  \n  ctx.memory.entries().forEach(([key, entry]) => {\n    if (typeof entry.timestamp === 'number' && \n        now - entry.timestamp > SESSION_THRESHOLD) {\n      issues.push(`Stale memory key: ${key} (age: ${(now - entry.timestamp) / 1000}s)`);\n    }\n  });\n  \n  return issues;\n}\n\n// Usage in Mastra agent hook\nasync function auditMemoryBeforeStep(ctx: AgentContext) {\n  const staleIssues = detectStaleContext(ctx);\n  if (staleIssues.length > 0) {\n    console.warn('🚨 Stale context detected:', staleIssues);\n    // Clear stale entries\n    staleIssues.forEach(issue => {\n      const key = issue.match(/key: (\\w+)/)?.[1];\n      key && ctx.memory.delete(key);\n    });\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Output Parsing Monitor",
+        "description": "Tracks malformed tool responses by monitoring JSON.parse failures in memory",
+        "code": "import { AgentContext, ToolCallResult } from 'mastra';\n\nfunction detectMalformedToolOutputs(ctx: AgentContext): boolean {\n  const toolResults = ctx.memory.get('toolCalls') as ToolCallResult[] | undefined;\n  \n  if (!toolResults?.length) return false;\n  \n  for (const result of toolResults) {\n    try {\n      if (result.output && typeof result.output === 'string') {\n        JSON.parse(result.output);\n      }\n    } catch (e) {\n      console.error(`❌ Malformed tool output from ${result.toolName}:`, result.output);\n      return true; // Issue detected\n    }\n  }\n  \n  return false;\n}\n\n// Mastra workflow guard\nconst memoryGuard: WorkflowStep = {\n  name: 'checkToolOutputs',\n  execute: async (ctx: AgentContext) => {\n    if (detectMalformedToolOutputs(ctx)) {\n      ctx.memory.set('toolCalls', []);\n      throw new Error('Tool output validation failed - cleared memory');\n    }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Validation Middleware",
+        "description": "Type-safe memory validation layer that sanitizes data before workflow transitions",
+        "code": "import { AgentContext, Middleware } from 'mastra';\n\ntype SafeMemory = {\n  conversationId: string;\n  context: Record<string, unknown>;\n  timestamp: number;\n};\n\nconst memoryValidationMiddleware: Middleware = {\n  async beforeStep(ctx: AgentContext, next) {\n    const rawMemory = ctx.memory.get('session');\n    const safeMemory = sanitizeMemory(rawMemory);\n    \n    ctx.memory.set('session', safeMemory);\n    await next();\n  }\n};\n\nfunction sanitizeMemory(raw: unknown): SafeMemory {\n  const now = Date.now();\n  const safe: SafeMemory = {\n    conversationId: typeof raw === 'object' && raw !== null \n      ? String((raw as any).conversationId || 'unknown')\n      : 'unknown',\n    context: {},\n    timestamp: now\n  };\n  \n  // Safely extract context\n  if (typeof raw === 'object' && raw !== null) {\n    safe.context = pickSafeFields(raw as Record<string, unknown>);\n  }\n  \n  return safe;\n}\n\nfunction pickSafeFields(obj: Record<string, unknown>): Record<string, unknown> {\n  const safeFields = {};\n  for (const [key, value] of Object.entries(obj)) {\n    if (isSafeValue(value)) {\n      safeFields[key] = value;\n    }\n  }\n  return safeFields;\n}\n\nfunction isSafeValue(value: unknown): boolean {\n  return typeof value !== 'function' &&\n         value !== null &&\n         typeof value !== 'symbol';\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Time-Windowed Memory TTL",
+        "description": "Automatic memory expiration for entries older than session window",
+        "code": "import { AgentContext, WorkflowHook } from 'mastra';\n\nconst MEMORY_TTL = 10 * 60 * 1000; // 10 minutes\n\nconst ttlMemoryHook: WorkflowHook = {\n  async beforeExecute(ctx: AgentContext) {\n    await enforceMemoryTTL(ctx);\n  }\n};\n\nasync function enforceMemoryTTL(ctx: AgentContext) {\n  const now = Date.now();\n  const expiredKeys: string[] = [];\n  \n  ctx.memory.entries().forEach(([key, entry]) => {\n    if (typeof entry.timestamp === 'number' && \n        now - entry.timestamp > MEMORY_TTL) {\n      expiredKeys.push(key);\n    }\n  });\n  \n  for (const key of expiredKeys) {\n    ctx.memory.delete(key);\n    console.log(`🧹 Expired memory: ${key}`);\n  }\n}\n\n// Register in Mastra agent\nconst agentConfig = {\n  hooks: {\n    beforeExecute: [ttlMemoryHook]\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Structured Tool Response Wrapper",
+        "description": "Ensures all tool outputs are JSON-serializable before memory storage",
+        "code": "import { ToolResult, AgentContext } from 'mastra';\n\nfunction wrapToolResponse(result: ToolResult): ToolResult {\n  return {\n    ...result,\n    output: serializeSafely(result.output),\n    validated: true,\n    timestamp: Date.now()\n  };\n}\n\nfunction serializeSafely(data: unknown): string {\n  try {\n    // Convert to JSON-safe structure\n    const safeData = convertToSafeObject(data);\n    return JSON.stringify(safeData);\n  } catch (error) {\n    console.warn('Tool output serialization failed, using fallback:', error);\n    return JSON.stringify({ error: 'Serialization failed', rawType: typeof data });\n  }\n}\n\nfunction convertToSafeObject(data: unknown): unknown {\n  if (data === null || typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {\n    return data;\n  }\n  \n  if (Array.isArray(data)) {\n    return data.map(convertToSafeObject);\n  }\n  \n  if (typeof data === 'object') {\n    const obj = data as Record<string, unknown>;\n    const safe: Record<string, unknown> = {};\n    for (const [key, value] of Object.entries(obj)) {\n      safe[key] = convertToSafeObject(value);\n    }\n    return safe;\n  }\n  \n  return String(data);\n}\n\n// Mastra tool wrapper\nconst safeTool = {\n  ...originalTool,\n  execute: async (input) => {\n    const result = await originalTool.execute(input);\n    return wrapToolResponse(result);\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates as middleware in the Mastra agent pipeline, automatically detecting memory validation failures, stale context injection, and malformed tool outputs across all workflows. It provides real-time observability into memory state transitions and enforces schema validation at runtime without code changes. Vex's AI-powered analysis identifies root causes of memory corruption and auto-generates remediation workflows, reducing MTTR from hours to minutes.\n\nThe Vex SDK hooks into Mastra's AgentContext at key lifecycle points (beforeStep, afterToolCall, beforeMemoryStore), performing schema validation, staleness checks, and data lineage tracking. Issues trigger automated alerts with remediation code snippets and can execute auto-fixes via Mastra workflow overrides. Vex maintains a memory health dashboard showing corruption rates, TTL violations, and schema drift across deployments.\n\nConfiguration is declarative - define memory schemas once, and Vex handles validation everywhere. It integrates with Mastra's workflow versioning to ensure memory contracts evolve safely with agent updates.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { AgentContext, MastraAgent } from 'mastra';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  agentMemoryGuard: {\n    schemas: {\n      session: {\n        conversationId: 'string',\n        timestamp: 'number',\n        context: 'object'\n      }\n    },\n    ttlMs: 10 * 60 * 1000,\n    maxContextSize: 10000\n  }\n});\n\n// Install Vex middleware in Mastra pipeline\nconst agent = new MastraAgent({\n  middleware: [\n    vex.middleware({\n      onMemoryViolation: async (issue, ctx: AgentContext) => {\n        // Auto-remediate\n        ctx.memory.set('session', vex.sanitizeMemory(ctx.memory.get('session')));\n        \n        // Log to Vex dashboard\n        await vex.track('memory_fixed', {\n          workflowId: ctx.workflow.id,\n          issueType: issue.type,\n          sizeBefore: issue.sizeBefore,\n          sizeAfter: ctx.memory.size\n        });\n      }\n    })\n  ],\n  hooks: {\n    beforeStep: [vex.auditMemory],\n    afterToolCall: [vex.validateToolOutput]\n  }\n});\n\n// Vex auto-generates this monitoring query\nvex.monitor('memory-health', {\n  query: 'memory.schema_violations > 0 OR memory.stale_entries > 5',\n  action: 'auto_sanitize',\n  alert: {\n    slack: '#ai-ops',\n    severity: 'critical'\n  }\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in 5 minutes to eliminate memory management failures across all Mastra agents: npm install @vex_dev/sdk"
+    }
+  }
+}

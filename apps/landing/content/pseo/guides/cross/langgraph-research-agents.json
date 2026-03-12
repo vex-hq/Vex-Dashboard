@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with LangGraph + Vex Guardrails",
+    "description": "Learn how to build research agents with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph research agents",
+      "LangGraph guardrails",
+      "research agents reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "LangGraph enables building sophisticated Research Agents as stateful graphs for multi-step web search, analysis, and synthesis workflows. These cyclical agents handle complex tasks like information gathering and summarization but are prone to failures like infinite loops and state corruption. Vex provides essential guardrails to verify source accuracy, claim validity, recency, and bias, ensuring reliable outputs in production environments.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with LangGraph",
+      "description": "Research Agents in LangGraph are structured as directed graphs with nodes representing specialized agents: a Router for task decomposition, Search Agent for web queries, Analyzer for fact-checking, Synthesizer for summarization, and optional Human-in-the-loop for approval. Edges define conditional flows based on state, such as re-searching if confidence is low or escalating to human review. Checkpoints persist state across cycles, enabling long-running research sessions.\n\nThe workflow typically starts with a user query, routes to parallel search branches (web, academic, news), merges results with conflict resolution, then analyzes for accuracy and bias before final synthesis. This cyclical design supports iterative refinement until quality thresholds are met.\n\nState schema includes messages, sources, confidence scores, and metadata, with custom reducers for merging parallel branch outputs.",
+      "diagram": "┌─────────────┐    ┌──────────────┐\n│   User      │───▶│   Router     │\n│   Query     │    │ (Decompose)  │\n└─────────────┘    └──────┬───────┘\n                        │\n                ┌───────▼───────┐ ┌──────────────┐\n                │ Search Agent  │ │ Analyzer     │\n                │ (Tavily/Web)  │ │ (Fact-check) │\n                └──────┬───────┘ └──────────────┘\n                       │           ▲\n                ┌──────▼──────┐    │\n                │ Synthesizer │◀───┘\n                │ (Summary)   │\n                └──────┬───────┘\n                       │\n                ┌──────▼───────┐\n                │   Vex Node   │\n                │ (Verify)     │\n                └──────┬───────┘\n                       │\n                  ┌────▼────┐\n                  │Output   │\n                  └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Router conditions fail to exit research loop when search confidence never meets threshold",
+        "severity": "critical",
+        "mitigation": "Add Vex verification node with max_iterations state check before conditional edges"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Search agents return contradictory facts that corrupt summary state during merge",
+        "severity": "high",
+        "mitigation": "Use Vex source verification during state reduction to resolve conflicts"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "Adding confidence_score field breaks loaded checkpoints from previous runs",
+        "severity": "medium",
+        "mitigation": "Implement Vex schema validation wrapper around graph checkpoints"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "Low-confidence states route to auto-retry instead of human review",
+        "severity": "high",
+        "mitigation": "Vex enforces human-in-loop for medium-risk outputs regardless of graph routing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Agent Graph",
+        "description": "Core LangGraph structure with router, search, and synthesizer nodes",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.graph.message import add_messages\n\nfrom langchain_community.tools.tavily_search import TavilySearchResults\n\nclass ResearchState(TypedDict):\n    messages: Annotated[list, add_messages]\n    sources: list[str]\n    confidence: float\n    summary: str\n\n    \n# Simplified nodes\ndef router(state: ResearchState) -> str:\n    return \"search\" if state['confidence'] < 0.8 else \"synthesize\"\n\ndef search_node(state: ResearchState) -> ResearchState:\n    tool = TavilySearchResults(max_results=3)\n    return {\"sources\": tool.run(state['messages'][-1].content), \"confidence\": 0.7}\n\ndef synthesize_node(state: ResearchState) -> ResearchState:\n    state['summary'] = f\"Summary based on {len(state['sources'])} sources\"\n    return state\n\n# Build graph\ngraph = StateGraph(ResearchState)\ngraph.add_node(\"router\", router)\ngraph.add_node(\"search\", search_node)\ngraph.add_node(\"synthesize\", synthesize_node)\ngraph.add_conditional_edges(\"router\", router, {\"search\": \"search\", \"synthesize\": \"synthesize\"})\ngraph.set_entry_point(\"router\")\nresearch_graph = graph.compile(checkpointer=MemorySaver())",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Search Branches",
+        "description": "Multiple search agents running concurrently with state merging",
+        "code": "from langgraph.prebuilt import ToolNode\nfrom typing_extensions import Literal\n\n# Add parallel edges\ngraph.add_node(\"web_search\", web_search_node)\ngraph.add_node(\"academic_search\", academic_search_node)\n\ndef merge_sources(state: ResearchState) -> ResearchState:\n    all_sources = state['sources_web'] + state['sources_academic']\n    state['sources'] = list(set(all_sources))  # Dedupe\n    return state\n\ngraph.add_node(\"merge\", merge_sources)\ngraph.add_edge(\"router\", \"web_search\")\ngraph.add_edge(\"router\", \"academic_search\")\ngraph.add_edge(\"web_search\", \"merge\")\ngraph.add_edge(\"academic_search\", \"merge\")\ngraph.add_edge(\"merge\", \"analyze\")",
+        "language": "python"
+      },
+      {
+        "title": "State Schema with Confidence Tracking",
+        "description": "Enhanced state with verification metadata",
+        "code": "class VerifiedResearchState(TypedDict):\n    messages: Annotated[list, add_messages]\n    sources: list[dict]  # {url, snippet, recency_score}\n    claims: list[dict]   # {text, confidence, evidence}\n    confidence: float\n    bias_score: float\n    needs_human_review: bool\n    iteration_count: int\n\n    \ndef update_confidence(state: VerifiedResearchState) -> VerifiedResearchState:\n    avg_conf = sum(c['confidence'] for c in state['claims']) / len(state['claims'])\n    state['confidence'] = min(avg_conf, 1.0)\n    state['needs_human_review'] = state['confidence'] < 0.7\n    state['iteration_count'] += 1\n    return state",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Integration",
+        "description": "Conditional human review breakpoint",
+        "code": "def human_review_node(state: VerifiedResearchState) -> VerifiedResearchState:\n    if not state.get('needs_human_review', False):\n        return {\"next\": \"synthesize\"}\n    \n    # In production, this would call human review API\n    print(f\"ALERT: Human review needed. Confidence: {state['confidence']}\")\n    approval = input(\"Approve? (y/n): \")  # Simulated\n    state['approved'] = approval.lower() == 'y'\n    return state\n\ngraph.add_conditional_edges(\n    \"analyze\",\n    lambda state: \"human_review\" if state['needs_human_review'] else \"synthesize\",\n    {\"human_review\": \"human_review\", \"synthesize\": \"synthesize\"}\n)\ngraph.add_edge(\"human_review\", END)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex.verify()",
+        "description": "Simplest integration - verify final output",
+        "code": "from vex import verify\n\nresult = research_graph.invoke({\n    \"messages\": [{\"role\": \"user\", \"content\": \"Latest AI research breakthroughs?\"}],\n    \"confidence\": 0.0\n})\n\n# Vex verifies claims, sources, recency, bias\nverified_result = verify(\n    result['summary'],\n    context={\n        \"sources\": result['sources'],\n        \"use_case\": \"research_agent\",\n        \"checks\": [\"source_verification\", \"claim_accuracy\", \"recency\", \"bias_detection\"]\n    },\n    risk_profile=\"medium\"\n)\n\nif verified_result.status == \"approved\":\n    print(verified_result.output)\nelse:\n    print(f\"Blocked: {verified_result.issues}\")",
+        "language": "python"
+      },
+      {
+        "title": "Vex as Graph Verification Node",
+        "description": "Add Vex as intermediate node before synthesis",
+        "code": "from vex import Client\nvex_client = Client(api_key=\"your-vex-key\")\n\n@vex_node\ndef vex_verification_node(state: VerifiedResearchState) -> VerifiedResearchState:\n    response = vex_client.verify(\n        text=state['summary'],\n        context={\n            \"sources\": state['sources'],\n            \"confidence\": state['confidence'],\n            \"iteration\": state['iteration_count']\n        },\n        checks=[\n            \"source_verification\",\n            \"claim_accuracy\",\n            \"recency_checks\",\n            \"bias_detection\"\n        ]\n    )\n    \n    state['vex_score'] = response.score\n    state['vex_issues'] = response.issues\n    state['confidence'] = min(state['confidence'], response.score)\n    \n    if response.status != \"approved\":\n        state['needs_human_review'] = True\n    \n    return state\n\ngraph.add_node(\"vex_verify\", vex_verification_node)\ngraph.add_edge(\"analyze\", \"vex_verify\")\ngraph.add_conditional_edges(\"vex_verify\", \n    lambda s: \"human_review\" if s['needs_human_review'] else \"synthesize\")",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Infinite Loops with Vex Circuit Breaker",
+        "description": "Max iterations + quality gate",
+        "code": "def safe_router(state: VerifiedResearchState) -> Literal[\"search\", \"vex_verify\", END]:\n    if state['iteration_count'] >= 5:\n        return END  # Circuit breaker\n    \n    if state['confidence'] >= 0.85:\n        return \"synthesize\"\n    \n    return \"search\"\n\n@vex_node\ndef quality_gate_node(state: VerifiedResearchState) -> VerifiedResearchState:\n    # Vex final verification with strict thresholds\n    response = vex_client.verify(\n        state['summary'],\n        risk_profile=\"medium\",\n        min_score=0.8,\n        max_issues=2\n    )\n    \n    if response.status != \"approved\":\n        raise ValueError(f\"Quality gate failed: {response.issues}\")\n    \n    return state\n\ngraph.add_conditional_edges(\"router\", safe_router,\n    {\"search\": \"search\", \"synthesize\": \"quality_gate\", END: END})\ngraph.add_node(\"quality_gate\", quality_gate_node)\ngraph.add_edge(\"quality_gate\", END)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Research Agents",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your research agents from hallucinations, bias, and infinite loops."
+    }
+  }
+}

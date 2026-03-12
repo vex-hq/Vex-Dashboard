@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with LangGraph + Vex Guardrails",
+    "description": "Learn how to build data extraction with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph data extraction",
+      "LangGraph guardrails",
+      "data extraction reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "LangGraph enables building complex, stateful data extraction workflows from unstructured documents using schema-guided LLM calls in cyclical agent graphs. Guardrails are essential to prevent cyclic execution loops, state corruption during parallel extractions, and ensure extracted data meets schema compliance and accuracy requirements. Vex provides runtime verification to catch these failures before they cascade in production pipelines.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with LangGraph",
+      "description": "The typical LangGraph data extraction architecture starts with a document loader node that ingests unstructured text (PDFs, emails, reports). Router nodes then dispatch to parallel extraction branches for different schema sections (e.g., entities, dates, amounts), each invoking schema-guided LLMs. Results merge at a validator node that checks completeness and type consistency before human-in-the-loop review or final output.\n\nState is managed via LangGraph's checkpointing system, persisting extraction progress across cycles. Conditional edges handle retries for low-confidence extractions, while parallel branches enable efficient multi-field extraction. The graph cycles back for refinement when validation fails schema constraints.\n\nThis cyclical design maximizes extraction accuracy but introduces risks like infinite loops from misconfigured retry conditions and state corruption when merging conflicting parallel results.",
+      "diagram": "┌─────────────────┐\n│   Document      │\n│   Loader        │\n└─────────┬───────┘\n          │\n   ┌─────▼─────┐\n   │  Router   │\n   └─────┬─────┘\n         │         ┌──────────────┐\n    ┌────▼────┐ ┌──▼────────────▼──┐\n    │Entity   │ │Date/Amount    │ │Contact Info │\n    │Extractor│ │Extractor      │ │Extractor    │\n    └────┬────┘ └─┬────────────┬──┘ └───────────┘\n         │         │            │\n         └─────────┼────────────┘\n                   │\n            ┌──────▼──────┐\n            │ Merge &     │\n            │ Validate    │\n            └──────┬──────┘\n                   │\n              ┌────▼────┐\n              │ Human   │──────┐\n              │ Review  │      │\n              └────────┘      │\n                             ▼\n                       ┌─────────────┐\n                       │ Final       │\n                       │ Output      │\n                       └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Misconfigured retry conditions on low-confidence extractions trigger endless cycles",
+        "severity": "critical",
+        "mitigation": "Wrap invoke() with vex.verify() to detect loop thresholds"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Entity extractor and amount extractor produce conflicting values for same field",
+        "severity": "high",
+        "mitigation": "Add Vex merge node to validate field consistency before state update"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "Evolving extraction schemas break compatibility with saved checkpoints",
+        "severity": "medium",
+        "mitigation": "Vex schema validation prevents deserialization of incompatible states"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "High-confidence paths skip required human review for critical fields",
+        "severity": "high",
+        "mitigation": "Vex enforces breakpoint execution regardless of confidence routing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Schema-Guided Extraction Graph",
+        "description": "Core LangGraph workflow for extracting structured data from documents using Pydantic schemas",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.graph.message import add_messages\nfrom pydantic import BaseModel, Field\n\nfrom langchain_openai import ChatOpenAI\n\nclass ExtractionState(TypedDict):\n    document: str\n    entities: dict\n    confidence: float\n    messages: Annotated[list, add_messages]\n\nclass Entity(BaseModel):\n    name: str = Field(..., description=\"Person/organization name\")\n    role: str = Field(..., description=\"Role/position\")\n\nllm = ChatOpenAI(model=\"gpt-4o-mini\")\n\ndef extract_entities(state: ExtractionState):\n    prompt = f\"\"\"Extract entities from: {state['document']}\nOutput JSON only.\"\"\"\n    chain = llm.with_structured_output(Entity, method=\"json_mode\")\n    result = chain.invoke(prompt)\n    return {\"entities\": result.dict(), \"confidence\": 0.85}\n\ndef router(state: ExtractionState):\n    return \"end\" if state['confidence'] > 0.8 else \"retry\"\n\nworkflow = StateGraph(state_schema=ExtractionState)\nworkflow.add_node(\"extract\", extract_entities)\nworkflow.add_node(\"retry\", lambda x: x)\nworkflow.set_entry_point(\"extract\")\nworkflow.add_conditional_edges(\"extract\", router, {\"retry\": \"retry\", \"end\": END})\napp = workflow.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Multi-Field Extraction",
+        "description": "Extract multiple schema sections in parallel branches for efficiency",
+        "code": "from typing import TypedDict, Dict, Any\nfrom langgraph.graph import StateGraph, END\n\nclass ExtractionState(TypedDict):\n    document: str\n    entities: dict\n    dates: dict\n    amounts: dict\n    complete: bool\n\nasync def extract_entities(state):\n    # Mock LLM extraction\n    return {\"entities\": {\"John Doe\": \"CEO\"}}\n\nasync def extract_dates(state):\n    return {\"dates\": {\"report_date\": \"2024-01-15\"}}\n\nasync def extract_amounts(state):\n    return {\"amounts\": {\"revenue\": 1250000}}\n\ndef merge_results(state):\n    return {\"complete\": True}\n\ngraph = StateGraph(ExtractionState)\n\n# Add parallel extraction nodes\ngraph.add_node(\"entities\", extract_entities)\ngraph.add_node(\"dates\", extract_dates)\ngraph.add_node(\"amounts\", extract_amounts)\ngraph.add_node(\"merge\", merge_results)\n\n# Fan-out to parallel extraction\ngraph.set_entry_point(\"entities\")\ngraph.add_edge(\"entities\", \"dates\")\ngraph.add_edge(\"dates\", \"amounts\")\ngraph.add_edge(\"amounts\", \"merge\")\ngraph.add_edge(\"merge\", END)\n\napp = graph.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Confidence-Based Retry Loop",
+        "description": "Cyclical refinement for low-confidence extractions with max iterations",
+        "code": "from typing import TypedDict\nfrom langgraph.graph import StateGraph, END\n\nclass ExtractionState(TypedDict):\n    document: str\n    result: dict\n    confidence: float\n    attempts: int\n\nMAX_ATTEMPTS = 3\n\ndef extract_with_retry(state: ExtractionState):\n    attempts = state.get('attempts', 0) + 1\n    confidence = 0.7 + (0.1 * attempts)  # Mock improvement\n    \n    return {\n        'result': {'entities': ['John Doe']},\n        'confidence': min(confidence, 0.95),\n        'attempts': attempts\n    }\n\ndef should_retry(state: ExtractionState):\n    return \"retry\" if state['confidence'] < 0.9 and state['attempts'] < MAX_ATTEMPTS else END\n\ngraph = StateGraph(ExtractionState)\ngraph.add_node(\"extract\", extract_with_retry)\ngraph.set_entry_point(\"extract\")\ngraph.add_conditional_edges(\"extract\", should_retry)\napp = graph.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Pydantic Schema Enforcement",
+        "description": "Strict type validation using Pydantic models for extraction output",
+        "code": "from pydantic import BaseModel, Field, validator\nfrom typing import List\nfrom langchain_core.output_parsers import PydanticOutputParser\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., pattern=r'^INV-\\d{6}')\n    date: str = Field(..., regex=r'^\\d{4}-\\d{2}-\\d{2}')\n    total: float = Field(..., gt=0)\n    line_items: List[dict] = Field(..., min_items=1)\n\n    @validator('total')\n    def total_must_be_positive(cls, v):\n        if v <= 0:\n            raise ValueError('Total must be positive')\n        return v\n\nparser = PydanticOutputParser(pydantic_object=Invoice)\nprompt = parser.get_format_instructions()\n\n# Usage in LangGraph node:\ndef extract_invoice(state):\n    llm_chain = llm.with_structured_output(Invoice)\n    result = llm_chain.invoke(state['document'])\n    return {'extraction': result.dict()}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex Verification",
+        "description": "Catch cyclic execution and schema violations at the graph boundary",
+        "code": "import vex\nfrom langgraph.checkpoint.memory import MemorySaver\n\n# Your compiled LangGraph app\napp = workflow.compile(checkpointer=MemorySaver())\n\n# Vex verification spec for data extraction\nverify_spec = {\n    \"name\": \"data_extraction\",\n    \"asserts\": [\n        {\"type\": \"schema_compliance\", \"schema\": Invoice.model_json_schema()},\n        {\"type\": \"field_accuracy\", \"fields\": [\"invoice_number\", \"total\"], \"min_confidence\": 0.9},\n        {\"type\": \"completeness\", \"required_fields\": [\"line_items\", \"date\"]},\n        {\"type\": \"no_cycles\", \"max_iterations\": 10}\n    ]\n}\n\n# Wrap invoke with Vex\nresult = vex.verify(\n    app.invoke,\n    config=verify_spec,\n    input={\"document\": \"Invoice INV-123456 dated 2024-01-15 total $1250...\"},\n    threshold=\"medium\"\n)\n\nif result['verified']:\n    print('Extraction verified:', result['output'])\nelse:\n    print('Blocked:', result['failures'])",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node for Merge Validation",
+        "description": "Add Vex as graph node to validate parallel branch merges",
+        "code": "import vex\n\nfrom langgraph.graph import StateGraph\n\n@vex.node(\n    name=\"validate_merge\",\n    spec={\n        \"asserts\": [\n            {\"type\": \"field_consistency\", \"fields\": [\"entities.name\", \"amounts.entity\"]},\n            {\"type\": \"type_consistency\", \"schema\": Invoice.model_json_schema()},\n            {\"type\": \"completeness\", \"min_fields\": 3}\n        ]\n    }\n)\ndef validate_extraction_merge(state):\n    merged = {\n        **state.get('entities', {}),\n        **state.get('dates', {}),\n        **state.get('amounts', {})\n    }\n    \n    # Vex automatically validates and returns verdict\n    return {\n        'merged_extraction': merged,\n        'validation_passed': True\n    }\n\n# Add to graph\ngraph.add_node(\"validate\", validate_extraction_merge)\ngraph.add_edge(\"amounts\", \"validate\")",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop with Vex Enforcement",
+        "description": "Ensure breakpoints execute regardless of confidence routing",
+        "code": "import vex\n\n@vex.node(\n    name=\"human_review\",\n    spec={\n        \"asserts\": [\n            {\"type\": \"critical_field_present\", \"fields\": [\"total\", \"invoice_number\"]},\n            {\"type\": \"confidence_below_threshold\", \"max_confidence\": 0.95}\n        ],\n        \"enforce_breakpoint\": True\n    },\n    timeout=3600  # 1 hour for human review\n)\ndef human_review_node(state):\n    extraction = state['extraction']\n    \n    print(f\"🚨 HUMAN REVIEW NEEDED: {extraction}\")\n    print(\"Waiting for approval...\")\n    \n    # Simulate human approval\n    approved = input(\"Approve? (y/n): \") == 'y'\n    \n    if approved:\n        return {'extraction': extraction, 'approved': True}\n    else:\n        raise ValueError(\"Human rejected extraction\")\n\n# Add to graph with Vex enforcement\ngraph.add_node(\"human_review\", human_review_node)\ngraph.add_conditional_edges(\"validate\", \n    lambda x: \"human_review\" if x.get('confidence', 0) < 0.95 else END,\n    {\"human_review\": \"human_review\", \"approved\": END}\n)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Data Extraction",
+      "description": "Install Vex today with `pip install vex-sdk` and verify your first extraction pipeline in minutes."
+    }
+  }
+}

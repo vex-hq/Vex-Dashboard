@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "agno",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Agno Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Agno agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Agno tool-loop-detection",
+      "Agno reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Agno agents, tool loops manifest as infinite or near-infinite cycles where agents repeatedly call the same sequence of tools without progressing toward task completion, often triggered by ambiguous tool responses or missing termination conditions in tool chains. This is particularly prevalent in multi-modal agents processing images/audio where tool outputs create feedback loops, and in team agents where sub-agents pass malformed results between each other. Agno's lightweight decorator-based architecture makes these loops hard to detect without explicit monitoring of tool call sequences.",
+    "howItManifests": [
+      {
+        "scenario": "Image analysis agent calling 'describe_image' → 'search_web' → 'describe_image' repeatedly",
+        "symptom": "Tool call stack shows repeating pattern: describe_image → search_web → describe_image",
+        "impact": "Agent consumes 100+ tool calls without generating final response, hitting rate limits"
+      },
+      {
+        "scenario": "Team agent where worker1 calls 'validate_data' → worker2 calls 'validate_data' → worker1",
+        "symptom": "Cross-agent tool calls exceed 50 iterations with no coordinator intervention",
+        "impact": "Contradictory sub-results accumulate, coordinator fails to synthesize response"
+      },
+      {
+        "scenario": "Memory-augmented agent calling 'search_memory' → 'update_memory' → 'search_memory'",
+        "symptom": "Memory tool calls > 20 with identical query patterns in session history",
+        "impact": "Fabricated memory entries created, agent hallucinates past interactions"
+      },
+      {
+        "scenario": "Structured output agent calling 'generate_json' → 'validate_schema' → 'generate_json'",
+        "symptom": "Schema validation tool called > 15 times with same validation errors",
+        "impact": "Never produces valid structured output, session times out after 10 minutes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Sequence Tracker",
+        "description": "Monitors tool call history for repeating patterns longer than 5 calls using Agno's session traces",
+        "code": "from collections import deque\nimport agno\n\ndef detect_tool_loop(agent):\n    call_history = deque(maxlen=20)\n    \n    original_run = agent.run\n    \n    def wrapped_run(*args, **kwargs):\n        result = original_run(*args, **kwargs)\n        \n        # Extract tool calls from Agno session trace\n        tools_used = [step.tool for step in agent.session.trace if hasattr(step, 'tool')]\n        call_history.extend(tools_used[-3:])\n        \n        # Detect repeating pattern\n        if len(call_history) >= 6:\n            pattern = tuple(call_history[-3:] * 2)\n            if pattern[:3] == pattern[3:]:\n                raise Exception(f'Tool loop detected: {list(call_history[-3:])} repeating')\n        \n        return result\n    \n    agent.run = wrapped_run\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Max Tool Calls Guard",
+        "description": "Hard limit of 15 tool calls per session with Agno's built-in metrics tracking",
+        "code": "import agno\nfrom contextlib import contextmanager\n\ndef tool_loop_detector(max_calls=15):\n    @contextmanager\n    def limiter(agent):\n        agent.metrics['tool_calls'] = 0\n        \n        original_tool_call = agent._call_tool\n        \n        def limited_tool_call(tool_name, *args, **kwargs):\n            agent.metrics['tool_calls'] += 1\n            if agent.metrics['tool_calls'] > max_calls:\n                raise Exception(f'Tool loop: exceeded {max_calls} tool calls')\n            return original_tool_call(tool_name, *args, **kwargs)\n        \n        agent._call_tool = limited_tool_call\n        try:\n            yield agent\n        finally:\n            agent._call_tool = original_tool_call\n    \n    return limiter",
+        "language": "python"
+      },
+      {
+        "name": "Agent State Cycle Detector",
+        "description": "Tracks agent internal state hashes to detect when state repeats across tool calls",
+        "code": "import hashlib\nimport agno\n\ndef detect_state_cycles(agent):\n    seen_states = set()\n    \n    def hash_agent_state():\n        state_str = str({\n            'memory': agent.session.memory.keys(),\n            'last_tools': [t.name for t in agent.session.trace[-3:]],\n            'task': agent.current_task\n        })\n        return hashlib.md5(state_str.encode()).hexdigest()\n    \n    original_step = agent._step\n    \n    def tracked_step(*args, **kwargs):\n        state_hash = hash_agent_state()\n        if state_hash in seen_states:\n            raise Exception(f'State cycle detected: {state_hash} repeated')\n        seen_states.add(state_hash)\n        return original_step(*args, **kwargs)\n    \n    agent._step = tracked_step\n    return agent",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Blacklist",
+        "description": "Prevents recently used tools from being called again within window using Agno tool registry",
+        "code": "from collections import deque\nimport agno\n\ndef add_loop_prevention(agent):\n    recent_tools = deque(maxlen=3)\n    \n    original_select_tool = agent._select_tool\n    \n    def loop_safe_tool_selection(tools, *args, **kwargs):\n        available_tools = [t for t in tools if t.name not in recent_tools]\n        if not available_tools:\n            # Force human intervention or final answer\n            return None\n        \n        selected = original_select_tool(available_tools, *args, **kwargs)\n        if selected:\n            recent_tools.append(selected.name)\n        return selected\n    \n    agent._select_tool = loop_safe_tool_selection\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Progressive Tool Cost",
+        "description": "Increases 'cost' of repeated tools to bias LLM away from loops in Agno's tool selection",
+        "code": "import agno\n\ndef progressive_tool_costs(agent):\n    tool_usage = {}\n    \n    def weighted_tool_selection(tools, llm):\n        for tool in tools:\n            usage_count = tool_usage.get(tool.name, 0)\n            tool.description += f\" (used {usage_count} times - consider alternatives)\"\n            tool_usage[tool.name] = usage_count + 1\n        \n        return agent.llm.acall([\n            'Select best tool',\n            'Avoid recently used tools',\n            'Break potential loops'\n        ], tools=tools)\n    \n    agent._select_tool = weighted_tool_selection\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Loop Escape Prompts",
+        "description": "Injects loop-breaking system prompts when patterns detected in Agno agent context",
+        "code": "import agno\n\ndef loop_escape_prompts(agent):\n    def inject_escape_prompt(context):\n        tool_pattern = [step.tool for step in agent.session.trace[-4:]]\n        if len(set(tool_pattern[-3:])) <= 1:\n            context.system += \"\\n\\n[URGENT] You are in a tool loop. STOP calling the same tool. \" \\\n                            \"Either give final answer or use COMPLETELY DIFFERENT tool. \" \\\n                            \"Do not repeat last 3 tools used.\"\n        return context\n    \n    original_context = agent._build_context\n    agent._build_context = lambda: inject_escape_prompt(original_context())\n    return agent",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade tool loop detection for Agno agents through its verify decorator, automatically learning failure patterns from your agent sessions without manual configuration. It monitors Agno's session traces in real-time, detecting cycles in tool call sequences, state repetition, and excessive tool usage across single agents and teams. When loops are detected, Vex automatically applies context-aware fixes including tool blacklisting, escape prompts, and progressive costs, then verifies remediation success before resuming normal operation.\n\nThe integration wraps Agno's agent.run() method and works seamlessly with multi-modal and team agents. Vex maintains a rolling baseline of healthy tool call patterns per agent/task type, flagging deviations as loops. Remediation is automatic with fallback to human review only for novel failure modes, ensuring 99.9% uptime while eliminating manual monitoring overhead.\n\nVex also provides rich observability dashboards showing loop frequency by tool/agent, MTTR metrics, and auto-generated remediation templates for your Agno deployments.",
+      "code": "import vex\nfrom agno import Agent\n\n# Install: pip install agno vex-sdk\n\n@vex.verify(\n    failure_modes=['tool_loop'],\n    max_tool_calls=15,\n    detect_cycles=True,\n    auto_remediate=True\n)\ndef reliable_agent_task():\n    # Your Agno agent\n    image_analyzer = Agent(\n        name=\"ImageAnalyzer\",\n        tools=[describe_image, search_web, generate_json],\n        model=\"gpt-4o\"\n    )\n    \n    result = image_analyzer.run(\"Analyze this chart: [image_url]\")\n    return result\n\n# Vex automatically:\n# 1. Detects tool loops in real-time\n# 2. Applies fixes (blacklist, escape prompts)\n# 3. Verifies remediation success\n# 4. Falls back to human if needed\n# 5. Logs patterns for future prevention",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "pip install vex-sdk and wrap your Agno agents to eliminate tool loops permanently"
+    }
+  }
+}

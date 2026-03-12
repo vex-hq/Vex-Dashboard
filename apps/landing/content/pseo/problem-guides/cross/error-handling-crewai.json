@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in CrewAI Agents",
+    "description": "How to detect and fix ai agent error handling patterns in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "CrewAI error-handling",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, AI Agent Error Handling Patterns manifest as cascading failures in multi-agent workflows where agents fail to properly handle errors from tools, delegation, or task outputs, leading to infinite loops and degraded performance. Common issues include delegation loops between crew members, hallucinated tool outputs propagating unchecked, task drift from reinterpreted objectives, and inconsistent output quality across roles. These problems arise due to CrewAI's autonomous agent delegation and lack of built-in error recovery mechanisms.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly delegate the same task back and forth without progress",
+        "impact": "Infinite loops consuming API credits and timeout failures"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agents accept and propagate nonsensical tool responses without validation",
+        "impact": "Downstream agents produce irrelevant or incorrect final outputs"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Agents deviate from original task scope during delegation handoffs",
+        "impact": "Final deliverables miss core requirements despite task completion"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Different agents produce varying quality/formats despite shared instructions",
+        "impact": "Crew output requires manual reconciliation and loses reliability"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Delegation Loop Detector",
+        "description": "Monitors task delegation patterns to detect circular references between agents",
+        "code": "from crewai import Task\ndef detect_delegation_loops(task: Task, history: list) -> bool:\n    current_agent = task.agent.name\n    recent_delegations = [h['agent'] for h in history[-5:] if 'agent' in h]\n    loop_count = recent_delegations.count(current_agent)\n    return loop_count > 2\n\n# Usage in callback\n# if detect_delegation_loops(task, task_history): raise Exception('Delegation loop detected')",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Output Validator",
+        "description": "Checks tool outputs for common hallucination patterns using regex and entropy",
+        "code": "import re\nfrom collections import Counter\ndef validate_tool_output(output: str) -> bool:\n    hallucination_patterns = [\n        r'\\b(I\\s+(don\\'t|cannot|unable)\\s+know)\\b',\n        r'\\b(error|failure|exception)\\b',\n        r'\\b(404|500|not found)\\b'\n    ]\n    for pattern in hallucination_patterns:\n        if re.search(pattern, output, re.IGNORECASE):\n            return False\n    \n    # Entropy check for gibberish\n    chars = [c for c in output.lower() if c.isalpha()]\n    if len(chars) > 10:\n        entropy = -sum((count/len(chars)) * (count/len(chars)).log() \n                      for count in Counter(chars).values())\n        return entropy > 2.5\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Task Drift Monitor",
+        "description": "Compares current task description against original objective using semantic similarity",
+        "code": "from crewai import Task\nfrom sentence_transformers import SentenceTransformer, util\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\ndef detect_task_drift(current_task: Task, original_objective: str, threshold=0.7) -> bool:\n    current_desc = current_task.description\n    embeddings = model.encode([original_objective, current_desc])\n    similarity = util.cos_sim(embeddings[0], embeddings[1]).item()\n    return similarity < threshold\n\n# Usage\n# if detect_task_drift(task, crew_objective): print('Task drift detected')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Delegation Circuit Breaker",
+        "description": "Implements max delegation depth and agent blacklisting to prevent loops",
+        "code": "from crewai import Agent, Task, Crew\nfrom typing import Dict, Set\n\nclass LoopSafeCrew(Crew):\n    def __init__(self, *args, max_delegations=3, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.delegation_counts: Dict[str, int] = {}\n        self.max_delegations = max_delegations\n        self.blacklisted_pairs: Set[tuple] = set()\n    \n    def safe_delegate(self, from_agent: str, to_agent: str, task: Task) -> bool:\n        pair = (from_agent, to_agent)\n        if pair in self.blacklisted_pairs:\n            return False\n        \n        self.delegation_counts[to_agent] = self.delegation_counts.get(to_agent, 0) + 1\n        if self.delegation_counts[to_agent] > self.max_delegations:\n            self.blacklisted_pairs.add(pair)\n            return False\n        return True",
+        "language": "python"
+      },
+      {
+        "name": "Output Validation Guardrails",
+        "description": "Validates and sanitizes tool outputs before agent consumption",
+        "code": "from crewai import Task\n\ndef create_validation_task(original_task: Task) -> Task:\n    return Task(\n        description=f\"\"\"\n        Validate the previous tool output before proceeding.\n        Original task: {original_task.description}\n        Tool output: {{previous_output}}\n        \n        Respond with VALID or INVALID.\n        If INVALID, explain why and suggest correction.\n        \"\"\"\",\n        agent=original_task.agent,\n        context=[original_task],\n        expected_output=\"VALID or INVALID with explanation\"\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Role-Consistent Output Formatter",
+        "description": "Enforces consistent output format across all crew agents",
+        "code": "from crewai import Agent\n\ndef create_output_formatter_agent() -> Agent:\n    return Agent(\n        role='Output Formatter',\n        goal='Ensure all crew outputs follow consistent JSON format',\n        backstory='''You are the quality gate for all crew outputs.\n        Convert any content into valid JSON with these required fields:\n        - \"status\": \"success\"|\"warning\"|\"error\"\n        - \"content\": main output\n        - \"confidence\": 0.0-1.0\n        - \"sources\": list of sources used''',\n        verbose=True,\n        allow_delegation=False\n    )\n\n# Add as final crew task\nfinal_format_task = Task(\n    description=\"Format final crew output as JSON\",\n    agent=create_output_formatter_agent()\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback step in CrewAI tasks, automatically detecting delegation loops, hallucinated outputs, task drift, and output inconsistency in real-time. By monitoring agent interactions and tool outputs through CrewAI's task execution lifecycle, Vex applies ML-powered anomaly detection trained specifically on multi-agent failure patterns. When issues are detected, Vex can automatically trigger recovery workflows, reroute tasks to specialist agents, or apply format corrections without human intervention.\n\nThe integration requires only pip install crewai vex-sdk and a single callback decorator per task. Vex maintains state across crew execution, tracking delegation graphs and output quality metrics to provide comprehensive error observability. Remediation happens inline - blocking problematic delegations, injecting validation tasks, or reformatting outputs before they propagate through the crew.",
+      "code": "from crewai import Task, Crew\nfrom vex_sdk import VexMonitor\n\n# Initialize Vex monitor\nvex = VexMonitor(api_key=\"your-vex-api-key\")\n\n# Apply to all tasks\n@vex.monitor_agent_errors(\n    patterns=[\"delegation_loop\", \"hallucination\", \"task_drift\", \"output_inconsistency\"],\n    auto_remediate=True\n)\ndef monitored_task(description: str, agent, **kwargs) -> Task:\n    return Task(\n        description=description,\n        agent=agent,\n        **kwargs\n    )\n\n# Usage in crew\nresearcher = Agent(role='Researcher', goal='...')\nwriter = Agent(role='Writer', goal='...')\n\ntasks = [\n    monitored_task(\"Research topic X\", researcher),\n    monitored_task(\"Write report\", writer)\n]\n\ncrew = Crew(agents=[researcher, writer], tasks=tasks)\nresult = crew.kickoff()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with pip install vex-sdk and eliminate CrewAI error patterns in one line of code."
+    }
+  }
+}

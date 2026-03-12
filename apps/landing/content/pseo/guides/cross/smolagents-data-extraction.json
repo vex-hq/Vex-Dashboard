@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Smolagents + Vex Guardrails",
+    "description": "Learn how to build data extraction with Smolagents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Smolagents data extraction",
+      "Smolagents guardrails",
+      "data extraction reliability",
+      "Vex Smolagents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Smolagents simplifies building lightweight agents for tasks like data extraction from unstructured documents using schema-guided LLM reasoning. However, its code-based approach exposes risks like unsafe code generation and schema non-compliance that can lead to inaccurate or incomplete extractions. Vex provides runtime verification to ensure schema compliance, field accuracy, and type consistency, making your agents production-ready.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Smolagents",
+      "description": "Smolagents agents typically consist of a code agent that generates Python functions for parsing unstructured text and a tool agent that calls LLM-powered extraction tools guided by JSON schemas. The workflow starts with document ingestion, followed by schema-defined extraction where the agent reasons step-by-step to populate fields like names, dates, and amounts. Multi-step reasoning handles complex documents by breaking extraction into sequential tool calls, but lacks built-in validation.\n\nThe lightweight design emphasizes minimal dependencies, using Hugging Face models for reasoning and Pydantic-like schemas for structured output. Agents execute generated code directly, making verification critical for production use cases like invoice processing or contract analysis. Vex wraps the agent.run() call to validate outputs against predefined checks before returning results.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Unstructured    │───▶│ Smolagents       │\n│ Document        │    │ - Code Agent     │\n└─────────────────┘    │ - Tool Agent     │\n                      │ - Schema Tools   │───▶┌──────────────┐\n                      └──────────────────┘    │ Vex Verify    │\n                                               │ - Schema      │\n                                               │ - Accuracy    │\n                                               │ - Completeness│\n                                               └──────────────┘\n                                                      │\n                                                      ▼\n                                               ┌──────────────┐\n                                               │ Validated    │\n                                               │ Extraction   │\n                                               └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unsafe Python Execution",
+        "description": "Code agent generates malicious or infinite-loop code during extraction",
+        "severity": "critical",
+        "mitigation": "Wrap agent.run() with Vex sandboxed execution"
+      },
+      {
+        "name": "Schema Non-Compliance",
+        "description": "Extracted fields missing required properties or wrong types",
+        "severity": "high",
+        "mitigation": "Vex schema compliance checks with Pydantic validation"
+      },
+      {
+        "name": "Field Accuracy Errors",
+        "description": "LLM hallucinates values not present in source document",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks against source text"
+      },
+      {
+        "name": "Incomplete Extractions",
+        "description": "Multi-step reasoning drops fields in long documents",
+        "severity": "medium",
+        "mitigation": "Vex completeness validation ensuring all schema fields populated"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Schema",
+        "description": "Create Pydantic model defining expected output structure for invoice extraction",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional, List\n\nclass InvoiceLineItem(BaseModel):\n    description: str = Field(..., min_length=1)\n    quantity: float\n    unit_price: float\n    total: float\n\nclass Invoice(BaseModel):\n    invoice_number: str\n    date: str\n    customer_name: str\n    line_items: List[InvoiceLineItem]\n    subtotal: float\n    tax: Optional[float] = 0.0\n    total: float",
+        "language": "python"
+      },
+      {
+        "title": "Create Extraction Tool",
+        "description": "Define Smolagents tool that uses LLM to extract structured data",
+        "code": "from smolagents import tool\nfrom smolagents.llm import OpenAI\n\nllm = OpenAI(model='gpt-4o-mini')\n\n@tool\ndef extract_invoice(text: str, schema: str) -> str:\n    '''Extract invoice data from text using provided schema'''\n    prompt = f\"\"\"Extract invoice data from this text using the schema:\n{schema}\n\nText: {text}\n\nReturn ONLY valid JSON:\"\"\"\n    return llm.invoke(prompt)",
+        "language": "python"
+      },
+      {
+        "title": "Build Extraction Agent",
+        "description": "Configure Smolagents with extraction tools and schema guidance",
+        "code": "from smolagents import Agent\nfrom pydantic import BaseModel\n\nclass Invoice(BaseModel):\n    # ... schema from step 1\n\nagent = Agent(\n    tools=[extract_invoice],\n    llm=llm,\n    instructions=\"\"\"You extract invoice data from documents.\n    Always return complete, valid JSON matching the schema.\n    Never hallucinate values not in the source text.\"\"\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Basic Agent Execution",
+        "description": "Run agent without verification (shows why Vex is needed)",
+        "code": "invoice_text = \"\"\"\nInvoice #12345\nDate: 2024-10-15\nCustomer: Acme Corp\n\nItem: Widget A, Qty: 2, $50.00 = $100.00\nItem: Widget B, Qty: 1, $75.00 = $75.00\n\nSubtotal: $175.00\nTax: $14.00\nTotal: $189.00\n\"\"\"\n\nresult = agent.run(f\"Extract this invoice: {invoice_text}\")\nprint(result)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap with Vex Verify",
+        "description": "Basic integration wrapping agent.run() with schema validation",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        vex.schema(Invoice),\n        vex.field_present('invoice_number'),\n        vex.field_present('line_items')\n    ]\n)\ndef safe_extract_invoice(text: str) -> Invoice:\n    raw_result = agent.run(f\"Extract this invoice: {text}\")\n    return Invoice.model_validate_json(raw_result)\n\nverified_invoice = safe_extract_invoice(invoice_text)",
+        "language": "python"
+      },
+      {
+        "title": "Add Accuracy Checks",
+        "description": "Verify extracted values appear in source document",
+        "code": "@vex.verify(\n    checks=[\n        vex.schema(Invoice),\n        vex.accuracy('customer_name', source_text=invoice_text, threshold=0.9),\n        vex.accuracy('invoice_number', source_text=invoice_text, threshold=0.95),\n        vex.range_check('total', min=0, max=10000)\n    ],\n    risk_profile='medium'\n)\ndef verified_extract(text: str) -> Invoice:\n    result = agent.run(f\"Extract invoice: {text}\")\n    return Invoice.model_validate_json(result)",
+        "language": "python"
+      },
+      {
+        "title": "Complete Production Pipeline",
+        "description": "Full pipeline with completeness, type, and safety checks",
+        "code": "@vex.verify(\n    checks=[\n        vex.schema(Invoice, strict=True),\n        vex.completeness(['invoice_number', 'date', 'total']),\n        vex.type_consistency(['quantity', 'unit_price'], float),\n        vex.length_check('customer_name', min=2),\n        vex.sandbox_code()  # Prevents unsafe execution\n    ],\n    fallback='retry',\n    max_retries=3\n)\ndef production_extract(text: str) -> Invoice:\n    return Invoice.model_validate_json(agent.run(f\"Extract: {text}\"))\n\n# Usage\nresult = production_extract(invoice_text)\nprint(result.model_dump_json(indent=2))",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Smolagents Data Extraction",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your agents to eliminate extraction failures."
+    }
+  }
+}

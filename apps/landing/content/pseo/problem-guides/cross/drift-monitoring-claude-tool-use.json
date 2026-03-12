@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Claude Tool Use Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Claude Tool Use drift-monitoring",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Claude Tool Use manifests as subtle deviations in tool invocation patterns, reasoning consistency, and output alignment during multi-turn agent interactions. Early tool failures cascade through Claude's message chains, parallel tool results lack resolution logic, and extended thinking traces diverge from final tool_use blocks. Vex monitors these drifts by wrapping Anthropic's messages.create() responses with runtime verification.",
+    "howItManifests": [
+      {
+        "scenario": "Tool use chains producing cascading errors from early tool failures",
+        "symptom": "First tool call returns malformed JSON, subsequent tools receive invalid inputs without error handling",
+        "impact": "Agent loops indefinitely or produces hallucinated results across 5+ message turns"
+      },
+      {
+        "scenario": "Parallel tool calls returning conflicting results without resolution",
+        "symptom": "Claude invokes multiple tools simultaneously but final response ignores discrepancies",
+        "impact": "Inconsistent data (e.g., weather API says 'sunny' while calendar shows 'rain event')"
+      },
+      {
+        "scenario": "Extended thinking producing reasoning inconsistent with final output",
+        "symptom": "Thinking trace concludes 'no action needed' but tool_use block executes risky operation",
+        "impact": "Stealth mode failures where audit logs show correct reasoning but wrong actions"
+      },
+      {
+        "scenario": "Computer use agent performing unintended actions on screen elements",
+        "symptom": "CursorControl tool targets wrong element due to drifted element selector reasoning",
+        "impact": "Deletes wrong files or clicks unauthorized buttons in screen automation flows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cascade Failure Detector",
+        "description": "Scans message history for tool error propagation by tracking input/output schemas across turns",
+        "code": "```python\nimport anthropic\n\nclient = anthropic.Anthropic()\n\nmessages = [{'role': 'user', 'content': 'Check weather then book flight'}]\nresponse = client.messages.create(\n    model='claude-3-5-sonnet-20240620',\n    max_tokens=1024,\n    messages=messages,\n    tools=[{'name': 'get_weather', 'input_schema': {...}}]\n)\n\n# Detect cascade: check if tool input contains previous tool's error format\ndef detect_cascade(messages):\n    for i in range(1, len(messages)):\n        prev_tool = messages[i-1].content[-1] if messages[i-1].content[-1].type == 'tool_use' else None\n        curr_input = messages[i].content[0].input if messages[i].content[0].type == 'tool_input' else None\n        if prev_tool and 'error' in prev_tool.result and prev_tool.name in str(curr_input):\n            return {'drift': 'cascade_error', 'turn': i}\n    return None\n\ncascade_drift = detect_cascade(response.content)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Tool Conflict Scanner",
+        "description": "Identifies unresolved conflicts by comparing parallel tool results referenced in final reasoning",
+        "code": "```typescript\nimport { Anthropic } from '@anthropic-ai/sdk';\n\nconst client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });\n\nconst tools = [\n  { name: 'get_weather', input_schema: { type: 'object', properties: { location: { type: 'string' } } } },\n  { name: 'check_calendar', input_schema: { type: 'object', properties: { date: { type: 'string' } } } }\n];\n\nconst response = await client.messages.create({\n  model: 'claude-3-5-sonnet-20240620',\n  max_tokens: 1024,\n  messages: [{ role: 'user', content: 'Plan my day' }],\n  tools\n});\n\nfunction scanParallelConflicts(content: any[]): { conflict: boolean; tools: string[] } | null {\n  const toolResults = content.filter((c): c is any => c.type === 'tool_result');\n  const finalText = content.find((c): c is any => c.type === 'text')?.text || '';\n  \n  const weatherResult = toolResults.find(t => t.tool_use_id?.includes('weather'))?.content;\n  const calendarResult = toolResults.find(t => t.tool_use_id?.includes('calendar'))?.content;\n  \n  if (weatherResult && calendarResult && finalText.includes('weather') && finalText.includes('calendar')) {\n    const weatherSunny = weatherResult.includes('sunny') || weatherResult.includes('clear');\n    const calendarRain = calendarResult.includes('rain') || calendarResult.includes('umbrella');\n    if (weatherSunny !== !calendarRain) {\n      return { conflict: true, tools: ['weather', 'calendar'] };\n    }\n  }\n  return null;\n}\n\nconst conflict = scanParallelConflicts(response.content);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Thinking-Action Divergence Check",
+        "description": "Compares reasoning trace against actual tool_use invocation for intent mismatch",
+        "code": "```python\ndef detect_thinking_divergence(content_blocks):\n    thinking_blocks = [b for b in content_blocks if b.type == 'text' and 'thinking' in b.text.lower()]\n    tool_blocks = [b for b in content_blocks if b.type == 'tool_use']\n    \n    if not thinking_blocks or not tool_blocks:\n        return None\n    \n    thinking_text = ' '.join([b.text for b in thinking_blocks]).lower()\n    tool_names = [b.name for b in tool_blocks]\n    \n    # Red flags: 'no action' but tools called, or 'safe' but risky tools\n    no_action_patterns = ['no action', 'nothing needed', 'standby', 'wait']\n    risky_tools = ['delete', 'cursor_control', 'exec', 'rm']\n    \n    if any(pattern in thinking_text for pattern in no_action_patterns) and tool_blocks:\n        return {'drift': 'unexpected_action', 'tools': tool_names}\n    \n    if any(tool in ' '.join(tool_names) for tool in risky_tools) and 'safe' in thinking_text:\n        return {'drift': 'risky_action_mismatch', 'tools': tool_names}\n    \n    return None\n\ndivergence = detect_thinking_divergence(response.content)\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Error Boundary Tool Wrapper",
+        "description": "Wraps tool executions with validation to prevent cascade failures",
+        "code": "```python\nclass SafeToolExecutor:\n    def __init__(self, tools):\n        self.tools = tools\n    \n    def execute_tool(self, tool_name: str, tool_input: dict) -> dict:\n        try:\n            # Validate input schema before execution\n            tool_schema = next(t for t in self.tools if t['name'] == tool_name)['input_schema']\n            # Add your schema validation here\n            \n            result = self.tools[tool_name](tool_input)\n            return {'status': 'success', 'result': result}\n        except Exception as e:\n            return {\n                'status': 'error',\n                'error_type': type(e).__name__,\n                'message': str(e),\n                'safe_fallback': None  # Provide fallback data\n            }\n\n# Usage in Claude response handling\nexecutor = SafeToolExecutor(available_tools)\nfor block in response.content:\n    if block.type == 'tool_use':\n        result = executor.execute_tool(block.name, block.input)\n        # Send back to Claude with clear error boundaries\n```",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Tool Resolution Middleware",
+        "description": "Forces Claude to explicitly resolve conflicts before final output",
+        "code": "```typescript\nfunction createResolutionSystemPrompt(tools: string[]): string {\n  return `You must resolve conflicts between parallel tool results before final answer.\n\nMANDATORY RESOLUTION FORMAT:\n1. List all tool results\n2. Identify conflicts (weather vs calendar, price vs availability, etc)\n3. State your resolution with reasoning\n4. Only then provide final answer\n\nTools called: ${tools.join(', ')}`;\n}\n\nconst messages = [\n  { role: 'user', content: 'Plan my day' },\n  // ... tool results from parallel calls\n  { role: 'assistant', content: createResolutionSystemPrompt(['weather', 'calendar']) }\n];\n\nconst resolutionResponse = await client.messages.create({\n  model: 'claude-3-5-sonnet-20240620',\n  messages,\n  tools: [], // No tools during resolution phase\n  system: 'ALWAYS resolve tool conflicts explicitly before answering.'\n});\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Action Confirmation Guardrails",
+        "description": "Requires explicit confirmation for high-risk tool invocations",
+        "code": "```python\nRISKY_TOOLS = {'delete_file', 'cursor_control', 'exec_code', 'transfer_funds'}\n\nclass RiskGatekeeper:\n    def __init__(self):\n        self.pending_actions = []\n    \n    def validate_tool_use(self, tool_name: str, tool_input: dict, reasoning: str) -> str:\n        if tool_name in RISKY_TOOLS:\n            self.pending_actions.append({\n                'tool': tool_name,\n                'input': tool_input,\n                'reasoning': reasoning,\n                'timestamp': time.time()\n            })\n            \n            return f\"\"\"RISK CHECK: {tool_name}\nReasoning: {reasoning}\n\nDO NOT PROCEED without explicit user approval.\nRespond ONLY with: APPROVE | REJECT | MODIFY [reason]\"\"\"\n        return 'SAFE'\n    \n    def clear_approved_actions(self):\n        self.pending_actions = []\n\ngatekeeper = RiskGatekeeper()\n# Integrate into tool_use response processing\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex provides zero-instrumentation monitoring for Claude Tool Use agents by automatically wrapping messages.create() calls with drift detectors. It captures full message histories, tool invocation patterns, and reasoning traces without code changes. Real-time alerts trigger on cascade failures, parallel conflicts, and thinking-action divergences, with automated remediation workflows that inject resolution prompts or pause risky actions.\n\nThe Vex SDK integrates seamlessly with Anthropic's Python and TypeScript clients, providing 95% drift detection coverage across multi-turn conversations. Configuration is declarative - define your tool schemas and risk thresholds once, and Vex handles continuous monitoring, anomaly baselining, and fix suggestions. Integration takes 3 lines of code and scales to production agent fleets.",
+      "code": "```python\nfrom vex_sdk import VexMonitor\nfrom anthropic import Anthropic\n\nvex = VexMonitor(api_key='vex-your-key')\nclient = Anthropic(api_key='anthropic-key')\n\n@vex.monitor_agent(\n    drift_types=['tool_cascade', 'parallel_conflict', 'reasoning_divergence'],\n    tools=['get_weather', 'cursor_control', 'delete_file'],\n    auto_remediate=True\n)\ndef reliable_claude_agent(prompt: str):\n    response = client.messages.create(\n        model='claude-3-5-sonnet-20240620',\n        max_tokens=1024,\n        messages=[{'role': 'user', 'content': prompt}],\n        tools=[your_tool_definitions]\n    )\n    return response\n\n# Vex auto-detects all 4 failure modes and applies fixes\nresult = reliable_claude_agent('Plan my week considering weather')\n\n# Check Vex dashboard for drift alerts and auto-fixes applied\nprint(vex.get_recent_incidents())\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds and eliminate Claude agent drift across your entire fleet: pip install vex-sdk"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with LangChain + Vex Guardrails",
+    "description": "Learn how to build voice agents with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain voice agents",
+      "LangChain guardrails",
+      "voice agents reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Voice Agents built with LangChain enable real-time conversational AI by chaining speech-to-text, LLM reasoning, and text-to-speech pipelines. Guardrails are essential due to sub-second latency demands and high-stakes risks like incoherent responses or safety violations in live interactions. Vex provides runtime verification to ensure reliability without compromising performance.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with LangChain",
+      "description": "Voice Agents process audio streams through a real-time pipeline: speech-to-text (STT) converts microphone input to text, LangChain agents or chains perform reasoning with tools and memory, and text-to-speech (TTS) synthesizes responses. LangChain's AgentExecutor handles tool calls and conversation state, while RAG chains retrieve context for coherent responses. Latency is optimized using streaming invocations and lightweight models.\n\nThe pipeline runs in an event loop, processing audio chunks continuously. Conversation memory (e.g., ConversationBufferWindowMemory) maintains context across turns, but risks context overflow in long sessions. Vex verification wraps critical chain invokes to catch failures before TTS, ensuring sub-second end-to-end latency.\n\nKey components include Deepgram/WebSocket for STT, OpenAI/Groq for LLM reasoning, and ElevenLabs for TTS, orchestrated via LangChain's LCEL (LangChain Expression Language).",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ LangChain Agent  │\n│     (Audio)      │    │   (Deepgram)     │    │  + RAG + Tools   │\n└─────────────────┘    └──────────────────┘    │  [Vex.verify()]  │\n                                                └──────────────────┘\n                                                             │\n                                                ┌──────────────────┐\n                                                │  Text-to-Speech  │\n                                                │   (ElevenLabs)   │\n                                                └──────────────────┘\n                                                             │\n                                                ┌─────────────────┐\n                                                │    Speakers     │\n                                                │     (Audio)     │\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Tool call loops in agent executors",
+        "description": "Agents repeatedly call the same tool due to poor termination conditions, causing infinite loops and latency violations",
+        "severity": "critical",
+        "mitigation": "Wrap AgentExecutor.invoke() with Vex.verify() using max_iterations guard"
+      },
+      {
+        "name": "Context window overflow in long conversations",
+        "description": "Conversation memory accumulates tokens beyond LLM context limits, leading to truncated history and incoherent responses",
+        "severity": "high",
+        "mitigation": "Monitor token usage with Vex and implement sliding window memory"
+      },
+      {
+        "name": "Hallucination in RAG retrieval chains",
+        "description": "Agent generates incorrect information when retrieved context doesn't match query, eroding user trust",
+        "severity": "high",
+        "mitigation": "Verify response faithfulness to retrieved documents using Vex semantic checks"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "Chain processing exceeds sub-second requirements, causing unnatural conversation pauses",
+        "severity": "critical",
+        "mitigation": "Enforce strict timeout budgets with Vex.verify(timeout=800ms)"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Real-time STT to LangChain Pipeline",
+        "description": "Connect Deepgram WebSocket STT to LangChain agent executor for continuous processing",
+        "code": "import asyncio\nfrom deepgram import DeepgramClient\nfrom langchain.agents import AgentExecutor, create_openai_tools_agent\nfrom langchain.memory import ConversationBufferWindowMemory\n\nasync def stt_to_agent(audio_stream):\n    dg_client = DeepgramClient('YOUR_DEEPGRAM_KEY')\n    \n    async def on_message(self, result):\n        transcript = result.channel.alternatives[0].transcript\n        if transcript:\n            memory = ConversationBufferWindowMemory(k=5)\n            agent_executor = AgentExecutor(agent=agent, tools=tools, memory=memory, max_iterations=3)\n            response = agent_executor.invoke({\"input\": transcript})\n            return response['output']\n    \n    source = dg_client.listen.live.v('1').stream(audio_stream)\n    source.register_handler(source.event.ON_MESSAGE, on_message)\n    await source.finish()",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Agent with Latency Monitoring",
+        "description": "Implement streaming responses with timeout enforcement for sub-second latency",
+        "code": "from langchain.callbacks import StreamingStdOutCallbackHandler\nimport time\n\ndef streaming_voice_agent(input_text):\n    start_time = time.time()\n    \n    agent_executor = AgentExecutor(\n        agent=agent,\n        tools=tools,\n        callbacks=[StreamingStdOutCallbackHandler()],\n        max_iterations=3,\n        handle_parsing_errors=True\n    )\n    \n    response = agent_executor.invoke({\"input\": input_text})\n    latency = time.time() - start_time\n    \n    if latency > 0.8:  # 800ms budget\n        raise TimeoutError(f\"Exceeded latency budget: {latency:.2f}s\")\n    \n    return response['output']",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Voice Agent with Web Audio",
+        "description": "Browser-based voice agent using Web Audio API and LangChain.js",
+        "code": "import { ChatOpenAI } from '@langchain/openai';\nimport { AgentExecutor } from 'langchain/agents';\nimport { createReactAgent } from '@langchain/core/agents';\n\nclass VoiceAgent {\n  constructor() {\n    this.model = new ChatOpenAI({ model: 'gpt-4o-mini', streaming: true });\n    this.agent = createReactAgent({ llm: this.model, tools });\n    this.executor = AgentExecutor.fromAgentAndTools({\n      agent: this.agent,\n      tools,\n      maxIterations: 3\n    });\n  }\n\n  async processAudio(transcript: string): Promise<string> {\n    const start = performance.now();\n    const result = await this.executor.invoke({ input: transcript });\n    const latency = performance.now() - start;\n    \n    if (latency > 800) {\n      throw new Error(`Latency violation: ${latency}ms`);\n    }\n    \n    return result.output;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Conversation Memory with Token Limits",
+        "description": "Implement token-aware memory to prevent context overflow",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\nfrom langchain.prompts import ChatPromptTemplate\n\nmemory = ConversationSummaryBufferMemory(\n    llm=ChatOpenAI(),\n    max_token_limit=2000,  # Prevent context overflow\n    return_messages=True\n)\n\nagent_executor = AgentExecutor(\n    agent=agent,\n    tools=tools,\n    memory=memory,\n    max_iterations=3,\n    verbose=True\n)\n\n# Usage\nresponse = agent_executor.invoke({\"input\": user_message})",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Latency Budgets",
+        "description": "Enforce sub-second response times with automatic retries",
+        "code": "from vex import verify\n\n@vex.verify(\n    timeout=800,  # 800ms budget\n    retry_on=['timeout'],\n    max_retries=2\n)\ndef voice_agent_pipeline(transcript: str) -> str:\n    response = agent_executor.invoke({\"input\": transcript})\n    return response['output']\n\n# Usage\ntry:\n    result = voice_agent_pipeline(user_transcript)\nexcept Exception as e:\n    print(f'Verification failed: {e}')",
+        "language": "python"
+      },
+      {
+        "title": "Safety Filtering for Voice Responses",
+        "description": "Block inappropriate content before TTS synthesis",
+        "code": "from vex import verify\n\n@vex.verify(\n    checks=[\n        'response_appropriateness',\n        'safety_filtering',\n        {'no_hate_speech': 'strict'}\n    ]\n)\ndef safe_voice_response(user_input: str) -> str:\n    response = agent_executor.invoke({\"input\": user_input})\n    return response['output']\n\nresponse = safe_voice_response(transcript)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Runtime verification for LangChain.js voice agents",
+        "code": "import { verify } from 'vex-sdk';\n\nclass VerifiedVoiceAgent {\n  constructor(private agent: AgentExecutor) {}\n\n  @verify({\n    timeout: 800,\n    checks: ['response_appropriateness', 'conversation_coherence'],\n    maxIterations: 3\n  })\n  async processVoice(transcript: string): Promise<string> {\n    const result = await this.agent.invoke({ input: transcript });\n    return result.output;\n  }\n}\n\nconst voiceAgent = new VerifiedVoiceAgent(agentExecutor);\nconst response = await voiceAgent.processVoice(userTranscript);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Voice Agents",
+      "description": "Add Vex verification to your voice pipeline in 5 minutes - start your free trial at vex.ai"
+    }
+  }
+}

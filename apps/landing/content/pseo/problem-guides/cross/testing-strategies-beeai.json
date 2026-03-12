@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in BeeAI Agents",
+    "description": "How to detect and fix ai agent testing strategies in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "BeeAI testing-strategies",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Testing Strategies in BeeAI reveal critical gaps in agent reliability, particularly through unbounded memory growth during extended sessions, tool injection vulnerabilities, state serialization failures, and Granite model output inconsistencies. These issues manifest uniquely in BeeAI's event-driven architecture and memory management patterns, where agents process long-running workflows with persistent state. Comprehensive testing strategies are essential to ensure production-grade robustness in BeeAI deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support agent handling 100+ message conversations",
+        "symptom": "Agent memory usage climbs from 50MB to 2.5GB over 2 hours, triggering OOM kills",
+        "impact": "Agent crashes mid-conversation, losing context and frustrating users"
+      },
+      {
+        "scenario": "Tool-calling agent processing user-supplied JSON payloads",
+        "symptom": "Malicious payload `{\"command\": \"rm -rf /\"}` bypasses validation and executes",
+        "impact": "Server compromise via arbitrary command injection through tools"
+      },
+      {
+        "scenario": "Agent state checkpointing during high-traffic periods",
+        "symptom": "SerializationError: 'AgentMemory' object has no attribute 'serialize()'",
+        "impact": "Complete loss of conversation history on restarts"
+      },
+      {
+        "scenario": "Granite model integration for multilingual customer service",
+        "symptom": "Model outputs inconsistent JSON formats: sometimes {'action': 'call_tool'} vs {'tool': 'call_tool'}",
+        "impact": "50% tool call failures due to parsing mismatches"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Growth Monitor",
+        "description": "Tracks BeeAI agent memory usage over time using psutil integration with event listeners",
+        "code": "import psutil\nimport vex\n\n@vex.listener('beeai.agent.message_processed')\ndef monitor_memory_growth(agent_id: str, session_duration: float):\n    process = psutil.Process()\n    memory_mb = process.memory_info().rss / 1024 / 1024\n    \n    if session_duration > 3600:  # 1 hour\n        if memory_mb > 500:\n            vex.incident.severity('HIGH')\n            vex.incident.title('Unbounded memory growth detected')\n            vex.metric('agent.memory_mb', memory_mb)\n            vex.alert('Agent {} memory at {}MB after {}s'.format(agent_id, memory_mb, session_duration))",
+        "language": "python"
+      },
+      {
+        "name": "Tool Injection Scanner",
+        "description": "Validates all tool inputs against allowlists and detects injection patterns in BeeAI tool calls",
+        "code": "import re\nimport vex\n\nDANGEROUS_PATTERNS = [r'rm\\s+-rf', r';\\s*', r'\\|\\|', r'\\$\\(']\n\n@vex.listener('beeai.agent.tool_called')\ndef scan_tool_injection(tool_name: str, args: dict):\n    arg_str = str(args)\n    for pattern in DANGEROUS_PATTERNS:\n        if re.search(pattern, arg_str):\n            vex.incident.severity('CRITICAL')\n            vex.incident.title(f'Tool injection in {tool_name}')\n            vex.evidence('suspicious_input', arg_str)\n            vex.block_execution()",
+        "language": "python"
+      },
+      {
+        "name": "Granite Output Validator",
+        "description": "Detects format inconsistencies in Granite model responses using BeeAI's response parsing events",
+        "code": "@vex.listener('beeai.agent.model_response')\ndef validate_granite_format(response: dict, model_name: str):\n    if 'granite' not in model_name.lower():\n        return\n    \n    # Expected BeeAI tool format\n    expected_keys = {'action', 'tool_name', 'parameters'}\n    actual_keys = set(response.keys())\n    \n    missing_keys = expected_keys - actual_keys\n    extra_keys = actual_keys - expected_keys\n    \n    if missing_keys or extra_keys:\n        vex.incident.severity('MEDIUM')\n        vex.incident.title('Granite output format inconsistency')\n        vex.evidence('expected', expected_keys)\n        vex.evidence('actual', actual_keys)\n        vex.metric('format_error_rate', 1)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Pruning Middleware",
+        "description": "Implement TTL-based memory cleanup for BeeAI agents using context window management",
+        "code": "from beeai import Agent\nfrom datetime import datetime, timedelta\n\nclass MemoryBoundedAgent(Agent):\n    def __init__(self, memory_ttl_hours=2):\n        super().__init__()\n        self.memory_ttl = timedelta(hours=memory_ttl_hours)\n    \n    def prune_memory(self):\n        cutoff = datetime.now() - self.memory_ttl\n        self.memory = {\n            k: v for k, v in self.memory.items()\n            if getattr(v, 'timestamp', datetime.now()) > cutoff\n        }\n    \n    def process_message(self, message):\n        self.prune_memory()  # Clean before processing\n        return super().process_message(message)",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Validator",
+        "description": "Add comprehensive input validation to BeeAI tool definitions with schema enforcement",
+        "code": "from beeai import Tool\nfrom pydantic import BaseModel, validator\nimport re\n\nclass SafeCommandTool(Tool):\n    class InputSchema(BaseModel):\n        command: str\n        \n        @validator('command')\n        def validate_command(cls, v):\n            if re.search(r'(rm\\s+-rf|;.*|\\|\\|.*|\\$\\(.*)', v):\n                raise ValueError('Dangerous command detected')\n            if len(v) > 100:\n                raise ValueError('Command too long')\n            return v\n    \n    def execute(self, command: str):\n        # Safe execution\n        return subprocess.run(['echo', command], capture_output=True)",
+        "language": "python"
+      },
+      {
+        "name": "Robust State Serializer",
+        "description": "Implement custom serialization for BeeAI agent state with error recovery",
+        "code": "import json\nimport pickle\nfrom beeai import Agent\n\nclass SerializableAgent(Agent):\n    def to_dict(self):\n        return {\n            'memory': {k: str(v) for k, v in self.memory.items()},\n            'tools': self.tools,\n            'config': self.config\n        }\n    \n    @classmethod\n    def from_dict(cls, data):\n        agent = cls()\n        agent.memory = {k: v for k, v in data['memory'].items()}\n        agent.tools = data['tools']\n        agent.config = data['config']\n        return agent\n    \n    def save_state(self, path):\n        with open(path, 'w') as f:\n            json.dump(self.to_dict(), f)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates seamlessly with BeeAI through its event listener system, automatically detecting all four failure modes in real-time. By registering as a BeeAI event listener during agent initialization, Vex monitors memory usage, validates tool inputs, catches serialization errors, and standardizes Granite model outputs without modifying core agent logic.\n\nThe platform provides automated remediation through dynamic memory pruning, input sanitization, and format normalization, reducing MTTR from hours to seconds. Vex's agent-specific testing strategies include session-based memory profiling, tool call fuzzing, state persistence validation, and model output standardization, covering 95% of production incidents.\n\nIntegration requires a single line of code and works across all BeeAI agent types, providing unified observability and automated recovery for memory, security, persistence, and model reliability issues.",
+      "code": "from beeai import Agent\nfrom vex import Vex\n\n# Initialize Vex with BeeAI integration\nvex = Vex(project='beeai-agents')\n\nclass MonitoredAgent(Agent):\n    def __init__(self):\n        super().__init__()\n        # Auto-register Vex listeners for all BeeAI events\n        vex.register_beeai_listeners([\n            'agent.message_processed',\n            'agent.tool_called',\n            'agent.model_response',\n            'agent.state_saved'\n        ])\n    \n    def run(self):\n        # Vex automatically monitors & protects\n        with vex.span('agent.conversation'):\n            super().run()\n\n# Production deployment\nagent = MonitoredAgent()\nagent.load_config('production.yaml')\nagent.run()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install beeai-framework vex-sdk` and eliminate AI agent testing gaps in one line of code."
+    }
+  }
+}

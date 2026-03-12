@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build data extraction with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK data extraction",
+      "OpenAI Agents SDK guardrails",
+      "data extraction reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction agents with OpenAI Agents SDK enables schema-guided extraction from unstructured documents using multi-agent handoffs and structured outputs. Guardrails are essential to prevent handoff loops, ensure schema compliance, validate field accuracy, and maintain type consistency in production systems. Vex integrates seamlessly as output guardrails to catch these failures before they cascade.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with OpenAI Agents SDK",
+      "description": "The typical architecture starts with a Router Agent that classifies documents and hands off to specialized Extractor Agents (e.g., InvoiceExtractor, ContractExtractor). Each extractor uses schema-guided LLM calls to parse unstructured text into structured JSON. A Validator Agent then checks completeness and accuracy before final output. Tracing spans handoffs, but lacks runtime validation.\n\nAgents communicate via the SDK's handoff protocol, with tools for document loading and schema enforcement. Common patterns include pydantic models for output schemas and function calling for structured extraction. However, without output guardrails, agents consume unvalidated tool outputs, leading to propagation errors.\n\nVex integrates as a post-agent guardrail, validating every agent output against extraction schemas before handoff or final response.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Router Agent  │───▶│ Invoice Extractor│\n│   (Classifier)  │    │     (Schema)     │\n└─────────┬───────┘    └────────┬──────────┘\n          │                     │\n          ▼                     ▼\n┌─────────────────┐    ┌──────────────────┐\n│ Document Loader │◄──▶│   Validator      │───▶ Final JSON\n│     Tool        │    │   Agent (Vex)    │\n└─────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Router misclassifies documents, causing ping-pong between Invoice and Contract extractors",
+        "severity": "high",
+        "mitigation": "Vex validates handoff instructions against document type schemas before execution"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious documents inject instructions that bypass schema enforcement in extractors",
+        "severity": "critical",
+        "mitigation": "Vex output guardrails reject non-schema-compliant responses regardless of prompt content"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "Document loader returns malformed text that extractors parse incorrectly",
+        "severity": "medium",
+        "mitigation": "Vex preprocesses tool outputs for format and content validity before agent consumption"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Partial failures in validation agent aren't traced back to originating extractor",
+        "severity": "medium",
+        "mitigation": "Vex provides end-to-end tracing with failure attribution across all handoffs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Schema-Guided Invoice Extractor Agent",
+        "description": "Define Pydantic model and agent that extracts invoice data using function calling",
+        "code": "from agents import Agent, function_tool\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass InvoiceData(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date YYYY-MM-DD\")\n    total: float = Field(..., description=\"Total amount\")\n    vendor: str = Field(..., description=\"Vendor name\")\n\n@function_tool\ndef extract_invoice(text: str) -> InvoiceData:\n    \"\"\"Extract structured invoice data from text\"\"\"\n    # LLM function calling implementation\n    pass\n\ninvoice_agent = Agent(\n    name=\"Invoice Extractor\",\n    instructions=\"Extract invoice data using the schema. Be precise.\",\n    tools=[extract_invoice]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Router Agent for Document Classification",
+        "description": "Classifies documents and hands off to appropriate extractor",
+        "code": "from agents import Agent, handoff\n\nrouter_agent = Agent(\n    name=\"Document Router\",\n    instructions=\"\"\"Classify document type and handoff:\n    - 'invoice' → invoice_agent\n    - 'contract' → contract_agent\n    Respond with exact agent name for handoff.\"\"\"\n)\n\n@handoff\ndef route_to_agent(doc_type: str, agent_name: str):\n    \"\"\"Execute handoff to specified agent\"\"\"\n    if agent_name == 'invoice_agent':\n        return invoice_agent.run(input)\n    return contract_agent.run(input)",
+        "language": "python"
+      },
+      {
+        "title": "Validator Agent with Pydantic Checks",
+        "description": "Validates completeness and type consistency of extracted data",
+        "code": "from agents import Agent\nfrom pydantic import ValidationError\n\nvalidator_agent = Agent(\n    name=\"Data Validator\",\n    instructions=\"Validate extracted data for completeness and accuracy\"\n)\n\ndef validate_extraction(data: dict, schema: type) -> bool:\n    try:\n        validated = schema(**data)\n        return all([valid\n        getattr(validated, field) for field in schema.__fields__])\n    except ValidationError:\n        return False\n\n# Called after each extraction\nis_valid = validate_extraction(extracted_data, InvoiceData)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Extraction Runner",
+        "description": "Orchestrates full extraction pipeline with handoffs",
+        "code": "from agents import Runner\n\nasync def extract_from_document(document_text: str):\n    # Route and extract\n    classification = await router_agent.run(document_text)\n    extracted_data = await Runner([router_agent, invoice_agent]).run(document_text)\n    \n    # Validate\n    is_valid = validate_extraction(extracted_data, InvoiceData)\n    \n    if is_valid:\n        return extracted_data\n    raise ValueError(\"Extraction failed validation\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Extractor Agents",
+        "description": "Wrap agent outputs with Vex schema validation before handoff",
+        "code": "from vex import Guardrail, SchemaValidator\nfrom agents import Agent\n\n# Define Vex guardrail for invoice extraction\ninvoice_guardrail = Guardrail(\n    name=\"invoice_schema_guardrail\",\n    validators=[\n        SchemaValidator(\n            pydantic_model=InvoiceData,\n            checks=[\"schema_compliance\", \"field_accuracy\", \"completeness\"]\n        )\n    ]\n)\n\n# Apply to agent\n@vex.guardrail(invoice_guardrail)\ndef safe_invoice_extraction(text: str):\n    result = invoice_agent.run(text)\n    return result\n\n# Usage\nvalidated_invoice = safe_invoice_extraction(document_text)",
+        "language": "python"
+      },
+      {
+        "title": "Handoff Validation Guardrail",
+        "description": "Prevent loops by validating handoff instructions",
+        "code": "from vex import Guardrail, RegexValidator\n\nhandoff_guardrail = Guardrail(\n    name=\"handoff_instruction_guardrail\",\n    validators=[\n        RegexValidator(\n            pattern=r\"^(invoice_agent|contract_agent)$\",\n            error_msg=\"Invalid handoff target\"\n        )\n    ]\n)\n\n@vex.guardrail(handoff_guardrail)\ndef safe_handoff(classification: str):\n    target_agent = router_agent.run(classification)\n    return target_agent\n\n# Blocks loops and invalid targets\nsafe_target = safe_handoff(\"invoice\")",
+        "language": "python"
+      },
+      {
+        "title": "End-to-End Pipeline Guardrail",
+        "description": "Comprehensive validation wrapping entire extraction flow",
+        "code": "from vex import PipelineGuardrail\n\nextraction_pipeline = PipelineGuardrail(\n    name=\"data_extraction_pipeline\",\n    stages=[\n        \"document_loader\",\n        \"router_classification\",\n        \"schema_extraction\",\n        \"completeness_validation\"\n    ],\n    final_validator=SchemaValidator(InvoiceData)\n)\n\n@extraction_pipeline.guard\nasync def secure_extraction_pipeline(text: str):\n    # Full agent workflow\n    classification = await router_agent.run(text)\n    data = await invoice_agent.run(text)\n    return data\n\n# Single call with full protection\nresult = await secure_extraction_pipeline(document)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Data Extraction",
+      "description": "Add Vex guardrails today to eliminate extraction failures and ensure 100% schema compliance in production."
+    }
+  }
+}

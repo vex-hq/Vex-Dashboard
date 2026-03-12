@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in LlamaIndex Agents",
+    "description": "How to detect and fix responsible ai governance for agents in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "LlamaIndex ai-governance",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in LlamaIndex manifests as unreliable agent outputs due to poor retrieval quality, hallucinations in response synthesis, outdated indexed data, and context fragmentation from chunking errors. These issues undermine agent trustworthiness, leading to incorrect decisions, compliance violations, and eroded user confidence. LlamaIndex's RAG pipeline amplifies these risks as agents chain multiple retrieval-synthesis cycles without built-in governance checks.",
+    "howItManifests": [
+      {
+        "scenario": "Agent retrieves Wikipedia articles when user asks about internal company policy",
+        "symptom": "Retrieved context irrelevant to query - cosine similarity < 0.3 despite top-k=5",
+        "impact": "Agent confidently cites external sources for internal decisions, violating data governance"
+      },
+      {
+        "scenario": "Synthesizer generates product pricing details not present in any retrieved documents",
+        "symptom": "Response contains hallucinated numerical values (prices, dates) beyond source context",
+        "impact": "Legal/compliance violations from fabricated authoritative information"
+      },
+      {
+        "scenario": "Knowledge base updated with new compliance policy but index not refreshed",
+        "symptom": "Index staleness - agent cites 6-month-old policy ignoring recent regulatory changes",
+        "impact": "Regulatory non-compliance and potential fines from outdated guidance"
+      },
+      {
+        "scenario": "Critical compliance clause split across chunk boundary, neither chunk retrieved fully",
+        "symptom": "Chunk boundary errors losing critical context - key clause 'Data retention: 7 years' missing",
+        "impact": "Incomplete legal advice omitting statutory requirements"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Scoring",
+        "description": "Measures cosine similarity between query embedding and top-k retrieved chunks to detect irrelevant context",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nfrom llama_index.embeddings.huggingface import HuggingFaceEmbedding\n\nquery_engine = index.as_query_engine()\nresponse = query_engine.query('What is our data retention policy?')\n\n# Calculate relevance scores\nquery_embedding = HuggingFaceEmbedding(model_name=\"BAAI/bge-small-en-v1.5\").get_text_embedding(query_engine.query_str)\n\nrelevant_chunks = []\nfor node in response.source_nodes:\n    chunk_embedding = query_engine._query_embedding_model.get_text_embedding(node.text)\n    similarity = cosine_similarity([query_embedding], [chunk_embedding])[0][0]\n    relevant_chunks.append({\n        'text': node.text,\n        'similarity': similarity,\n        'relevant': similarity > 0.7\n    })\n\navg_relevance = sum(c['similarity'] for c in relevant_chunks) / len(relevant_chunks)\nprint(f\"Avg relevance: {avg_relevance:.3f}, Alert: {avg_relevance < 0.5}\")",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Grounding Check",
+        "description": "Extracts numerical entities from response and verifies presence in source documents",
+        "code": "import re\nfrom llama_index.core import Settings\n\nresponse = query_engine.query('What are our compliance deadlines?')\n\n# Extract numbers from response\nresponse_numbers = re.findall(r'\\d+(?:\\.\\d+)?', str(response))\n\n# Check grounding in source documents\ngrounded = []\nfor num in response_numbers:\n    grounded_in_sources = False\n    for node in response.source_nodes:\n        if num in node.text:\n            grounded_in_sources = True\n            break\n    grounded.append({\n        'number': num,\n        'grounded': grounded_in_sources\n    })\n\nungrounded_count = sum(1 for g in grounded if not g['grounded'])\nhallucination_rate = ungrounded_count / len(response_numbers) if response_numbers else 0\nprint(f\"Hallucination rate: {hallucination_rate:.2%}, Alert: {hallucination_rate > 0.2}\")",
+        "language": "python"
+      },
+      {
+        "name": "Index Freshness Monitor",
+        "description": "Compares document metadata timestamps against index build time to detect staleness",
+        "code": "from datetime import datetime, timedelta\nimport os\n\nindex_stats = index.storage_context.persist()\nbuild_time = datetime.fromisoformat(index.storage_context.docstore._index_struct.last_indexed_ts)\n\n# Check document freshness\nlatest_doc_time = max(\n    datetime.fromtimestamp(os.path.getmtime(doc_path))\n    for doc_path in SimpleDirectoryReader(input_dir='./data').input_files\n)\n\nstaleness_days = (latest_doc_time - build_time).days\nis_stale = staleness_days > 7\n\nprint(f\"Index age: {staleness_days} days, Alert: {'STALE' if is_stale else 'FRESH'}\")\nif is_stale:\n    print(f\"Rebuild required. Latest doc: {latest_doc_time}, Index built: {build_time}\")",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retrieval with Metadata Filtering",
+        "description": "Combines semantic search with metadata filters to ensure domain-relevant retrieval",
+        "code": "from llama_index.core import VectorStoreIndex\nfrom llama_index.core.query_engine import CitationQueryEngine\n\n# Add metadata filtering\nindex = VectorStoreIndex.from_documents(\n    documents,\n    show_progress=True\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=3,\n    node_postprocessors=[\n        MetadataReplacementPostProcessor(target_metadata_key=\"category\", replacement=\"relevant_docs\")\n    ],\n    filters=MetadataFilters(\n        filters=[\n            MetadataFilter(key=\"domain\", value=\"internal_policy\"),\n            ExactMatchFilter(key=\"type\", value=\"compliance\")\n        ]\n    )\n\nresponse = query_engine.query(\"What is our data retention policy?\")\n",
+        "language": "python"
+      },
+      {
+        "name": "Faithful Response Synthesizer",
+        "description": "Uses citation-backed synthesis to prevent hallucination beyond source context",
+        "code": "from llama_index.core.postprocessor import SimilarityPostprocessor\nfrom llama_index.core.prompts import PromptTemplate\n\n# Faithful synthesis prompt\nfaithfulness_prompt = PromptTemplate(\n    \"Context information is below.\\n---------------------\\n{context_str}\\n---------------------\\nGiven the context information and no additional knowledge, \"\n    \"answer the query. Cite only information from the provided context. \"\n    \"If the context doesn't contain the answer, say 'Insufficient context provided'.\\n\\nQuery: {query_str}\\nAnswer:\"\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=5,\n    node_postprocessors=[\n        SimilarityPostprocessor(similarity_cutoff=0.8),\n        PrevNextNodePostprocessor()\n    ],\n    text_qa_template=faithfulness_prompt\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Automatic Index Refresh Pipeline",
+        "description": "Schedules index rebuild on document changes with versioning",
+        "code": "from llama_index.core import StorageContext, load_index_from_storage\nfrom llama_index.core.indexes.vector_stores import MetadataAwareVectorStoreIndex\n\nimport schedule\nimport time\n\ndef refresh_index():\n    global index, index_id\n    \n    # Load latest documents\n    new_docs = SimpleDirectoryReader('./data').load_data()\n    \n    # Create new index\n    new_index = VectorStoreIndex.from_documents(\n        new_docs,\n        show_progress=True\n    )\n    \n    # Persist with timestamp\n    timestamp = datetime.now().isoformat()\n    new_index.storage_context.persist(persist_dir=f\"./storage/{timestamp}\")\n    \n    # Update global reference\n    index = new_index\n    index_id = timestamp\n    print(f\"Index refreshed: {timestamp}\")\n\n# Schedule daily refresh\nschedule.every().day.at(\"02:00\").do(refresh_index)\n\n# Run scheduler\nwhile True:\n    schedule.run_pending()\n    time.sleep(3600)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex provides production-grade observability for LlamaIndex agents by wrapping query_engine.query() calls with vex.verify(). This automatically captures retrieval relevance scores, hallucination rates, index freshness, and chunk boundary issues across all agent executions. Vex's ML-powered detectors identify governance violations in real-time, providing root cause analysis and automated remediation workflows.\n\nThe platform maintains lineage across agent chains, tracking how retrieval quality propagates through multi-hop reasoning. Compliance dashboards show SLA compliance for governance metrics, with instant alerts for violations. Vex integrates natively with LlamaIndex via a single pip install and context manager, requiring zero code changes to existing agent pipelines.\n\nRemediation happens automatically: Vex can trigger index rebuilds, swap to backup indices, or route queries to human-in-the-loop when governance thresholds are breached. This ensures agents remain trustworthy at scale without manual monitoring.",
+      "code": "pip install llama-index vex-sdk\n\nfrom vex import verify\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Load your LlamaIndex agent\nindex = VectorStoreIndex.from_documents(SimpleDirectoryReader(\"./data\").load_data())\nquery_engine = index.as_query_engine()\n\n# Wrap with Vex governance checks\n@verify(\n    checks=[\n        \"retrieval.relevance>0.7\",\n        \"response.hallucination_rate<0.1\",\n        \"index.freshness<7d\",\n        \"context.complete_chunks=true\"\n    ],\n    auto_remediate=True\n)\ndef governed_query(query: str):\n    response = query_engine.query(query)\n    return str(response)\n\n# Production usage\nresult = governed_query(\"What is our data retention policy?\")\n# Vex automatically detects issues and applies fixes\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your LlamaIndex agents in 3 lines of code to achieve enterprise-grade Responsible AI Governance."
+    }
+  }
+}

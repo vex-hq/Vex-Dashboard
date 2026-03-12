@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with DSPy + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy rag pipeline",
+      "DSPy guardrails",
+      "rag pipeline reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming LM pipelines like RAG through composable, optimizable modules rather than manual prompting, making it ideal for building robust retrieval-augmented generation systems. However, optimized prompts can overfit, chain-of-thought may produce plausible errors, and module composition can lead to unexpected failures in high-risk scenarios like document synthesis. Vex provides runtime verification to catch source faithfulness violations, hallucinations, and citation errors before they reach users.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with DSPy",
+      "description": "A DSPy RAG pipeline typically starts with a Retriever module that performs vector search over a document corpus to fetch top-k relevant passages based on query embedding similarity. These passages are then assembled into a context by a ContextAssembler, which formats them with metadata for traceability. The core synthesis happens in a Generator module (often a ChainOfThought or custom signature) that produces a response with source attribution, followed by optional routing or refinement modules.\n\nDSPy's strength lies in its teleprompter optimization, which tunes module prompts and weights against a training set, but this can amplify failure modes like overfitting or hallucination if not verified. The pipeline is executed via forward() calls on a composed Program, making it straightforward to wrap with Vex for runtime checks on faithfulness, relevance, and accuracy.\n\nVerification is critical for production RAG, ensuring retrieved contexts are relevant, generated answers cite sources correctly, and no hallucinations slip through optimized but brittle reasoning chains.",
+      "diagram": "Query → [DSPy Retriever] → Vector Search → Top-K Passages\n                 ↓\n        [ContextAssembler] → Formatted Context w/ Sources\n                 ↓\n    [DSPy Generator] → Synthesized Answer + Citations\n                 ↓\n           [Vex.verify()] → Faithfulness, Hallucination Checks\n                 ↓\n              Final Response"
+    },
+    "risks": [
+      {
+        "name": "Optimized prompts overfitting to training examples",
+        "description": "DSPy teleprompters tune prompts to validation data, producing brittle modules that fail on production queries with different distributions",
+        "severity": "high",
+        "mitigation": "Wrap forward() calls with Vex.verify() using diverse test cases and distribution shift detectors"
+      },
+      {
+        "name": "Chain-of-thought reasoning producing plausible but wrong logic",
+        "description": "CoT modules generate convincing but factually incorrect reasoning chains, especially with irrelevant retrieved context",
+        "severity": "critical",
+        "mitigation": "Verify intermediate reasoning steps and final citations against source passages"
+      },
+      {
+        "name": "Assertion violations not caught at inference time",
+        "description": "DSPy modules lack built-in runtime checks, allowing hallucinated facts or missing citations to pass through",
+        "severity": "high",
+        "mitigation": "Runtime Vex assertions for source faithfulness and citation accuracy"
+      },
+      {
+        "name": "Module composition creating unexpected output distributions",
+        "description": "Composing retriever + generator + router modules can produce edge cases like empty contexts or citation mismatches",
+        "severity": "medium",
+        "mitigation": "End-to-end verification of composed pipeline outputs with context relevance scoring"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic DSPy RAG Signature",
+        "description": "Define the core RAG synthesis module with source attribution using DSPy signatures",
+        "code": "import dspy\n\nclass RAGSignature(dspy.Signature):\n    '''Answer questions with source attribution.'''\n    question = dspy.InputField()\n    context = dspy.InputField(desc='Relevant passages with [source_id] markers')\n    answer = dspy.OutputField()\n    citations = dspy.OutputField(desc='List source_ids used: [1], [2]')\n\nrag_module = dspy.ChainOfThought(RAGSignature)\n\n# Usage\ncontext = 'Passage 1 about ML [1]. Passage 2 about DSPy [2].'\npred = rag_module(question='What is DSPy?', context=context)\nprint(pred.answer, pred.citations)",
+        "language": "python"
+      },
+      {
+        "title": "Retriever and Context Assembly",
+        "description": "Implement vector search retriever and context formatter for DSPy pipeline",
+        "code": "from dspy.retrieve import VectorIndexRetriever\n\n# Mock retriever (replace with FAISS/Chroma)\nclass MockRetriever:\n    def __call__(self, query, k=3):\n        return [\n            'DSPy programs LMs [1]',\n            'RAG uses retrieval [2]',\n            'Optimization tunes prompts [3]'\n        ]\n\nretriever = MockRetriever()\n\ndef assemble_context(passages):\n    return ' '.join([f'{p} [id]' for p, id in zip(passages, range(1, len(passages)+1))])\n\n# Pipeline forward\nquery = 'What is DSPy RAG?'\npassages = retriever(query)\ncontext = assemble_context(passages)\nprint(context)",
+        "language": "python"
+      },
+      {
+        "title": "Composed RAG Program",
+        "description": "Create end-to-end DSPy program combining retrieval, assembly, and generation",
+        "code": "class RAGProgram(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.retrieve = MockRetriever()\n        self.generate = dspy.ChainOfThought(RAGSignature)\n    \n    def forward(self, question):\n        passages = self.retrieve(question, k=3)\n        context = assemble_context(passages)\n        pred = self.generate(question=question, context=context)\n        return dspy.Prediction(\n            answer=pred.answer,\n            citations=pred.citations,\n            context=context,\n            sources=passages\n        )\n\nprogram = RAGProgram()\nresult = program('How does DSPy optimize RAG?')\nprint(result.answer)",
+        "language": "python"
+      },
+      {
+        "title": "DSPy Teleprompter Optimization",
+        "description": "Optimize the RAG pipeline using DSPy's bootstrap teleprompter",
+        "code": "from dspy.teleprompt import BootstrapFewShot\n\n# Training examples\ntrainset = [\n    dspy.Example(question='What is DSPy?', answer='Programming framework', context='DSPy programs LMs [1]').with_inputs('question')\n]\n\nprogram = RAGProgram()\nteleprompter = BootstrapFewShot(metric=dspy.answer_exact_match)\noptimized_program = teleprompter.compile(program, trainset=trainset)\n\n# Optimized inference\nresult = optimized_program('What is RAG?', max_bootstrapped_demos=4)\nprint(result.answer)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap forward() with Vex Verification",
+        "description": "Basic integration wrapping DSPy module forward calls with Vex runtime checks",
+        "code": "import vex\n\n@vex.verify([\n    vex.check.source_faithfulness(),\n    vex.check.no_hallucinations(),\n])\ndef verified_rag(question: str) -> str:\n    program = RAGProgram()\n    result = program(question)\n    return result.answer\n\n# Production usage\ntry:\n    answer = verified_rag('What is DSPy?')\n    print('✅ Verified:', answer)\nexcept vex.Violation as e:\n    print('❌ Blocked:', e.reason)",
+        "language": "python"
+      },
+      {
+        "title": "Context Relevance + Citation Accuracy",
+        "description": "Verify retrieved context relevance and citation mapping accuracy",
+        "code": "@vex.verify([\n    vex.check.context_relevance(threshold=0.7),\n    vex.check.citation_accuracy(),\n    vex.check.source_coverage(min_sources=1),\n])\ndef production_rag_pipeline(question: str, lm=dspy.OpenAI(model='gpt-4')):\n    dspy.settings.configure(lm=lm)\n    program = optimized_program  # From teleprompter\n    result = program(question)\n    return {\n        'answer': result.answer,\n        'citations': result.citations,\n        'context': result.context\n    }\n\nresponse = production_rag_pipeline('DSPy RAG optimization techniques?')\nprint(response)",
+        "language": "python"
+      },
+      {
+        "title": "End-to-End Pipeline with Custom Assertions",
+        "description": "Comprehensive verification catching all RAG failure modes with custom DSPy-specific checks",
+        "code": "@vex.verify([\n    vex.check.source_faithfulness(),\n    vex.check.hallucination_rate(max_hallucinations=0),\n    vex.check('citations_present', lambda output: len(output.get('citations', [])) > 0),\n    vex.check('no_empty_context', lambda output: len(output.get('context', '')) > 50),\n    vex.check.context_relevance(model='text-embedding-ada-002'),\n])\ndef secure_rag_service(question: str) -> dict:\n    # Full DSPy pipeline\n    passages = retriever(question, k=5)\n    context = assemble_context(passages)\n    result = rag_module(question=question, context=context)\n    \n    return {\n        'question': question,\n        'answer': result.answer,\n        'citations': result.citations,\n        'context': context,\n        'sources': passages\n    }\n\n# Safe production deployment\nfinal_answer = secure_rag_service('Production RAG best practices?')\nprint('Production ready:', final_answer)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy RAG Pipeline",
+      "description": "Add Vex verification to your DSPy modules today with one line of code - pip install vex-sdk and wrap your forward() calls."
+    }
+  }
+}

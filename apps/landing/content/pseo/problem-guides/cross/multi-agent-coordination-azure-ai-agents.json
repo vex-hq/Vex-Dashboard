@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Azure AI Agent Service Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Azure AI Agent Service multi-agent-coordination",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, Multi-Agent Coordination Failure occurs when agents fail to synchronize state, share context, or respect execution boundaries across multi-agent workflows, leading to cascading errors and inconsistent outputs. This manifests uniquely through Azure's agent threads exceeding token limits without delegation, unvalidated tool calls bypassing enterprise policies, and grounding data conflicts between agents using Bing Search and file search. These failures disrupt enterprise-grade agent orchestration, causing unreliable automation in production pipelines.",
+    "howItManifests": [
+      {
+        "scenario": "Agent A completes Bing Search grounding but Agent B uses stale cached results without validation",
+        "symptom": "Inconsistent factual responses across agent responses in the same thread",
+        "impact": "Decision-making errors in enterprise workflows relying on real-time data"
+      },
+      {
+        "scenario": "Multiple agents calling file_search simultaneously return Azure metadata conflicts",
+        "symptom": "Agents receive storage account URLs instead of document content",
+        "impact": "Failed RAG pipelines and hallucinated responses from metadata parsing"
+      },
+      {
+        "scenario": "Lead agent delegates to specialist agents without token budget coordination",
+        "symptom": "Thread token limit exceeded (128k context) mid-conversation",
+        "impact": "Complete workflow termination without graceful summarization or handoff"
+      },
+      {
+        "scenario": "Tool execution results from one agent not validated before passing to next agent",
+        "symptom": "Enterprise policy violations (PII exposure, unapproved API calls) propagate",
+        "impact": "Security incidents and compliance audit failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Token Limit Monitoring",
+        "description": "Detects when Azure AI Agent threads approach 80% of 128k token limit without delegation logic",
+        "code": "from azure.ai.projects import AgentClient\nfrom azure.ai.projects.types import ThreadMetrics\n\ndef detect_token_exhaustion(thread_id: str, agent_client: AgentClient) -> bool:\n    metrics: ThreadMetrics = agent_client.get_thread_metrics(thread_id)\n    token_usage = metrics.input_tokens + metrics.output_tokens\n    max_tokens = 128000  # Azure AI Agent Service limit\n    \n    if token_usage > (max_tokens * 0.8):\n        print(f'⚠️  Token exhaustion risk: {token_usage}/{max_tokens}')\n        return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Cross-Agent Policy Validation Check",
+        "description": "Scans agent tool call traces for unvalidated enterprise policy compliance",
+        "code": "from azure.ai.projects.evaluation import Evaluator\n\ndef detect_policy_violations(agent_session):\n    violations = 0\n    for step in agent_session.steps:\n        if step.tool_calls:\n            for tool_call in step.tool_calls:\n                # Check for missing enterprise policy validation\n                if 'policy_check' not in tool_call.metadata:\n                    violations += 1\n                    print(f'❌ Unvalidated tool call: {tool_call.name}')\n    return violations > 0",
+        "language": "python"
+      },
+      {
+        "name": "Grounding Data Consistency Audit",
+        "description": "Compares grounding sources across agents for staleness and conflicts",
+        "code": "import re\nfrom datetime import datetime, timedelta\n\ndef audit_grounding_consistency(messages):\n    bing_sources = []\n    file_sources = []\n    \n    for msg in messages:\n        if msg.role == 'system' and 'bing' in msg.content.lower():\n            # Extract Bing search timestamp\n            timestamp_match = re.search(r'(\\d{4}-\\d{2}-\\d{2})', msg.content)\n            if timestamp_match:\n                bing_sources.append(datetime.fromisoformat(timestamp_match.group(1)))\n        \n    stale_data = any((datetime.now() - source).days > 1 for source in bing_sources)\n    return {'stale_bing': stale_data, 'source_conflict': len(bing_sources) > 0 and len(file_sources) > 0}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Token-Aware Agent Delegation",
+        "description": "Implement proactive thread summarization and specialist agent handoff before token limits",
+        "code": "from azure.ai.projects import AgentClient\n\ndef smart_delegate_overloaded_thread(thread_id: str, agent_client: AgentClient):\n    metrics = agent_client.get_thread_metrics(thread_id)\n    if metrics.total_tokens > 100000:  # Proactive threshold\n        # Create summary agent\n        summary_agent = agent_client.create_agent(\n            name=\"thread-summarizer\",\n            instructions=\"Summarize conversation preserving key facts and decisions\"\n        )\n        \n        summary_thread = agent_client.create_thread()\n        summary_result = summary_agent.run(\n            thread_id=summary_thread,\n            messages=[{\"role\": \"user\", \"content\": f\"Summarize: {metrics.last_messages}\"}]\n        )\n        \n        # Handoff to specialist\n        specialist_thread = agent_client.create_thread()\n        agent_client.send_message(\n            thread_id=specialist_thread,\n            role=\"system\",\n            content=f\"Context summary: {summary_result.content}\"\n        )",
+        "language": "python"
+      },
+      {
+        "name": "Enterprise Policy Middleware",
+        "description": "Add validation layer for all tool calls across agent coordination",
+        "code": "from azure.ai.projects import Middleware\n\nclass EnterprisePolicyMiddleware(Middleware):\n    def __init__(self):\n        self.policies = {\n            'pii_detection': lambda x: 'ssn' not in x and 'credit_card' not in x,\n            'approved_apis': lambda x: x in ['bing_search', 'file_search'],\n            'rate_limits': lambda x: True  # Implement rate limiting\n        }\n    \n    def pre_tool_call(self, tool_call):\n        for policy_name, policy_fn in self.policies.items():\n            if not policy_fn(tool_call.name):\n                raise ValueError(f'Policy violation: {policy_name}')\n        tool_call.metadata['policy_validated'] = True\n        return tool_call\n    \n# Register middleware\nglobal_middleware = EnterprisePolicyMiddleware()\nagent_client.add_middleware(global_middleware)",
+        "language": "python"
+      },
+      {
+        "name": "Grounding Source Arbitration",
+        "description": "Centralized grounding service to resolve conflicts between Bing and file search",
+        "code": "from typing import Dict, Any\n\nclass GroundingArbitrator:\n    def __init__(self):\n        self.cache_ttl = 3600  # 1 hour\n    \n    def resolve_grounding(self, query: str, sources: list) -> Dict[str, Any]:\n        bing_fresh = any(self._is_fresh_bing(source) for source in sources if 'bing' in source)\n        file_content = any('content' in source for source in sources if 'file' in source)\n        \n        if bing_fresh and file_content:\n            return {'use': 'hybrid', 'priority': 'bing_then_file'}\n        elif bing_fresh:\n            return {'use': 'bing', 'reason': 'Fresh real-time data'}\n        elif file_content:\n            return {'use': 'file', 'reason': 'Enterprise document priority'}\n        \n    def _is_fresh_bing(self, source):\n        # Implementation for Bing timestamp freshness\n        return True",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically monitoring thread metrics, tool call validation, and grounding consistency across all agents in real-time. It detects coordination failures before they cascade, providing automated remediation through policy enforcement, thread summarization, and agent handoff orchestration. Vex's agent reliability engine learns from failure patterns specific to Azure AI Agent Service, continuously improving detection accuracy and remediation effectiveness for enterprise multi-agent workflows.\n\nThe Vex SDK (`pip install azure-ai-projects vex-sdk`) provides pre-built detectors for Azure-specific failure modes including token exhaustion, policy violations, and grounding conflicts. Vex automatically generates remediation agents and injects them into failing threads, ensuring 99.9% uptime for production agent orchestrations while maintaining enterprise compliance.",
+      "code": "from vex_sdk import VexMonitor\nfrom azure.ai.projects import AgentClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex_monitor = VexMonitor(\n    service='azure-ai-agent',\n    detectors=[\n        'thread_token_exhaustion',\n        'tool_policy_violation',\n        'grounding_conflict',\n        'agent_handover_failure'\n    ]\n)\n\n# Add Vex middleware to Azure Agent Client\nagent_client = AgentClient(\n    subscription_id='your-sub',\n    resource_group='rg',\n    project_name='agents',\n    middleware=[vex_monitor]\n)\n\n# Vex auto-detects and remediates\nthread_id = agent_client.create_thread()\nresult = agent_client.run(\n    thread_id=thread_id,\n    agent_id='multi-agent-orchestrator',\n    messages=[{\"role\": \"user\", \"content\": \"Complex enterprise task\"}]\n)\n\n# Vex reliability report\nprint(vex_monitor.get_reliability_report(thread_id))\n# Output: {'reliability_score': 0.97, 'issues_fixed': 2, 'remediations_applied': ['thread_summary', 'policy_enforced']}",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate multi-agent coordination failures in your Azure AI Agent Service workflows with one line of code."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with LangChain + Vex Guardrails",
+    "description": "Learn how to build code generation with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain code generation",
+      "LangChain guardrails",
+      "code generation reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "LangChain simplifies building LLM-powered code generation agents that write, test, and refine code iteratively. However, without guardrails, these agents risk generating unsafe code, leaking credentials, or entering infinite loops during execution and refinement. Vex provides runtime verification to ensure code safety, syntax validity, and secure execution in production.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with LangChain",
+      "description": "A typical LangChain code generation agent uses an LLM (like GPT-4) prompted to generate code based on user requirements. The agent integrates tools for sandboxed code execution (using Docker or E2B), test validation via unittest/pytest, and iterative refinement through agent loops. LangChain's AgentExecutor manages the ReAct pattern: Reason, Act (generate code), Observe (execute and test), and repeat until validation succeeds.\n\nThe workflow starts with a user request parsed into structured requirements. The LLM generates code, which is executed in a sandbox. Results and test outcomes feed back into the agent for refinement. Retrieval chains pull relevant code examples or libraries from a vector store to reduce hallucinations. Context management prevents token overflow during long refinement cycles.\n\nKey components include: a custom CodeGenerationTool for sandbox execution, a TestValidatorTool for running unit tests, and structured output parsers ensuring consistent code formatting across iterations.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│ LangChain Agent  │\n│   (\"Write a...\")│    │ + ReAct Loop     │\n└─────────────────┘    │                  │\n                       │ ┌──────────────┐ │\n                       │ │ LLM (GPT-4)  │ │\n                       │ └──────────────┘ │\n                       │ ┌──────────────┐ │\n                       └─│CodeGen Tool   │ │──┐\n                         │(Sandbox Exec) │ │  │\n                         └──────────────┘ │  │\n                                          │  │\n                       ┌──────────────────┘  ▼\n                       │ Test Results      ┌──────────────┐\n                       │ + Execution Logs  │ Vex Verify   │\n                       └────────────────────┤ (Safety,     │\n                                            │  Syntax,     │──┐\n                                            │  Sandboxing) │  │\n                                            └──────────────┘  │\n                                                              │\n                                            ┌─────────────────┘\n                                            │ Validated Code\n                                            │ ────────────────\n                                            └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious Code Injection",
+        "description": "Agent generates code with system calls, file deletions, or network requests that could harm the host environment",
+        "severity": "critical",
+        "mitigation": "Vex sandbox verification + static analysis before execution"
+      },
+      {
+        "name": "Credential Leakage",
+        "description": "Generated code accidentally embeds API keys, passwords, or secrets from training data or context",
+        "severity": "critical",
+        "mitigation": "Vex regex scanning + secret detection across all chain outputs"
+      },
+      {
+        "name": "Infinite Refinement Loops",
+        "description": "Agent enters tool call loops when tests continuously fail without convergence",
+        "severity": "high",
+        "mitigation": "Vex loop detection + max iterations enforcement"
+      },
+      {
+        "name": "Unsafe Dependencies",
+        "description": "Code installs malicious packages or uses vulnerable library versions",
+        "severity": "high",
+        "mitigation": "Vex dependency scanning + allowlist enforcement"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Chain",
+        "description": "Simple LangChain chain that generates Python code from natural language requirements",
+        "code": "from langchain.prompts import PromptTemplate\nfrom langchain_openai import ChatOpenAI\nfrom langchain.schema.output_parser import StrOutputParser\n\nllm = ChatOpenAI(model=\"gpt-4\", temperature=0)\n\nprompt = PromptTemplate(\n    input_variables=[\"requirements\"],\n    template=\"\"\"Write clean Python code that {requirements}.\n\nReturn ONLY the code, no explanations:\n\"\"\"\n)\n\ncode_chain = prompt | llm | StrOutputParser()\n\nresult = code_chain.invoke({\"requirements\": \"sorts a list of integers using quicksort\"})\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Agent with Sandbox Tool",
+        "description": "LangChain agent with custom sandbox execution tool for safe code testing",
+        "code": "from langchain.agents import create_react_agent, AgentExecutor\nfrom langchain.tools import tool\nfrom langchain_openai import ChatOpenAI\nimport subprocess\nimport tempfile\n\n@tool\ndef execute_code(code: str) -> str:\n    \"\"\"Execute Python code in sandbox and return results.\"\"\"\n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    try:\n        result = subprocess.run(['python', temp_file], \n                              capture_output=True, text=True, timeout=10)\n        return f\"STDOUT: {result.stdout}\\nSTDERR: {result.stderr}\\nEXIT: {result.returncode}\"\n    finally:\n        import os\n        os.unlink(temp_file)\n\nllm = ChatOpenAI(model=\"gpt-4\")\nagent = create_react_agent(llm, [execute_code], prompt)\nagent_executor = AgentExecutor(agent=agent, tools=[execute_code], verbose=True)\n\nresult = agent_executor.invoke({\"input\": \"Write and test code that reverses a string\"})",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Setup",
+        "description": "LangChain.js agent for code generation with structured output parsing",
+        "code": "import { ChatOpenAI } from \"langchain/chat_models/openai\";\nimport { createReactAgent } from \"langchain/agents\";\nimport { pull } from \"langchain/hub\";\nimport { codeExecutor } from \"langchain/tools\";\n\nconst llm = new ChatOpenAI({ modelName: \"gpt-4\", temperature: 0 });\nconst prompt = await pull(\"hwchase17/react\");\n\nconst agent = await createReactAgent({\n  llm,\n  tools: [codeExecutor],\n  prompt,\n});\n\nconst result = await agent.call({\n  input: \"Generate TypeScript code to validate email addresses, then test it\",\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Test Validation Tool",
+        "description": "Custom tool that validates generated code with unit tests",
+        "code": "from langchain.tools import tool\nimport pytest\nimport sys\nfrom io import StringIO\n\n@tool\ndef validate_with_tests(code: str, test_code: str) -> str:\n    \"\"\"Run unit tests against generated code. Returns PASS/FAIL status.\"\"\"\n    combined = code + \"\\n\\n\" + test_code\n    old_stdout = sys.stdout\n    sys.stdout = mystdout = StringIO()\n    \n    try:\n        exec(combined)\n        pytest.main([\"-v\", \"--tb=no\"])\n        output = mystdout.getvalue()\n        return \"PASS\" if \"passed\" in output.lower() else \"FAIL: \" + output[:500]\n    except Exception as e:\n        return f\"ERROR: {str(e)}\"\n    finally:\n        sys.stdout = old_stdout",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Chain with Vex Verify",
+        "description": "Protect the entire code generation chain with comprehensive verification",
+        "code": "import vex\nfrom langchain.schema.output_parser import StrOutputParser\n\n@vex.verify(\n    guards=[\n        \"code_safety\",\n        \"syntax_validity\",\n        \"no_credential_leakage\",\n        \"dependency_safety\"\n    ],\n    risk_profile=\"high\"\n)\ndef safe_code_chain(inputs: dict) -> str:\n    result = code_chain.invoke(inputs)\n    return result\n\n# Usage\ntry:\n    verified_code = safe_code_chain({\n        \"requirements\": \"implement binary search algorithm\"\n    })\n    print(\"✅ Verified code:\", verified_code)\nexcept vex.VexError as e:\n    print(\"❌ Blocked:\", e.message)",
+        "language": "python"
+      },
+      {
+        "title": "Agent Executor Protection",
+        "description": "Verify agent tool calls and prevent dangerous execution patterns",
+        "code": "import vex\n\n@vex.verify(\n    guards=[\"execution_sandboxing\", \"tool_call_loop_detection\"],\n    max_iterations=5\n)\ndef safe_agent_executor(inputs: dict):\n    return agent_executor.invoke(inputs)\n\nresult = safe_agent_executor({\n    \"input\": \"Write code to process CSV data with pandas\"\n})\n\n# Vex automatically blocks:\n# - Infinite loops\n# - Unsafe syscalls\n# - Memory leaks\n# - Timeout violations",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Protect LangChain.js agents with Vex TypeScript SDK",
+        "code": "import { verify } from 'vex-sdk';\n\nimport { agent } from './langchain-agent';\n\nconst safeAgentCall = async (input: string) => {\n  const result = await verify({\n    fn: async () => {\n      return await agent.call({ input });\n    },\n    guards: [\n      'code_safety',\n      'syntax_validity',\n      'no_credential_leakage',\n      'execution_sandboxing'\n    ],\n    riskProfile: 'high',\n    maxIterations: 5\n  });\n  \n  return result;\n};\n\n// Usage\nconst verifiedCode = await safeAgentCall(\n  \"Generate React component for user login form\"\n);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Code Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your chains to eliminate code generation risks."
+    }
+  }
+}

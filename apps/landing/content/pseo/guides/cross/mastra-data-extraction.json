@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Mastra + Vex Guardrails",
+    "description": "Learn how to build data extraction with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra data extraction",
+      "Mastra guardrails",
+      "data extraction reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building reliable data extraction agents with Mastra enables schema-guided extraction from unstructured documents, powering intelligent document processing workflows. Vex guardrails are essential to catch malformed outputs, validate schema compliance, and prevent stale context from derailing extraction accuracy. This integration guide shows how to add Vex middleware to your Mastra pipelines for production-grade reliability.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Mastra",
+      "description": "Mastra's agent workflows orchestrate document ingestion, chunking, embedding storage, and schema-guided LLM extraction. The pipeline typically starts with file upload to a knowledge base, followed by retrieval-augmented generation where agents fetch relevant chunks and invoke structured LLM calls. Tools handle parsing, validation, and integration with external systems like CRMs or databases.\n\nThe core extraction step uses Mastra's workflow nodes with Pydantic-like schemas to enforce output structure. Agents transition between validation, enrichment, and persistence steps, with memory managing conversation context across multi-turn extractions. Failure often occurs when LLM outputs deviate from schemas or retrieval injects irrelevant context.\n\nVex integrates as middleware in Mastra's agent executor, wrapping tool calls, workflow transitions, and LLM invocations to validate outputs against extraction schemas before state updates.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Document      │───▶│   Mastra Agent   │───▶│  Structured      │\n│   Upload        │    │  Workflow        │    │   Output          │\n│                 │    │ ┌──────────────┐ │    │ ┌──────────────┐ │\n└─────────────────┘    │ │Knowledge RAG │ │    │ │Schema Valid. │ │\n                       │ │   + Tools    │ │    │ │   + Persist  │ │\n                       │ └──────────────┘ │    │ └──────────────┘ │\n                       │     │ Vex      │ │    └──────────────────┘\n                       │     │Middleware│ │           │\n                       └─────────────────┘           ▼\n                                                    │ CRM/DB │\n                                                    └────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra workflows pass unvalidated LLM outputs between nodes, causing downstream parsing failures",
+        "severity": "high",
+        "mitigation": "Vex schema guards on workflow transitions enforce type consistency"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Document parsing tools return inconsistent formats that break extraction schemas",
+        "severity": "critical",
+        "mitigation": "Vex tool output validators catch malformed data before agent reasoning"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Old document versions in Mastra memory confuse extraction agents",
+        "severity": "medium",
+        "mitigation": "Vex context freshness checks filter stale retrievals"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "External API responses with unexpected fields disrupt structured extraction",
+        "severity": "high",
+        "mitigation": "Vex field-level accuracy guards on integration outputs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Extraction Workflow Setup",
+        "description": "Define the core workflow with schema-guided extraction node",
+        "code": "import { createWorkflow, createAgent, createTool } from 'mastra';\nimport { z } from 'zod';\n\nconst invoiceSchema = z.object({\n  invoiceNumber: z.string().min(1),\n  date: z.string().datetime(),\n  total: z.number().positive(),\n  vendor: z.string(),\n  lineItems: z.array(z.object({\n    description: z.string(),\n    amount: z.number()\n  }))\n});\n\nconst extractionAgent = createAgent({\n  name: 'invoice_extractor',\n  model: 'gpt-4o',\n  instructions: 'Extract invoice data using the provided schema',\n  outputSchema: invoiceSchema\n});\n\nconst extractionWorkflow = createWorkflow({\n  nodes: [\n    {\n      id: 'extract',\n      agent: extractionAgent,\n      input: ({ context }) => ({ documents: context.documents })\n    }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Document Parsing Tool",
+        "description": "Tool to preprocess documents before schema extraction",
+        "code": "const parseDocumentTool = createTool({\n  name: 'parse_document',\n  description: 'Parse document text into chunks',\n  schema: z.object({\n    content: z.string(),\n    fileType: z.enum(['pdf', 'docx', 'txt'])\n  }),\n  execute: async ({ content, fileType }) => {\n    // PDF/text parsing logic\n    const chunks = await parseContent(content, fileType);\n    return {\n      chunks,\n      metadata: { fileType, chunkCount: chunks.length }\n    };\n  }\n});\n\nextractionAgent.addTool(parseDocumentTool);",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Integration",
+        "description": "Connect extraction to Mastra knowledge retrieval",
+        "code": "import { KnowledgeBase } from 'mastra/knowledge';\n\nconst kb = new KnowledgeBase({\n  name: 'documents',\n  embeddingModel: 'text-embedding-3-small'\n});\n\nconst ragNode = {\n  id: 'retrieve',\n  type: 'knowledge_retrieval',\n  knowledgeBase: kb,\n  input: ({ query }) => ({ query }),\n  maxResults: 5\n};\n\nextractionWorkflow.addNode(ragNode);",
+        "language": "typescript"
+      },
+      {
+        "title": "Validation and Persistence",
+        "description": "Final validation before saving extracted data",
+        "code": "const validateNode = {\n  id: 'validate',\n  type: 'function',\n  func: async (input: any) => {\n    const result = invoiceSchema.safeParse(input.extractedData);\n    if (!result.success) {\n      throw new Error(`Validation failed: ${JSON.stringify(result.error.issues)}`);\n    }\n    return result.data;\n  }\n};\n\nconst persistNode = {\n  id: 'persist',\n  type: 'function',\n  func: async (validatedData: any) => {\n    await db.invoices.insert(validatedData);\n    return { status: 'persisted', data: validatedData };\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware in Mastra Executor",
+        "description": "Wrap Mastra agent executor with Vex schema guards",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'mastra-extraction'\n});\n\nconst guardedExecutor = async (input: any) => {\n  const guardrail = await vex.guardrail({\n    name: 'invoice_extraction',\n    validations: [\n      {\n        type: 'pydantic_schema',\n        schema: {\n          type: 'object',\n          properties: {\n            invoiceNumber: { type: 'string' },\n            date: { type: 'string', format: 'date-time' },\n            total: { type: 'number', minimum: 0 },\n            vendor: { type: 'string' },\n            lineItems: {\n              type: 'array',\n              items: { type: 'object', properties: { description: { type: 'string' }, amount: { type: 'number' } } }\n            }\n          },\n          required: ['invoiceNumber', 'date', 'total', 'vendor', 'lineItems']\n        }\n      },\n      { type: 'completeness_check', required_fields: ['invoiceNumber', 'total'] },\n      { type: 'field_accuracy', fields: ['total'], threshold: 0.95 }\n    ]\n  });\n\n  const result = await guardrail.enforce({\n    input: input.documents,\n    agent: extractionAgent,\n    context: { workflow: 'invoice_extraction' }\n  });\n\n  return result.output;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Output Validation",
+        "description": "Guard document parsing tool outputs specifically",
+        "code": "const toolGuardrail = await vex.guardrail({\n  name: 'document_parser',\n  validations: [\n    {\n      type: 'object_structure',\n      required_keys: ['chunks', 'metadata'],\n      max_array_length: { chunks: 50 }\n    },\n    {\n      type: 'regex_match',\n      field: 'metadata.fileType',\n      pattern: '^(pdf|docx|txt)$'\n    },\n    {\n      type: 'range_check',\n      field: 'metadata.chunkCount',\n      min: 1,\n      max: 100\n    }\n  ]\n});\n\nconst safeParseTool = createTool({\n  ...parseDocumentTool,\n  execute: async (params) => {\n    const rawOutput = await parseDocumentTool.execute(params);\n    return await toolGuardrail.enforce({\n      input: params,\n      output: rawOutput\n    }).output;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Workflow Transition Guards",
+        "description": "Validate data between Mastra workflow nodes",
+        "code": "const workflowGuard = await vex.guardrail({\n  name: 'workflow_transition',\n  validations: [\n    {\n      type: 'context_freshness',\n      max_age_hours: 24,\n      fields: ['document.timestamp']\n    },\n    {\n      type: 'data_drift',\n      baseline_schema: invoiceSchema,\n      drift_threshold: 0.1\n    },\n    {\n      type: 'consistency_check',\n      rules: [\n        'total === lineItems.reduce((sum, item) => sum + item.amount, 0)'\n      ]\n    }\n  ]\n});\n\nconst safeTransition = async (fromNode: string, toNode: string, data: any) => {\n  const result = await workflowGuard.enforce({\n    input: data,\n    metadata: { fromNode, toNode, timestamp: new Date().toISOString() }\n  });\n  \n  if (result.valid) {\n    return extractionWorkflow.executeNode(toNode, result.output);\n  }\n  throw new Error(`Transition failed: ${result.issues}`);\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Data Extraction",
+      "description": "Add Vex guardrails to your Mastra workflows today and achieve 99.9% extraction reliability."
+    }
+  }
+}

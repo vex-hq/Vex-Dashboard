@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "jailbreak-prevention",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Jailbreak Prevention for AI Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix llm jailbreak prevention for ai agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-jailbreak-prevention-for-ai-agents",
+      "Vercel AI SDK jailbreak-prevention",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK agents, LLM jailbreaks manifest as malicious prompts bypassing safety guardrails during streaming tool calls and generateText operations, leading to unauthorized actions or data leaks. Agents built with useChat or streamUI patterns are particularly vulnerable when partial streaming responses aren't validated, allowing attackers to inject harmful instructions mid-stream. This is exacerbated by the framework's reliance on provider-specific structured outputs without built-in jailbreak detection.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming chat agent with useChat hook",
+        "symptom": "Attacker sends DAN-style prompt during conversation stream, model responds with uncensored content",
+        "impact": "Sensitive PII exposed in real-time UI, compliance violations"
+      },
+      {
+        "scenario": "Tool-calling agent with generateText + tools",
+        "symptom": "Jailbroken prompt tricks agent into executing unauthorized tool calls",
+        "impact": "Internal API keys leaked or destructive database operations triggered"
+      },
+      {
+        "scenario": "Multi-turn agent with streamUI pattern",
+        "symptom": "Partial stream tokens contain jailbreak payload before safety filters activate",
+        "impact": "UI renders malicious content before full response validation"
+      },
+      {
+        "scenario": "Structured output agent with zod schemas",
+        "symptom": "Jailbreak bypasses schema validation, returns raw harmful text",
+        "impact": "Downstream systems receive unfiltered malicious responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Jailbreak Token Scanner",
+        "description": "Intercepts generateText streams and flags known jailbreak patterns in partial tokens",
+        "code": "import { generateText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\n\nconst detectJailbreak = (text: string) => {\n  const patterns = [/DAN\\s*:\\s*ignore\\s*previous/i, /jailbreak/i, /ignore\\s*all\\s*rules/i];\n  return patterns.some(p => p.test(text));\n};\n\nexport async function streamAgent(prompt: string) {\n  const result = await generateText({\n    model: 'gpt-4o',\n    prompt,\n    stream: true,\n  });\n\n  const stream = createStreamableValue('');\n  \n  for await (const chunk of result.textStream) {\n    const current = await stream.get();\n    const next = current + chunk;\n    \n    if (detectJailbreak(next)) {\n      stream.update('[JAILBREAK DETECTED] Response blocked');\n      break;\n    }\n    \n    stream.update(next);\n  }\n  \n  return stream.value;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Intent Validator",
+        "description": "Inspects tool call arguments for jailbreak artifacts before execution",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst toolCallSchema = z.object({\n  action: z.enum(['search', 'writeFile', 'deleteFile']),\n  params: z.object({}).passthrough(),\n});\n\nexport async function safeToolCall(prompt: string) {\n  const result = await generateObject({\n    model: 'gpt-4o',\n    schema: toolCallSchema,\n    prompt,\n    tools: {\n      search: { /* ... */ },\n      writeFile: { /* ... */ },\n    },\n  });\n\n  // Detect jailbreak in tool arguments\n  const suspiciousArgs = /override|ignore|sudo|root/i.test(\n    JSON.stringify(result.object)\n  );\n  \n  if (suspiciousArgs) {\n    throw new Error('Jailbreak detected in tool call arguments');\n  }\n  \n  return result.object;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Response Completeness Checker",
+        "description": "Validates final structured output against expected schema after streaming",
+        "code": "import { streamObject } from 'ai';\nimport { z } from 'zod';\n\nconst responseSchema = z.object({\n  content: z.string().min(1),\n  safe: z.boolean(),\n});\n\nexport async function validateStreamedResponse(prompt: string) {\n  const result = await streamObject({\n    model: 'gpt-4o',\n    schema: responseSchema,\n    prompt,\n  });\n\n  const finalObject = await result.full();\n  \n  // Post-stream jailbreak validation\n  if (!finalObject.safe || /jailbreak/i.test(finalObject.content)) {\n    console.error('Jailbreak detected:', finalObject);\n    return { blocked: true, reason: 'Jailbreak detected' };\n  }\n  \n  return finalObject;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Double-Generation Safety Wrapper",
+        "description": "Uses secondary model call to validate primary response safety before streaming",
+        "code": "import { generateText } from 'ai';\n\nconst SAFETY_PROMPT = `Classify if this contains jailbreak attempts or harmful content:\\n\\n{{RESPONSE}}\\n\\nRespond ONLY with SAFE or UNSAFE`;\n\nexport async function safeGenerateText(prompt: string) {\n  // Primary generation\n  const primary = await generateText({\n    model: 'gpt-4o',\n    prompt,\n  });\n\n  // Safety check\n  const safetyCheck = await generateText({\n    model: 'gpt-4o-mini',\n    prompt: SAFETY_PROMPT.replace('{{RESPONSE}}', primary.text),\n    temperature: 0,\n  });\n\n  if (safetyCheck.text.toUpperCase().includes('UNSAFE')) {\n    return { text: '[Response blocked for safety]', safe: false };\n  }\n\n  return { text: primary.text, safe: true };\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Token-Level Streaming Guard",
+        "description": "Blocks streaming at first sign of jailbreak tokens with regex + embedding check",
+        "code": "import { createStreamableValue } from 'ai/rsc';\nimport { generateText } from 'ai';\n\nconst JAILBREAK_PATTERNS = [\n  /DAN[:\\s]/i, /jailbreak/i, /ignore\\s+previous/i, /override\\s+rules/i\n];\n\nexport async function guardedStream(prompt: string) {\n  const stream = createStreamableValue('');\n  const result = await generateText({ model: 'gpt-4o', prompt, stream: true });\n\n  let buffer = '';\n  \n  for await (const chunk of result.textStream) {\n    buffer += chunk;\n    \n    // Check each chunk incrementally\n    for (const pattern of JAILBREAK_PATTERNS) {\n      if (pattern.test(buffer)) {\n        stream.update('[BLOCKED: Jailbreak detected]');\n        stream.done();\n        return;\n      }\n    }\n    \n    stream.update(buffer);\n  }\n  \n  stream.done();\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Schema-Enforced Safe Outputs",
+        "description": "Uses strict Zod schemas that reject jailbreak patterns at parse time",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst SafeContentSchema = z.string().refine(\n  (val) => !/jailbreak|DAN|ignore\\s+rules/i.test(val),\n  { message: 'Jailbreak content detected' }\n);\n\nconst SafeAgentSchema = z.object({\n  content: SafeContentSchema,\n  tools: z.array(z.object({ name: z.string() })).optional(),\n  safe: z.literal(true),\n});\n\nexport async function safeAgent(prompt: string) {\n  try {\n    const result = await generateObject({\n      model: 'gpt-4o',\n      schema: SafeAgentSchema,\n      prompt: `Safe response only: ${prompt}`,\n      temperature: 0.1,\n    });\n    \n    return result.object;\n  } catch (error) {\n    return { content: '[Blocked: Safety violation]', safe: false };\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Jailbreak Prevention for AI Agents Detection with Vex",
+      "description": "Vex provides middleware integration for Vercel AI SDK's generateText and streamText APIs, automatically injecting safety checks at the stream and tool-call layers without modifying core agent logic. The SDK wraps existing agent patterns (useChat, generateObject, streamUI) with real-time jailbreak detection using regex patterns, embedding similarity against known attacks, and secondary safety model validation. Detection runs edge-side with <5ms overhead, blocking malicious streams before they reach the UI.\n\nRemediation is automatic: Vex replaces jailbroken responses with safe fallbacks, logs attack vectors for audit, and applies progressive rate limiting to repeat offenders. Integration requires one line of middleware addition to existing Vercel AI SDK routes, with full TypeScript support and zero-config setup for common providers (OpenAI, Anthropic, custom). The platform maintains 99.9% uptime SLAs even under coordinated jailbreak attempts.",
+      "code": "import { createMiddleware } from '@vex_dev/sdk/vercel';\nimport { generateText, generateObject } from 'ai';\n\n// Single-line Vex integration\nexport const vexMiddleware = createMiddleware({\n  jailbreak: {\n    enabled: true,\n    providers: ['openai', 'anthropic'],\n    blockThreshold: 0.8,\n  },\n  agentSafety: {\n    validateTools: true,\n    maxTokensBeforeCheck: 128,\n  },\n});\n\n// Wrap existing AI SDK calls\nexport async function agentRoute(request: Request) {\n  return vexMiddleware(async () => {\n    // Your existing Vercel AI SDK code\n    const result = await generateText({\n      model: 'gpt-4o',\n      prompt: request.prompt,\n      stream: true,\n    });\n    \n    return result;\n  });\n}",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in <60 seconds to block 99% of jailbreaks across all your Vercel AI SDK agents"
+    }
+  }
+}

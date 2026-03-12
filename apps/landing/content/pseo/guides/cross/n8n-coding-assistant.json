@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents ai coding assistant",
+      "n8n AI Agents guardrails",
+      "ai coding assistant reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Build powerful AI Coding Assistants using n8n AI Agents to handle repository context, code generation, sandbox execution, and iterative debugging in automated workflows. Guardrails are essential to prevent recursive loops, unvalidated code outputs, credential leaks, and stale context injection that can lead to security vulnerabilities or infinite executions. Vex provides runtime verification to ensure code correctness, security, and compliance before deployment.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with n8n AI Agents",
+      "description": "The typical n8n AI Coding Assistant workflow starts with a trigger (e.g., GitHub webhook or chat input) feeding into AI Agent nodes that analyze repository context from Git nodes and user prompts. The agent uses tools for code generation, sandbox execution via Execute Command nodes, and test validation with custom script nodes. Outputs flow to action nodes for PR creation or deployment, with Memory Window nodes maintaining conversation history across iterations.\n\nComplex chains emerge as the AI agent calls sub-agents for debugging, security scanning, and dependency analysis, creating risk points where unvalidated outputs pass directly to execution environments. Credential nodes (API keys, repo tokens) are accessed via tools, and recursive triggers can occur if validation fails and loops back to the AI agent.\n\nVex integrates as a webhook node immediately after AI Agent outputs, verifying code before it reaches sandbox or deployment nodes, blocking common failure modes like invalid code or leaked secrets.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   Trigger       │───▶│   AI Agent Node  │───▶│   Vex        │\n│ (GitHub/Chat)   │    │ (Code Gen/Debug) │    │ Webhook      │\n└─────────────────┘    │                  │    │ (Guardrails) │\n                       └──────────────────┘    └──────────────┘\n                                    │                    │\n                                    ▼                    ▼\n                           ┌──────────────────┐    ┌──────────────┐\n                           │ Sandbox Exec +   │    │   APPROVED   │\n                           │ Test Validation  │◀───│   Output     │\n                           └──────────────────┘    └──────────────┘\n                                    │\n                                    ▼\n                           ┌──────────────────┐\n                           │ Deploy/PR Action │\n                           └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI agent outputs trigger new workflow instances, creating infinite loops during debugging iterations",
+        "severity": "critical",
+        "mitigation": "Vex detects recursive patterns in execution traces and blocks loops exceeding depth thresholds"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unverified code reaches sandbox execution, potentially running malicious or broken scripts",
+        "severity": "high",
+        "mitigation": "Vex performs static analysis and test execution verification before approving code outputs"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI agents log or pass repo tokens/API keys in plain text through tool calls",
+        "severity": "critical",
+        "mitigation": "Vex scans all outputs for PII/credentials using pattern matching and redacts before forwarding"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated repo state or previous credentials pollute new debugging sessions",
+        "severity": "medium",
+        "mitigation": "Vex validates context freshness against git commit timestamps and repo state"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n AI Agent Node Setup for Code Generation",
+        "description": "Configure the AI Agent node with repo context tools and code generation prompt template",
+        "code": "const agentNode = {\n  name: 'CodeGenAgent',\n  type: 'n8n-nodes-base.agent',\n  parameters: {\n    agent: 'gpt-4o',\n    systemMessage: `You are a coding assistant. Analyze {{ $json.repoContext }} and generate fixes for {{ $json.bugDescription }}. Output ONLY valid TypeScript code.`,\n    tools: [\n      {\n        type: 'codeInterpreter',\n        name: 'generateCode'\n      },\n      {\n        type: 'github',\n        credentials: { github: 'repoAccess' }\n      }\n    ]\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Sandbox Execution Node with Test Validation",
+        "description": "Execute generated code in isolated environment and run unit tests before PR creation",
+        "code": "const sandboxNode = {\n  name: 'CodeSandbox',\n  type: 'n8n-nodes-base.executeCommand',\n  parameters: {\n    command: 'npm test && node sandbox.js',\n    workingDirectory: '/tmp/sandbox',\n    inputData: {\n      code: '={{ $json.aiOutput.code }}',\n      tests: '={{ $json.aiOutput.tests }}'\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Window for Iterative Debugging Context",
+        "description": "Maintain conversation history across debugging iterations with repo state awareness",
+        "code": "const memoryNode = {\n  name: 'DebugMemory',\n  type: 'n8n-nodes-base.memoryWindow',\n  parameters: {\n    windowSize: 10,\n    contextFields: ['repoContext', 'previousCode', 'testFailures'],\n    sessionId: '={{ $json.conversationId }}',\n    maxTokens: 8000\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "GitHub PR Creation Action Node",
+        "description": "Create verified PR with validated code changes after Vex approval",
+        "code": "const prNode = {\n  name: 'CreateVerifiedPR',\n  type: 'n8n-nodes-base.github',\n  parameters: {\n    resource: 'issue',\n    operation: 'create',\n    title: `Fix: {{ $json.bugDescription }}`,\n    body: `Verified code changes:\\n\\n{{ $json.vexApprovedCode }}`,\n    additionalFields: {\n      labels: ['ai-generated', 'vex-verified']\n    }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Webhook Node After AI Agent Output",
+        "description": "Add Vex webhook immediately after AI Agent to verify code before sandbox execution",
+        "code": "const vexWebhookNode = {\n  name: 'VexGuardrails',\n  type: 'n8n-nodes-base.webhook',\n  parameters: {\n    httpMethod: 'POST',\n    path: 'vex-verify',\n    options: {},\n    bodyParameters: {\n      parameters: [\n        { name: 'code', value: '={{ $json.aiOutput.code }}' },\n        { name: 'repoContext', value: '={{ $json.repoContext }}' },\n        { name: 'tests', value: '={{ $json.aiOutput.tests }}' }\n      ]\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex SDK Policy for Code Correctness + Security",
+        "description": "TypeScript SDK verification policy checking all use case requirements",
+        "code": "import { Vex, Policy } from '@vex_dev/sdk';\n\nconst policy = new Policy({\n  name: 'n8nCodingAssistant',\n  verifications: [\n    {\n      type: 'code_execution',\n      test: 'npm test',\n      success_codes: [0]\n    },\n    {\n      type: 'security_scan',\n      tools: ['semgrep', 'bandit'],\n      block_on: ['sql-injection', 'command-injection']\n    },\n    {\n      type: 'pii_detection',\n      patterns: ['API_KEY', 'GITHUB_TOKEN'],\n      action: 'block'\n    },\n    {\n      type: 'dependency_check',\n      max_age_days: 90,\n      vuln_threshold: 'medium'\n    }\n  ]\n});\n\nconst app = new Vex({ apiKey: process.env.VEX_API_KEY });\napp.use(policy);\n\n// n8n webhook handler\nexport async function verifyCode(req: Request) {\n  const { code, repoContext } = await req.json();\n  const result = await app.verify({ input: code, context: repoContext });\n  return Response.json({ approved: result.pass, report: result });\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Workflow Continuation After Vex Approval",
+        "description": "IF node routes approved outputs to sandbox, blocks failures with detailed reports",
+        "code": "const approvalNode = {\n  name: 'RouteByVexResult',\n  type: 'n8n-nodes-base.if',\n  parameters: {\n    conditions: {\n      options: {\n        caseSensitive: true,\n        leftValue: '={{ $json.vexResult.approved }}',\n        rightValue: true\n      }\n    }\n  }\n};\n\nconst errorNode = {\n  name: 'VexBlockReport',\n  type: 'n8n-nodes-base.respondToWebhook',\n  parameters: {\n    respondWith: 'JSON',\n    responseBody: '={{ JSON.stringify($json.vexResult.report) }}',\n    options: { }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents AI Coding Assistant",
+      "description": "Add Vex guardrails to your n8n workflows today to prevent code vulnerabilities and credential leaks."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Instructor Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Instructor tool-loop-detection",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor agents, Tool Loop Detection identifies infinite or excessive loops where the LLM repeatedly calls tools without progressing toward task completion, often triggered by structured output validation failures. This manifests as cascading retries from Instructor's Pydantic validation, where malformed tool responses fail schema validation and trigger endless re-parsing cycles. The problem is exacerbated by Instructor's strict validation, turning minor LLM inconsistencies into persistent loops that exhaust token budgets and timeout quotas.",
+    "howItManifests": [
+      {
+        "scenario": "Enum validation failures in tool parameters",
+        "symptom": "Instructor.from_openai() returns ValidationError repeatedly for tool_call.function.arguments",
+        "impact": "Agent calls same tool 20+ times with hallucinated enum values like 'INVALID_STATUS'"
+      },
+      {
+        "scenario": "Nested tool response missing required fields",
+        "symptom": "Partial Pydantic extraction triggers max_retries_exhausted after 5 attempts",
+        "impact": "Tool loop consumes 80% of session tokens without task progress"
+      },
+      {
+        "scenario": "Inconsistent JSON depth in tool outputs",
+        "symptom": "Instructor patch fails on varying nested object structures across tool calls",
+        "impact": "Agent stuck rephrasing same tool request indefinitely"
+      },
+      {
+        "scenario": "Structured output retries exhausted during multi-tool orchestration",
+        "symptom": "Instructor's mode='json' validation loops between weather_api and location_api",
+        "impact": "Complete session failure after 50+ tool calls and 30k tokens"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Counter Monitoring",
+        "description": "Track Instructor's internal retry attempts via validation error patterns",
+        "code": "from instructor import Instructor\nfrom openai import OpenAI\n\nclient = Instructor(Openai())\n\nclass ToolCall(BaseModel):\n    name: str\n    args: dict\n\ntry:\n    response = client.chat.completions.create(\n        model='gpt-4o',\n        response_model=ToolCall,\n        messages=messages,\n        max_retries=3\n    )\nexcept Exception as e:\n    if 'max_retries_exhausted' in str(e):\n        print('TOOL_LOOP_DETECTED: Validation retries exhausted')\n",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Signature Tracking",
+        "description": "Detect identical tool call sequences indicating loops",
+        "code": "tool_history = []\n\ndef detect_tool_loop(tool_calls):\n    signatures = []\n    for tc in tool_calls:\n        sig = (tc.function.name, hash(str(tc.function.arguments)))\n        signatures.append(sig)\n    \n    if len(signatures) > 5:\n        recent = signatures[-5:]\n        if len(set(recent)) == 1:\n            raise Exception('TOOL_LOOP: Repeated identical tool calls')\n    tool_history.extend(signatures)\n",
+        "language": "python"
+      },
+      {
+        "name": "Token Burn Rate Alert",
+        "description": "Monitor excessive tokens spent on tool validation retries",
+        "code": "import time\nclass LoopDetector:\n    def __init__(self):\n        self.token_history = []\n        self.start_time = time.time()\n    \n    def check(self, usage):\n        self.token_history.append(usage.total_tokens)\n        if len(self.token_history) > 10:\n            avg_tokens = sum(self.token_history[-5:]) / 5\n            if avg_tokens > 2000:  # High burn rate\n                duration = time.time() - self.start_time\n                if duration < 60 and sum(self.token_history[-5:]) > 10000:\n                    print('TOOL_LOOP: Excessive token burn rate')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Partial Validation Fallback",
+        "description": "Use Instructor's partial=True to break strict validation loops",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass FlexibleToolCall(BaseModel):\n    name: str\n    args: Optional[dict] = Field(default=None, validate_default=False)\n\nclient = Instructor(Openai(mode='json', validate_partial=True))\n\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=FlexibleToolCall,\n    messages=messages,\n    temperature=0.1  # Reduce hallucination\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Blacklisting",
+        "description": "Prevent repeated failed tool calls with usage tracking",
+        "code": "failed_tools = set()\nmax_attempts = 3\nattempts = defaultdict(int)\n\ndef safe_tool_call(tool_name, args):\n    if tool_name in failed_tools:\n        return {'error': 'TOOL_BLACKLISTED'}\n    \n    attempts[tool_name] += 1\n    if attempts[tool_name] > max_attempts:\n        failed_tools.add(tool_name)\n        return {'error': 'MAX_ATTEMPTS_EXCEEDED'}\n    \n    # Execute tool\n    return execute_tool(tool_name, args)\n",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Schema Relaxation",
+        "description": "Relax Instructor validation constraints after failures",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel, Field\n\nclass AdaptiveToolSchema(BaseModel):\n    name: str\n    args: dict = Field(default_factory=dict)\n\n# Start strict, fall back to lenient\nclient = Instructor(Openai())\n\ntry:\n    response = client.chat.completions.create(\n        model='gpt-4o',\n        response_model=AdaptiveToolSchema,\n        strict=False,\n        max_retries=1\n    )\nexcept:\n    # Fallback: raw JSON parsing\n    raw_response = openai_client.chat.completions.create(...)\n    tool_data = json.loads(raw_response.choices[0].message.tool_calls[0].function.arguments)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex automatically wraps Instructor's client.chat.completions.create() calls with intelligent loop detection that monitors retry patterns, tool call signatures, and token consumption rates specific to structured output validation failures. When loops are detected, Vex intervenes with adaptive remediation strategies including partial validation fallbacks, tool blacklisting, and dynamic schema relaxation without requiring manual configuration.\n\nThe integration requires only pip install instructor vex-sdk followed by a single vex.verify() wrapper around your Instructor client. Vex maintains state across sessions to track tool usage patterns and automatically applies the optimal fix strategy based on the specific loop signature observed in Instructor's Pydantic validation pipeline.\n\nVex provides real-time observability dashboards showing loop frequency, affected tools, and remediation success rates, enabling teams to proactively tune agent reliability before production issues occur.",
+      "code": "from vex import verify\nfrom instructor import Instructor\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Install: pip install instructor vex-sdk\nclient = Instructor(Openai())\n\n@verify(problem='tool_loop')\ndef agent_step(messages: list) -> BaseModel:\n    class ToolResponse(BaseModel):\n        name: str\n        args: dict\n    \n    return client.chat.completions.create(\n        model='gpt-4o',\n        messages=messages,\n        response_model=ToolResponse,\n        temperature=0.1\n    )\n\n# Vex auto-detects loops and applies fixes\nresponse = agent_step(messages)\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds and eliminate tool loops across your Instructor agents forever."
+    }
+  }
+}

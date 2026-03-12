@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in Haystack Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "Haystack latency-optimization",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack, LLM Latency Optimization for AI Agents manifests as excessive delays in RAG pipelines where slow retrievers, inefficient prompt builders, and unoptimized LLM components create bottlenecks during agentic workflows. Agents built with Haystack's Pipeline and Agent classes suffer from compounded latency when multiple LLM calls cascade through routing logic, document processing, and generation steps. This leads to poor user experience in production deployments where real-time responsiveness is critical.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever + Generator Pipeline",
+        "symptom": "Pipeline.run() takes >5s per query due to full document re-ranking",
+        "impact": "Agents timeout during multi-turn conversations, users abandon sessions"
+      },
+      {
+        "scenario": "Agent with Tool Routing",
+        "symptom": "Multiple sequential LLM calls for tool selection and execution",
+        "impact": "End-to-end latency exceeds 10s, breaking conversational flow"
+      },
+      {
+        "scenario": "Batch Processing in Agents",
+        "symptom": "Parallel document processing creates uneven LLM load balancing",
+        "impact": "Some requests complete in 2s, others >15s, causing UI jitter"
+      },
+      {
+        "scenario": "Custom PromptTemplate Components",
+        "symptom": "Verbose prompts with full context fed to LLM on every agent step",
+        "impact": "Token processing time scales quadratically with retrieved docs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Pipeline Latency Profiling",
+        "description": "Measure component-level timing using Haystack's built-in debugging and custom timers",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import PromptBuilder\nfrom time import perf_counter\n\npipe = Pipeline()\npipe.add_component(\"timer\", LambdaComponent(lambda x: (perf_counter(), x)))\npipe.add_component(\"retriever\", InMemoryBM25Retriever())\npipe.add_component(\"prompt\", PromptBuilder(\"Answer using: {docs}\"))\n\nresult = pipe.run({\n    \"timer\": {},\n    \"retriever\": {\"query\": \"What is Haystack?\"}\n})\n\nstart, end = result[\"timer\"][\"output\"]\nprint(f\"Retriever latency: {end - start:.2f}s\")",
+        "language": "python"
+      },
+      {
+        "name": "Agent Call Chain Analysis",
+        "description": "Trace LLM calls through agent routing with custom observability",
+        "code": "from haystack.agents import Agent\nfrom haystack.components.routers import PromptSingleRouter\nfrom time import perf_counter\n\nclass LatencyTracker:\n    def __init__(self):\n        self.calls = []\n    \n    def track(self, name, fn):\n        start = perf_counter()\n        result = fn()\n        latency = perf_counter() - start\n        self.calls.append({\"component\": name, \"latency\": latency})\n        return result\n\ntracker = LatencyTracker()\nagent = Agent(tools=[...])\n\n# Wrap agent execution\nresult = tracker.track(\"agent_full_run\", lambda: agent.run(\"query\"))\nprint(\"Call chain:\", tracker.calls)",
+        "language": "python"
+      },
+      {
+        "name": "Token Count Bottleneck Detection",
+        "description": "Identify prompt bloat causing LLM inference delays",
+        "code": "from haystack.components.builders import PromptBuilder\nfrom tiktoken import get_encoding\n\nprompt_builder = PromptBuilder(template=\"Answer using context: {{documents|join(' ')}}\")\n\ntokens = get_encoding(\"cl100k_base\")\n\n# Simulate with retrieved docs\ncontext = \"doc1 content... doc2 content...\"\nprompt = prompt_builder.run(documents=[context])[\"prompt\"]\n\ntoken_count = len(tokens.encode(prompt))\nprint(f\"Prompt tokens: {token_count}\")\nif token_count > 4000:\n    print(\"⚠️ High token count detected - optimize context!\")",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Async Parallel Retrieval",
+        "description": "Replace sequential retriever calls with concurrent execution",
+        "code": "from haystack import Pipeline\nimport asyncio\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\nclass AsyncRetriever:\n    def __init__(self, retriever):\n        self.retriever = retriever\n    \n    async def arun(self, query):\n        return await asyncio.to_thread(self.retriever.run, query=query)\n\n# Pipeline with async components\npipe = Pipeline()\npipe.add_component(\"async_retriever\", AsyncRetriever(InMemoryEmbeddingRetriever(...)))\n\n# Run asynchronously\nloop = asyncio.get_event_loop()\nresults = loop.run_until_complete(pipe.arun({\"async_retriever\": {\"query\": \"fast query\"}}))",
+        "language": "python"
+      },
+      {
+        "name": "Context Compression",
+        "description": "Reduce prompt size with semantic chunking before LLM",
+        "code": "from haystack.components.builders import PromptBuilder\nfrom haystack.components.preprocessors import DocumentSplitter\n\n# Split long docs before embedding\nsplitter = DocumentSplitter(chunk_size=200, chunk_overlap=20)\n\npipe = Pipeline()\npipe.add_component(\"splitter\", splitter)\npipe.add_component(\"retriever\", InMemoryBM25Retriever())\npipe.add_component(\"prompt\", PromptBuilder(\n    \"Answer using ONLY these chunks: {{documents|join(sep='\\n')[:3000]}}\")\n)\n\n# Limits context to 3000 chars max\nresult = pipe.run({\"splitter\": {\"documents\": docs}, \"retriever\": {\"query\": query}})",
+        "language": "python"
+      },
+      {
+        "name": "Speculative Decoding Proxy",
+        "description": "Cache common agent prefixes to skip redundant LLM computation",
+        "code": "from functools import lru_cache\nfrom haystack.agents import Agent\n\n@lru_cache(maxsize=128)\ndef cached_prompt_eval(prompt_hash, max_tokens=100):\n    \"\"\"Cache common agent routing decisions\"\"\"\n    return llm_client.generate(prompt_hash, max_tokens=max_tokens)\n\nclass FastAgent(Agent):\n    def _route_tools(self, query):\n        prompt_hash = hash(self._build_routing_prompt(query))\n        return cached_prompt_eval(prompt_hash)\n\nagent = FastAgent(tools=tools)\n# Subsequent identical queries hit cache instantly",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that automatically instruments your pipelines and agents with production-grade latency observability. It captures component timings, token counts, and call graphs without code changes, then applies ML-driven anomaly detection to flag latency regressions. Vex's auto-remediation suggests and applies optimizations like async refactoring, context compression, and model distillation directly in your pipeline definition.\n\nThe Vex component wraps existing Haystack components with zero-config profiling, building a latency heatmap across all agent paths. It detects the specific failure modes - retriever bottlenecks, verbose prompts, sequential LLM calls - and generates optimized pipeline variants. Deploying Vex reduces manual debugging from hours to seconds while maintaining your existing Haystack workflows.\n\nVex's agent-aware monitoring understands Haystack's routing patterns, correlating latency spikes with specific tool chains and conversation states for precise root cause analysis.",
+      "code": "from vex_sdk.haystack import VexMonitor\nfrom haystack import Pipeline\n\n# Zero-config integration\npipe = Pipeline()\npipe.add_component(\"vex\", VexMonitor())  # Auto-instruments all components\npipe.add_component(\"retriever\", InMemoryBM25Retriever())\npipe.add_component(\"generator\", OpenAIGenerator())\n\n# Vex auto-generates latency dashboard and fixes\nresult, insights = pipe.run_with_vex(\n    {\"retriever\": {\"query\": \"What is Haystack?\"}},\n    target_latency_ms=2000\n)\n\nprint(\"Vex Insights:\")\nprint(insights['latency_breakdown'])\nprint(insights['recommended_fixes'])\n\n# Auto-apply optimal pipeline\noptimized_pipe = insights['optimized_pipeline']\nresult = optimized_pipe.run({...})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install haystack-ai vex-sdk` and add one component to eliminate LLM latency issues forever."
+    }
+  }
+}

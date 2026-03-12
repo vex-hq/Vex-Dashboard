@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Haystack Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Haystack tool-loop-detection",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack agents, tool loops manifest as infinite or excessively long cycles where the Agent component repeatedly invokes the same tool sequence without progressing toward task completion. This occurs due to the Agent's iterative reasoning loop failing to recognize repetitive tool calls or state patterns within Haystack's Pipeline.run() execution. The problem is exacerbated by Haystack's stateless pipeline nature, where conversation history and tool call tracking must be explicitly managed.",
+    "howItManifests": [
+      {
+        "scenario": "RAG Agent repeatedly calling DocumentStore retriever",
+        "symptom": "Pipeline logs show identical query→retrieve→generate cycles >5 iterations",
+        "impact": "High compute costs, timeouts, degraded user experience"
+      },
+      {
+        "scenario": "Calculator tool self-referencing in math agent",
+        "symptom": "Same tool input parameters called consecutively in AgentChatMessage history",
+        "impact": "Infinite loops until max_iterations exceeded, incorrect final answers"
+      },
+      {
+        "scenario": "Search tool cycling between similar queries",
+        "symptom": "Levenshtein distance < 0.8 between consecutive tool query strings",
+        "impact": "Pipeline hangs, resource exhaustion in production deployments"
+      },
+      {
+        "scenario": "Multi-tool agent ping-ponging between tools",
+        "symptom": "Alternating tool call patterns (toolA→toolB→toolA→toolB)",
+        "impact": "Stuck reasoning loops, failure to synthesize final response"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Sequence Tracker",
+        "description": "Monitors consecutive tool calls in Haystack Agent pipeline for repetition patterns",
+        "code": "from haystack import component, Pipeline\nfrom collections import deque\n\n@component\nclass ToolLoopDetector:\n    def __init__(self, max_repeats=3, window_size=5):\n        self.tool_history = deque(maxlen=window_size)\n        self.max_repeats = max_repeats\n        \n    @component.output_types(has_loop=bool, loop_details=str)\n    def run(self, tool_calls: list):\n        if not tool_calls:\n            return {\"has_loop\": False, \"loop_details\": \"\"}\n        \n        current_tool = (tool_calls[-1]['name'], str(tool_calls[-1].get('parameters', {})))\n        self.tool_history.append(current_tool)\n        \n        # Check for repetition\n        recent_calls = list(self.tool_history)\n        if len(set(recent_calls)) <= 1 and len(recent_calls) >= self.max_repeats:\n            return {\n                \"has_loop\": True, \n                \"loop_details\": f\"Repeated {current_tool[0]} {len(recent_calls)} times\"\n            }\n        return {\"has_loop\": False, \"loop_details\": \"\"}",
+        "language": "python"
+      },
+      {
+        "name": "Conversation State Hash Monitor",
+        "description": "Detects loops by hashing Agent conversation state between iterations",
+        "code": "import hashlib\nfrom haystack import component\n\n@component\nclass StateLoopDetector:\n    def __init__(self):\n        self.seen_states = set()\n    \n    @component.output_types(loop_detected=bool, state_hash=str)\n    def run(self, conversation_history: str, tool_calls: list):\n        state_str = f\"{conversation_history}|{str(tool_calls)}\"\n        state_hash = hashlib.md5(state_str.encode()).hexdigest()\n        \n        if state_hash in self.seen_states:\n            return {\"loop_detected\": True, \"state_hash\": state_hash}\n        \n        self.seen_states.add(state_hash)\n        return {\"loop_detected\": False, \"state_hash\": state_hash}",
+        "language": "python"
+      },
+      {
+        "name": "Iteration Counter with Tool Pattern Analysis",
+        "description": "Tracks pipeline iterations and detects cyclic tool invocation patterns",
+        "code": "from haystack import component\nfrom collections import Counter\n\n@component\nclass IterationLoopDetector:\n    def __init__(self, max_iterations=10):\n        self.iteration_count = 0\n        self.tool_pattern_history = []\n        self.max_iterations = max_iterations\n    \n    @component.output_types(loop_detected=bool, iteration_count=int)\n    def run(self, tool_name: str = None):\n        self.iteration_count += 1\n        if tool_name:\n            self.tool_pattern_history.append(tool_name)\n        \n        # Pattern repetition check\n        if len(self.tool_pattern_history) >= 4:\n            recent_pattern = tuple(self.tool_pattern_history[-4:])\n            earlier_pattern = tuple(self.tool_pattern_history[-8:-4])\n            if recent_pattern == earlier_pattern:\n                return {\"loop_detected\": True, \"iteration_count\": self.iteration_count}\n        \n        if self.iteration_count >= self.max_iterations:\n            return {\"loop_detected\": True, \"iteration_count\": self.iteration_count}\n        \n        return {\"loop_detected\": False, \"iteration_count\": self.iteration_count}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Early Loop Termination Component",
+        "description": "Intercepts detected loops and forces pipeline termination with error message",
+        "code": "from haystack import component\n\n@component\nclass LoopBreaker:\n    @component.output_types(should_terminate=bool, final_response=str)\n    def run(self, has_loop: bool, loop_details: str):\n        if has_loop:\n            return {\n                \"should_terminate\": True,\n                \"final_response\": f\"Loop detected: {loop_details}. Terminating to prevent infinite execution.\"\n            }\n        return {\"should_terminate\": False, \"final_response\": \"\"}",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Memoization",
+        "description": "Caches identical tool calls to prevent redundant execution",
+        "code": "from haystack import component\nfrom collections import defaultdict\n\n@component\nclass ToolMemoizer:\n    def __init__(self):\n        self.cache = defaultdict(list)\n    \n    @component.output_types(cached_result=dict, use_cache=bool)\n    def run(self, tool_name: str, parameters: dict):\n        key = (tool_name, str(sorted(parameters.items())))\n        \n        if key in self.cache and self.cache[key]:\n            return {\"cached_result\": self.cache[key][-1], \"use_cache\": True}\n        \n        return {\"cached_result\": {}, \"use_cache\": False}",
+        "language": "python"
+      },
+      {
+        "name": "Diverse Tool Router",
+        "description": "Forces tool diversity by tracking recent usage and suggesting alternatives",
+        "code": "from haystack import component\nimport random\n\n@component\nclass DiverseToolRouter:\n    def __init__(self, available_tools: list):\n        self.recent_tools = []\n        self.available_tools = available_tools\n    \n    @component.output_types(suggested_tool=str, force_diversity=bool)\n    def run(self, preferred_tool: str, tool_calls_history: list):\n        self.recent_tools.extend([call['name'] for call in tool_calls_history[-3:]])\n        \n        # If same tool used 3+ times recently, force diversity\n        if self.recent_tools.count(preferred_tool) >= 3:\n            alternatives = [t for t in self.available_tools if t != preferred_tool]\n            suggested = random.choice(alternatives) if alternatives else preferred_tool\n            return {\"suggested_tool\": suggested, \"force_diversity\": True}\n        \n        return {\"suggested_tool\": preferred_tool, \"force_diversity\": False}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in Haystack Agents with Vex",
+      "description": "Vex integrates seamlessly as a custom Haystack component to automatically detect tool loops across all agent pipelines. It monitors tool call sequences, conversation state hashes, and iteration patterns in real-time, providing observability into loop formation without modifying core agent logic. Vex's ML-powered anomaly detection identifies subtle cyclic patterns that rule-based systems miss, such as gradual query drift leading to loops.\n\nOnce detected, Vex automatically applies context-aware remediation: injecting cached results, forcing tool diversity, or gracefully terminating loops with synthesized responses. The platform provides production-ready dashboards showing loop frequency by tool/pipeline, MTTR metrics, and auto-remediation success rates. Integration requires only adding the VexGuard component to your existing Haystack Pipeline.\n\nVex maintains full pipeline traceability with structured logging of loop events, enabling teams to iterate on prompt engineering and tool definitions to prevent recurrence at the root cause.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk import VexGuard\n\n# Install: pip install haystack-ai vex-sdk\n\nvex_pipeline = Pipeline()\n\n# Add your existing components\nvex_pipeline.add_component(\"agent\", your_haystack_agent)\n\n# Vex auto-detects and fixes tool loops\nvex_pipeline.add_component(\"vex_guard\", VexGuard(monitor_loops=True))\n\n# Auto-wires between agent and Vex\nvex_pipeline.connect(\"agent.output\", \"vex_guard.agent_output\")\n\n# Run with automatic loop protection\nresult = vex_pipeline.run({\n    \"agent\": {\"query\": \"What's 15% of 237?\"}\n})\n\n# Vex automatically injects loop_protected=True metadata\nprint(result['vex_guard']['loop_protected'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix Tool Loops Automatically with Vex",
+      "description": "Add Vex to your Haystack pipelines today and eliminate tool loops with one line of code."
+    }
+  }
+}

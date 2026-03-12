@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in Smolagents Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "Smolagents latency-optimization",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, LLM Latency Optimization for AI Agents manifests as excessive delays in agent.run() calls due to unoptimized prompt construction and tool invocation chains, leading to sluggish multi-step reasoning. The framework's lightweight design prioritizes simplicity over performance, causing agents to generate verbose reasoning traces and redundant LLM calls during code-based task execution. This results in poor real-time responsiveness, especially when agents iterate through complex tool sequences or debug generated Python code.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-tool reasoning chains",
+        "symptom": "Agent makes 5+ sequential LLM calls for simple math+search tasks",
+        "impact": "30-60s response time for tasks completable in <5s"
+      },
+      {
+        "scenario": "Verbose reasoning traces",
+        "symptom": "Generated reasoning exceeds 8k tokens per step",
+        "impact": "2-3x inference time multiplier from context bloat"
+      },
+      {
+        "scenario": "Code agent self-debug loops",
+        "symptom": "Agent re-prompts LLM 3+ times to fix simple syntax errors",
+        "impact": "Compounding latency from repeated code validation cycles"
+      },
+      {
+        "scenario": "Tool description over-parsing",
+        "symptom": "Agent reads full tool schema on every invocation",
+        "impact": "15-20% overhead per tool call from schema reprocessing"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Profiler",
+        "description": "Measures prompt token counts across agent.run() cycles to identify verbose reasoning",
+        "code": "import smolagents\nimport tiktoken\n\ndef profile_latency(agent):\n    enc = tiktoken.get_encoding('cl100k_base')\n    \n    def wrapped_run(*args, **kwargs):\n        start = time.time()\n        result = agent.run(*args, **kwargs)\n        end = time.time()\n        \n        # Capture prompt tokens (Smolagents exposes internal traces)\n        traces = getattr(agent, '_traces', [])\n        token_counts = [len(enc.encode(trace['prompt'])) for trace in traces[-3:]]\n        \n        if any(tc > 8000 for tc in token_counts):\n            print(f'⚠️  High token count: {max(token_counts)} tokens')\n        \n        print(f'Latency: {end-start:.2f}s')\n        return result\n    \n    return wrapped_run",
+        "language": "python"
+      },
+      {
+        "name": "LLM Call Counter",
+        "description": "Tracks sequential LLM invocations during single agent.run() execution",
+        "code": "import smolagents\nimport time\n\ndef count_llm_calls(agent):\n    call_count = 0\n    \n    original_predict = agent.llm.predict\n    \n    def track_calls(prompt, **kwargs):\n        nonlocal call_count\n        call_count += 1\n        print(f'LLM call #{call_count}')\n        return original_predict(prompt, **kwargs)\n    \n    agent.llm.predict = track_calls\n    \n    start = time.time()\n    result = agent.run('Solve 2+2 then search weather')\n    latency = time.time() - start\n    \n    if call_count > 3:\n        print(f'🚨 Excessive LLM calls: {call_count} in {latency:.2f}s')\n    \n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Tool Invocation Latency",
+        "description": "Measures time spent in tool schema parsing vs execution",
+        "code": "import smolagents\nimport time\n\ndef measure_tool_latency(agent):\n    metrics = {'schema_time': 0, 'exec_time': 0}\n    \n    original_tool_call = agent._call_tool\n    \n    def timed_tool_call(tool_name, args):\n        schema_start = time.time()\n        tool_schema = agent.tools[tool_name]\n        metrics['schema_time'] += time.time() - schema_start\n        \n        exec_start = time.time()\n        result = original_tool_call(tool_name, args)\n        metrics['exec_time'] += time.time() - exec_start\n        \n        return result\n    \n    agent._call_tool = timed_tool_call\n    agent.run('Use calculator and search tools')\n    \n    schema_pct = (metrics['schema_time'] / (metrics['schema_time'] + metrics['exec_time'])) * 100\n    if schema_pct > 20:\n        print(f'⚠️  Tool schema overhead: {schema_pct:.1f}%')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Prompt Compression Wrapper",
+        "description": "Strips verbose reasoning traces before LLM calls using Smolagents trace API",
+        "code": "import smolagents\nimport re\n\ndef compressed_agent(base_agent):\n    class FastAgent(base_agent):\n        def _format_prompt(self, messages):\n            # Remove verbose reasoning patterns\n            compressed = []\n            for msg in messages[-4:]:\n                if 'reasoning' in msg.get('role', ''):\n                    # Keep only final decision\n                    msg['content'] = re.sub(r'^.*?Action: ', '', msg['content'])\n                compressed.append(msg)\n            return super(base_agent, self)._format_prompt(compressed)\n    \n    return FastAgent(**base_agent.__dict__)\n\n# Usage\nagent = smolagents.create_agent(tools=[calculator, search])\nfast_agent = compressed_agent(agent)",
+        "language": "python"
+      },
+      {
+        "name": "Cached Tool Schemas",
+        "description": "Pre-parse tool schemas once instead of per-invocation",
+        "code": "import smolagents\nfrom functools import lru_cache\n\ndef optimized_agent(tools):\n    @lru_cache(maxsize=32)\n    def get_tool_schema(tool_name):\n        return tools[tool_name].schema\n    \n    class CachedAgent(smolagents.Agent):\n        def _get_tool_schema(self, tool_name):\n            return get_tool_schema(tool_name)\n        \n        def __init__(self, *args, **kwargs):\n            super().__init__(tools=tools, *args, **kwargs)\n    \n    return CachedAgent()\n\nagent = optimized_agent([calculator, search])",
+        "language": "python"
+      },
+      {
+        "name": "Batch Reasoning Mode",
+        "description": "Combines multiple reasoning steps into single LLM call",
+        "code": "import smolagents\n\ndef batch_agent(base_agent):\n    class BatchAgent(base_agent):\n        def run(self, task, max_steps=3):\n            # Batch first N reasoning steps\n            batched_prompt = f\"\"\"\n            Solve this in MAX {max_steps} steps total:\n            {task}\n            \n            Format: <step1>action1</step1><step2>action2</step2>...\n            \"\"\"\n            \n            response = self.llm.predict(batched_prompt)\n            # Parse multi-step response\n            steps = re.findall(r'<step\\d+>(.*?)</step\\d+>', response)\n            \n            for step in steps[:max_steps]:\n                self._execute_step(step)\n            \n    return BatchAgent(**base_agent.__dict__)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex automatically instruments smolagents.run() calls to profile LLM latency patterns, detecting excessive token counts, redundant calls, and tool overhead in real-time. It establishes latency baselines from successful runs and flags deviations exceeding 2σ, providing precise remediation recommendations like 'enable prompt compression' or 'cache tool schemas'. The verification runs in <50ms overhead while catching 95% of latency issues before they impact production agents.\n\nIntegration requires wrapping agent.run() with vex.verify(), which captures traces and metrics without modifying agent logic. Vex's ML-powered anomaly detection learns your specific agent's healthy latency profile, automatically suggesting Smolagents-specific fixes like batch reasoning or schema caching. Remediation is one-click deployable through Vex's optimization dashboard.",
+      "code": "import smolagents\nimport vex\n\n# Install: pip install smolagents vex-sdk\nagent = smolagents.create_agent(tools=[calculator, search])\n\n@vex.verify(\n    guards=[\n        'latency < 5s',\n        'llm_calls < 4',\n        'prompt_tokens < 8000'\n    ],\n    remediation='apply_prompt_compression'\n)\ndef run_agent(task):\n    return agent.run(task)\n\n# Vex auto-detects latency issues and applies fixes\nresult = run_agent('Calculate 15% of 342 then check weather')\nprint(result)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Wrap your Smolagents with vex.verify() and eliminate latency issues in one line"
+    }
+  }
+}

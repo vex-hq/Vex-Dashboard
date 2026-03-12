@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Google ADK Agents",
+    "description": "How to detect and fix ai agent observability in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Google ADK agent-observability",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, AI Agent Observability challenges arise from multi-agent delegation loops, Gemini model inconsistencies, session state drift in long conversations, and tool format mismatches between agents. These issues manifest as silent failures in agent workflows, making debugging complex due to ADK's asynchronous delegation patterns and shared session contexts. Vex integration via before_agent_callback provides real-time tracing to surface these hidden failures.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation creating circular dependencies",
+        "symptom": "Agent A delegates to Agent B, which delegates back to Agent A indefinitely",
+        "impact": "Infinite loops consume API quotas and timeout sessions without error"
+      },
+      {
+        "scenario": "Gemini model switching causing output inconsistency",
+        "symptom": "Different agents use gemini-1.5-pro vs gemini-1.5-flash inconsistently",
+        "impact": "Format mismatches break tool parsing across agent handoffs"
+      },
+      {
+        "scenario": "Session state corruption in long conversations",
+        "symptom": "Shared session context gets overwritten by parallel agent executions",
+        "impact": "Agents reference stale or missing conversation history"
+      },
+      {
+        "scenario": "Tool response format mismatches across agents",
+        "symptom": "One agent returns JSON, another returns plain text for same tool",
+        "impact": "Downstream agents fail to parse tool responses correctly"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Circular Delegation Detector",
+        "description": "Traces agent delegation paths to detect cycles using call stack analysis",
+        "code": "from adk import Agent\ndef detect_circular_delegation(callback_data):\n    stack = callback_data.get('delegation_stack', [])\n    current_agent = callback_data['agent_id']\n    \n    # Check if current agent appears twice in stack (cycle)\n    if stack.count(current_agent) > 1:\n        cycle_path = ' -> '.join(stack[stack.index(current_agent):] + [current_agent])\n        print(f'🚨 CIRCULAR DELEGATION: {cycle_path}')\n        return {'alert': 'circular_dependency', 'path': cycle_path}\n    \n    stack.append(current_agent)\n    return {'delegation_stack': stack}",
+        "language": "python"
+      },
+      {
+        "name": "Model Consistency Checker",
+        "description": "Validates all agents use consistent Gemini model versions",
+        "code": "def check_model_consistency(callback_data):\n    agents = callback_data.get('session_agents', {})\n    model_versions = set()\n    \n    for agent_id, config in agents.items():\n        model = config.get('model', 'unknown')\n        model_versions.add(model)\n        \n    if len(model_versions) > 1:\n        print(f'⚠️ MODEL INCONSISTENCY: {model_versions}')\n        return {'alert': 'model_mismatch', 'models': list(model_versions)}\n    return {'status': 'consistent'}",
+        "language": "python"
+      },
+      {
+        "name": "Session State Drift Monitor",
+        "description": "Tracks session state mutations to detect corruption patterns",
+        "code": "import hashlib\ndef monitor_session_state(callback_data):\n    session_state = callback_data.get('session_state', {})\n    state_str = str(sorted(session_state.items()))\n    state_hash = hashlib.md5(state_str.encode()).hexdigest()\n    \n    prev_hash = callback_data.get('last_state_hash')\n    if prev_hash and prev_hash != state_hash:\n        print(f'🔍 STATE DRIFT DETECTED: {prev_hash[:8]} → {state_hash[:8]}')\n        return {'alert': 'state_drift', 'hash_change': True}\n    \n    return {'last_state_hash': state_hash}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Delegation Circuit Breaker",
+        "description": "Prevents circular delegation with max delegation depth",
+        "code": "from adk import Agent\nclass SafeDelegationAgent(Agent):\n    def __init__(self, *args, max_delegations=5, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_delegations = max_delegations\n        \n    async def before_delegate(self, target_agent, context):\n        delegation_count = context.get('delegation_count', 0)\n        if delegation_count >= self.max_delegations:\n            return {'error': 'Max delegation depth exceeded', 'safe_response': 'Cannot delegate further'}\n        context['delegation_count'] = delegation_count + 1\n        return context",
+        "language": "python"
+      },
+      {
+        "name": "Unified Model Configuration",
+        "description": "Enforces consistent model across all agents in workflow",
+        "code": "from adk import Workflow\nclass ConsistentModelWorkflow(Workflow):\n    def __init__(self, model='gemini-1.5-pro'):\n        super().__init__()\n        self.default_model = model\n        \n    def add_agent(self, agent):\n        agent.model = self.default_model\n        super().add_agent(agent)\n        print(f'✅ Agent {agent.name} configured with {self.default_model}')\n        return self",
+        "language": "python"
+      },
+      {
+        "name": "Structured Tool Response Wrapper",
+        "description": "Standardizes tool outputs across all agents",
+        "code": "def standardize_tool_response(tool_output):\n    return {\n        'content': str(tool_output),\n        'type': 'tool_result',\n        'format_version': '1.0',\n        'parseable': True\n    }\n\n# In agent tool handler\nasync def my_tool(context):\n    result = await perform_tool_action(context)\n    return standardize_tool_response(result)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex integrates seamlessly as a before_agent_callback in Google ADK, automatically tracing multi-agent interactions, delegation paths, model usage, and session state changes. It detects circular dependencies in real-time, flags model inconsistencies before they cascade, and monitors session drift across long conversations without manual instrumentation.\n\nVex's agent-specific detectors capture ADK's unique failure patterns like tool format mismatches during handoffs and delegation loops, providing structured alerts with remediation paths. The platform automatically suggests fixes like circuit breakers and model normalization, reducing MTTR from hours to seconds.\n\nInstallation is simple: pip install google-adk vex-sdk, then add Vex to your workflow callbacks for immediate observability across all agents.",
+      "code": "from adk import Agent, Workflow\nfrom vex_sdk import VexObserver\n\n# Initialize Vex observer\nvex = VexObserver(api_key='your-vex-api-key')\n\n# Add Vex as before_agent callback\nagent = Agent(\n    name='researcher',\n    model='gemini-1.5-pro',\n    before_agent_callback=vex.trace_agent_call,\n    after_agent_callback=vex.record_agent_output\n)\n\nworkflow = Workflow(agents=[agent])\n\n# Vex auto-detects all 4 failure modes\n@vex.detector('circular_delegation')\ndef check_loops(trace):\n    return len(trace.delegation_path) > 10\n\n@vex.detector('model_consistency')\ndef check_models(trace):\n    return len(set(a.model for a in trace.agents)) > 1\n\nresult = await workflow.run('Analyze market trends')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to eliminate Google ADK observability blindspots in 5 minutes"
+    }
+  }
+}

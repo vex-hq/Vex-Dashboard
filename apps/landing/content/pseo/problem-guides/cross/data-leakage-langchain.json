@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in LangChain Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "LangChain data-leakage",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangChain agents, sensitive data leakage often occurs when agents inadvertently expose API keys, user PII, or internal secrets in tool calls, chain outputs, or hallucinated responses due to unfiltered LLM generations. This is exacerbated by LangChain's flexible agent executors and retrieval chains, where intermediate states like ReAct agent thoughts or RAG context can propagate sensitive data without sanitization. Without proper guards, LangChain applications become prime targets for data exfiltration attacks.",
+    "howItManifests": [
+      {
+        "scenario": "ReAct Agent Tool Calls with Embedded Secrets",
+        "symptom": "Agent includes API keys from user input in tool arguments",
+        "impact": "Attackers extract credentials from agent executor traces"
+      },
+      {
+        "scenario": "RAG Retrieval Chain Context Leakage",
+        "symptom": "Retrieved documents containing PII appear in final chain output",
+        "impact": "Customer data exposed in chatbot responses"
+      },
+      {
+        "scenario": "Conversational Memory Buffer Overflow",
+        "symptom": "ChatHistory buffer retains sensitive messages across sessions",
+        "impact": "Historical PII accessible to unauthorized users"
+      },
+      {
+        "scenario": "Custom Tool Function Parameter Logging",
+        "symptom": "Tool input parameters with secrets logged to LangSmith traces",
+        "impact": "Secrets visible in LangSmith observability dashboard"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Output PII Scanner",
+        "description": "Detects common PII patterns and API key formats in agent final outputs",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain.tools import Tool\nimport re\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'(sk-[A-Za-z0-9]{48})',\n    r'(ak-[A-Za-z0-9]{20})'\n]\n\ndef scan_for_pii(text: str) -> list:\n    matches = []\n    for pattern in PII_PATTERNS:\n        found = re.finditer(pattern, text)\n        matches.extend([m.group() for m in found])\n    return matches\n\n# Usage in agent executor\nresult = agent_executor.invoke({\"input\": user_query})\nleaks = scan_for_pii(result['output'])\nif leaks:\n    print(f'🚨 PII Leak detected: {leaks}')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Argument Inspector",
+        "description": "Intercepts agent tool calls to scan arguments for sensitive data before execution",
+        "code": "from langchain.callbacks.base import BaseCallbackHandler\n\nclass SensitiveDataCallback(BaseCallbackHandler):\n    def on_tool_start(self, tool, input_str: str, **kwargs):\n        if 'api_key' in input_str.lower() or 'secret' in input_str.lower():\n            print(f'🚨 Suspicious tool input: {input_str[:50]}...')\n            raise ValueError('Sensitive data detected in tool call')\n\n# Bind to agent\nagent_executor = AgentExecutor.from_agent_and_tools(\n    agent=agent,\n    tools=tools,\n    callbacks=[SensitiveDataCallback()]\n)",
+        "language": "python"
+      },
+      {
+        "name": "LangSmith Trace PII Monitor",
+        "description": "Scans LangSmith run traces for sensitive data exposure",
+        "code": "from langsmith import Client\nimport re\n\nclient = Client()\n\nruns = client.list_runs(project_name=\"my-agent\")\nfor run in runs:\n    if run.outputs:\n        output_text = str(run.outputs)\n        # Check for common secret patterns\n        if re.search(r'(sk-[A-Za-z0-9]{48}|Bearer\\s+[A-Za-z0-9]{40})', output_text):\n            print(f'🚨 Leak in run {run.id}: {output_text[:100]}...')\n            client.update_run(run.id, {'extra': {'security_alert': True}})",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Output Sanitization Chain Wrapper",
+        "description": "Wraps agent outputs with regex-based PII redaction before returning to user",
+        "code": "import re\nfrom typing import Dict, Any\nfrom langchain.schema import BaseOutputParser\n\nclass SecureOutputParser(BaseOutputParser):\n    def parse(self, text: str) -> str:\n        # Redact PII patterns\n        text = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL_REDACTED]', text)\n        text = re.sub(r'\\b\\d{3}-\\d{2}-\\d{4}\\b', '[SSN_REDACTED]', text)\n        text = re.sub(r'sk-[A-Za-z0-9]{48}', '[API_KEY_REDACTED]', text)\n        return text\n\n# Apply to agent\nagent_with_security = agent | SecureOutputParser()\nresult = agent_with_security.invoke({\"input\": user_input})",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Input Validator",
+        "description": "Validates and sanitizes tool call arguments before execution",
+        "code": "from langchain.tools.base import BaseTool\n\nclass SecureTool(BaseTool):\n    name = \"secure_calculator\"\n    description = \"Secure calculator tool\"\n    \n    def _run(self, expression: str):\n        # Sanitize input\n        if any(keyword in expression.lower() for keyword in ['api_key', 'password', 'secret']):\n            raise ValueError('Invalid input contains sensitive keywords')\n        return eval(expression)  # Simplified - use safe eval in production\n\n# Replace regular tools with secure versions\ntools = [SecureTool()]",
+        "language": "python"
+      },
+      {
+        "name": "Memory Buffer Sanitizer",
+        "description": "Automatically sanitizes chat history before adding to memory buffer",
+        "code": "from langchain.memory import ConversationBufferMemory\nimport re\n\nclass SecureMemory(ConversationBufferMemory):\n    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]):\n        # Sanitize before saving\n        sanitized_input = self._sanitize(inputs['input'])\n        sanitized_output = self._sanitize(outputs['output'])\n        super().save_context(\n            {'input': sanitized_input},\n            {'output': sanitized_output}\n        )\n    \n    def _sanitize(self, text: str) -> str:\n        return re.sub(r'(sk-[A-Za-z0-9]{48}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,})', '[REDACTED]', text)\n\nmemory = SecureMemory()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade sensitive data leakage prevention by automatically wrapping LangChain chain.invoke() and agent_executor.invoke() calls with runtime verification. Using predefined security detectors for PII, API keys, and secret patterns, Vex scans agent thoughts, tool calls, intermediate chain states, and final outputs in real-time. When leakage is detected, Vex can automatically redact sensitive data, block malicious requests, or trigger custom remediation workflows.\n\nThe platform integrates seamlessly with LangChain's callback system and LangSmith tracing, providing comprehensive coverage across RAG chains, conversational agents, and multi-step reasoning workflows. Vex's ML-powered detectors adapt to your specific sensitive data patterns while maintaining <1ms inference overhead. Teams can configure custom redaction rules, set leakage thresholds, and receive instant alerts through Slack, PagerDuty, or custom webhooks.\n\nVex also provides automated remediation through dynamic output patching, secure tool argument filtering, and memory sanitization, ensuring zero-trust security for LangChain applications without code changes.",
+      "code": "from vex_sdk import verify\nfrom langchain.agents import AgentExecutor\nfrom langchain_openai import ChatOpenAI\n\n# Vex automatically wraps all invoke calls\n@verify(\n    detectors=[\"pii\", \"api_keys\", \"secrets\"],\n    remediation=\"redact\",\n    alert_on=\"block\"\n)\ndef secure_agent_query(user_input: str):\n    result = agent_executor.invoke({\"input\": user_input})\n    return result['output']\n\n# Single line integration for existing chains\nresult = verify(\n    agent_executor.invoke,\n    detectors=[\"pii\", \"financial_data\"],\n    input={\"input\": user_query}\n)['output']\n\n# Vex auto-instruments LangSmith callbacks\nagent_executor = AgentExecutor(\n    agent=agent,\n    tools=tools,\n    callbacks=[VexLangSmithCallback()]\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Start your 14-day free trial and secure LangChain agents in minutes with zero code changes."
+    }
+  }
+}

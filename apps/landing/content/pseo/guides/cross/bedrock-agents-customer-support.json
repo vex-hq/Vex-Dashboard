@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build customer support with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents customer support",
+      "Amazon Bedrock Agents guardrails",
+      "customer support reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable powerful customer support bots with RAG knowledge bases, CRM tool integrations, and action groups for ticket creation and order lookups. However, issues like malformed Lambda responses, poor chunking in retrieval, guardrail failures, and session state loss can lead to inaccurate or non-compliant interactions. Vex provides post-processing verification on invoke_agent() responses to ensure response accuracy, PII filtering, tone consistency, policy compliance, and proper escalation triggers.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Amazon Bedrock Agents",
+      "description": "The architecture centers on a Bedrock Agent configured with a foundation model like Anthropic Claude, connected to a knowledge base for FAQ and product docs retrieval via Amazon OpenSearch or Pinecone. Action groups use Lambda functions to integrate with CRM systems like Salesforce for order lookups and ticket creation. Guardrails enforce PII redaction and policy checks, while multi-turn sessions maintain context for complex support queries.\n\nUser queries trigger agent.invoke_agent(), which orchestrates retrieval-augmented generation and tool calls. Responses flow back through guardrails before reaching the user. Common integrations include API Gateway for frontend exposure and Step Functions for orchestration.\n\nVex wraps the final agent response with verify() to catch failures in Lambda formatting, retrieval relevance, guardrail gaps, and session continuity before delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Bedrock Agent    │\n│   (API Gateway) │    │ + Knowledge Base │\n└─────────────────┘    │ + Action Groups   │\n                       │   (Lambda/CRM)    │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │   Vex.verify()    │───▶┌──────────────┐\n                       │ (Accuracy/PII/    │    │ Verified     │\n                       │  Tone/Policy)     │    │ Response     │\n                       └──────────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups return JSON not matching agent schema, causing invocation failures or hallucinated tool results",
+        "severity": "critical",
+        "mitigation": "Vex verifies response structure and content validity post-invoke_agent()"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies fail to retrieve contextually relevant docs, leading to inaccurate RAG responses",
+        "severity": "high",
+        "mitigation": "Vex cross-checks response relevance against query and known support patterns"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Built-in guardrails miss customer support policies like escalation triggers or branded tone requirements",
+        "severity": "high",
+        "mitigation": "Vex applies custom policy/compliance checks beyond Bedrock guardrails"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Context loss in multi-turn conversations leads to repetitive or inconsistent support interactions",
+        "severity": "medium",
+        "mitigation": "Vex validates session continuity and conversation coherence"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation (Python)",
+        "description": "Core invoke_agent() call with session management for customer support workflow",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef invoke_support_agent(query: str, session_id: str) -> dict:\n    response = bedrock_agent.invoke_agent(\n        agentId='YOUR_AGENT_ID',\n        agentAliasId='YOUR_AGENT_ALIAS_ID',\n        sessionId=session_id,\n        inputText=query\n    )\n    \n    # Stream response completion\n    completion = ''\n    for event in response['completion']:\n        if 'chunk' in event:\n            completion += event['chunk']['bytes'].decode()\n    \n    return {'sessionId': session_id, 'response': completion}",
+        "language": "python"
+      },
+      {
+        "title": "CRM Action Group Lambda (Python)",
+        "description": "Lambda function for order lookup and ticket creation in customer support action group",
+        "code": "import json\nimport boto3\n\ndef lambda_handler(event, context):\n    # Parse agent action request\n    action_group = event['actionGroup']\n    api_path = event['apiPath']\n    parameters = event['parameters']\n    \n    if api_path == '/lookupOrder':\n        order_id = next(p['value'] for p in parameters if p['name'] == 'orderId')\n        # Mock CRM lookup\n        order_data = {'status': 'shipped', 'items': ['Widget A']}\n        return {\n            'actionGroup': action_group,\n            'apiPath': api_path,\n            'httpStatusCode': 200,\n            'responseBody': json.dumps(order_data)\n        }\n    \n    raise ValueError('Invalid API path')",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Client Wrapper",
+        "description": "TypeScript wrapper for Bedrock Agent with proper error handling and typing",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\ninterface SupportResponse {\n  sessionId: string;\n  response: string;\n}\n\nexport async function invokeSupportAgent(\n  query: string,\n  sessionId: string\n): Promise<SupportResponse> {\n  const command = new InvokeAgentCommand({\n    agentId: 'YOUR_AGENT_ID',\n    agentAliasId: 'YOUR_AGENT_ALIAS_ID',\n    sessionId,\n    inputText: query,\n  });\n\n  const response = await client.send(command);\n  let completion = '';\n\n  for await (const event of response.completion!) {\n    if (event.chunk?.bytes) {\n      completion += Buffer.from(event.chunk.bytes).toString();\n    }\n  }\n\n  return { sessionId, response: completion };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Setup (Python)",
+        "description": "Configure OpenSearch knowledge base for support documentation retrieval",
+        "code": "import boto3\n\nkb_client = boto3.client('bedrock-agent')\n\nresponse = kb_client.create_knowledge_base(\n    name='support-docs',\n    roleArn='arn:aws:iam::ACCOUNT:role/BedrockKBExecutionRole',\n    knowledgeBaseConfiguration={\n        'type': 'VECTOR',\n        'vectorKnowledgeBaseConfiguration': {\n            'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'\n        }\n    },\n    storageConfiguration={\n        'type': 'OPENSEARCH_SERVERLESS',\n        'opensearchServerlessConfiguration': {\n            'collectionArn': 'arn:aws:aoss:us-east-1:ACCOUNT:collection/support-docs',\n            'vectorIndexName': 'support-index',\n            'fieldMapping': {\n                'vectorField': 'embedding',\n                'textField': 'text',\n                'metadataField': 'metadata'\n            }\n        }\n    }\n)\nprint(response['knowledgeBaseId'])",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Verification Wrapper",
+        "description": "Wrap invoke_agent() with comprehensive customer support verification checks",
+        "code": "import vex\n\nfrom implementation import invoke_support_agent\n\n@vex.verify(\n    guards=[\n        vex.ResponseAccuracy(expected_patterns=['order status', 'ticket created']),\n        vex.PIIFilter(sensitive_fields=['ssn', 'credit_card']),\n        vex.ToneConsistency(style='professional, empathetic'),\n        vex.CustomPolicy([\n            'escalate if refund > $1000',\n            'always provide ticket ID'\n        ])\n    ],\n    risk_profile='high'\n)\ndef verified_support_agent(query: str, session_id: str) -> dict:\n    raw_response = invoke_support_agent(query, session_id)\n    return raw_response\n\n# Usage\nresult = verified_support_agent('What\\'s my order #12345 status?', 'sess-123')\nif result.vex_status == 'PASS':\n    print(result.response)\nelse:\n    print(f'Blocked: {result.vex_failures}')",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Type-safe Vex verification for Bedrock Agent responses with support-specific guards",
+        "code": "import { verify, ResponseAccuracy, PIIFilter, ToneConsistency, CustomPolicy } from 'vex-sdk';\n\nimport { invokeSupportAgent } from './implementation';\n\ntype SupportContext = {\n  query: string;\n  sessionId: string;\n};\n\nexport const verifiedSupportAgent = verify<SupportContext, string>({\n  guards: [\n    new ResponseAccuracy({\n      expected_patterns: ['order status', 'ticket created', 'escalation required']\n    }),\n    new PIIFilter({ sensitive_fields: ['ssn', 'credit_card', 'account_number'] }),\n    new ToneConsistency({ style: 'professional, empathetic, customer-focused' }),\n    new CustomPolicy({\n      rules: [\n        'always include ticket ID in responses',\n        'escalate high-value refund requests',\n        'no pricing speculation'\n      ]\n    })\n  ],\n  risk_profile: 'high'\n})(async ({ query, sessionId }) => {\n  const rawResponse = await invokeSupportAgent(query, sessionId);\n  return rawResponse.response;\n});\n\n// Usage\ntry {\n  const result = await verifiedSupportAgent({\n    query: \"What's my order #12345 status?\",\n    sessionId: 'sess-123'\n  });\n  console.log('✅ Verified:', result);\n} catch (error) {\n  console.log('❌ Blocked:', error.message);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Session Continuity Check (Python)",
+        "description": "Verify conversation state preservation across support agent sessions",
+        "code": "import vex\nfrom typing import Dict, Any\n\n@vex.verify(\n    guards=[\n        vex.SessionContinuity([\n            'customer_name',\n            'order_id',\n            'ticket_id',\n            'escalation_status'\n        ]),\n        vex.ConversationCoherence(window_size=3)\n    ]\n)\ndef verified_multi_turn_support(\n    query: str, \n    session_history: list[Dict[str, Any]]\n) -> str:\n    # Simulate agent invocation with session context\n    context = {'history': session_history[-3:], 'current_query': query}\n    agent_response = f\"Understood {session_history[-1].get('customer_name', 'customer')}. Order {session_history[0].get('order_id')} is shipped.\"\n    return agent_response\n\n# Usage example\nhistory = [\n    {'customer_name': 'John Doe', 'order_id': '12345'},\n    {'ticket_id': 'TICKET-678'}\n]\nresult = verified_multi_turn_support('Has my ticket been updated?', history)\nprint(result)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Customer Support",
+      "description": "Integrate Vex verification today to eliminate support agent failures and ensure compliant, accurate customer interactions."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "agno",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Agno + Vex Guardrails",
+    "description": "Learn how to build data extraction with Agno + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Agno data extraction",
+      "Agno guardrails",
+      "data extraction reliability",
+      "Vex Agno",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Agno is a lightweight, model-agnostic framework for building multi-modal AI agents that excel at structured data extraction from unstructured documents. Integrating Vex provides essential guardrails to ensure schema compliance, field accuracy, and completeness in high-stakes extraction pipelines. This guide shows how to wrap Agno's agent.run() with Vex verification to mitigate common failure modes in data extraction workflows.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Agno",
+      "description": "The typical Agno data extraction architecture starts with a schema-guided Agent configured with tools for document parsing and structured output generation. Documents (PDFs, images, text) are fed into the agent via a run() call, which orchestrates LLM calls with Pydantic models for output validation. The agent maintains session memory for context across multi-page documents while coordinating multimodal inputs.\n\nKey components include a central Agent instance with custom Tools for OCR/preprocessing, a structured OutputParser for schema enforcement, and optional Team agents for parallel extraction across document sections. The workflow processes unstructured input → agent reasoning → structured JSON output, but is prone to hallucinated fields and schema violations without verification.\n\nVex integration wraps the critical agent.run() call to verify outputs against predefined checks for completeness, type consistency, and semantic accuracy before downstream consumption.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Unstructured   │───▶│     Agno Agent   │───▶│  Structured JSON │\n│     Documents    │    │  (schema-guided) │    │      Output      │\n│ (PDF/Image/Text) │    │ + Tools + Memory │    └──────────────────┘\n└─────────────────┘    └──────────────┬──────────────┘\n                                     │\n                        ┌────────────▼────────────┐\n                        │   Vex.verify() Wrapper  │\n                        │  (Schema/Accuracy/...)  │\n                        └────────────┬────────────┘\n                                     │ Verified\n                                     ▼\n                            ┌──────────────────┐\n                            │ Downstream Apps  │\n                            │   (DB/CRM/etc)   │\n                            └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-modal agent misinterpreting image or audio inputs",
+        "description": "OCR failures or visual hallucination in table extraction from scanned PDFs",
+        "severity": "high",
+        "mitigation": "Vex field accuracy checks with fuzzy matching and cross-verification"
+      },
+      {
+        "name": "Agentic session memory recalling fabricated past interactions",
+        "description": "Agent invents previous page data when processing multi-page documents",
+        "severity": "critical",
+        "mitigation": "Vex completeness validation ensuring all required fields populated"
+      },
+      {
+        "name": "Structured output failing validation on complex nested schemas",
+        "description": "Pydantic validation fails on deeply nested invoice line items or org charts",
+        "severity": "high",
+        "mitigation": "Vex schema compliance with recursive type checking"
+      },
+      {
+        "name": "Team agent coordination producing contradictory sub-results",
+        "description": "Parallel extraction agents return inconsistent totals across document sections",
+        "severity": "medium",
+        "mitigation": "Vex semantic consistency checks across coordinated outputs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Agno Agent for Invoice Extraction",
+        "description": "Create a schema-guided agent for extracting structured invoice data from text/documents",
+        "code": "from agno.agent import Agent\nfrom agno.models.openai import OpenAI\nfrom pydantic import BaseModel, Field\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date\")\n    total_amount: float = Field(..., description=\"Total invoice amount\")\n    line_items: list[dict] = Field(default_factory=list)\n\nagent = Agent(\n    model=OpenAI(id=\"gpt-4o\"),\n    output_type=Invoice,\n    instructions=\"Extract all invoice details accurately from the document.\"\n)\n\nresult = agent.run(\"Invoice #12345 dated 2024-01-15 total $2,500...\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-modal Document Processing",
+        "description": "Handle image/PDF inputs with preprocessing tools for robust extraction",
+        "code": "from agno.agent import Agent\nfrom agno.tools.text import TextTool\nfrom agno.models.openai import OpenAI\n\nagent = Agent(\n    model=OpenAI(id=\"gpt-4o\"),\n    tools=[TextTool()],\n    instructions=\"Process document images and extract structured data\"\n)\n\n# Process image or PDF\nresult = agent.run(\"Extract invoice data from this image: [image_url_or_bytes]\")\nprint(result.data)",
+        "language": "python"
+      },
+      {
+        "title": "Team Agent Coordination for Complex Documents",
+        "description": "Parallel extraction across document sections with aggregated results",
+        "code": "from agno.agents import Team\nfrom agno.agent import Agent\n\nheader_agent = Agent(name=\"Header\", instructions=\"Extract header data\")\nline_items_agent = Agent(name=\"LineItems\", instructions=\"Extract all line items\")\ntotals_agent = Agent(name=\"Totals\", instructions=\"Extract totals and summary\")\n\nteam = Team(agents=[header_agent, line_items_agent, totals_agent])\nresult = team.run(\"Multi-page financial report...\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Custom Output Validation with Pydantic",
+        "description": "Enforce strict schema compliance with custom validators",
+        "code": "from pydantic import BaseModel, Field, validator\nfrom typing import List\nfrom agno.agent import Agent\n\nclass LineItem(BaseModel):\n    description: str\n    quantity: int\n    unit_price: float\n    @validator('quantity')\n    def quantity_positive(cls, v):\n        if v <= 0: raise ValueError('Quantity must be positive')\n        return v\n\nclass Invoice(BaseModel):\n    line_items: List[LineItem]\n    total: float\n\nagent = Agent(output_type=Invoice)\nresult = agent.run(\"Invoice with 2 widgets @ $10 each, total $25\")\nprint(result)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Basic Vex Decorator for Schema Compliance",
+        "description": "Wrap agent.run() with vex.verify() for automatic schema validation",
+        "code": "import vex\nfrom agno.agent import Agent\nfrom pydantic import BaseModel\n\n@vex.verify(\n    checks=[\n        vex.schema_compliance(),\n        vex.field_accuracy(min_similarity=0.9)\n    ],\n    risk_profile=\"medium\"\n)\ndef extract_invoice(text: str) -> dict:\n    agent = Agent(model=\"gpt-4o\", output_type=Invoice)\n    return agent.run(text)\n\n# Usage\nresult = extract_invoice(\"Invoice #INV-001, Date: 2024-01-15, Total: $1500\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Completeness + Type Consistency Verification",
+        "description": "Ensure all required fields present with proper data types",
+        "code": "import vex\nfrom typing import List, Dict, Any\n\n@vex.verify(\n    checks=[\n        vex.completeness(required_fields=[\"invoice_number\", \"total_amount\", \"line_items\"]),\n        vex.type_consistency(),\n        vex.custom(lambda x: len(x.get('line_items', [])) > 0, \"Has line items\")\n    ]\n)\ndef safe_extraction(document: str) -> Dict[str, Any]:\n    agent = Agent(model=\"gpt-4o\")\n    return agent.run(document)\n\nverified_result = safe_extraction(\"Multi-page invoice document...\")",
+        "language": "python"
+      },
+      {
+        "title": "Team Agent Results Aggregation with Vex",
+        "description": "Verify coordinated outputs from multiple extraction agents",
+        "code": "import vex\nfrom agno.agents import Team\n\n@vex.verify(\n    checks=[\n        vex.semantic_consistency(fields=[\"total_amount\"]),\n        vex.numerical_accuracy(tolerance=0.01),\n        vex.schema_compliance(recursive=True)\n    ]\n)\ndef extract_team_results(team: Team, document: str) -> dict:\n    return team.run(document)\n\nfinancial_team = Team([...])  # header, lines, totals agents\nresult = extract_team_results(financial_team, \"Financial report...\")\nprint(f\"Verified team extraction: {result}\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Agno Data Extraction",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your Agno agents for production-ready reliability."
+    }
+  }
+}

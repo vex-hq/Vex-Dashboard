@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Haystack Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Haystack data-leakage",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, sensitive data leakage in AI agents often occurs when retrievers expose PII from document stores or generators inadvertently include confidential information from retrieved contexts in responses. Pipeline component outputs can propagate sensitive data unchecked across nodes, especially in RAG setups where document stores contain unfiltered enterprise data. Without proper sanitization at each stage, Haystack agents risk exposing customer data, API keys, or internal documents through unmonitored outputs.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever exposes PII from document store",
+        "symptom": "DocumentStore returns metadata containing emails/phone numbers in search results",
+        "impact": "All downstream components receive raw PII, leading to exposure in final responses"
+      },
+      {
+        "scenario": "Generator includes sensitive context in hallucinations",
+        "symptom": "LLM outputs contain exact document excerpts with confidential info despite instructions",
+        "impact": "Users receive unfiltered enterprise data mixed with generated responses"
+      },
+      {
+        "scenario": "Custom components forward raw inputs without sanitization",
+        "symptom": "User queries with API keys/tokens passed through unmodified to LLM",
+        "impact": "Sensitive credentials logged or exposed in prompt templates"
+      },
+      {
+        "scenario": "Pipeline debugging logs sensitive data",
+        "symptom": "Haystack's debug mode prints full documents containing PII to console",
+        "impact": "Developers accidentally expose production data during testing"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex PII Scanner Component",
+        "description": "Custom Haystack component that scans all pipeline outputs for common PII patterns like emails, phones, and API keys",
+        "code": "from haystack import component\n\nimport re\n\n@component\nclass PIILeakDetector:\n    @component.output_types(detected=bool, entities=list)\n    def run(self, text: str):\n        patterns = {\n            'email': r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n            'phone': r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b',\n            'api_key': r'(?i)(key|token|secret)[\\s:=]+[a-zA-Z0-9]{20,}'\n        }\n        \n        entities = []\n        for type_, pattern in patterns.items():\n            matches = re.findall(pattern, text)\n            if matches:\n                entities.extend([{'type': type_, 'value': m} for m in matches])\n        \n        return {'detected': bool(entities), 'entities': entities}",
+        "language": "python"
+      },
+      {
+        "name": "Document Metadata Leak Check",
+        "description": "Inspects retrieved documents for sensitive metadata fields before passing to generator",
+        "code": "from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\nfrom typing import List\n\nclass SafeRetriever(InMemoryEmbeddingRetriever):\n    SENSITIVE_FIELDS = {'email', 'phone', 'ssn', 'api_key'}\n    \n    def run(self, query_embedding: List[float], top_k: int = 5):\n        result = super().run(query_embedding=query_embedding, top_k=top_k)\n        \n        filtered_docs = []\n        for doc in result['documents']:\n            has_sensitive = any(\n                field in str(doc.meta).lower() \n                for field in self.SENSITIVE_FIELDS\n            )\n            if not has_sensitive:\n                filtered_docs.append(doc)\n        \n        result['documents'] = filtered_docs[:top_k]\n        return result",
+        "language": "python"
+      },
+      {
+        "name": "Response Entropy Leak Detector",
+        "description": "Detects when generator outputs contain suspiciously structured data indicating leaked PII",
+        "code": "from haystack import component\nimport json\n\n@component\nclass EntropyLeakDetector:\n    @component.output_types(leak_risk=float, suspicious_patterns=list)\n    def run(self, response: str):\n        score = 0\n        patterns = []\n        \n        # High entropy strings often indicate base64/API keys\n        entropy = -sum(p * (c / len(response)) for c in set(response) \n                      for p in [response.count(c)/len(response)])\n        \n        if entropy > 4.5:  # Base64-like entropy\n            score += 0.8\n            patterns.append('high_entropy')\n        \n        # JSON-like structures in responses\n        try:\n            json.loads(response)\n            score += 0.6\n            patterns.append('json_structure')\n        except:\n            pass\n        \n        return {'leak_risk': score, 'suspicious_patterns': patterns}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Sanitization Filter Component",
+        "description": "Automatically redacts PII from all text passing through Haystack pipeline",
+        "code": "from haystack import component\nimport re\n\n@component\nclass PIIRedactor:\n    @component.output_types(cleaned_text=str, redacted_count=int)\n    def run(self, text: str):\n        patterns = [\n            (r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]'),\n            (r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b', '[PHONE]'),\n            (r'(?i)(key|token|secret)[\\s:=]+[a-zA-Z0-9]{20,}', '[CREDENTIAL]')\n        ]\n        \n        cleaned = text\n        redacted_count = 0\n        for pattern, replacement in patterns:\n            matches = re.findall(pattern, cleaned)\n            redacted_count += len(matches)\n            cleaned = re.sub(pattern, replacement, cleaned)\n        \n        return {'cleaned_text': cleaned, 'redacted_count': redacted_count}",
+        "language": "python"
+      },
+      {
+        "name": "Safe Document Preprocessor",
+        "description": "Strips sensitive metadata from documents before indexing/retrieval",
+        "code": "from haystack import Document\n\nclass SafeDocumentProcessor:\n    SENSITIVE_KEYS = {'email', 'phone', 'password', 'api_key', 'ssn'}\n    \n    @staticmethod\n    def sanitize_document(doc: Document) -> Document:\n        if doc.meta:\n            cleaned_meta = {\n                k: v for k, v in doc.meta.items()\n                if k.lower() not in SafeDocumentProcessor.SENSITIVE_KEYS\n            }\n            doc.meta = cleaned_meta\n        \n        # Sanitize content\n        doc.content = SafeDocumentProcessor.redact_pii(doc.content)\n        return doc\n    \n    @staticmethod\n    def redact_pii(text: str) -> str:\n        # Simple PII redaction\n        text = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]', text)\n        return re.sub(r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b', '[PHONE]', text)",
+        "language": "python"
+      },
+      {
+        "name": "Secure Pipeline with Vex Guardrails",
+        "description": "Integrates Vex as pipeline component for runtime PII detection and blocking",
+        "code": "from haystack import Pipeline\nfrom vex_sdk import VexGuardrail\n\n# Install: pip install haystack-ai vex-sdk\n\nvex_guardrail = VexGuardrail(\n    api_key=\"your-vex-api-key\",\n    rules=[\n        \"block_pii\",\n        \"prevent_data_exfiltration\",\n        \"sanitize_credentials\"\n    ]\n)\n\npii_safe_pipeline = Pipeline()\npii_safe_pipeline.add_component(\"vex_guard\", vex_guardrail)\n\n# Connect to all text inputs/outputs\npii_safe_pipeline.connect('retriever.documents', 'vex_guard.input')\npii_safe_pipeline.connect('vex_guard.output', 'prompt_builder.documents')\npii_safe_pipeline.connect('generator.response', 'vex_guard.final_check')\n\n# Vex automatically blocks/redacts sensitive content\nresult = pii_safe_pipeline.run({'retriever': {'query': 'user query'}})",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a Haystack custom component, automatically scanning all pipeline dataflows for PII leakage patterns. It employs advanced regex, ML classifiers, and contextual analysis to detect emails, credentials, financial data, and custom sensitive patterns defined in your org's policy. Unlike static rules, Vex learns from your data patterns and false positives, continuously improving detection accuracy.\n\nRemediation happens inline - Vex can redact, block, or rewrite responses containing sensitive data before they reach users. Integration takes <5 minutes: install vex-sdk, add as pipeline component, configure rules. Vex provides comprehensive observability with leakage dashboards, alert integrations, and automated compliance reports for SOC2/ISO27001 audits.\n\nFor Haystack specifically, Vex monitors the critical junctions: DocumentStore→Retriever→Generator→Response, catching leaks that span multiple components. It handles both structured metadata leakage and unstructured text hallucination risks unique to RAG pipelines.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk.haystack import VexPIIGuardrail\n\n# Complete secure RAG pipeline with Vex\nsecure_rag = Pipeline()\n\n# Standard Haystack components\nsecure_rag.add_component(\"retriever\", InMemoryEmbeddingRetriever(document_store))\nsecure_rag.add_component(\"prompt_builder\", PromptBuilder(template))\nsecure_rag.add_component(\"llm\", OpenAI())\n\n# Vex guards every data path\nvex_guard = VexPIIGuardrail(\n    api_key=\"vex_123...\",\n    org_id=\"your-org\",\n    block_on_detection=True,\n    redact_patterns=[\"email\", \"phone\", \"api_key\", \"custom:contract-numbers\"]\n)\n\nsecure_rag.add_component(\"vex_guard_in\", vex_guard)\nsecure_rag.add_component(\"vex_guard_out\", vex_guard)\n\n# Wire securely\nsecure_rag.connect('retriever.documents', 'vex_guard_in')\nsecure_rag.connect('vex_guard_in.safe_output', 'prompt_builder')\nsecure_rag.connect('llm.replies', 'vex_guard_out')\n\n# Run with automatic protection\nresult = secure_rag.run({'retriever': {'query': 'find customer data'}})\n\n# Vex logs: {'blocked': 2, 'redacted': 5, 'safe': True}",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex to your Haystack pipelines in 5 minutes to automatically prevent PII leakage across all components - start your free trial now."
+    }
+  }
+}

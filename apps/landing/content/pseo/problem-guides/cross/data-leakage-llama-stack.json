@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Llama Stack Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Llama Stack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Llama Stack data-leakage",
+      "Llama Stack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Llama Stack agents, Sensitive Data Leakage Prevention manifests as unintended exposure of PII, API keys, or confidential data in agent responses, tool calls, or memory banks due to inadequate filtering in the safety shield and unvalidated tool outputs. The framework's agentic loops and memory retrieval can propagate leaked data across turns, amplifying risks in multi-step interactions. Integration with Vex via post-processing wrappers is key to catching these leaks before they reach users or external systems.",
+    "howItManifests": [
+      {
+        "scenario": "Safety shield false negatives on encoded data",
+        "symptom": "Base64-encoded API keys or obfuscated PII pass through LlamaSafetyShield unchecked",
+        "impact": "Credentials exposed in tool call parameters or final responses"
+      },
+      {
+        "scenario": "Memory bank retrieval injecting sensitive context",
+        "symptom": "Agent hallucinates document associations pulling redacted customer data",
+        "impact": "Private user information appears in unrelated conversation threads"
+      },
+      {
+        "scenario": "Tool runtime responses bypassing schema validation",
+        "symptom": "External API tools return unfiltered sensitive data in free-form fields",
+        "impact": "Database query results containing emails/SSNs included in agent output"
+      },
+      {
+        "scenario": "Agentic loop accumulating leaked fragments",
+        "symptom": "Multiple turns gradually reconstruct sensitive info from partial leaks",
+        "impact": "Complete credit card numbers or passwords emerge after 5+ turns"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex Pattern Scanning for Common Secrets",
+        "description": "Scans LlamaStack agent responses and tool outputs for API keys, passwords, and PII patterns using comprehensive regex patterns",
+        "code": "import re\n\nfrom llama_stack_client import LlamaStackAgent\n\nSECRETS_REGEX = {\n    'api_keys': r'(?i)(api[-_]?key|secret|token)[\\s:=]+[a-zA-Z0-9]{20,}',\n    'aws_keys': r'(?i)(aws_access_key_id|aws_secret_access_key)[\\s:=]+[A-Z0-9]{20,}',\n    'pii_email': r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    'pii_ssn': r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b',\n    'credit_card': r'\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b'\n}\n\ndef detect_secrets_in_llamastack_response(response: dict) -> list:\n    findings = []\n    content = response.get('content', '') + response.get('tool_calls', '')\n    \n    for secret_type, pattern in SECRETS_REGEX.items():\n        matches = re.finditer(pattern, content)\n        for match in matches:\n            findings.append({\n                'type': secret_type,\n                'value': match.group(0),\n                'location': f'char {match.start()}-{match.end()}',\n                'confidence': 0.95\n            })\n    return findings",
+        "language": "python"
+      },
+      {
+        "name": "LlamaSafetyShield Bypass Detection",
+        "description": "Monitors safety shield classifications against content entropy to detect base64/encoded data evasion",
+        "code": "import base64\nimport numpy as np\nfrom llama_stack_client import LlamaSafetyShield\n\ndef detect_safety_bypass(response: dict, shield_result: dict) -> dict:\n    content = response.get('content', '')\n    \n    # High entropy suggests encoded data\n    entropy = -sum(p * np.log2(p) for p in np.unique(list(content), return_counts=True)[1] / len(content))\n    \n    # Base64 decode attempt\n    try:\n        decoded = base64.b64decode(content).decode('utf-8', errors='ignore')\n        contains_secrets = bool(re.search(r'(key|secret|password|token)', decoded, re.I))\n    except:\n        contains_secrets = False\n    \n    risk_score = 0\n    if shield_result.get('category') == 'safe' and entropy > 4.5:\n        risk_score += 0.8\n    if contains_secrets:\n        risk_score += 0.9\n    \n    return {\n        'bypassed': risk_score > 0.7,\n        'entropy': entropy,\n        'risk_score': risk_score,\n        'decoded_content': decoded if contains_secrets else None\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Memory Bank Sensitive Data Propagation",
+        "description": "Tracks sensitive data movement through LlamaStack memory retrieval across agent turns",
+        "code": "from llama_stack_client import LlamaMemoryBank\nimport hashlib\n\nclass MemoryLeakTracker:\n    def __init__(self):\n        self.seen_hashes = set()\n    \n    def track_memory_retrieval(self, memory_docs: list, agent_turn: int) -> list:\n        leaks = []\n        for doc in memory_docs:\n            content_hash = hashlib.md5(doc['content'].encode()).hexdigest()\n            \n            # Check for known sensitive patterns\n            if self._is_sensitive(doc['content']):\n                leaks.append({\n                    'turn': agent_turn,\n                    'doc_id': doc['id'],\n                    'content_hash': content_hash,\n                    'severity': 'high'\n                })\n                \n            self.seen_hashes.add(content_hash)\n        return leaks\n    \n    def _is_sensitive(self, text: str) -> bool:\n        sensitive_patterns = [\n            r'\\d{3}-\\d{2}-\\d{4}',  # SSN\n            r'\\b4[0-9]{12}(?:[0-9]{3})?\\b',  # Visa\n            r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}'  # Email\n        ]\n        return any(re.search(pattern, text) for pattern in sensitive_patterns)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Pre-Tool Call Data Sanitization",
+        "description": "Scrubs sensitive data from tool parameters before LlamaStack tool execution",
+        "code": "from llama_stack_client import LlamaStackAgent\nimport re\n\ndef sanitize_tool_params(tool_call: dict) -> dict:\n    params = tool_call['parameters']\n    \n    # Remove PII from all string parameters\n    def scrub_pii(value):\n        if isinstance(value, str):\n            # Remove emails, SSNs, etc.\n            value = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL_REDACTED]', value)\n            value = re.sub(r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b', '[SSN_REDACTED]', value)\n        return value\n    \n    sanitized_params = {k: scrub_pii(v) for k, v in params.items()}\n    return {'parameters': sanitized_params, 'cleaned': True}",
+        "language": "python"
+      },
+      {
+        "name": "Response Double-Filtering Pipeline",
+        "description": "Applies LlamaSafetyShield + custom regex filtering to all agent outputs",
+        "code": "from llama_stack_client import LlamaSafetyShield\n\nclass DoubleFilterPipeline:\n    def __init__(self):\n        self.shield = LlamaSafetyShield()\n    \n    def filter_response(self, response: dict) -> tuple[bool, str]:\n        content = response['content']\n        \n        # First pass: Llama Safety Shield\n        shield_result = self.shield.classify(content)\n        if shield_result['risk'] > 0.3:\n            return False, 'blocked_by_shield'\n        \n        # Second pass: Custom secrets detection\n        secrets = self._detect_secrets(content)\n        if secrets:\n            return False, f'secrets_detected: {secrets}'\n        \n        return True, 'approved'\n    \n    def _detect_secrets(self, text: str) -> list:\n        patterns = [r'(?i)(api[_-]?key|secret)[\\s:=]+[A-Za-z0-9]{20,}']\n        return [m.group() for pattern in patterns for m in re.finditer(pattern, text)]",
+        "language": "python"
+      },
+      {
+        "name": "Memory Bank Access Controls",
+        "description": "Implements role-based filtering for LlamaStack memory retrieval",
+        "code": "from llama_stack_client import LlamaMemoryBank\n\nclass ControlledMemoryBank(LlamaMemoryBank):\n    def __init__(self, allowed_domains: list = None):\n        super().__init__()\n        self.allowed_domains = allowed_domains or []\n    \n    def retrieve_relevant(self, query: str, agent_context: dict) -> list:\n        docs = super().retrieve_relevant(query, limit=5)\n        \n        filtered_docs = []\n        for doc in docs:\n            if self._is_safe_for_context(doc, agent_context):\n                filtered_docs.append(doc)\n            else:\n                print(f'Blocked sensitive doc: {doc[\"id\"]}')\n        \n        return filtered_docs\n    \n    def _is_safe_for_context(self, doc: dict, context: dict) -> bool:\n        content = doc['content'].lower()\n        # Block docs with sensitive indicators\n        if any(sensitive in content for sensitive in ['ssn', 'credit card', 'api key', 'password']):\n            return False\n        return True",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides continuous, runtime verification of Llama Stack agents by wrapping every agent turn with vex.verify(), automatically detecting sensitive data leakage across responses, tool calls, and memory retrievals. The platform maintains behavioral baselines for your specific Llama Stack deployment, flagging deviations like sudden entropy spikes indicative of encoded secrets or unexpected PII patterns in tool outputs. \n\nRemediation is proactive: Vex can auto-block leaky responses, inject sanitization middleware, or trigger LlamaSafetyShield re-evaluation with heightened sensitivity. Integration takes minutes via the llama-stack-client and vex-sdk pip packages, with full observability into leakage patterns across your agent fleet. \n\nThe verification runs server-side with zero performance overhead, providing instant alerts and automated fixes while preserving agent functionality for safe interactions.",
+      "code": "from llama_stack_client import LlamaStackAgent\nimport vex\n\n# Initialize Llama Stack agent\nagent = LlamaStackAgent(\n    model='llama-3.1-70b',\n    safety_shield=True,\n    memory_bank=True\n)\n\n# Wrap with Vex verification\n@vex.verify(\n    checks=[\n        'pii_detection',\n        'secrets_scanning',\n        'entropy_anomaly',\n        'safety_bypass'\n    ],\n    auto_remediate=True,\n    block_threshold=0.8\n)\ndef safe_agent_turn(user_input: str, context: dict) -> dict:\n    '''Vex-wrapped Llama Stack agent turn'''\n    response = agent.run(\n        user_input,\n        context=context,\n        max_turns=10,\n        tools=['search', 'calculator']\n    )\n    return response\n\n# Usage\nresult = safe_agent_turn(\"What's my account balance?\", {'user_id': '123'})\n# Vex automatically blocks: {'blocked': True, 'reason': 'SSN_detected_in_tool_output'}",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate sensitive data leakage in your Llama Stack agents with one line of code."
+    }
+  }
+}

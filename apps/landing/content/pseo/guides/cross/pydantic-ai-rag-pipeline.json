@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI rag pipeline",
+      "Pydantic AI guardrails",
+      "rag pipeline reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG pipeline with Pydantic AI enables type-safe, structured document retrieval and synthesis for production applications. Guardrails are essential to mitigate risks like hallucination, source infidelity, and citation errors that can undermine reliability in high-stakes retrieval tasks. Vex integration provides automated verification for source faithfulness and context relevance, ensuring trustworthy outputs.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Pydantic AI",
+      "description": "The RAG pipeline begins with vector search over a document corpus using embeddings to retrieve relevant chunks. Retrieved contexts are assembled and injected into a Pydantic AI agent prompt, which uses structured tools for synthesis and citation generation. The agent produces a typed response with source attribution, validated against schema constraints.\n\nPydantic AI's agent definitions enforce output structure via Pydantic models, while tools handle retrieval and formatting. Vex result validators run post-generation to check hallucination, faithfulness, and citation accuracy beyond syntactic validation.\n\nThis architecture supports streaming but requires careful validation to handle partial outputs and nested tool calls.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vector Search    │───▶│ Context Assembly │\n└─────────────────┘    │ (Embeddings)     │    │ + Prompt Inject  │\n                       └──────────────────┘    └──────────┬───────┘\n                                          ┌──────────┼───────┘\n                                          │          ▼\n┌─────────────────┐                 ┌─────▼─────────────┐ ┌──────────────┐\n│Pydantic AI Agent│◀────────────────│ LLM Synthesis     │ │ Vex Validator │\n│+ Tools          │                 │+ Source Citation  │ │(Faithfulness) │\n└─────────────────┘                 └────────────────────┘ └──────────────┘\n\nStructured Output ──────────────────────────────────────────────────────────▶"
+    },
+    "risks": [
+      {
+        "name": "Source Faithfulness Failure",
+        "description": "LLM generates claims not grounded in retrieved contexts despite valid structure",
+        "severity": "critical",
+        "mitigation": "Vex faithfulness checks trace every claim to source chunks"
+      },
+      {
+        "name": "Hallucination in Synthesis",
+        "description": "Agent fabricates details when context is ambiguous or incomplete",
+        "severity": "high",
+        "mitigation": "Semantic similarity scoring between output and context"
+      },
+      {
+        "name": "Citation Drift",
+        "description": "Incorrect or missing source attribution in structured citations",
+        "severity": "high",
+        "mitigation": "Vex citation validation matching references to actual context usage"
+      },
+      {
+        "name": "Context Relevance Gap",
+        "description": "Retrieved chunks don't actually answer the query despite vector similarity",
+        "severity": "medium",
+        "mitigation": "Query-context relevance scoring before synthesis"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Vector Search Tool Definition",
+        "description": "Pydantic AI tool for semantic document retrieval using embeddings",
+        "code": "from pydantic_ai import Tool, Agent\nfrom typing import List\nimport chromadb\n\nclass RetrieveDocuments(Tool):\n    name = 'retrieve_documents'\n    description = 'Retrieve relevant documents for RAG'\n\n    def __call__(self, query: str, top_k: int = 5) -> List[str]:\n        client = chromadb.Client()\n        collection = client.get_collection('docs')\n        results = collection.query(\n            query_embeddings=[self.embed(query)],\n            n_results=top_k\n        )\n        return results['documents'][0]\n\n    def embed(self, text: str) -> List[float]:\n        # Use your embedding model\n        from sentence_transformers import SentenceTransformer\n        model = SentenceTransformer('all-MiniLM-L6-v2')\n        return model.encode(text).tolist()",
+        "language": "python"
+      },
+      {
+        "title": "RAG Agent with Structured Output",
+        "description": "Main agent definition with Pydantic response model and citation tracking",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import List, Annotated\nfrom pydantic_ai import Agent\n\nclass Citation(BaseModel):\n    chunk_id: int\n    start_char: int\n    end_char: int\n    source_text: str\n\nclass RAGResponse(BaseModel):\n    answer: str = Field(..., max_length=2000)\n    citations: List[Citation] = Field(..., min_items=1)\n    confidence: float = Field(ge=0.0, le=1.0)\n\nrag_agent = Agent(\n    'rag-synthesis',\n    model='gpt-4o',\n    response_model=RAGResponse,\n    tools=[RetrieveDocuments()]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly and Prompting",
+        "description": "Assemble retrieved contexts with citation metadata for the agent",
+        "code": "def assemble_context(query: str, docs: List[str]) -> str:\n    context = []\n    for i, doc in enumerate(docs):\n        context.append(f'[DOC-{i}] {doc}')\n    context_str = '\\n\\n'.join(context)\n    \n    prompt = f\"\"\"\nAnswer the query using ONLY the provided context. Cite sources with [DOC-X].\n\nQuery: {query}\n\nContext: {context_str}\n\nAnswer with citations:\"\"\"\n    return prompt\n\n# Usage in agent workflow\nresponse = rag_agent.run(assemble_context(query, retrieved_docs))",
+        "language": "python"
+      },
+      {
+        "title": "Streaming RAG Response",
+        "description": "Handle streaming structured outputs with progressive validation",
+        "code": "async def stream_rag_response(query: str):\n    stream = rag_agent.stream(\n        assemble_context(query, retrieved_docs),\n        stream_mode='structured'\n    )\n    \n    async for chunk in stream:\n        if hasattr(chunk, 'content'):\n            print(chunk.content, end='', flush=True)\n        # Vex validates complete structured response\n        if chunk.done:\n            yield chunk.response_model\n\n# Usage\nasync for response in stream_rag_response(query):\n    print(f'Confidence: {response.confidence}')"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Source Faithfulness Validator",
+        "description": "Vex result validator ensuring all claims trace to retrieved context",
+        "code": "from vex_sdk import Vex, ResultValidator\nfrom typing import Dict, Any\n\nvex = Vex(api_key='your-vex-key')\n\n@vex.result_validator(name='rag-faithfulness')\ndef check_source_faithfulness(result: RAGResponse, context: List[str], query: str) -> Dict[str, Any]:\n    verdict = vex.evaluate.fidelity_check(\n        claim=result.answer,\n        grounding_docs=context,\n        task='factual_synthesis'\n    )\n    \n    if verdict.score < 0.85:\n        return {\n            'pass': False,\n            'reason': f'Low faithfulness score: {verdict.score}',\n            'citations': result.citations\n        }\n    return {'pass': True, 'score': verdict.score}\n\n# Attach to agent\nrag_agent.result_validators.append(check_source_faithfulness)",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy Check",
+        "description": "Validate that citations match actual context usage and boundaries",
+        "code": "@vex.result_validator(name='citation-accuracy')\ndef validate_citations(result: RAGResponse, raw_context: List[str]) -> Dict[str, Any]:\n    issues = []\n    for citation in result.citations:\n        doc_id = citation.chunk_id\n        if doc_id >= len(raw_context):\n            issues.append(f'Invalid doc_id: {doc_id}')\n            continue\n        \n        snippet = raw_context[doc_id][citation.start_char:citation.end_char]\n        if len(snippet.strip()) < 10:\n            issues.append(f'Empty citation span: {citation}')\n    \n    return {\n        'pass': len(issues) == 0,\n        'issues': issues,\n        'citation_count': len(result.citations)\n    }\n\nrag_agent.result_validators.append(validate_citations)",
+        "language": "python"
+      },
+      {
+        "title": "Hallucination + Relevance Guard",
+        "description": "Combined check for hallucination and context-query relevance",
+        "code": "@vex.result_validator(name='rag-safety-net')\ndef rag_safety_net(result: RAGResponse, context: List[str], query: str) -> Dict[str, Any]:\n    # Hallucination check\n    hallucination_score = vex.evaluate.semantic_similarity(\n        result.answer, ' '.join(context)\n    )\n    \n    # Context relevance\n    relevance_score = vex.evaluate.query_relevance(\n        query=query,\n        contexts=context,\n        answer=result.answer\n    )\n    \n    scores = {\n        'hallucination': hallucination_score,\n        'relevance': relevance_score,\n        'confidence': result.confidence\n    }\n    \n    return {\n        'pass': hallucination_score > 0.75 and relevance_score > 0.8,\n        'scores': scores\n    }\n\nrag_agent.result_validators.append(rag_safety_net)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI RAG Pipeline",
+      "description": "Add Vex validators today to eliminate hallucination and citation risks in production."
+    }
+  }
+}

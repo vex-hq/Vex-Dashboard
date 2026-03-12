@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in LangGraph Agents",
+    "description": "How to detect and fix ai agent error handling patterns in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "LangGraph error-handling",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph, AI agent error handling patterns fail when stateful graphs encounter cyclic executions, parallel branch merges, checkpoint schema drifts, or bypassed human-in-the-loop controls. These issues manifest as infinite loops, corrupted shared state, deserialization failures during recovery, and skipped critical human approvals. LangGraph's graph-based architecture amplifies these problems due to its flexible conditional edges and persistent checkpointing system.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic graph execution causing infinite state transitions",
+        "symptom": "Agent stuck in endless loop between nodes despite termination conditions",
+        "impact": "Infinite API calls, skyrocketing costs, and complete workflow failure"
+      },
+      {
+        "scenario": "State corruption when parallel branches merge conflicting data",
+        "symptom": "Inconsistent state values after `Send` operations from parallel tool calls",
+        "impact": "Downstream nodes receive corrupted data leading to hallucinated responses"
+      },
+      {
+        "scenario": "Checkpoint deserialization errors after schema changes",
+        "symptom": "TypeError or KeyError during `graph.invoke()` after adding/removing state fields",
+        "impact": "All historical conversations fail to resume, breaking persistent agents"
+      },
+      {
+        "scenario": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "symptom": "INTERRUPT state ignored when conditional routing skips human node",
+        "impact": "Critical decisions made without human approval, violating compliance"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cycle Detection via State Transition Logging",
+        "description": "Monitor repeated state transitions exceeding threshold across graph nodes",
+        "code": "from langgraph.graph import StateGraph\nfrom collections import defaultdict\n\ndef detect_cycles(graph, max_iterations=50):\n    state_visits = defaultdict(int)\n    \n    @graph.before('agent')\n    def cycle_monitor(state):\n        current_path = state.get('path', [])\n        if len(current_path) > max_iterations:\n            raise ValueError(f\"Cycle detected: {current_path[-10:]}\")\n        return state\n    \n    return graph",
+        "language": "python"
+      },
+      {
+        "name": "State Corruption Detector for Parallel Merges",
+        "description": "Validate state schema consistency after SEND operations merge parallel branches",
+        "code": "from typing import TypedDict, Any\nfrom langgraph.graph.message import add_messages\n\nclass ValidState(TypedDict):\n    messages: list\n    data: dict\n    version: int\n\nclass StateCorruptionGuard:\n    def __init__(self):\n        self.schema_version = 1\n    \n    def validate_merge(self, state: ValidState) -> ValidState:\n        if 'version' not in state or state['version'] != self.schema_version:\n            raise ValueError(f\"State corruption detected: version {state.get('version')} != {self.schema_version}\")\n        if len(set(msg.id for msg in state['messages'])) != len(state['messages']):\n            raise ValueError(\"Duplicate message IDs detected - merge corruption\")\n        return state",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Deserialization Safety Check",
+        "description": "Test checkpoint compatibility before production deployment",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\nimport pickle\n\nclass CheckpointValidator:\n    def __init__(self, checkpointer):\n        self.checkpointer = checkpointer\n    \n    def validate_checkpoints(self, config, test_state):\n        try:\n            # Test deserialization\n            checkpoint = self.checkpointer.get(config)\n            if checkpoint:\n                restored = pickle.loads(checkpoint['checkpoint'])\n                assert set(test_state.keys()) == set(restored.keys()), \"Schema mismatch\"\n        except (pickle.UnpicklingError, AssertionError, KeyError) as e:\n            raise RuntimeError(f\"Checkpoint deserialization failed: {e}\")",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Cycle Prevention with Visit Counters",
+        "description": "Add node-level visit counters and max-iteration guards to StateGraph",
+        "code": "from typing import Annotated, TypedDict\nfrom langgraph.graph import END, StateGraph\n\nclass SafeState(TypedDict):\n    messages: Annotated[list, 'add_messages']\n    visit_counts: dict[str, int]\n    max_visits: dict[str, int]\n\n    def check_node_limit(state: SafeState, node_name: str) -> SafeState:\n        state['visit_counts'][node_name] = state['visit_counts'].get(node_name, 0) + 1\n        if state['visit_counts'][node_name] > state['max_visits'].get(node_name, 3):\n            return {'next': END}\n        return state\n\n# Usage\ngraph = StateGraph(SafeState)\ngraph.add_node('agent', lambda state: check_node_limit(state, 'agent'))",
+        "language": "python"
+      },
+      {
+        "name": "Atomic State Merging for Parallel Branches",
+        "description": "Use CRDT-style merging for parallel SEND operations",
+        "code": "from typing import TypedDict, List\nfrom langgraph.graph import StateGraph\n\nclass ConflictFreeState(TypedDict):\n    shared_data: dict\n    branch_results: List[dict]\n\nclass AtomicMerger:\n    def merge_parallel(self, state: ConflictFreeState) -> ConflictFreeState:\n        # Last-write-wins with validation\n        final_data = state['shared_data'].copy()\n        for branch in state['branch_results']:\n            for key, value in branch.items():\n                if isinstance(value, dict):  # Deep merge\n                    final_data.setdefault(key, {}).update(value)\n                else:\n                    final_data[key] = value\n        state['shared_data'] = final_data\n        state['branch_results'] = []\n        return state\n\n# Add as reducer\ngraph.add_node('merger', AtomicMerger().merge_parallel)",
+        "language": "python"
+      },
+      {
+        "name": "Schema Versioned Checkpoints",
+        "description": "Add versioning and migration layer to checkpoint persistence",
+        "code": "from langgraph.checkpoint.base import BaseCheckpointSaver\nfrom typing import Any, Dict\n\nclass VersionedCheckpointer(BaseCheckpointSaver):\n    def __init__(self, inner):\n        self.inner = inner\n        self.schema_version = 2\n    \n    def put(self, config, checkpoint: bytes, snapshot: bytes = None):\n        # Wrap with version metadata\n        versioned = {\n            'version': self.schema_version,\n            'checkpoint': checkpoint,\n            'snapshot': snapshot\n        }\n        return self.inner.put(config, pickle.dumps(versioned))\n    \n    def get(self, config) -> Dict[str, Any]:\n        data = pickle.loads(self.inner.get(config)['checkpoint'])\n        if data['version'] != self.schema_version:\n            data = self.migrate(data)\n        return data\n\n    def migrate(self, data: dict) -> dict:\n        # Schema migration logic\n        return data",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex automatically detects all four LangGraph error patterns by wrapping `graph.invoke()` and injecting validation nodes. It monitors state transitions for cycles, validates parallel merges using schema guards, tests checkpoint compatibility on every invocation, and enforces human-in-the-loop compliance by blocking bypassed interrupts. Vex generates remediation code and patches graphs in real-time.\n\nThe platform runs continuous verification during development and production, catching issues before they cascade. Integration takes 3 lines of code and provides detailed error reports with fix suggestions specific to your LangGraph implementation.\n\nVex's LangGraph adapter understands graph topology, conditional edges, SEND operations, and checkpoint formats, providing framework-aware diagnostics that generic monitoring misses.",
+      "code": "pip install langgraph vex-sdk\nfrom vex import verify\nfrom langgraph.graph import StateGraph, END\n\n# Method 1: Wrap invoke\n@verify('langgraph-agent-safety')\ndef safe_invoke(graph, input, config=None):\n    return graph.invoke(input, config)\n\n# Method 2: Add as graph node\ngraph.add_node('vex_guard', verify('langgraph-agent-safety'))\ngraph.add_conditional_edges('agent', {'vex_guard': 'vex_guard', END: END})\n\n# Production usage\nresult = safe_invoke(compiled_graph, {'messages': ['analyze Q3 earnings']}, config)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LangGraph invokes to eliminate agent error handling failures instantly."
+    }
+  }
+}

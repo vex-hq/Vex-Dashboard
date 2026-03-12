@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with CrewAI + Vex Guardrails",
+    "description": "Learn how to build customer support with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI customer support",
+      "CrewAI guardrails",
+      "customer support reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "CrewAI enables building sophisticated customer support systems where specialized agents collaborate to handle inquiries, retrieve knowledge, and integrate with CRM tools. However, multi-agent delegation can lead to loops, hallucinations, and task drift, compromising response accuracy and compliance. Vex provides critical guardrails to verify agent outputs, filter PII, and ensure policy adherence in high-risk customer support scenarios.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with CrewAI",
+      "description": "The CrewAI customer support architecture features a triage agent that classifies incoming tickets and delegates to specialized roles: a research agent performs RAG-based knowledge retrieval, a CRM agent handles order lookups and ticket creation via API tools, and a response agent generates polite, compliant replies. Agents communicate via shared memory and task outputs, with tools for vector search, Salesforce/Zendesk integration, and escalation logic.\n\nThis setup processes customer queries end-to-end: from intent detection to verified response delivery. Critical failure points include hallucinated CRM data, tone inconsistencies across agents, and unfiltered PII leakage during handoffs.\n\nVex integrates as task callbacks to validate outputs at each delegation step, ensuring accuracy before proceeding.",
+      "diagram": "┌─────────────────┐\n│   Customer      │\n│   Inquiry       │───→┌──────────────┐\n└─────────────────┘    │ Triage Agent  │\n                       │ (Vex Verify)  │\n                       └──────┬───────┘\n                              │\n                ┌──────────────┴───────┐\n                │                     │\n        ┌───────▼──────┐     ┌────────▼──────┐\n        │ Research     │     │   CRM Agent    │\n        │ Agent (RAG)  │     │ (Order/Ticket) │\n        │ (Vex Verify) │     │  (Vex Verify)  │\n        └──────┬──────┘     └──────┬────────┘\n               │                   │\n                └──────────┬────────┘\n                           │\n                    ┌──────▼──────┐\n                    │ Response    │───→┌──────────────┐\n                    │ Agent       │    │ Customer     │\n                    │ (Vex Final) │    │ Response     │\n                    └────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "Triage agent endlessly re-delegates to research agent due to vague task completion criteria",
+        "severity": "critical",
+        "mitigation": "Vex callback enforces delegation limits and task convergence checks"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "CRM agent fabricates order details when API fails, passed to response agent",
+        "severity": "critical",
+        "mitigation": "Vex verifies tool outputs against expected schemas and sources"
+      },
+      {
+        "name": "Task drift",
+        "description": "Research agent reinterprets 'find order status' as general product info",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks against original task objectives"
+      },
+      {
+        "name": "PII leakage in handoffs",
+        "description": "Customer phone/email numbers passed unfiltered between agents",
+        "severity": "critical",
+        "mitigation": "Vex PII detection and redaction before agent delegation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic CrewAI Customer Support Crew",
+        "description": "Define agents and tasks for triage, research, CRM lookup, and response generation",
+        "code": "from crewai import Agent, Task, Crew\nfrom langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model='gpt-4o')\n\ntriage_agent = Agent(\n    role='Ticket Triage Specialist',\n    goal='Classify customer intent and delegate appropriately',\n    backstory='You expertly categorize support tickets...',\n    llm=llm,\n    verbose=True\n)\n\nresearch_agent = Agent(\n    role='Knowledge Base Researcher',\n    goal='Retrieve accurate info from support KB via RAG',\n    tools=[rag_tool],  # Assume RAG tool defined\n    llm=llm,\n    verbose=True\n)\n\ncrm_agent = Agent(\n    role='CRM Integration Specialist',\n    goal='Lookup orders and create tickets in CRM',\n    tools=[salesforce_tool, zendesk_tool],\n    llm=llm,\n    verbose=True\n)\n\nresponse_agent = Agent(\n    role='Customer Response Writer',\n    goal='Write polite, accurate, policy-compliant responses',\n    llm=llm,\n    verbose=True\n)\n\ntriage_task = Task(\n    description='Analyze: {customer_query} and delegate',\n    agent=triage_agent\n)\n\ncrew = Crew(\n    agents=[triage_agent, research_agent, crm_agent, response_agent],\n    tasks=[triage_task],\n    verbose=2\n)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Tool for Knowledge Base",
+        "description": "Vector search tool for retrieving support articles",
+        "code": "from crewai_tools import BaseTool\nfrom langchain_community.vectorstores import FAISS\nfrom langchain_openai import OpenAIEmbeddings\n\nclass SupportKBTool(BaseTool):\n    name: str = \"Support Knowledge Base\"\n    description: str = \"Searches support KB for relevant articles\"\n    \n    def _run(self, query: str) -> str:\n        # Load FAISS index (pre-built from support docs)\n        vectorstore = FAISS.load_local('support_kb_index', \n                                     OpenAIEmbeddings())\n        docs = vectorstore.similarity_search(query, k=3)\n        return '\\n\\n'.join([doc.page_content for doc in docs])\n\nrag_tool = SupportKBTool()",
+        "language": "python"
+      },
+      {
+        "title": "CRM Order Lookup Tool",
+        "description": "Tool for querying customer orders via CRM API",
+        "code": "from crewai_tools import BaseTool\nimport requests\n\nclass OrderLookupTool(BaseTool):\n    name: str = \"Order Lookup\"\n    description: str = \"Lookup customer order by email or order_id\"\n    \n    def _run(self, identifier: str) -> str:\n        # Mock CRM API call\n        response = requests.get(\n            f'https://crm.example.com/orders',\n            params={'email_or_id': identifier},\n            headers={'Authorization': 'Bearer YOUR_API_KEY'}\n        )\n        if response.status_code == 200:\n            orders = response.json()['orders']\n            return f\"Found {len(orders)} orders: \" + \\\n                   '\\n'.join([f\"Order {o['id']}: {o['status']}\" for o in orders])\n        return \"No orders found\"\n\ncrm_tool = OrderLookupTool()",
+        "language": "python"
+      },
+      {
+        "title": "Zendesk Ticket Creation Tool",
+        "description": "Creates support tickets with customer context",
+        "code": "from crewai_tools import BaseTool\nimport requests\n\nclass TicketCreationTool(BaseTool):\n    name: str = \"Create Support Ticket\"\n    description: str = \"Creates Zendesk ticket for customer issue\"\n    \n    def _run(self, customer_email: str, issue_summary: str, priority: str = 'normal') -> str:\n        payload = {\n            'ticket': {\n                'subject': f'Support Request: {issue_summary[:50]}',\n                'comment': {'body': issue_summary},\n                'requester': {'email': customer_email},\n                'priority': priority\n            }\n        }\n        response = requests.post(\n            'https://yourcompany.zendesk.com/api/v2/tickets.json',\n            json=payload,\n            headers={'Authorization': 'Basic YOUR_ZENDESK_TOKEN'}\n        )\n        ticket_id = response.json()['ticket']['id']\n        return f'Ticket #{ticket_id} created successfully'",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Task Callback for Agent Outputs",
+        "description": "Add Vex verification to each agent's task before delegation",
+        "code": "from vex_sdk import VexClient\nfrom crewai import Task\n\nvex = VexClient(api_key='your-vex-api-key')\n\ndef vex_task_callback(task_output: str, task_context: dict) -> bool:\n    # Verify customer support specific requirements\n    checks = [\n        {\n            'type': 'response_accuracy',\n            'prompt': f\"Is this output accurate for query: {task_context['customer_query']}?\",\n            'threshold': 0.9\n        },\n        {\n            'type': 'pii_filter',\n            'rules': ['PHONE_NUMBER', 'EMAIL', 'SSN'],\n            'action': 'redact'\n        },\n        {\n            'type': 'tone_consistency',\n            'target_tone': 'professional empathetic',\n            'threshold': 0.8\n        },\n        {\n            'type': 'policy_compliance',\n            'policies': ['no_personal_opinions', 'no_price_guarantees']\n        }\n    ]\n    \n    result = vex.verify(\n        content=task_output,\n        checks=checks,\n        context=task_context,\n        risk_profile='high'\n    )\n    return result['approved']\n\n# Apply to research agent task\ntriage_task = Task(\n    description='Analyze: {customer_query}',\n    agent=triage_agent,\n    output_callback=lambda x: vex_task_callback(x, {'customer_query': customer_query})\n)",
+        "language": "python"
+      },
+      {
+        "title": "PII Redaction Wrapper for CRM Tools",
+        "description": "Protect customer data in tool inputs/outputs with Vex",
+        "code": "from vex_sdk import VexClient\n\nvex = VexClient(api_key='your-vex-api-key')\n\ndef safe_crm_tool_call(tool_func, *args, **kwargs):\n    # Redact PII from inputs\n    clean_args = vex.redact_pii(\n        inputs=args,\n        entity_types=['EMAIL', 'PHONE_NUMBER', 'CREDIT_CARD']\n    )\n    \n    # Execute tool\n    raw_output = tool_func(*clean_args['clean_inputs'], **kwargs)\n    \n    # Verify and redact output\n    verified = vex.verify(\n        content=raw_output,\n        checks=[{'type': 'pii_filter', 'action': 'redact'}],\n        context={'tool': tool_func.__name__}\n    )\n    \n    return {\n        'clean_output': verified['content'],\n        'pii_detected': verified['detections'],\n        'approved': verified['approved']\n    }\n\n# Wrap CRM tools\nsafe_order_lookup = lambda x: safe_crm_tool_call(OrderLookupTool()._run, x)\nsafe_ticket_create = lambda e,s: safe_crm_tool_call(TicketCreationTool()._run, e, s)",
+        "language": "python"
+      },
+      {
+        "title": "Escalation Detection in Final Response",
+        "description": "Vex checks for escalation triggers before customer delivery",
+        "code": "def final_response_guardrail(response: str, context: dict) -> dict:\n    escalation_checks = [\n        {\n            'type': 'keyword_trigger',\n            'keywords': ['legal action', 'lawsuit', 'attorney', 'refund all purchases'],\n            'severity': 'critical'\n        },\n        {\n            'type': 'sentiment',\n            'min_score': -0.8,\n            'labels': ['anger', 'threat']\n        },\n        {\n            'type': 'policy_violation',\n            'policy': 'escalation_handling',\n            'rules': [\n                'Cannot promise executive callback',\n                'Must route legal threats to compliance'\n            ]\n        }\n    ]\n    \n    result = vex.verify(\n        content=response,\n        checks=escalation_checks,\n        context=context,\n        risk_profile='high'\n    )\n    \n    if result['approved']:\n        return {'status': 'send_to_customer', 'content': result['content']}\n    else:\n        return {\n            'status': 'escalate',\n            'reason': result['failures'],\n            'escalation_type': 'human_compliance',\n            'ticket_id': context.get('ticket_id')\n        }\n\n# Usage in crew process\nfinal_result = crew.kickoff(inputs={'customer_query': query})\ndelivery_decision = final_response_guardrail(final_result, {'query': query})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI Customer Support",
+      "description": "Install Vex today with `pip install vex-sdk` and eliminate agent failures in your production support system."
+    }
+  }
+}

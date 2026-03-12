@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "industry": "insurance",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Instructor Guardrails for Insurance",
+    "description": "Compliance guide for Instructor agents in insurance. Meet State insurance regulations, NAIC Model Laws requirements with Vex guardrails.",
+    "keywords": [
+      "Instructor insurance",
+      "insurance AI compliance",
+      "Instructor guardrails",
+      "insurance AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Insurance teams using Instructor for structured extraction from LLMs face heightened compliance risks due to the industry's strict regulations on data privacy, non-discrimination, and explainability. Without guardrails, common Instructor failures like hallucinated enum values or partial field extraction can lead to discriminatory underwriting or unexplainable claim denials. Vex provides runtime verification to ensure structured outputs strictly adhere to insurance compliance schemas.",
+    "complianceRequirements": [
+      {
+        "regulation": "NAIC Model Laws",
+        "description": "Mandates non-discriminatory underwriting decisions and prohibits use of protected class data in risk assessment models.",
+        "howVexHelps": "Validates extracted enums and fields to block hallucinated discriminatory risk factors, ensuring only approved underwriting criteria are used."
+      },
+      {
+        "regulation": "Fair Credit Reporting Act (FCRA)",
+        "description": "Requires accurate credit data usage and explainable adverse action notices in insurance quoting.",
+        "howVexHelps": "Enforces complete extraction of required FCRA disclosure fields, preventing partial outputs that omit mandatory explanations."
+      },
+      {
+        "regulation": "GDPR/CCPA",
+        "description": "Demands encryption of policyholder PII and audit trails for all data access in claims processing.",
+        "howVexHelps": "Verifies structured outputs contain only audited, non-PII fields and blocks hallucinated sensitive data extraction."
+      },
+      {
+        "regulation": "State Insurance Regulations",
+        "description": "Require explainable AI decisions in claims denial with specific regulatory reason codes.",
+        "howVexHelps": "Validates nested claim denial objects contain exact state-required enum codes, preventing inconsistent depth failures."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Discriminatory Underwriting Output",
+        "description": "Instructor hallucinates protected class proxies (zip code as race indicator) in risk score extraction.",
+        "severity": "critical",
+        "example": "Model extracts 'high-risk' due to 'urban zip' hallucination, violating NAIC anti-discrimination rules."
+      },
+      {
+        "name": "Incomplete FCRA Disclosures",
+        "description": "Partial extraction misses required credit inquiry explanation fields.",
+        "severity": "critical",
+        "example": "Quote rejection lacks FCRA-mandated 'credit factors used' disclosure, triggering regulatory fines."
+      },
+      {
+        "name": "Unexplainable Claims Denials",
+        "description": "Nested denial reason objects have inconsistent depth, omitting state-required codes.",
+        "severity": "high",
+        "example": "Claim denied with generic 'policy exclusion' instead of specific 'pre-existing condition' code."
+      },
+      {
+        "name": "PII Data Leakage",
+        "description": "Hallucinated policyholder SSN or medical history in structured claims output.",
+        "severity": "critical",
+        "example": "Extracted claim record contains fabricated SSN, violating GDPR/CCPA data minimization."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Claims Processing with NAIC Denial Codes",
+        "description": "Wrap Instructor client to validate state-specific denial reason enums and nested explanations.",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel, Field\nfrom vex import verify\n\nclass ClaimDenial(BaseModel):\n    denial_code: Literal['PRE_EXISTING', 'LATE_FILING', 'EXCLUSION'] = Field(..., description='NAIC Model 880 required code')\n    explanation: str = Field(..., min_length=50, description='Explainable reason for policyholder')\n    protected_class_check: bool = Field(False, description='Must be False per anti-discrimination laws')\n\nclient = Instructor.from_openai(OpenAI())\n@verify\nasync def process_claim(prompt: str) -> ClaimDenial:\n    return await client.chat.completions.create(\n        model='gpt-4o',\n        response_model=ClaimDenial,\n        messages=[{'role': 'user', 'content': f\"Extract denial: {prompt}\"}]\n    )",
+        "language": "python"
+      },
+      {
+        "title": "Underwriting Risk Score Validation",
+        "description": "Ensure no protected class factors appear in extracted risk assessment using Vex verification.",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field, validator\nfrom typing import Literal\nfrom vex import verify\n\nclass RiskAssessment(BaseModel):\n    risk_score: int = Field(ge=0, le=1000)\n    factors: list[Literal['AGE', 'DRIVING_RECORD', 'COVERAGE_AMOUNT']]  # No protected classes\n    \n    @validator('factors')\n    def no_protected(cls, v):\n        protected = {'ZIP_CODE', 'GENDER', 'ETHNICITY'}\n        if any(f in protected for f in v): raise ValueError('Protected class detected')\n        return v\n\nopenai_client = from_openai(OpenAI())\n\n@verify\nasync def assess_risk(applicant_data: str) -> RiskAssessment:\n    response = await openai_client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=RiskAssessment,\n        messages=[{\"role\": \"user\", \"content\": applicant_data}]\n    )\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript FCRA Disclosure Extraction",
+        "description": "Validate complete FCRA adverse action disclosures with required explanation fields.",
+        "code": "import { fromOpenai } from '@instructor-ai/instructor'; // npm i instructor\n\nimport { z } from 'zod';\nimport { verify } from '@vex-sdk/core';\n\nconst FCRA_DISCLOSURE = z.object({\n  credit_factors_used: z.array(z.enum(['PAYMENT_HISTORY', 'DEBT_UTILIZATION', 'LENGTH_OF_CREDIT'])),\n  explanation: z.string().min(100).describe('FCRA-mandated explanation'),\n  inquiry_date: z.string().datetime(),\n  no_discrimination: z.literal(true).describe('Anti-discrimination compliance flag')\n});\n\ntype FCRADisclosure = z.infer<typeof FCRA_DISCLOSURE>;\n\nconst instructor = fromOpenai(OpenAI({ apiKey: process.env.OPENAI_API_KEY }));\n\nexport const extractFCRA = verify(\n  async (prompt: string): Promise<FCRADisclosure> => {\n    const completion = await instructor.chat.completions.create({\n      model: 'gpt-4o',\n      response_model: FCRA_DISCLOSURE,\n      messages: [{ role: 'user', content: `Extract FCRA disclosure from: ${prompt}` }],\n    });\n    return completion;\n  },\n  { schema: FCRA_DISCLOSURE }\n);",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Instructor in Insurance: A Scenario",
+      "scenario": "Midwest Mutual Insurance deployed Instructor to automate claims processing across 15 states, extracting structured denial reasons from customer documents and adjuster notes. The system processed 50,000 claims monthly but began generating regulatory complaints when partial extractions omitted state-specific denial codes required by NAIC Model 880. Underwriting teams also reported hallucinated risk factors including zip code proxies for protected classes, triggering a state insurance department audit. Without validation retries or nested object consistency checks, the deployment risked $2M in fines and license suspension.",
+      "outcome": "Vex guardrails wrapped the Instructor client, enforcing exact enum validation for NAIC denial codes and blocking protected class hallucinations with 99.7% compliance rate. Nested claim explanation objects maintained consistent depth across all states, eliminating partial extraction failures. The audit passed with zero violations, and wrongful denial callbacks dropped 87%. Vex's verification logs provided complete audit trails for regulatory review."
+    },
+    "cta": {
+      "heading": "Comply with Insurance Regulations Using Vex",
+      "description": "Integrate Vex with Instructor today to eliminate compliance failures and protect your insurance license."
+    }
+  }
+}

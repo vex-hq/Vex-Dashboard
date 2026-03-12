@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Instructor + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor rag pipeline",
+      "Instructor guardrails",
+      "rag pipeline reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies structured output extraction from LLMs by patching clients to return validated Pydantic models, perfect for RAG pipelines needing precise document synthesis and citation extraction. Guardrails are essential in RAG to prevent hallucinations, ensure source faithfulness, and maintain citation accuracy in high-risk applications. Vex provides runtime verification to catch these failures before they impact users.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Instructor",
+      "description": "A typical Instructor + RAG pipeline starts with vector search over document embeddings to retrieve relevant chunks. These chunks are assembled into context and passed to an Instructor-patched LLM client that extracts structured responses with citations. The Pydantic models enforce schemas for answer content, sources, and confidence scores.\n\nInstructor wraps OpenAI's chat.completions.create() to validate outputs against models like AnswerWithSources, retrying on failures. Vex verification layers add runtime checks for hallucination, relevance, and faithfulness post-extraction.\n\nThis architecture ensures type-safe, verifiable responses while maintaining RAG's core retrieval-generation flow.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vector Search    │───▶│ Context Assembly │\n└─────────────────┘    │ (Pinecone/FAISS) │    │ + System Prompt  │\n                       └──────────────────┘    └──────────────────�┘\n                                                    │\n                                        ┌─────────▼──────────┐\n                                        │Instructor Client   │\n                                        │+ Vex.verify()      │\n                                        │Extract Answer      │\n                                        │+ Citations         │\n                                        └──────────┬─────────┘\n                                                   │\n                                        ┌─────────▼──────────┐\n                                        │  Validated Output  │\n                                        │Answer + Sources    │\n                                        └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Source Faithfulness Failure",
+        "description": "LLM generates claims not grounded in retrieved context",
+        "severity": "critical",
+        "mitigation": "Vex faithfulness checks trace every claim to source chunks"
+      },
+      {
+        "name": "Hallucinated Citations",
+        "description": "Model fabricates source IDs or references non-existent chunks",
+        "severity": "high",
+        "mitigation": "Validate citation indices against actual retrieved documents"
+      },
+      {
+        "name": "Context Relevance Drift",
+        "description": "Irrelevant chunks passed to LLM degrade answer quality",
+        "severity": "high",
+        "mitigation": "Pre-filter chunks with semantic similarity thresholds"
+      },
+      {
+        "name": "Structured Extraction Collapse",
+        "description": "Instructor retries exhausted, partial Pydantic models returned",
+        "severity": "medium",
+        "mitigation": "Vex fallback assertions ensure minimum required fields"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Pydantic Model for RAG Response",
+        "description": "Define structured output schema with citations and confidence",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import List, Optional\n\nclass Citation(BaseModel):\n    chunk_id: int\n    start_char: int\n    end_char: int\n    content: str = Field(..., max_length=500)\n\nclass RAGResponse(BaseModel):\n    answer: str = Field(..., max_length=1000)\n    citations: List[Citation] = Field(..., min_items=1, max_items=5)\n    confidence: float = Field(..., ge=0.0, le=1.0)\n    sources_used: int = Field(..., ge=1)",
+        "language": "python"
+      },
+      {
+        "title": "Instructor Client Setup",
+        "description": "Patch OpenAI client and create RAG response function",
+        "code": "from instructor import from_openai\n\nfrom openai import OpenAI\n\nclient = from_openai(OpenAI())\n\n@client.chat.completions.create\nasync def rag_extract(\n    context: str,\n    question: str\n) -> RAGResponse:\n    return await client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=RAGResponse,\n        temperature=0.1,\n        messages=[\n            {\"role\": \"system\", \"content\": \"Answer using ONLY the provided context. Always cite sources.\"},\n            {\"role\": \"user\", \"content\": f\"Context: {context}\\n\\nQuestion: {question}\"}\n        ]\n    )",
+        "language": "python"
+      },
+      {
+        "title": "Basic Vector Search Integration",
+        "description": "Retrieve and format context chunks for Instructor",
+        "code": "import pinecone\n\nindex = pinecone.Index('rag-docs')\n\nasync def retrieve_context(query: str, top_k: int = 5) -> str:\n    query_embedding = get_embedding(query)  # Your embedding function\n    results = await index.query(\n        vector=query_embedding,\n        top_k=top_k,\n        include_metadata=True\n    )\n    chunks = []\n    for match in results['matches']:\n        chunks.append(f\"[Source {match['id']}]: {match['metadata']['text']}\")\n    return \"\\n\".join(chunks)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Instructor Equivalent",
+        "description": "Zod schema for TypeScript RAG responses",
+        "code": "import { z } from 'zod';\n\nconst CitationSchema = z.object({\n  chunkId: z.number(),\n  startChar: z.number(),\n  endChar: z.number(),\n  content: z.string().max(500)\n});\n\nconst RAGResponseSchema = z.object({\n  answer: z.string().max(1000),\n  citations: z.array(CitationSchema).min(1).max(5),\n  confidence: z.number().min(0).max(1),\n  sourcesUsed: z.number().min(1)\n});\n\nexport type RAGResponse = z.infer<typeof RAGResponseSchema>;",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Verify every claim traces back to cited context chunks",
+        "code": "import { verify } from 'vex-sdk';\n\nfrom your_rag import rag_extract, retrieve_context\n\n@verify({\n  name: 'rag-faithfulness',\n  assertions: [\n    {\n      type: 'faithfulness',\n      claim_selector: '.answer',\n      context_selector: '.citations[].content',\n      threshold: 0.9\n    }\n  ]\n})\nasync def verified_rag(question: str) -> RAGResponse:\n    context = await retrieve_context(question)\n    response = await rag_extract(context, question)\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy Check",
+        "description": "Ensure cited chunk IDs exist in retrieved documents",
+        "code": "import { verify } from 'vex-sdk';\n\nconst retrieved_chunks = await retrieveContext(query);\nconst chunk_ids = new Set(retrieved_chunks.map(c => c.id));\n\nawait verify({\n  name: 'citation-accuracy',\n  assertions: [\n    {\n      type: 'forall',\n      selector: '.citations',\n      assertion: (citation: Citation) => chunk_ids.has(citation.chunkId)\n    },\n    {\n      type: 'range',\n      selector: '.citations',\n      min: 1,\n      max: retrieved_chunks.length\n    }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Hallucination + Relevance Guard",
+        "description": "Multi-check verification combining hallucination and context checks",
+        "code": "from vex_sdk import verify\n\n@verify({\n  name: 'rag-comprehensive',\n  risk_profile: 'high',\n  assertions: [\n    {\n      type: 'no_hallucination',\n      selector: '.answer',\n      context: '.citations[].content'\n    },\n    {\n      type: 'context_relevance',\n      query: question,\n      context: '.citations[].content',\n      threshold: 0.8\n    },\n    {\n      type: 'field_complete',\n      selector: '.citations',\n      required_fields: ['chunk_id', 'content']\n    }\n  ],\n  fallback: 'retry'\n})\nasync def secure_rag(question: str) -> RAGResponse:\n    return await rag_extract(await retrieve_context(question), question)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor RAG Pipeline",
+      "description": "Add Vex verification to your Instructor client in 5 minutes - start with `pip install vex-sdk`"
+    }
+  }
+}

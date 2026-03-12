@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in LangChain Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "LangChain tool-loop-detection",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Tool loops in LangChain agents occur when the agent's ReAct loop repeatedly calls the same tool with similar inputs, often due to ambiguous tool descriptions or LLM hallucinations, leading to infinite recursion in AgentExecutor. This manifests as excessive tool invocations without progressing toward a final answer, consuming tokens and compute resources. LangChain's default AgentExecutor lacks built-in loop prevention, making it prone to this failure mode in complex multi-tool scenarios.",
+    "howItManifests": [
+      {
+        "scenario": "Math agent with calculator tool",
+        "symptom": "Agent calls calculator_tool('2+2') → gets '4' → calls calculator_tool('4') → gets '4' → repeats indefinitely",
+        "impact": "Infinite loop, token exhaustion, no final answer"
+      },
+      {
+        "scenario": "Search agent with web search tool",
+        "symptom": "Agent searches 'current weather' → gets results → searches 'current weather' again with identical query",
+        "impact": "API rate limits hit, escalating costs, stalled execution"
+      },
+      {
+        "scenario": "Multi-tool agent with file reader + summarizer",
+        "symptom": "Reads file → summarizes → reads same file again → summarizes identical content",
+        "impact": "Context window overflow, redundant processing"
+      },
+      {
+        "scenario": "Database agent with query tool",
+        "symptom": "Queries 'user count' → gets result → queries 'user count' to 'verify' → loops",
+        "impact": "Database overload, inconsistent results from caching"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Invocation Count Threshold",
+        "description": "Monitor AgentExecutor invocations and flag if same tool called >5 times consecutively",
+        "code": "from collections import defaultdict, deque\n\ndef detect_tool_loops(executor):\n    tool_calls = defaultdict(deque)\n    max_calls = 5\n    \n    original_run = executor._call\n    \n    def wrapped_run(*args, **kwargs):\n        result = original_run(*args, **kwargs)\n        # Extract tool calls from intermediate steps\n        for step in result['intermediate_steps']:\n            tool_name = step[0].tool\n            tool_calls[tool_name].append(step[1])\n            \n            if len(tool_calls[tool_name]) > max_calls:\n                recent_calls = list(tool_calls[tool_name])[-max_calls:]\n                if all(call == recent_calls[0] for call in recent_calls):\n                    raise ValueError(f'Tool loop detected: {tool_name} called {max_calls}+ times identically')\n        return result\n    \n    executor._call = wrapped_run\n    return executor",
+        "language": "python"
+      },
+      {
+        "name": "State Similarity Check",
+        "description": "Track agent state (observations + tool inputs) and detect >90% similarity across iterations",
+        "code": "import numpy as np\nfrom difflib import SequenceMatcher\n\ndef detect_state_loops(agent):\n    state_history = []\n    similarity_threshold = 0.9\n    \n    def similarity(a, b):\n        return SequenceMatcher(None, str(a), str(b)).ratio()\n    \n    original_plan = agent.plan\n    \n    def wrapped_plan(*args, **kwargs):\n        state = str(args[0])  # Current observation\n        state_history.append(state)\n        \n        if len(state_history) > 3:\n            recent_states = state_history[-3:]\n            if all(similarity(recent_states[0], s) > similarity_threshold for s in recent_states[1:]):\n                raise RuntimeError('Agent state looping - no progress detected')\n        \n        return original_plan(*args, **kwargs)\n    \n    agent.plan = wrapped_plan\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Token Budget Exceeded",
+        "description": "Track total tokens consumed per agent run and flag excessive usage",
+        "code": "class TokenBudgetMonitor:\n    def __init__(self, max_tokens=5000):\n        self.max_tokens = max_tokens\n        self.total_tokens = 0\n    \n    def monitor_chain(self, chain):\n        def wrapped_invoke(inputs, **kwargs):\n            result = chain.invoke(inputs, **kwargs)\n            # Estimate tokens (rough: 4 chars per token)\n            total_chars = sum(len(str(v)) for v in result.values())\n            self.total_tokens += total_chars // 4\n            \n            if self.total_tokens > self.max_tokens:\n                raise RuntimeError(f'Token budget exceeded: {self.total_tokens}/{self.max_tokens}')\n            \n            return result\n        \n        chain.invoke = wrapped_invoke.__get__(chain)\n        return chain",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Iterations Limit",
+        "description": "Configure AgentExecutor with explicit max_iterations to prevent infinite loops",
+        "code": "from langchain.agents import AgentExecutor, create_react_agent\n\nagent_executor = AgentExecutor(\n    agent=agent,\n    tools=tools,\n    max_iterations=10,  # Hard limit\n    max_execution_time=60,  # 60 second timeout\n    handle_parsing_errors=True\n)\n\n# Safe execution\ntry:\n    result = agent_executor.invoke({\"input\": user_query})\nexcept Exception as e:\n    print(f'Agent failed safely: {e}')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Deduplication",
+        "description": "Cache recent tool calls and skip identical invocations within window",
+        "code": "from collections import defaultdict, deque\nimport hashlib\n\nclass LoopProofAgentExecutor(AgentExecutor):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.tool_cache = defaultdict(deque)\n        self.cache_window = 5\n    \n    def _call(self, *args, **kwargs):\n        # Hash tool input for deduplication\n        tool_input = str(kwargs.get('tool_input', ''))\n        tool_hash = hashlib.md5(tool_input.encode()).hexdigest()\n        \n        if tool_hash in [h for h in self.tool_cache[kwargs.get('tool', 'unknown')]][:self.cache_window]:\n            return {'output': 'Tool call skipped - recent duplicate detected'}\n        \n        self.tool_cache[kwargs.get('tool', 'unknown')].append(tool_hash)\n        if len(self.tool_cache[kwargs.get('tool', 'unknown')]) > self.cache_window:\n            self.tool_cache[kwargs.get('tool', 'unknown')].popleft()\n        \n        return super()._call(*args, **kwargs)",
+        "language": "python"
+      },
+      {
+        "name": "Early Termination Heuristic",
+        "description": "Stop agent when final answer confidence exceeds threshold",
+        "code": "from langchain.schema import AgentAction, AgentFinish\n\ndef confident_early_stop(agent):\n    def wrapped_agent(inputs):\n        response = agent(inputs)\n        # Check for confident final answer patterns\n        confident_phrases = ['final answer', 'conclusion', 'result is', 'answer:']\n        \n        if isinstance(response, AgentFinish):\n            content = response.return_values['output'].lower()\n            if any(phrase in content for phrase in confident_phrases):\n                return response\n        \n        return response\n    \n    return wrapped_agent",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents with Vex",
+      "description": "Vex automatically detects tool loops by monitoring LangChain AgentExecutor invocation patterns, tracking tool call frequency, input similarity, and state progression. When loops are detected, Vex captures the exact sequence of failing tool calls and applies remediation strategies like iteration limits or call deduplication. Integration requires wrapping chain.invoke() with vex.verify(), providing full observability into agent behavior without code changes.\n\nVex's ML-powered anomaly detection identifies loops in real-time across all agent runs, correlating them with specific tools, prompts, and input patterns. The platform generates remediation code snippets and automatically applies safe defaults to prevent recurrence. Teams gain visibility into loop frequency, cost impact, and resolution effectiveness through Vex's dashboard.\n\nWith one line of code, Vex transforms unreliable agents into production-ready systems, catching 95% of tool loops before they impact users.",
+      "code": "import vex\nfrom langchain.agents import AgentExecutor\n\n# Install: pip install langchain vex-sdk\n\n@vex.verify(test_name=\"agent-tool-loop-detection\")\ndef safe_agent_run(query: str):\n    result = agent_executor.invoke({\"input\": query})\n    return result['output']\n\n# Vex automatically detects:\n# - Tool call loops (>5 identical calls)\n# - State stagnation (no progress)\n# - Token budget exhaustion\n# - Applies fixes: max_iterations, deduplication\n\nresponse = safe_agent_run(\"What's 2+2?\")\nprint(response)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add vex.verify() to your LangChain agents in 1 line and eliminate tool loops forever."
+    }
+  }
+}

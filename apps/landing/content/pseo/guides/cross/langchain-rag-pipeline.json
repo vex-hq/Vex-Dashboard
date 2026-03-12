@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with LangChain + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain rag pipeline",
+      "LangChain guardrails",
+      "rag pipeline reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with LangChain enables powerful document retrieval and synthesis using vector search and LLMs, but introduces risks like hallucinations and citation errors that can undermine reliability. Vex provides runtime verification to ensure source faithfulness and context relevance in these high-stakes applications. Guardrails are essential for production-grade RAG systems handling critical queries.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with LangChain",
+      "description": "A typical LangChain RAG pipeline starts with query embedding using models like OpenAIEmbeddings, followed by vector search in a store like FAISS or Pinecone to retrieve top-k relevant document chunks. Retrieved contexts are assembled and augmented with the user query, then passed to an LLM chain (often via ChatOpenAI) for synthesis. The final output includes generated answers with source citations for traceability.\n\nKey components include a retriever (e.g., VectorStoreRetriever), a prompt template formatting context+query, and an output parser for structured responses. Agents may extend this with tool calling for dynamic retrieval. Context window management is critical to avoid truncation during long conversations.\n\nFailure often occurs in retrieval relevance, context overflow, or synthesis faithfulness, making verification at the chain.invoke() level essential.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Embed & Retrieve │───▶│  Context + LLM   │\n│                 │    │  (VectorStore)    │    │  Synthesis       │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                                     │\n                                             ┌───────▼───────┐\n                                             │  Vex.verify() │\n                                             │ (Faithful?    │\n                                             │  Relevant?)   │\n                                             └───────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Hallucination in RAG retrieval chains",
+        "description": "LLM generates facts not grounded in retrieved context",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks against retrieved documents"
+      },
+      {
+        "name": "Context window overflow",
+        "description": "Excessive retrieved chunks exceed LLM token limits",
+        "severity": "high",
+        "mitigation": "Dynamic context truncation with relevance scoring"
+      },
+      {
+        "name": "Citation accuracy failures",
+        "description": "Incorrect or missing source attribution in responses",
+        "severity": "high",
+        "mitigation": "Verify citation mappings match retrieved chunks"
+      },
+      {
+        "name": "Irrelevant context retrieval",
+        "description": "Vector search returns semantically mismatched documents",
+        "severity": "medium",
+        "mitigation": "Post-retrieval relevance filtering via Vex"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG Chain Setup",
+        "description": "Core retrieval chain with FAISS vector store and context synthesis",
+        "code": "from langchain.vectorstores import FAISS\nfrom langchain.embeddings import OpenAIEmbeddings\nfrom langchain.chat_models import ChatOpenAI\nfrom langchain.prompts import ChatPromptTemplate\n\nembeddings = OpenAIEmbeddings()\ndocstore = FAISS.from_texts([\"doc1 content\", \"doc2 content\"], embeddings)\nretriever = docstore.as_retriever(search_kwargs={\"k\": 3})\n\nprompt = ChatPromptTemplate.from_template(\"Answer using context: {context}\\nQuery: {question}\")\nllm = ChatOpenAI(model=\"gpt-4\")\nchain = prompt | llm\n\ndef rag_pipeline(query):\n    docs = retriever.get_relevant_documents(query)\n    context = \"\\n\".join([doc.page_content for doc in docs])\n    return chain.invoke({\"context\": context, \"question\": query})",
+        "language": "python"
+      },
+      {
+        "title": "RAG with Source Attribution",
+        "description": "Enhanced chain returning citations with metadata",
+        "code": "from langchain.schema import StrOutputParser\n\noutput_parser = StrOutputParser()\nchain_with_parser = prompt | llm | output_parser\n\ndef rag_with_citations(query):\n    docs = retriever.get_retrieval_documents(query)\n    context = \"\\n\".join([f\"[{i}]: {doc.page_content}\" for i, doc in enumerate(docs)])\n    response = chain_with_parser.invoke({\"context\": context, \"question\": query})\n    sources = [f\"Source {i+1}: {doc.metadata.get('source', 'unknown')}\" for i, doc in enumerate(docs)]\n    return {\"answer\": response, \"sources\": sources}",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript RAG Retriever",
+        "description": "LangChain.js equivalent with in-memory vector store",
+        "code": "import { OpenAIEmbeddings } from \"langchain/embeddings/openai\";\nimport { ChatOpenAI } from \"langchain/chat_models/openai\";\nimport { ChatPromptTemplate } from \"langchain/prompts\";\nimport { MemoryVectorStore } from \"langchain/vectorstores/memory\";\n\nconst embeddings = new OpenAIEmbeddings();\nconst vectorStore = await MemoryVectorStore.fromTexts(\n  [\"doc1 content\", \"doc2 content\"], [], embeddings\n);\n\nconst retriever = vectorStore.asRetriever({ k: 3 });\nconst llm = new ChatOpenAI({ modelName: \"gpt-4\" });\nconst prompt = ChatPromptTemplate.fromTemplate(\n  \"Answer using context: {context}\\nQuery: {question}\"\n);\n\nconst chain = prompt.pipe(llm);\n\nexport async function ragQuery(query: string) {\n  const docs = await retriever.getRelevantDocuments(query);\n  const context = docs.map(doc => doc.pageContent).join(\"\\n\");\n  return await chain.call({ context, question: query });\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming RAG Response",
+        "description": "Streaming implementation for real-time user experience",
+        "code": "from langchain.callbacks.manager import CallbackManagerForChainRun\n\nasync def stream_rag(query):\n    docs = retriever.get_relevant_documents(query)\n    context = \"\\n\".join([doc.page_content for doc in docs])\n    \n    async for chunk in chain.astream(\n        {\"context\": context, \"question\": query},\n        config={\"callbacks\": [StreamingCallbackHandler()]}\n    ):\n        yield chunk.content",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap chain.invoke() with Vex Verify",
+        "description": "Basic integration verifying source faithfulness",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        \"source_faithfulness\",\n        \"hallucination_detection\",\n        \"context_relevance\"\n    ],\n    risk_profile=\"high\"\n)\ndef verified_rag_pipeline(query):\n    docs = retriever.get_relevant_documents(query)\n    context = \"\\n\".join([doc.page_content for doc in docs])\n    response = chain.invoke({\"context\": context, \"question\": query})\n    return {\n        \"answer\": response.content,\n        \"sources\": [doc.metadata for doc in docs]\n    }\n\nresult = verified_rag_pipeline(\"What is the capital of France?\")\n# Returns verified result or raises VexVerificationError",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy Verification",
+        "description": "Custom Vex check for citation mapping validation",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        vex.checks.SourceFaithfulness(),\n        vex.checks.CitationAccuracy(expected_sources=len(docs))\n    ]\n)\ndef rag_with_citation_check(query):\n    docs = retriever.get_relevant_documents(query)\n    context = \"\\n\".join([f\"[{i}]: {doc.page_content}\" for i, doc in enumerate(docs)])\n    response = chain.invoke({\"context\": context, \"question\": query})\n    return {\n        \"response\": response.content,\n        \"retrieved_docs\": [doc.page_content for doc in docs],\n        \"citations\": extract_citations(response.content)\n    }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "LangChain.js with Vex verification wrapper",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nexport async function verifiedRagQuery(query: string) {\n  const docs = await retriever.getRelevantDocuments(query);\n  const context = docs.map(doc => doc.pageContent).join('\\n');\n  \n  const result = await chain.call({ context, question: query });\n  \n  const verified = await vex.verify({\n    input: { query, context },\n    output: result.content,\n    sources: docs.map(doc => doc.metadata),\n    checks: ['source_faithfulness', 'context_relevance'],\n    riskProfile: 'high'\n  });\n  \n  if (!verified.passes) {\n    throw new Error(`Verification failed: ${verified.issues.join(', ')}`);\n  }\n  \n  return { ...result, verified: true };\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain RAG Pipeline",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your chains to eliminate hallucinations and citation errors in production."
+    }
+  }
+}

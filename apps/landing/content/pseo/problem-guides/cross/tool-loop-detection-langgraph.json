@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in LangGraph Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "LangGraph tool-loop-detection",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, Tool Loop Detection identifies infinite cycles where agents repeatedly invoke the same tools without progressing toward task completion, often due to cyclic edges in the graph state machine. This manifests as endless state transitions between tool nodes and agent decision nodes, consuming resources and failing to produce outputs. LangGraph's checkpointing system exacerbates the issue by persisting these loops across invocations, leading to escalating costs and timeouts.",
+    "howItManifests": [
+      {
+        "scenario": "Agent repeatedly calls the same search tool with identical queries",
+        "symptom": "Graph state shows repeating node sequence: agent -> search_tool -> agent -> search_tool",
+        "impact": "Infinite loop detected after 10+ identical tool calls, API costs skyrocket"
+      },
+      {
+        "scenario": "Cyclic conditional edges between two tools based on overlapping criteria",
+        "symptom": "State transitions ping-pong between tool_a and tool_b without resolution",
+        "impact": "Checkpoint memory balloons, human intervention required to break cycle"
+      },
+      {
+        "scenario": "Parallel tool calls where merger node triggers re-execution",
+        "symptom": "State shows repeated execution of parallel tool branch after merge",
+        "impact": "Exponential state growth due to duplicated checkpoint snapshots"
+      },
+      {
+        "scenario": "Self-referential tool that generates its own follow-up tool calls",
+        "symptom": "Tool node output directly triggers identical tool invocation",
+        "impact": "Complete workflow hangs, no final output generated"
+      }
+    ],
+    "detection": [
+      {
+        "name": "State Transition Cycle Monitor",
+        "description": "Tracks node execution history in graph state to detect repeating sequences longer than max_cycles",
+        "code": "from langgraph.graph import StateGraph\nfrom langgraph.checkpoint.sqlite import SqliteSaver\nfrom collections import defaultdict, deque\n\nclass LoopDetector:\n    def __init__(self, max_cycles=5):\n        self.max_cycles = max_cycles\n        self.node_history = deque(maxlen=100)\n        self.cycle_counts = defaultdict(int)\n\n    def check_loop(self, state):\n        current_node = state.get('__node_history__', [])[-1] if state.get('__node_history__') else 'unknown'\n        self.node_history.append(current_node)\n        \n        # Check for repeating sequence\n        recent_history = list(self.node_history)[-self.max_cycles*2:]\n        sequence = tuple(recent_history[-self.max_cycles:])\n        \n        if sequence in [tuple(list(self.node_history)[i:i+self.max_cycles]) for i in range(len(self.node_history)-self.max_cycles*2, len(self.node_history)-self.max_cycles)]:\n            return {'loop_detected': True, 'cycle': str(sequence)}\n        return {'loop_detected': False}\n\n# Usage in graph\nloop_detector = LoopDetector()\ndef loop_check_node(state):\n    detection = loop_detector.check_loop(state)\n    if detection['loop_detected']:\n        return {'error': f'Tool loop detected: {detection[\"cycle\"]}'}\n    return state",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Signature Tracker",
+        "description": "Monitors tool call parameters to detect identical repeated invocations",
+        "code": "from langgraph.prebuilt import ToolNode\nimport hashlib\n\nclass ToolLoopTracker(ToolNode):\n    def __init__(self, tools, max_repeats=3):\n        super().__init__(tools)\n        self.tool_calls = {}\n\n    def _track_call(self, tool_name, args):\n        call_sig = f'{tool_name}:{hashlib.md5(str(args).encode()).hexdigest()}'\n        self.tool_calls.setdefault(call_sig, 0)\n        self.tool_calls[call_sig] += 1\n        return self.tool_calls[call_sig] > 3\n\n    async def invoke(self, state):\n        messages = state['messages']\n        tool_calls = messages[-1].tool_calls if hasattr(messages[-1], 'tool_calls') else []\n        \n        for call in tool_calls:\n            if self._track_call(call['name'], call['args']):\n                return {'messages': [{'role': 'system', 'content': f'Tool loop detected: {call[\"name\"]} called 4+ times with same args'}]}\n        \n        return await super().invoke(state)\n\n# Replace standard ToolNode\ntool_node = ToolLoopTracker(tools=my_tools)",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Cycle Analyzer",
+        "description": "Analyzes checkpoint history for repeating state patterns across invocations",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\nimport sqlite3\nfrom typing import List\n\ndef analyze_checkpoints(config, max_cycles=5) -> dict:\n    conn = sqlite3.connect(config.checkpoint['kwargs']['path'])\n    cursor = conn.cursor()\n    \n    cursor.execute('''\n        SELECT thread_id, ts, state\n        FROM checkpoints \n        ORDER BY ts DESC LIMIT ?\n    ''', (max_cycles * 10,))\n    \n    recent_checkpoints = cursor.fetchall()\n    states = [eval(row[2]) for row in recent_checkpoints]\n    \n    # Extract node sequences and messages\n    sequences = []\n    for state in states:\n        nodes = state.get('__node_history__', [])\n        sequences.append(tuple(nodes[-5:]))  # Last 5 nodes\n    \n    # Detect cycles\n    for i in range(len(sequences)-max_cycles):\n        if sequences[i] == sequences[i+max_cycles]:\n            return {'loop_detected': True, 'cycle_length': max_cycles, 'pattern': str(sequences[i])}\n    \n    return {'loop_detected': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Cycles Interrupt Node",
+        "description": "Adds cycle-breaking conditional edge that forces workflow termination",
+        "code": "from langgraph.graph import END, StateGraph\n\nclass CycleBreaker:\n    def __init__(self, max_tool_calls=5):\n        self.tool_counts = defaultdict(int)\n\n    def should_break(self, state):\n        messages = state['messages']\n        recent_tools = [m for m in messages[-10:] if m.tool_calls]\n        tool_names = [call[0]['name'] for m in recent_tools for call in m.tool_calls]\n        \n        for tool in set(tool_names):\n            count = tool_names.count(tool)\n            if count >= max_tool_calls:\n                return True, f'Max tool calls exceeded for {tool}'\n        return False, None\n\ncycle_breaker = CycleBreaker()\n\ndef break_loop_node(state):\n    should_break, reason = cycle_breaker.should_break(state)\n    if should_break:\n        return {'messages': [{'role': 'system', 'content': f'INTERRUPTED: {reason}'}], 'interrupted': True}\n    return state\n\n# Add to graph\ngraph.add_node('break_loop', break_loop_node)\ngraph.add_conditional_edges(\n    'agent',\n    lambda state: 'break_loop' if cycle_breaker.should_break(state)[0] else 'tools',\n    {'break_loop': END, 'tools': 'tools'}\n)",
+        "language": "python"
+      },
+      {
+        "name": "Deduplicating Tool Router",
+        "description": "Prevents identical tool calls by caching recent invocations",
+        "code": "from langgraph.prebuilt import ToolNode\nimport time\nfrom typing import Dict, Any\n\nclass DedupToolNode(ToolNode):\n    def __init__(self, tools, cache_ttl=300):\n        super().__init__(tools)\n        self.call_cache = {}\n        self.cache_ttl = cache_ttl\n\n    def _get_cache_key(self, tool_name: str, args: Dict[str, Any]) -> str:\n        return f'{tool_name}:{hash(frozenset(args.items()))}'\n\n    async def invoke(self, state):\n        messages = state['messages']\n        tool_calls = messages[-1].tool_calls\n        \n        cached_results = []\n        new_calls = []\n        \n        for call in tool_calls:\n            cache_key = self._get_cache_key(call['name'], call['args'])\n            now = time.time()\n            \n            if (cache_key in self.call_cache and \n                now - self.call_cache[cache_key]['timestamp'] < self.cache_ttl):\n                cached_results.append(self.call_cache[cache_key]['result'])\n            else:\n                new_calls.append(call)\n                self.call_cache[cache_key] = {'timestamp': now}\n        \n        if new_calls:\n            state['messages'][-1].tool_calls = new_calls\n            result = await super().invoke(state)\n            # Cache new results\n            for i, call in enumerate(new_calls):\n                cache_key = self._get_cache_key(call['name'], call['args'])\n                self.call_cache[cache_key]['result'] = result['messages'][i]\n            return result\n        \n        # Return cached results\n        return {'messages': cached_results}\n\ntools_node = DedupToolNode(tools=my_tools)",
+        "language": "python"
+      },
+      {
+        "name": "Progressive Fallback Router",
+        "description": "Escalates to simpler tools or human intervention after repeated failures",
+        "code": "from langgraph.graph import StateGraph\n\nfallback_tools = [\n    'web_search',\n    'simple_calculator',\n    'human_ask'\n]\n\nclass FallbackRouter:\n    def __init__(self):\n        self.failure_counts = defaultdict(int)\n\n    def route(self, state, attempted_tools):\n        for tool in attempted_tools[-3:]:\n            self.failure_counts[tool] += 1\n        \n        # If any tool failed 3+ times, move to next fallback\n        max_fails = max(self.failure_counts.values())\n        if max_fails >= 3:\n            fallback_idx = min(len(fallback_tools), max_fails // 3)\n            return fallback_tools[fallback_idx - 1]\n        return 'continue_primary'\n\nfallback_router = FallbackRouter()\n\ndef fallback_conditional(state):\n    attempted = state.get('attempted_tools', [])\n    route = fallback_router.route(state, attempted)\n    state['attempted_tools'] = attempted + [route]\n    return route\n\n# Add fallback paths\ngraph.add_conditional_edges(\n    'tools',\n    fallback_conditional,\n    {\n        'continue_primary': 'agent',\n        'web_search': 'web_search',\n        'simple_calculator': 'calculator',\n        'human_ask': 'human',\n    }\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade tool loop detection by wrapping LangGraph's invoke() method with automated cycle analysis, maintaining execution traces across distributed deployments. It automatically detects repeating node sequences, identical tool call signatures, and checkpoint bloat patterns, surfacing them in real-time dashboards with one-click remediation workflows. Vex's LangGraph integration adds zero-latency monitoring nodes that persist loop metadata for post-mortem analysis and automatic fallback routing.\n\nThe platform correlates tool loops with business impact metrics like token consumption and latency spikes, enabling teams to set SLO-based thresholds for automatic intervention. Vex's remediation engine can inject cycle-breaking states, trigger human-in-the-loop escalation, or rewrite conditional edges—all without modifying core agent logic. This ensures 99.9% uptime for complex cyclical workflows while providing full observability into loop root causes.",
+      "code": "import vex\nfrom langgraph.graph import StateGraph\n\n# Method 1: Wrap graph.invoke() with Vex\n@vex.verify(issue_types=['tool-loop', 'infinite-cycle'])\ndef invoke_with_monitoring(graph, input, config=None):\n    return graph.invoke(input, config)\n\n# Method 2: Add Vex as graph node\n@vex.monitor('langgraph-tool-loop')\ndef vex_loop_detector(state):\n    \"\"\"Vex automatically detects loops and injects remediation\"\"\"\n    return state\n\n# Install Vex node in graph\ngraph.add_node('vex_monitor', vex_loop_detector)\ngraph.add_edge('tools', 'vex_monitor')\ngraph.add_conditional_edges('vex_monitor', \n    lambda state: 'END' if state.get('vex_loop_detected') else 'agent',\n    {'END': END, 'agent': 'agent'}\n)\n\n# Production deployment\nwith vex.span('agent_execution'):\n    result = invoke_with_monitoring(graph, {'messages': [...]})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LangGraph agents to eliminate tool loops in production."
+    }
+  }
+}

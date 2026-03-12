@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with DSPy + Vex Guardrails",
+    "description": "Learn how to build code generation with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy code generation",
+      "DSPy guardrails",
+      "code generation reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programmatic LLM optimization for code generation agents that iteratively refine code through sandbox execution and testing. Guardrails are essential to prevent syntax errors, unsafe code execution, credential leaks, and overfitting during optimization. Vex provides runtime verification to catch these failures before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with DSPy",
+      "description": "A typical DSPy code generation agent uses Signature modules for task decomposition: CodeWriter generates initial code, TestExecutor runs it in a sandbox, and Refiner iterates based on test failures. Modules are composed into a Program optimized via teleprompters like BootstrapFewShot. The forward() pass orchestrates the full pipeline, making it ideal for Vex wrapping.\n\nThe agent maintains state across iterations, tracking test results and refinement history. Sandbox execution uses restricted environments (Docker, E2E) to validate functionality while DSPy optimizes for higher pass@k rates. Output distributions can drift during composition, requiring verification at each module boundary.\n\nVerification focuses on code safety (no syscalls, imports), syntax validity, dependency constraints, and no credential patterns before sandbox execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   DSPy Program  │───▶│  Vex.verify()    │───▶│ Sandbox Executor│\n│                 │    │  (safety+syntax)  │    │   + Tests       │\n│ CodeWriter ───▶ │    └──────────────────�┘    └─────────────────┘\n│     │           │           ▲                         │\n│     ▼           │           │                         ▼\n│  TestExecutor   │◀──────────┼───────────────────────▶│Refiner\n└─────────────────┘           │                         │\n                             └─────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious code injection",
+        "description": "Optimized CodeWriter generates dangerous syscalls or file writes during refinement",
+        "severity": "critical",
+        "mitigation": "Vex safety scanner blocks execution before sandbox"
+      },
+      {
+        "name": "Syntax errors in refined code",
+        "description": "Refiner module produces syntactically invalid Python despite test optimization",
+        "severity": "high",
+        "mitigation": "Vex syntax validator rejects before execution"
+      },
+      {
+        "name": "Credential leakage",
+        "description": "Training examples with API keys cause overfitting to credential patterns",
+        "severity": "critical",
+        "mitigation": "Vex PII scanner strips secrets from generated code"
+      },
+      {
+        "name": "Unsafe dependency imports",
+        "description": "Code imports subprocess/os despite dependency safety constraints",
+        "severity": "high",
+        "mitigation": "Vex dependency analyzer enforces allowlist"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "DSPy Code Generation Signature",
+        "description": "Basic DSPy signature for code generation with test feedback",
+        "code": "import dspy\n\nclass CodeWriter(dspy.Signature):\n    '''Generate Python code for a task.'''\n    task_description = dspy.InputField()\n    test_cases = dspy.InputField(desc='JSON test cases')\n    code = dspy.OutputField(desc='Valid Python code')\n\nclass CodeTester(dspy.Signature):\n    '''Test generated code.'''\n    code = dspy.InputField()\n    test_cases = dspy.InputField()\n    test_results = dspy.OutputField(desc='Pass/fail JSON')\n\ncodegen = dspy.ChainOfThought(CodeWriter)\ntest_module = dspy.ChainOfThought(CodeTester)",
+        "language": "python"
+      },
+      {
+        "title": "Composable DSPy Program",
+        "description": "Full agent program with iterative refinement",
+        "code": "class CodeGenProgram(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.writer = dspy.ChainOfThought(CodeWriter)\n        self.tester = dspy.ChainOfThought(CodeTester)\n        self.refiner = dspy.ChainOfThought('previous_code, test_results -> refined_code')\n\n    def forward(self, task, test_cases, max_iters=3):\n        code = self.writer(task_description=task, test_cases=test_cases).code\n        for i in range(max_iters):\n            results = self.tester(code=code, test_cases=test_cases).test_results\n            if 'PASS' in results:\n                return dspy.Prediction(code=code)\n            code = self.refiner(previous_code=code, test_results=results).refined_code\n        return dspy.Prediction(code=code)",
+        "language": "python"
+      },
+      {
+        "title": "Bootstrap Optimization",
+        "description": "Optimize the full program with few-shot examples",
+        "code": "from dspy.teleprompt import BootstrapFewShot\n\nprogram = CodeGenProgram()\ntrainset = [\n    dspy.Example(task='sort list', test_cases='[[3,1,2]] -> [1,2,3]').with_inputs('task', 'test_cases')\n]\n\nteleprompter = BootstrapFewShot(metric=lambda ex, pred, trace: 'PASS' in pred.test_results)\noptimized_program = teleprompter.compile(program, trainset=trainset)",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Wrapper",
+        "description": "Execute code safely with test validation",
+        "code": "import subprocess\nimport ast\n\ndef safe_execute(code: str, test_cases: list) -> dict:\n    # Syntax check\n    try:\n        ast.parse(code)\n    except SyntaxError:\n        return {'status': 'fail', 'error': 'syntax'}\n    \n    # Sandbox execution (docker-py or similar)\n    with open('temp.py', 'w') as f:\n        f.write(code)\n    result = subprocess.run(['docker', 'run', '--rm', '-v', f'{os.getcwd()}/temp.py:/code.py', 'python:3.9', 'python', '/code.py'], capture_output=True)\n    \n    # Test validation\n    passed = all(run_test(code, test) for test in test_cases)\n    return {'status': 'pass' if passed else 'fail', 'output': result.stdout.decode()}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Program forward() with Vex",
+        "description": "Verify entire DSPy program execution with comprehensive checks",
+        "code": "import vex\n\nprogram = CodeGenProgram()\n\n@vex.verify([\n    vex.safety.Sandbox(),\n    vex.syntax.Python(),\n    vex.pii.Credentials(),\n    vex.dependencies.Allowlist(['numpy', 'pandas'])  # Safe deps only\n])\ndef verified_codegen(task, test_cases):\n    return program(task_description=task, test_cases=test_cases)\n\n# Usage\nresult = verified_codegen('calculate fibonacci', '[fib(5)==5]')\nif result.is_verified:\n    print('Safe code generated:', result.code)\nelse:\n    print('Blocked:', result.violations)",
+        "language": "python"
+      },
+      {
+        "title": "Module-Level Verification",
+        "description": "Verify individual DSPy modules before composition",
+        "code": "import vex\n\n@vex.verify([\n    vex.safety.NoSyscalls(),\n    vex.syntax.Python(),\n    vex.regex.NoAPIKeys()\n])\ndef safe_code_writer(task, test_cases):\n    return codegen(task_description=task, test_cases=test_cases)\n\n@vex.verify([\n    vex.dependencies.NoSubprocess(),\n    vex.safety.ReadOnlyFS()\n])\ndef safe_tester(code, test_cases):\n    return test_module(code=code, test_cases=test_cases)\n\n# Optimized composition\nprogram = dspy.Module().with_modules({\n    'writer': safe_code_writer,\n    'tester': safe_tester\n})",
+        "language": "python"
+      },
+      {
+        "title": "Optimization-Time Verification",
+        "description": "Verify during DSPy teleprompter compilation to prevent bad examples",
+        "code": "from dspy.teleprompt import BootstrapFewShot\nimport vex\n\n@vex.verify([vex.safety.Sandbox(), vex.pii.Credentials()])\ndef verified_example_gen(example):\n    '''Generate safe training examples for optimization'''\n    result = program(**example.inputs())\n    if result.is_verified:\n        return result\n    raise ValueError(f'Unsafe example blocked: {result.violations}')\n\n# Safe optimization\nteleprompter = BootstrapFewShot(metric=verified_metric)\noptimized = teleprompter.compile(program, trainset=trainset.map(verified_example_gen))",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Code Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your DSPy modules to eliminate code generation risks."
+    }
+  }
+}

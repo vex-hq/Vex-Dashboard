@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Google ADK Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Google ADK drift-monitoring",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Google ADK manifests as subtle degradations in multi-agent coordination, where Gemini-powered agents deviate from intended behaviors due to state inconsistencies and delegation loops. Common triggers include circular dependencies in agent handoffs, model version switches disrupting output schemas, and session state corruption during extended interactions. This leads to unreliable tool usage and cascading failures across agent hierarchies.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation creating circular dependencies",
+        "symptom": "Agents repeatedly delegate to each other without resolution, consuming excessive tokens",
+        "impact": "Infinite loops crash sessions and exhaust API quotas"
+      },
+      {
+        "scenario": "Gemini model switching causing output inconsistency",
+        "symptom": "gemini-2.0-flash vs gemini-1.5-pro produce different tool response formats",
+        "impact": "Downstream agents fail to parse malformed tool outputs"
+      },
+      {
+        "scenario": "Session state corruption in long conversations",
+        "symptom": "StateAgent loses conversation history after 10+ turns",
+        "impact": "Agents lose context awareness and repeat resolved issues"
+      },
+      {
+        "scenario": "Tool response format mismatches across agents",
+        "symptom": "CodeAgent returns plain text instead of JSON tool schema",
+        "impact": "Orchestrator agents cannot execute tool calls reliably"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Circular Delegation Detector",
+        "description": "Tracks agent delegation paths to detect loops exceeding 5 hops",
+        "code": "from collections import defaultdict\n\ndef detect_circular_delegation(messages):\n    delegation_graph = defaultdict(list)\n    current_agent = 'root'\n    path = []\n    \n    for msg in messages:\n        if hasattr(msg, 'agent') and msg.agent != current_agent:\n            delegation_graph[current_agent].append(msg.agent)\n            path.append(msg.agent)\n            current_agent = msg.agent\n            \n            if len(path) > 5:\n                return {'type': 'CIRCULAR_DELEGATION', 'path': path[-5:]}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Model Output Schema Drift",
+        "description": "Validates Gemini tool responses against expected JSON schema",
+        "code": "import json\n\ndef detect_schema_drift(tool_response):\n    expected_schema = {\n        'type': 'object',\n        'properties': {'tool_name': {'type': 'string'}, 'args': {'type': 'object'}}\n    }\n    \n    try:\n        parsed = json.loads(tool_response)\n        if not validate_json_schema(parsed, expected_schema):\n            return {'type': 'SCHEMA_DRIFT', 'actual': parsed}\n    except json.JSONDecodeError:\n        return {'type': 'SCHEMA_DRIFT', 'error': 'Not JSON'}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Session State Corruption Check",
+        "description": "Monitors StateAgent memory for conversation context loss",
+        "code": "def detect_state_corruption(session_state, recent_messages):\n    context_window = session_state.get('conversation_history', [])\n    recent_topics = set(msg.content.lower() for msg in recent_messages[-3:])\n    \n    if len(context_window) > 10 and len(set(context_window[-5:]) & recent_topics) == 0:\n        return {'type': 'STATE_CORRUPTION', 'lost_context': True}\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Delegation Circuit Breaker",
+        "description": "Implement max delegation depth in ADK agent routing",
+        "code": "from google.adk.agents import BaseAgent\n\nclass SafeDelegationAgent(BaseAgent):\n    def __init__(self, max_hops=5):\n        self.max_hops = max_hops\n        self.delegation_path = []\n    \n    def route_message(self, message):\n        if len(self.delegation_path) >= self.max_hops:\n            return self.final_response(message)\n        \n        next_agent = self.select_agent(message)\n        self.delegation_path.append(next_agent.name)\n        return next_agent.route_message(message)",
+        "language": "python"
+      },
+      {
+        "name": "Model Version Pinning",
+        "description": "Lock Gemini model version across agent hierarchy",
+        "code": "from google.adk.models import GeminiModel\n\n# Pin model version globally\nMODEL_CONFIG = {\n    'model': 'gemini-1.5-pro-002',\n    'generation_config': {\n        'response_mime_type': 'application/json',\n        'response_schema': TOOL_RESPONSE_SCHEMA\n    }\n}\n\nclass ConsistentAgent(BaseAgent):\n    def __init__(self):\n        self.model = GeminiModel(**MODEL_CONFIG)",
+        "language": "python"
+      },
+      {
+        "name": "State Persistence Wrapper",
+        "description": "Add external state backup for long conversations",
+        "code": "import pickle\nfrom google.adk.state import StateAgent\n\nclass PersistentStateAgent(StateAgent):\n    def __init__(self, session_id):\n        super().__init__()\n        self.session_id = session_id\n        self.backup_file = f'state_{session_id}.pkl'\n    \n    def save_state(self):\n        with open(self.backup_file, 'wb') as f:\n            pickle.dump(self.state, f)\n    \n    def load_state(self):\n        try:\n            with open(self.backup_file, 'rb') as f:\n                self.state.update(pickle.load(f))\n        except FileNotFoundError:\n            pass",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates seamlessly as a before_agent_callback in Google ADK, automatically detecting all four drift patterns in real-time. It captures delegation graphs, validates tool schemas against golden outputs, monitors session state integrity, and flags model inconsistencies before they cascade. Vex's ML-powered anomaly detection learns your agents' normal behavior patterns and alerts on deviations with precise root cause analysis.\n\nRemediation is fully automated: Vex can inject circuit breakers, restore state from checkpoints, normalize tool outputs, and even reroute delegations. The platform provides drift dashboards showing failure patterns across your agent fleet, with one-click fixes deployable to production. Integration takes 5 minutes and works with existing ADK workflows without code changes.",
+      "code": "from vex_sdk import VexMonitor\nfrom google.adk import AgentRunner\n\n# Install: pip install google-adk vex-sdk\n\nvex_monitor = VexMonitor(\n    detectors=[\n        'circular_delegation',\n        'gemini_schema_drift',\n        'state_corruption',\n        'tool_format_mismatch'\n    ],\n    auto_remediate=True\n)\n\n# Add Vex as before_agent callback\nrunner = AgentRunner(\n    root_agent=orchestrator,\n    before_agent_callback=vex_monitor.intercept\n)\n\n# Run with automatic drift monitoring\nresult = runner.run('user query')\n\n# Vex auto-generates remediation report\nprint(vex_monitor.get_drift_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex integration to eliminate AI Agent Drift in your Google ADK workflows today."
+    }
+  }
+}

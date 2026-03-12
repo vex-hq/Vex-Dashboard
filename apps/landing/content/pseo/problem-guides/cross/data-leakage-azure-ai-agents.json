@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Azure AI Agent Service Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Azure AI Agent Service data-leakage",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, Sensitive Data Leakage Prevention issues arise when AI agents process unfiltered tool outputs from Azure OpenAI, Bing grounding, or file search without enterprise PII redaction. Agents often return raw Azure-specific metadata, API keys, or unredacted search results directly to users, bypassing built-in security controls. This manifests uniquely through the service's agent threads and grounding data flows where validation middleware is absent.",
+    "howItManifests": [
+      {
+        "scenario": "Tool execution results not validated against enterprise policies",
+        "symptom": "Azure OpenAI function calls return raw JSON with embedded customer PII from CRM connectors",
+        "impact": "Customer SSNs, emails, and API keys exposed in agent responses"
+      },
+      {
+        "scenario": "Grounding data from Bing Search containing outdated information",
+        "symptom": "Bing returns cached documents with leaked internal URLs and employee contact info",
+        "impact": "Enterprise directory information exposed through agent search responses"
+      },
+      {
+        "scenario": "File search returning Azure-specific metadata instead of content",
+        "symptom": "Azure AI Search returns document metadata with SharePoint paths and user principals",
+        "impact": "Internal file paths and user identities leaked in agent outputs"
+      },
+      {
+        "scenario": "Agent thread token limits exceeded without graceful degradation",
+        "symptom": "Thread context overflow causes full conversation history with PII to be dumped",
+        "impact": "Complete audit trails containing sensitive data exposed to end users"
+      }
+    ],
+    "detection": [
+      {
+        "name": "PII Regex Scanner for Agent Outputs",
+        "description": "Scans Azure AI Agent Service thread messages for common PII patterns before user delivery",
+        "code": "import re\n\nfrom azure.ai.projects.client import ProjectsClient\nfrom azure.identity import DefaultAzureCredential\n\nPII_PATTERNS = [\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n    r'\\b\\d{16}\\b'  # Credit card\n]\n\ndef scan_agent_thread_for_pii(project_name: str, thread_id: str):\n    credential = DefaultAzureCredential()\n    client = ProjectsClient(credential=credential)\n    \n    thread = client.threads.get(project_name=project_name, thread_id=thread_id)\n    \n    for message in thread.messages:\n        content = message.content[0].text.value if message.content else ''\n        for pattern in PII_PATTERNS:\n            if re.search(pattern, content):\n                print(f'🚨 PII detected in thread {thread_id}: {message.id}')\n                return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Azure AI Search Metadata Leak Detector",
+        "description": "Detects when file search tools return Azure-specific paths instead of redacted content",
+        "code": "from azure.search.documents import SearchClient\nfrom azure.core.credentials import AzureKeyCredential\n\ndef detect_metadata_leaks(search_service: SearchClient, query: str):\n    results = search_service.search(\n        search_text=query,\n        select=['metadata_storage_path', 'content'],\n        top=5\n    )\n    \n    leaks = []\n    for result in results:\n        if 'sharepoint' in str(result.get('metadata_storage_path', '')).lower():\n            leaks.append({\n                'path': result['metadata_storage_path'],\n                'has_content': bool(result.get('content'))\n            })\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "Thread Token Overflow Monitor",
+        "description": "Checks agent threads approaching token limits that could dump sensitive context",
+        "code": "def check_thread_token_usage(project_name: str, thread_id: str, client):\n    thread = client.threads.get(project_name=project_name, thread_id=thread_id)\n    \n    total_tokens = sum(\n        len(msg.content[0].text.value) for msg in thread.messages \n        if msg.content and msg.content[0].type == 'text'\n    )\n    \n    max_tokens = 128000  # GPT-4 limit\n    usage_pct = (total_tokens / max_tokens) * 100\n    \n    if usage_pct > 90:\n        print(f'⚠️ Thread {thread_id} at {usage_pct:.1f}% token capacity')\n        return {'critical': usage_pct > 95}\n    return {'safe': True}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Middleware",
+        "description": "Intercepts agent responses and redacts PII before delivery using Azure Content Safety",
+        "code": "from azure.ai.contentsafety import ContentSafetyClient\nfrom azure.core.credentials import TokenCredential\n\ndef create_pii_redaction_middleware(credential: TokenCredential):\n    safety_client = ContentSafetyClient(endpoint=\"https://your-cs-endpoint.cognitiveservices.azure.com/\", credential=credential)\n    \n    def redact_agent_response(content: str) -> str:\n        analyze_result = safety_client.analyze_text(\n            text=content,\n            categories=['PersonallyIdentifyingInformation']\n        )\n        \n        if analyze_result.personally_identifying_information.detected:\n            return '[REDACTED_PII]'\n        return content\n    \n    return redact_agent_response",
+        "language": "python"
+      },
+      {
+        "name": "Safe File Search Projection",
+        "description": "Configures Azure AI Search to exclude metadata paths from agent tool results",
+        "code": "from azure.search.documents.indexes import SearchIndexClient\nfrom azure.search.documents.indexes.models import SearchIndex\n\ndef configure_safe_search_projection(index_name: str):\n    index_client = SearchIndexClient(\n        endpoint=\"https://your-search-service.search.windows.net\",\n        credential=DefaultAzureCredential()\n    )\n    \n    # Update index to exclude sensitive metadata\n    fields = [\n        {\"name\": \"content\", \"type\": \"Edm.String\", \"searchable\": True},\n        {\"name\": \"title\", \"type\": \"Edm.String\", \"searchable\": True}\n        # Exclude metadata_storage_path, user_principal\n    ]\n    \n    index = SearchIndex(name=index_name, fields=fields)\n    index_client.create_or_update_index(index)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Thread Truncation",
+        "description": "Gracefully truncates agent threads before token limits trigger PII dumps",
+        "code": "def truncate_thread_safely(project_name: str, thread_id: str, client, max_tokens: int = 100000):\n    thread = client.threads.get(project_name=project_name, thread_id=thread_id)\n    \n    # Calculate current usage\n    messages = thread.messages\n    current_tokens = sum(len(str(msg)) for msg in messages)\n    \n    if current_tokens > max_tokens:\n        # Keep only most recent messages\n        cutoff = len(messages) // 2\n        recent_messages = messages[-cutoff:]\n        \n        client.threads.delete(project_name=project_name, thread_id=thread_id)\n        new_thread = client.threads.create(project_name=project_name)\n        \n        for msg in recent_messages:\n            client.messages.create(\n                project_name=project_name,\n                thread_id=new_thread.id,\n                message=msg\n            )",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically scanning all agent threads, tool outputs, and grounding data for PII exposure patterns. It applies enterprise data loss prevention policies using Azure Purview classifications and Content Safety APIs, blocking responses containing sensitive patterns before they reach users.\n\nVex provides continuous monitoring with automated remediation workflows, rotating compromised threads and injecting redaction filters. The platform maintains audit trails for compliance while preserving agent functionality, using ML-based anomaly detection to identify new leakage patterns beyond regex rules.\n\nIntegration requires only pip install azure-ai-projects vex-sdk and configuration of your Azure tenant policies, with zero-code deployment across all agent projects.",
+      "code": "from vex_sdk import VexAgentGuard\nfrom azure.ai.projects.client import ProjectsClient\nfrom azure.identity import DefaultAzureCredential\n\n# Install: pip install azure-ai-projects vex-sdk\n\nclass AzureAIAgentVexGuard:\n    def __init__(self, subscription_id: str, resource_group: str):\n        self.credential = DefaultAzureCredential()\n        self.projects_client = ProjectsClient(credential=self.credential)\n        self.vex = VexAgentGuard(\n            azure_tenant='your-tenant-id',\n            policies=['pii-redaction', 'metadata-stripping']\n        )\n    \n    def protect_agent_pipeline(self, project_name: str, thread_id: str):\n        # Scan thread for leakage\n        if self.vex.scan_thread(project_name, thread_id):\n            # Auto-remediate\n            self.vex.redact_pii(project_name, thread_id)\n            print('✅ Vex auto-remediated PII leakage')\n        \n        # Protect next agent run\n        @self.vex.protect\n        def safe_agent_run():\n            return self.projects_client.threads.create(project_name=project_name)\n        \n        return safe_agent_run()\n\n# Usage\nguard = AzureAIAgentVexGuard('sub-id', 'rg-name')\nsafe_thread = guard.protect_agent_pipeline('my-agent-project', 'thread-123')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to automatically prevent sensitive data leakage across all your Azure AI Agent Service deployments."
+    }
+  }
+}

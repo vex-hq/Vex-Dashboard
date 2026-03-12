@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in AG2 Agents",
+    "description": "How to detect and fix context window management for ai agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "AG2 context-window-management",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, Context Window Management issues for AI agents manifest as agents exceeding token limits during extended multi-agent conversations, leading to truncated context and degraded performance. The framework's enhanced group chat capabilities amplify this problem, as speaker selection and conversation history accumulate rapidly, causing off-topic spiraling and fact drift. AG2's message routing system makes it challenging to implement effective context pruning without breaking conversation flow.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running group chat with 5+ agents debating complex topics",
+        "symptom": "Last 20-30 messages become incoherent; agents repeat themselves or reference non-existent prior statements",
+        "impact": "Group consensus fails on incorrect facts; conversation derails into repetitive loops"
+      },
+      {
+        "scenario": "Code execution agent chain with iterative debugging",
+        "symptom": "Agent ignores recent error messages buried in 100+ message history",
+        "impact": "Produces harmful or incorrect code outputs due to context truncation"
+      },
+      {
+        "scenario": "Multi-agent debate with speaker selection bias",
+        "symptom": "Dominant speaker's early messages overshadow recent critical corrections",
+        "impact": "Group chat converges on outdated or wrong information"
+      },
+      {
+        "scenario": "Customer support simulation with role rotation",
+        "symptom": "Agents lose track of customer requirements after 15+ message exchanges",
+        "impact": "Provides irrelevant responses; conversation satisfaction drops"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Exceeded Monitor",
+        "description": "Tracks total conversation token count and flags when approaching 80% of model limit",
+        "code": "from ag2 import GroupChat\nfrom ag2.utils import estimate_token_count\n\ndef monitor_context_window(chat: GroupChat):\n    history = chat.messages\n    total_tokens = sum(estimate_token_count(msg.content) for msg in history)\n    max_tokens = 120000  # GPT-4 limit\n    \n    if total_tokens > max_tokens * 0.8:\n        print(f'⚠️  Context window at {total_tokens/max_tokens*100:.1f}% capacity')\n        return {'warning': 'Context overflow imminent', 'tokens': total_tokens}\n    return {'status': 'healthy', 'tokens': total_tokens}",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Drift Detector",
+        "description": "Measures semantic similarity between recent vs early conversation topics",
+        "code": "from ag2 import GroupChat\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\ndef detect_drift(chat: GroupChat):\n    if len(chat.messages) < 10:\n        return {'drift_score': 0}\n    \n    recent_msgs = [m.content for m in chat.messages[-5:]]\n    early_msgs = [m.content for m in chat.messages[:5]]\n    \n    recent_emb = np.mean([model.encode(msg) for msg in recent_msgs], axis=0)\n    early_emb = np.mean([model.encode(msg) for msg in early_msgs], axis=0)\n    \n    similarity = np.dot(recent_emb, early_emb) / (np.linalg.norm(recent_emb) * np.linalg.norm(early_emb))\n    drift_score = 1 - similarity\n    \n    if drift_score > 0.4:\n        return {'drift_score': drift_score, 'alert': 'High topic drift detected'}\n    return {'drift_score': drift_score}",
+        "language": "python"
+      },
+      {
+        "name": "Speaker Dominance Tracker",
+        "description": "Identifies when single agents monopolize conversation, bloating context",
+        "code": "from ag2 import GroupChat\nfrom collections import Counter\n\ndef track_speaker_dominance(chat: GroupChat):\n    speakers = [msg.sender for msg in chat.messages[-20:] if hasattr(msg, 'sender')]\n    speaker_counts = Counter(speakers)\n    total_msgs = len(speakers)\n    \n    if total_msgs == 0:\n        return {'dominance_ratio': 0}\n    \n    max_dominance = max(speaker_counts.values()) / total_msgs\n    \n    if max_dominance > 0.5:\n        dominant = speaker_counts.most_common(1)[0][0]\n        return {'dominance_ratio': max_dominance, 'warning': f'{dominant} dominates conversation'}\n    \n    return {'dominance_ratio': max_dominance, 'status': 'balanced'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Pruner",
+        "description": "Automatically removes low-relevance messages while preserving key facts",
+        "code": "from ag2 import GroupChatManager\nfrom ag2.core import register_message_hook\n\nclass ContextPruner:\n    def __init__(self, max_tokens=100000):\n        self.max_tokens = max_tokens\n        self.relevant_msgs = []\n    \n    @register_message_hook\n    def prune_context(self, chat: GroupChatManager, message):\n        # Add new message\n        self.relevant_msgs.append(message)\n        \n        # Estimate tokens\n        total_tokens = sum(estimate_token_count(msg.content) for msg in self.relevant_msgs)\n        \n        if total_tokens > self.max_tokens:\n            # Sort by recency and relevance score\n            scored_msgs = sorted(self.relevant_msgs, \n                               key=lambda m: (m.timestamp, self._relevance_score(m)), reverse=True)\n            self.relevant_msgs = scored_msgs[:int(self.max_tokens * 0.9 / 500)]\n            \n        chat.messages = self.relevant_msgs\n        return message\n    \n    def _relevance_score(self, msg):\n        # Simple heuristic: longer messages, from critics, recent\n        return len(msg.content) * (0.1 if 'error' in msg.content.lower() else 1)",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Summarizer",
+        "description": "Condenses conversation history into key facts before each agent turn",
+        "code": "from ag2 import GroupChat\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef summarize_context(chat: GroupChat):\n    if len(chat.messages) < 15:\n        return chat.messages\n    \n    history = ' '.join([f'{m.sender}: {m.content[:100]}...' for m in chat.messages[-10:]])\n    \n    summary_prompt = f\"\"\"\nSummarize key facts and decisions from this conversation in 200 words:\n{history}\n\nKey Facts:\n\"\"\"\n    \n    summary = client.chat.completions.create(\n        model='gpt-4o-mini',\n        messages=[{'role': 'user', 'content': summary_prompt}]\n    ).choices[0].message.content\n    \n    # Replace history with summary message\n    chat.messages = chat.messages[-3:] + [Message(sender='SUMMARIZER', content=summary)]\n    return chat.messages",
+        "language": "python"
+      },
+      {
+        "name": "Smart Speaker Rotation",
+        "description": "Enforces balanced participation to prevent context bloat from dominant speakers",
+        "code": "from ag2.groupchat import GroupChat\nfrom collections import deque, Counter\n\nclass BalancedRotation:\n    def __init__(self):\n        self.recent_speakers = deque(maxlen=10)\n        self.speaker_quota = Counter()\n    \n    def select_next_speaker(self, chat: GroupChat, candidates):\n        recent_speakers = list(self.recent_speakers)\n        \n        # Prioritize agents who haven't spoken recently\n        eligible = [agent for agent in candidates \n                   if agent.name not in recent_speakers[-3:]]\n        \n        if eligible:\n            selected = min(eligible, key=lambda a: self.speaker_quota[a.name])\n        else:\n            selected = min(candidates, key=lambda a: self.speaker_quota[a.name])\n        \n        self.recent_speakers.append(selected.name)\n        self.speaker_quota[selected.name] += 1\n        \n        return selected",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly with AG2 through message hooks, automatically monitoring context window usage across all group chats and agent conversations. It detects token overflow, conversation drift, and speaker imbalances in real-time, providing actionable alerts and automated remediation. \n\nThe Vex SDK (`pip install vex-sdk`) registers as an AG2 message observer, tracking metrics like token consumption, semantic drift, and participation balance without modifying core agent logic. When thresholds are breached, Vex can trigger context pruning, summarization, or speaker rotation automatically.\n\nFor production deployments, Vex provides dashboards showing context health across all AG2 groups, with one-click remediation workflows and historical analysis to prevent recurrence.",
+      "code": "from vex_sdk import Vex\nfrom ag2 import GroupChat, register_message_hook\n\n# Install: pip install ag2 vex-sdk\n\n@vex_sdk.register_monitor('ag2-context-window')\nclass AG2ContextMonitor:\n    def __init__(self):\n        self.token_history = []\n    \n    @register_message_hook\n    def monitor(self, chat: GroupChat, message):\n        # Vex automatically tracks metrics\n        tokens = estimate_token_count(message.content)\n        self.token_history.append(tokens)\n        \n        total_tokens = sum(self.token_history[-100:])\n        \n        # Vex anomaly detection\n        vex_sdk.report_metric('context_tokens', total_tokens)\n        \n        if total_tokens > 100000:\n            vex_sdk.trigger_remediation('context_overflow', {\n                'chat_id': chat.id,\n                'action': 'prune_context',\n                'tokens': total_tokens\n            })\n        \n        return message\n\n# Auto-remediation handler\n@vex_sdk.remediation_handler('context_overflow')\ndef auto_prune_context(event):\n    chat_id = event['chat_id']\n    # Trigger AG2 context pruner\n    summarize_context(get_chat(chat_id))\n    print(f'✅ Auto-pruned context for {chat_id}')\n\n# Start monitoring\nvex_sdk.start_monitoring()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK today and eliminate context window failures in your AG2 agents with zero-code monitoring and auto-remediation."
+    }
+  }
+}

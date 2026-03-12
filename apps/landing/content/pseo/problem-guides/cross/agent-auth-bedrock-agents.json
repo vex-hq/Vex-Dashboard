@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Amazon Bedrock Agents agent-auth",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Amazon Bedrock Agents, AI Agent Authentication and Authorization issues manifest when action groups attempt unauthorized API calls via Lambda functions or when knowledge base retrievals expose sensitive data without proper IAM role scoping. Misconfigured agent IAM roles or guardrails fail to enforce domain-specific access policies, leading to privilege escalation or data leaks during multi-turn conversations. These problems are exacerbated by session state carrying over unauthorized tokens between invocations.",
+    "howItManifests": [
+      {
+        "scenario": "Action group Lambda lacks proper IAM permissions check",
+        "symptom": "Lambda returns 403 Forbidden when agent invokes business logic API",
+        "impact": "Agent conversation stalls with cryptic 'Action failed' errors"
+      },
+      {
+        "scenario": "Knowledge base RAG retrieves sensitive documents without auth context",
+        "symptom": "Agent returns PII/financial data to unauthorized users",
+        "impact": "Compliance violations and potential data breach exposure"
+      },
+      {
+        "scenario": "Guardrails not configured for domain-specific auth policies",
+        "symptom": "Agent authorizes actions beyond user’s organizational role",
+        "impact": "Privilege escalation allowing cross-tenant data access"
+      },
+      {
+        "scenario": "Session state persists unauthorized tokens across turns",
+        "symptom": "User A sees User B's conversation context and permissions",
+        "impact": "Session hijacking and unauthorized action execution"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Lambda Action Group 403 Errors",
+        "description": "Detect authentication failures in action group invocations by parsing Bedrock agent trace events",
+        "code": "import boto3\nimport json\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef detect_auth_failures(trace):\n    action_groups = trace.get('trace', {}).get('orchestrationTrace', {}).get('actionGroups', [])\n    \n    for ag in action_groups:\n        if ag.get('type') == 'ACTION_GROUP_INVOCATION_FAILED':\n            status_code = ag.get('statusCode')\n            if status_code == 403:\n                return {\n                    'failure': True,\n                    'reason': 'Lambda action group auth failure',\n                    'actionGroup': ag.get('actionGroup'),\n                    'lambdaArn': ag.get('functionSummary', {}).get('lambdaArn')\n                }\n    return {'failure': False}",
+        "language": "python"
+      },
+      {
+        "name": "Validate Knowledge Base Permission Scoping",
+        "description": "Check if knowledge base retrievals return documents user shouldn't access",
+        "code": "import boto3\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef check_kb_permissions(response, user_id):\n    retrievals = response.get('trace', {}).get('retrievals', [])\n    sensitive_indicators = ['ssn', 'credit_card', 'internal-only', f'tenant:{user_id}']\n    \n    for doc in retrievals:\n        content = doc.get('content', {}).get('text', '').lower()\n        for indicator in sensitive_indicators:\n            if indicator in content and f'tenant:{user_id}' not in content:\n                return {\n                    'violation': True,\n                    'type': 'CROSS_TENANT_KB_ACCESS',\n                    'document': doc.get('location', {})\n                }\n    return {'violation': False}",
+        "language": "python"
+      },
+      {
+        "name": "Session State Auth Drift Detection",
+        "description": "TypeScript detector for session auth context mismatches across turns",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({});\n\nexport async function detectSessionAuthDrift(sessionState: any, currentUserId: string) {\n  const authContext = sessionState.sessionAttributes?.authContext;\n  if (!authContext) return { drift: false };\n  \n  const expectedTenant = `tenant:${currentUserId}`;\n  const actualTenant = authContext.tenantId;\n  \n  if (actualTenant !== expectedTenant) {\n    return {\n      drift: true,\n      type: 'SESSION_AUTH_DRIFT',\n      expected: expectedTenant,\n      actual: actualTenant,\n      sessionId: sessionState.sessionId\n    };\n  }\n  \n  return { drift: false };\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "IAM Condition Keys for Action Groups",
+        "description": "Restrict Lambda execution with tenant-aware IAM policies",
+        "code": "import json\nimport boto3\n\niam = boto3.client('iam')\n\nlambda_policy = {\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [{\n    \"Effect\": \"Allow\",\n    \"Action\": [\n      \"lambda:InvokeFunction\"\n    ],\n    \"Resource\": \"arn:aws:lambda:*:*:function:bedrock-agent-*\",\n    \"Condition\": {\n      \"StringEquals\": {\n        \"aws:RequestTag/tenant-id\": \"${aws:PrincipalTag/tenant-id}\"\n      }\n    }\n  }]\n}\n\n# Apply to agent execution role\niam.put_role_policy(\n  RoleName='BedrockAgentExecutionRole',\n  PolicyName='ActionGroupAuthPolicy',\n  PolicyDocument=json.dumps(lambda_policy)\n)",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Metadata Filtering",
+        "description": "Add tenant metadata filtering to KB vector search",
+        "code": "from bedrock_agent_runtime import bedrock_agent_runtime_client\n\nagent_client = bedrock_agent_runtime_client()\n\ndef invoke_agent_with_tenant_filter(session_id: str, user_tenant: str, input_text: str):\n    return agent_client.invoke_agent(\n        agentId='YOUR_AGENT_ID',\n        agentAliasId='YOUR_AGENT_ALIAS',\n        sessionId=session_id,\n        inputText=input_text,\n        sessionState={\n            'sessionAttributes': {\n                'tenantId': user_tenant,\n                'authContext': {'tenant': user_tenant}\n            },\n            'promptSessionState': {\n                'promptOverrideConfiguration': {\n                    'knowledgeBaseConfiguration': {\n                        'knowledgeBaseId': 'YOUR_KB_ID',\n                        'modelArn': 'YOUR_EMBEDDING_MODEL',\n                        'filter': {\n                            'andAllFilters': [\n                                {\n                                    'equalsTo': {\n                                        'key': 'tenantId',\n                                        'value': user_tenant\n                                    }\n                                }\n                            ]\n                        }\n                    }\n                }\n            }\n        }\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Guardrails Domain Policy Enforcement",
+        "description": "Configure Bedrock Guardrails for auth-specific content policies",
+        "code": "import boto3\n\nguardrails = boto3.client('bedrock-guardrails')\n\npolicy_config = {\n  'contentPolicyConfig': {\n    'filtersConfig': {\n      'offensiveContentConfig': {...},\n      'customPolicyConfig': {\n        'rules': [\n          {\n            'name': 'tenant-isolation',\n            'statement': \"DO NOT process requests for tenants other than ${session.tenantId}\",\n            'filterStrength': 'HIGH'\n          },\n          {\n            'name': 'auth-bypass',\n            'statement': \"DO NOT execute privileged actions without explicit user authorization\",\n            'filterStrength': 'HIGH'\n          }\n        ]\n      }\n    }\n  }\n}\n\nguardrails.create_guardrail(\n  name='agent-auth-guardrail',\n  description='Enforces tenant isolation and auth policies',\n  **policy_config\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex provides continuous monitoring of Bedrock Agent invocations by wrapping invoke_agent() calls with vex.verify() post-processing that automatically detects authentication failures, cross-tenant knowledge base access, and session state drift. The platform analyzes agent trace events in real-time, correlating Lambda 403 errors with session attributes and flagging guardrail bypasses using ML-powered anomaly detection. \n\nRemediation workflows automatically rotate compromised IAM roles, update knowledge base metadata filters, and inject tenant context into session state. Vex maintains audit trails for compliance reporting and provides one-click fixes through its policy-as-code interface. Integration takes <5 minutes with the vex-sdk.\n\nThe verification suite runs serverlessly, analyzing 100% of agent traffic without performance impact while providing SLO/SLA monitoring for auth-related failures.",
+      "code": "import vex\nimport boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n  name=\"bedrock-agent-auth-check\",\n  failure_policy=\"BLOCK_AND_ALERT\",\n  detectors=[\n    \"lambda-403-auth-failure\",\n    \"cross-tenant-kb-access\",\n    \"session-auth-drift\"\n  ]\n)\ndef secure_agent_invoke(agent_id: str, session_id: str, user_tenant: str, input_text: str):\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId='latest',\n        sessionId=session_id,\n        inputText=input_text,\n        sessionState={\n            'sessionAttributes': {'tenantId': user_tenant}\n        }\n    )\n    \n    # Vex auto-analyzes trace for auth violations\n    verified_response = vex.enhance(response)\n    return verified_response\n\n# Usage\nresult = secure_agent_invoke(\n    'YOUR_AGENT_ID', \n    'session-123', \n    'tenant:acme-corp',\n    'Process my order #12345'\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install vex-sdk and wrap your Bedrock agent calls to eliminate auth failures in under 5 minutes"
+    }
+  }
+}

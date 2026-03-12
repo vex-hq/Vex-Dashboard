@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build voice agents with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK voice agents",
+      "Vercel AI SDK guardrails",
+      "voice agents reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Vercel AI SDK enables real-time conversational AI through speech-to-text, LLM reasoning, and text-to-speech pipelines. Guardrails are essential due to high-stakes risks like hallucinations in streaming responses, unvalidated tool calls, and latency failures that break sub-second user experience. Vex provides runtime verification to ensure response safety, coherence, and performance in production voice deployments.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Vercel AI SDK",
+      "description": "Voice agents process audio streams via WebSocket or edge functions, converting speech-to-text with providers like Deepgram or OpenAI Whisper. The transcribed text feeds into Vercel AI SDK's generateText or streamText for LLM reasoning, often with tool calls for actions like database queries or API integrations. Responses are validated and converted to speech via TTS (e.g., ElevenLabs) before streaming back, all within strict latency budgets.\n\nThe pipeline demands sub-second end-to-end latency, making edge deployment critical. Vercel AI SDK's streaming UI components handle partial responses, but without verification, hallucinations or unsafe content can propagate directly to users. Vex middleware intercepts at the generateText/streamText layer to enforce safety and performance SLAs.\n\nCommon patterns use React Server Components for server-side rendering of streaming UIs, with Vercel Edge Functions handling the core agent logic.",
+      "diagram": "Client Mic → [STT: Deepgram/OpenAI] → [Vercel AI SDK: generateText/streamText + Tools] → [Vex Middleware: Verify] → [TTS: ElevenLabs] → Client Speaker\n                          ↓\n                     [Edge Function: <1s Latency]"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Partial LLM tokens can contain misleading or harmful content before full response coherence",
+        "severity": "critical",
+        "mitigation": "Vex real-time token verification blocks unsafe partial streams"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Unverified tool outputs displayed via TTS can leak sensitive data or execute unsafe actions",
+        "severity": "critical",
+        "mitigation": "Vex tool result schema validation + PII redaction"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLM providers return varying tool call formats breaking voice agent flows",
+        "severity": "high",
+        "mitigation": "Vex normalized structured output enforcement"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Long-running tool calls exceed Vercel edge limits, dropping conversations",
+        "severity": "high",
+        "mitigation": "Vex latency budgeting + early termination"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent Streaming Pipeline",
+        "description": "Core Vercel AI SDK streamText setup for voice agents with OpenAI",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nimport type { VercelRequest, VercelResponse } from '@vercel/node';\n\nexport default async function handler(req: VercelRequest, res: VercelResponse) {\n  const { transcript } = await req.json();\n  \n  const result = await streamText({\n    model: openai('gpt-4o-mini'),\n    prompt: `Voice agent response to: ${transcript}`,\n    maxTokens: 150,\n  });\n\n  res.setHeader('Content-Type', 'text/plain; charset=utf-8');\n  const reader = result.textStream;\n  reader.pipe(res);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Calling for Voice Actions",
+        "description": "Add structured tool calls for database/actions in voice context",
+        "code": "const result = await streamText({\n  model: openai('gpt-4o'),\n  tools: {\n    get_weather: {\n      description: 'Get current weather',\n      parameters: z.object({\n        city: z.string().describe('City name'),\n      }),\n      execute: async ({ city }) => {\n        // Fetch weather API\n        return { temperature: '22°C', condition: 'sunny' };\n      },\n    },\n  },\n  prompt: transcript,\n});\n\nfor await (const chunk of result.fullStream) {\n  if (chunk.type === 'tool-call') {\n    // Execute and stream TTS\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Edge Function Latency Handling",
+        "description": "Timeout protection for Vercel Edge Functions in voice agents",
+        "code": "import { streamText } from 'ai';\n\nexport default async function handler(req: VercelRequest, res: VercelResponse) {\n  const controller = new AbortController();\n  const timeout = setTimeout(() => controller.abort(), 2500); // Edge limit\n  \n  try {\n    const result = await streamText({\n      model: openai('gpt-4o-mini'),\n      // ... config\n      signal: controller.signal,\n    });\n    \n    clearTimeout(timeout);\n    // Stream to client\n  } catch (error) {\n    if (error.name === 'AbortError') {\n      res.status(408).json({ error: 'timeout' });\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "STT → Agent → TTS Pipeline",
+        "description": "Complete real-time voice pipeline integration",
+        "code": "async function voiceAgentPipeline(audio: Buffer) {\n  // 1. Speech-to-Text\n  const transcript = await deepgram.transcribe(audio);\n  \n  // 2. LLM Reasoning\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    prompt: transcript,\n  });\n  \n  // 3. Collect full response\n  let fullResponse = '';\n  for await (const chunk of result.textStream) {\n    fullResponse += chunk;\n  }\n  \n  // 4. Text-to-Speech\n  const audioResponse = await elevenlabs.generate({\n    text: fullResponse,\n    voice: 'default',\n  });\n  \n  return audioResponse;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for streamText",
+        "description": "Wrap Vercel AI SDK streams with real-time safety + latency verification",
+        "code": "import { createVex } from '@vex_dev/sdk/vercel';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n});\n\nexport async function safeStreamText(params: any) {\n  return vex.verifyStream({\n    stream: await streamText(params),\n    checks: [\n      'response_appropriateness',\n      'latency_budget:1000ms',\n      'conversation_coherence',\n      'safety_filter',\n    ],\n    onFail: (reason) => `Sorry, let me rephrase that. ${reason}`,\n  });\n}\n\n// Usage\nconst result = await safeStreamText({\n  model: openai('gpt-4o'),\n  prompt: transcript,\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Call Verification",
+        "description": "Validate tool results before TTS with Vex structured output",
+        "code": "const result = await vex.verifyStream({\n  stream: await streamText({\n    model: openai('gpt-4o'),\n    tools: {\n      get_user_info: {\n        parameters: z.object({\n          userId: z.string(),\n        }),\n        execute: async ({ userId }) => {\n          const data = await db.user.find(userId);\n          // Vex validates before return\n          return vex.verifyToolResult({\n            result: data,\n            checks: ['pii_redaction', 'schema_conformance'],\n          });\n        },\n      },\n    },\n  }),\n  checks: ['tool_result_validation'],\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Latency Budget Enforcement",
+        "description": "Guarantee sub-second voice responses with Vex timeouts",
+        "code": "const result = await vex.verifyStream({\n  stream: await streamText(params),\n  checks: [\n    {\n      type: 'latency_budget',\n      maxDuration: '800ms',\n      onFail: () => 'One moment please...',\n    },\n    'partial_hallucination_detection',\n    {\n      type: 'conversation_coherence',\n      contextWindow: 5, // last 5 turns\n    },\n  ],\n  maxRetries: 1,\n});\n\n// Auto-terminates if >800ms, preventing edge timeouts",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Voice Agents",
+      "description": "Add Vex middleware today to guarantee safe, low-latency voice conversations at scale."
+    }
+  }
+}

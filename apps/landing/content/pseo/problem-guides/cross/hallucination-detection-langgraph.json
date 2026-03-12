@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in LangGraph Agents",
+    "description": "How to detect and fix ai agent hallucination detection in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "LangGraph hallucination-detection",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, AI hallucinations manifest as fabricated facts or illogical reasoning injected during state transitions between graph nodes, often amplified by cyclic executions that reinforce errors across loops. These issues appear when LLM nodes generate inconsistent outputs that propagate through conditional edges, corrupting the shared state. Detection requires monitoring state snapshots and node outputs against ground truth at runtime.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic reasoning loops in research agents",
+        "symptom": "Agent repeatedly cites non-existent sources in `messages` state after 3+ cycles",
+        "impact": "Infinite loop until max iterations, producing confidently wrong research reports"
+      },
+      {
+        "scenario": "Parallel fact-checking branches merging",
+        "symptom": "Conflicting `facts` dict entries from parallel nodes (e.g., {'population': 330M} vs {'population': 1.4B})",
+        "impact": "State corruption causes downstream decision nodes to fail or hallucinate further"
+      },
+      {
+        "scenario": "Conditional edge routing based on hallucinated confidence",
+        "symptom": "Agent bypasses human review by self-reporting 95% confidence in fabricated data",
+        "impact": "Critical errors skip validation, deploying hallucinated actions"
+      },
+      {
+        "scenario": "Checkpoint resume after schema evolution",
+        "symptom": "Deserialized state missing `ground_truth` field, causing nodes to hallucinate missing context",
+        "impact": "Agent reinvents false facts from incomplete historical state"
+      }
+    ],
+    "detection": [
+      {
+        "name": "State Consistency Check",
+        "description": "Monitor graph state for internal contradictions by validating facts against each other across cycles",
+        "code": "from langgraph.graph import StateGraph\nfrom typing import TypedDict, List\n\nclass AgentState(TypedDict):\n    messages: List[str]\n    facts: dict\n    cycle_count: int\n\n# Add as custom node\ndef hallucination_detector(state: AgentState) -> AgentState:\n    facts = state['facts']\n    # Detect contradiction: population can't be both US and China\n    populations = [v for k,v in facts.items() if 'population' in k.lower()]\n    if len(set(populations)) > 1:\n        raise ValueError(f\"Hallucination detected: conflicting populations {populations}\")\n    if state['cycle_count'] > 3 and 'nonexistent_source' in ' '.join(state['messages']):\n        raise ValueError(\"Cyclic hallucination: citing fake sources\")\n    return state\n\n# In graph builder\ngraph.add_node('detector', hallucination_detector)",
+        "language": "python"
+      },
+      {
+        "name": "Message Fact-Check",
+        "description": "Extract entities from agent messages and verify against external knowledge base",
+        "code": "import re\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\n# Integrate in END node\ndef fact_check_node(state):\n    messages = state['messages'][-1]\n    entities = re.findall(r'([A-Z][a-z]+ (?:[A-Z][a-z]+)?)', messages)\n    \n    # Simple knowledge base check\n    known_facts = {'New York': 'USA', 'Tokyo': 'Japan'}\n    hallucinated = []\n    for entity in entities:\n        if entity not in known_facts:\n            hallucinated.append(entity)\n    \n    if hallucinated:\n        state['flags'] = state.get('flags', []) + ['hallucination']\n        print(f\"⚠️  Potential hallucination: {hallucinated}\")\n    return state\n\ngraph.add_node('fact_check', fact_check_node)",
+        "language": "python"
+      },
+      {
+        "name": "Cycle Hallucination Monitor",
+        "description": "Track state similarity across cycles to detect reinforcing hallucinations",
+        "code": "from langgraph.graph.message import add_messages\nimport hashlib\n\ndef cycle_monitor(state):\n    current_hash = hashlib.md5(str(state['facts']).encode()).hexdigest()\n    prev_hashes = state.get('cycle_hashes', [])\n    \n    if current_hash in prev_hashes[-3:]:\n        raise ValueError(\"Cyclic hallucination: facts repeating across cycles\")\n    \n    state['cycle_hashes'] = prev_hashes + [current_hash]\n    return state\n\n# Add before loop decision node\ngraph.add_node('cycle_check', cycle_monitor)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Ground Truth Anchoring Node",
+        "description": "Inject verified facts at graph start and validate against them in every cycle",
+        "code": "class AgentState(TypedDict):\n    messages: List[str]\n    facts: dict\n    ground_truth: dict  # Immutable verified facts\n\n# Bootstrap node\ndef ground_truth_loader(state: AgentState) -> AgentState:\n    state['ground_truth'] = {\n        'usa_population': '331e6',\n        'japan_population': '125e6',\n        'sources': ['census.gov', 'worldbank.org']\n    }\n    return state\n\n# Validation node\ndef validate_against_truth(state: AgentState) -> AgentState:\n    for key, value in state['facts'].items():\n        truth_key = key.replace(' ', '_')\n        if truth_key in state['ground_truth'] and str(value) != state['ground_truth'][truth_key]:\n            state['messages'].append(f\"[CORRECTION] {key}: {state['ground_truth'][truth_key]}\")\n            state['facts'][key] = state['ground_truth'][truth_key]\n    return state\n\ngraph.add_node('ground_truth', ground_truth_loader)\ngraph.add_node('validate', validate_against_truth)",
+        "language": "python"
+      },
+      {
+        "name": "Human Review Mandatory Edges",
+        "description": "Force human breakpoints for high-confidence hallucination risk paths",
+        "code": "from langgraph.prebuilt import ToolNode, tools_condition\n\nclass AgentState(TypedDict):\n    messages: List[str]\n    confidence: float\n    needs_review: bool\n\n# Confidence-based routing\ndef route_hallucination_risk(state: AgentState):\n    if state.get('confidence', 0) > 0.9 and 'uncertain' in state['messages'][-1].lower():\n        return \"human_review\"  # Force review despite high confidence\n    return \"continue\"\n\n# Update graph\ngraph.add_conditional_edges(\n    'llm',\n    route_hallucination_risk,\n    {\n        'continue': 'tools',\n        'human_review': 'human_breakpoint'\n    }\n)\ngraph.add_node('human_breakpoint', lambda state: state)",
+        "language": "python"
+      },
+      {
+        "name": "State Schema Validation",
+        "description": "Enforce strict typing and validation on state transitions to prevent hallucination propagation",
+        "code": "from pydantic import BaseModel, Field, validator\nfrom typing import Dict, Any\n\nclass ValidatedState(BaseModel):\n    messages: list[str] = Field(..., max_items=50)\n    facts: Dict[str, str] = {}\n    sources: list[str] = Field(default_factory=list, min_items=1)\n    \n    @validator('facts')\n    def facts_must_have_sources(cls, v):\n        if v and not any('source' in k.lower() for k in v):\n            raise ValueError('Facts must reference sources')\n        return v\n\n# Wrap state in graph\ndef validated_node(state: AgentState) -> AgentState:\n    validated = ValidatedState(**state).dict()\n    return {**state, **validated}\n\ngraph.add_node('validate_schema', validated_node)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates seamlessly with LangGraph by wrapping `graph.invoke()` calls or injecting as dedicated verification nodes, automatically detecting hallucinations through semantic consistency checks, fact validation against external sources, and cycle analysis. It captures state snapshots at every node transition, running parallel evaluations against ground truth datasets and knowledge bases to flag inconsistencies before they propagate. Remediation happens inline with corrected state injection or human escalation paths.\n\nFor complex cyclical agents, Vex monitors state similarity across iterations using vector embeddings, automatically breaking loops when hallucination risk exceeds thresholds. Integration requires only `pip install vex-sdk langgraph` and a single decorator, providing production-grade observability with zero-config hallucination detectors trained on your specific agent patterns.\n\nVex's LangGraph adapter handles checkpoint serialization automatically, ensuring hallucination detection persists across sessions and schema evolutions without manual migration.",
+      "code": "from vex import verify\nfrom langgraph.graph import StateGraph\nfrom langgraph.checkpoint.memory import MemorySaver\n\n# Method 1: Wrap invoke() calls\n@verify(task='langgraph-hallucination', auto_fix=True)\ndef run_agent(input_data):\n    graph = StateGraph(AgentState)\n    # ... build your graph\n    \n    result = graph.invoke(input_data, config={\"configurable\": {\"thread_id\": \"1\"}})\n    return result\n\n# Method 2: Vex as graph node\nclass AgentState(TypedDict):\n    messages: List[str]\n    facts: dict\n\nasync def vex_detector(state: AgentState):\n    from vex import Client\n    client = Client(api_key=\"your_key\")\n    \n    result = await client.verify(\n        state['messages'][-1],\n        task='agent-hallucination',\n        context={'facts': state['facts']},\n        auto_fix=True\n    )\n    \n    if result.fixed:\n        state['messages'][-1] = result.fixed_output\n    \n    return state\n\ngraph.add_node('vex_check', vex_detector)\n\n# Install: pip install langgraph vex-sdk",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with `pip install vex-sdk` and eliminate LangGraph hallucinations in minutes."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Claude Tool Use Agents",
+    "description": "How to detect and fix context window management for ai agents in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Claude Tool Use context-window-management",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, Context Window Management issues arise when long tool call chains and iterative reasoning exceed the model's 200K token limit, causing truncation of critical history and state loss. This manifests as agents repeating failed tool calls, hallucinating prior results, or abruptly abandoning tasks mid-execution. The problem is exacerbated by Claude's verbose XML-formatted tool responses that rapidly consume context during agentic loops.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-step research agent with 10+ tool calls",
+        "symptom": "Agent repeats identical web search queries after 5th iteration",
+        "impact": "Infinite loop, 30min+ execution time, incomplete final answer"
+      },
+      {
+        "scenario": "Code debugging agent iterating on fixes",
+        "symptom": "Forgets previous error messages, reintroduces same bugs",
+        "impact": "Divergent code evolution, never converges to working solution"
+      },
+      {
+        "scenario": "Parallel tool execution with result aggregation",
+        "symptom": "Only processes first 2/5 tool results, ignores the rest",
+        "impact": "Incomplete analysis, confidently wrong conclusions"
+      },
+      {
+        "scenario": "Long-form content generation with fact-checking",
+        "symptom": "Stops mid-sentence after 15K tokens, outputs '...'",
+        "impact": "Truncated deliverables requiring manual completion"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Tracks cumulative token usage across message history and alerts when approaching 80% of context window",
+        "code": "import anthropic\n\ndef monitor_context_window(messages, model='claude-3-5-sonnet-20240620'):\n    client = anthropic.Anthropic()\n    total_tokens = 0\n    for msg in messages:\n        if msg.get('role') == 'assistant' and msg.get('content'):\n            for block in msg['content']:\n                if block.get('type') == 'tool_use':\n                    total_tokens += 50  # XML overhead\n                elif block.get('type') == 'text':\n                    response = client.count_tokens(block['text'])\n                    total_tokens += response.json()['usage']['total_tokens']\n    window_limit = 180000  # Safety margin\n    overflow_pct = (total_tokens / window_limit) * 100\n    return {\n        'tokens_used': total_tokens,\n        'overflow_risk': overflow_pct > 80,\n        'warning': f'Context at {overflow_pct:.1f}% capacity'\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Repetition Detector",
+        "description": "Identifies when agent calls same tool with identical inputs consecutively",
+        "code": "def detect_repeated_tool_calls(messages):\n    tool_history = []\n    repeats = []\n    for msg in messages:\n        if msg.get('role') == 'assistant' and msg.get('content'):\n            for block in msg['content']:\n                if block.get('type') == 'tool_use':\n                    tool_id = (block['name'], block.get('input', {}))\n                    if tool_id in tool_history[-3:]:\n                        repeats.append({\n                            'tool': block['name'],\n                            'input_hash': hash(str(tool_id[1])),\n                            'position': len(tool_history)\n                        })\n                    tool_history.append(tool_id)\n    return {'repeated_calls': len(repeats) > 0, 'details': repeats}",
+        "language": "python"
+      },
+      {
+        "name": "History Truncation Check",
+        "description": "Verifies if critical prior tool results are referenced in current reasoning",
+        "code": "def check_history_truncation(current_msg, full_history):\n    recent_tools = [m for m in full_history[-10:] if m.get('role') == 'user' and any(b.get('type') == 'tool_result' for b in m.get('content', []))]\n    current_text = ' '.join([b['text'] for b in current_msg.get('content', []) if b.get('type') == 'text'])\n    \n    missing_references = []\n    for tool_result in recent_tools:\n        result_id = tool_result['content'][0].get('tool_use_id')\n        if result_id and result_id not in current_text:\n            missing_references.append(result_id)\n    \n    return {'truncation_detected': len(missing_references) > 0, 'missing': missing_references}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Summary Compression",
+        "description": "Condenses tool results into structured summaries before adding to context",
+        "code": "def compress_tool_history(messages, max_tool_results=5):\n    compressed = messages.copy()\n    tool_summaries = []\n    \n    for msg in reversed(messages):\n        if msg.get('role') == 'user' and any(b.get('type') == 'tool_result' for b in msg.get('content', [])):\n            for block in msg['content']:\n                if block.get('type') == 'tool_result':\n                    summary = f\"Tool '{block['name']}': {block.get('content', '[result]')[:100]}...\"\n                    tool_summaries.append(summary)\n                    if len(tool_summaries) >= max_tool_results:\n                        break\n            if len(tool_summaries) >= max_tool_results:\n                break\n    \n    # Replace old history with summaries\n    summary_msg = {\n        'role': 'system',\n        'content': 'Recent tool results: ' + ' | '.join(tool_summaries)\n    }\n    return [summary_msg] + messages[-3:]",
+        "language": "python"
+      },
+      {
+        "name": "Stateful Memory Manager",
+        "description": "Extracts and persists key state variables across context resets",
+        "code": "class ClaudeStateManager:\n    def __init__(self):\n        self.state = {'tools_used': {}, 'key_facts': [], 'task_progress': {}}\n    \n    def extract_state(self, messages):\n        for msg in messages:\n            if msg.get('role') == 'user' and any(b.get('type') == 'tool_result' for b in msg.get('content', [])):\n                for block in msg['content']:\n                    if block.get('type') == 'tool_result'):\n                        tool_name = block['name']\n                        self.state['tools_used'][tool_name] = block.get('content', '')\n        return self.state\n    \n    def inject_state(self, messages):\n        state_str = f\"Previous state: tools_used={len(self.state['tools_used'])}, facts={len(self.state['key_facts'])}\"\n        messages.insert(0, {'role': 'system', 'content': state_str})\n        return messages",
+        "language": "python"
+      },
+      {
+        "name": "Chunked Execution Pipeline",
+        "description": "Breaks long tasks into explicit phases with context reset between",
+        "code": "def chunked_agent_execution(client, task, max_iterations_per_chunk=8):\n    phases = ['research', 'analyze', 'synthesize']\n    final_result = ''\n    \n    for phase in phases:\n        messages = [{'role': 'user', 'content': f\"Phase: {phase}. Task: {task}. Prior: {final_result}\"}]\n        \n        for _ in range(max_iterations_per_chunk):\n            response = client.messages.create(\n                model=\"claude-3-5-sonnet-20240620\",\n                max_tokens=1024,\n                messages=messages,\n                tools=[your_tools]\n            )\n            messages.append({'role': 'assistant', 'content': response.content})\n            \n            if not response.content or response.stop_reason == 'end_turn':\n                final_result += f\"\\n{phase}: \" + ' '.join([b.text for b in response.content if b.type == 'text'])\n                break\n    \n    return final_result",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automatically monitors Claude Tool Use agents for context overflow by tracking token consumption in real-time across tool call chains. It detects repetition patterns, missing tool result references, and truncation symptoms, then applies intelligent remediation like dynamic summarization and state extraction without manual intervention. The platform wraps Anthropic's messages.create() calls with vex.verify(), providing observability into context health and automatic recovery paths.\n\nVex's Claude-specific detectors parse XML tool_use blocks and tool_result responses to maintain precise token accounting, including the verbose formatting overhead unique to Anthropic's API. When issues are detected, Vex can trigger context compression, state migration to external memory, or task rechunking, ensuring agents complete reliably even in 50+ iteration chains. This eliminates the need for custom monitoring logic in production agent deployments.\n\nIntegration takes <5 minutes via pip install anthropic vex-sdk, with full observability dashboard showing context utilization trends, failure patterns, and ROI from automated fixes.",
+      "code": "import anthropic\nimport vex\n\nclient = anthropic.Anthropic()\nvex_client = vex.Vex(api_key=\"your-vex-key\")\n\n@vex_client.verify(test_name=\"claude-context-management\")\ndef reliable_claude_agent(task: str):\n    messages = [{'role': 'user', 'content': task}]\n    \n    while True:\n        # Vex automatically monitors context window\n        response = client.messages.create(\n            model=\"claude-3-5-sonnet-20240620\",\n            max_tokens=1024,\n            messages=messages,\n            tools=[{\"name\": \"search\", \"input_schema\": {...}}]\n        )\n        \n        messages.extend([{'role': 'assistant', 'content': response.content}])\n        \n        # Vex auto-applies fixes: compression, state extraction\n        if response.stop_reason == 'tool_use':\n            tool_calls = [b for b in response.content if b.type == 'tool_use']\n            tool_results = execute_tools(tool_calls)\n            messages.append({'role': 'user', 'content': tool_results})\n        else:\n            return response.content[0].text\n\n# Run with automatic context management\nresult = reliable_claude_agent(\"Complex multi-step research task\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to eliminate context window failures in your Claude agents: pip install vex-sdk anthropic"
+    }
+  }
+}

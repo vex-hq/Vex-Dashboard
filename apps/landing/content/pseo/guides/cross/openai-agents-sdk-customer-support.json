@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build customer support with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK customer support",
+      "OpenAI Agents SDK guardrails",
+      "customer support reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with OpenAI Agents SDK enables sophisticated multi-agent workflows for RAG, CRM integration, and ticket management. However, handoff loops, prompt injections, and unvalidated tool outputs can lead to compliance failures and poor customer experiences. Vex provides essential output guardrails to ensure response accuracy, PII filtering, tone consistency, and policy compliance in production deployments.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with OpenAI Agents SDK",
+      "description": "The typical customer support architecture uses a Router Agent to triage queries to specialized agents: RAG Agent for knowledge base retrieval, CRM Agent for order lookup and ticket creation, and Escalation Agent for complex issues. Each agent uses OpenAI's agent framework with handoffs, tool calling, and shared memory. Tools integrate with Zendesk for ticketing, Stripe for orders, and Pinecone/VectorDB for RAG retrieval.\n\nAgent handoffs pass context through shared state, while guardrails validate outputs before consumption. Tracing spans multi-agent interactions to debug failures. Vex integrates as output validators on each agent's final response before handoff or customer delivery.\n\nThis setup handles 80% of queries autonomously while escalating 20% to humans, maintaining compliance across PII, tone, and policy requirements.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Router Agent   │\n└─────────────────┼────┼──────────────────┤\n                  │    │     handoff      │\n                  ▼    ▼                  │\n┌─────────────────┐┌──────────────────┐┌─┴───────────────┐\n│   RAG Agent     ││   CRM Agent      ││ Escalation Agent│\n│ (Knowledge DB)  ││ (Order/Ticket)   ││   (Human)       │\n└──────────┬──────┘└──────────┬───────┘└──────────────────┘\n           │                 │\n           └─────────┬───────┘\n                     │ Vex Guardrails\n                     ▼\n              ┌─────────────────┐\n              │   Final Response│\n              └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Router Agent endlessly cycles between RAG and CRM agents when ticket context is ambiguous, consuming tokens and delaying resolution.",
+        "severity": "critical",
+        "mitigation": "Vex escalation guardrail detects loop patterns and forces human handoff after 3 cycles."
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious users inject 'ignore previous instructions' in support queries, bypassing PII filtering and policy checks.",
+        "severity": "critical",
+        "mitigation": "Vex input validation strips injection attempts before agent processing."
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "CRM API returns malformed order data that confuses downstream agents, leading to incorrect ticket creation.",
+        "severity": "high",
+        "mitigation": "Vex tool output validator ensures structured JSON before agent handoff."
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Context loss during RAG→CRM→Escalation handoffs makes debugging impossible when customers report wrong resolutions.",
+        "severity": "high",
+        "mitigation": "Vex traces full handoff chains with input/output validation at each step."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Router Agent with Handoff Logic",
+        "description": "Initial triage agent that routes to RAG, CRM, or Escalation based on query intent.",
+        "code": "from agents import Agent, handoff\nfrom openai import OpenAI\n\nrouter_agent = Agent(\n    name=\"Router\",\n    instructions=\"\"\"You are a customer support router. Route to:\n- RAG Agent for product questions\n- CRM Agent for orders/tickets\n- Escalation for billing/complex issues\"\"\",\n    model=\"gpt-4o\",\n    handoffs=[\n        handoff(\"RAG Agent\", \"product or knowledge questions\"),\n        handoff(\"CRM Agent\", \"order status, tickets\"),\n        handoff(\"Escalation Agent\", \"billing, refunds, urgent\")\n    ]\n)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Agent with Knowledge Base Retrieval",
+        "description": "Retrieves from Pinecone vector DB and synthesizes accurate responses.",
+        "code": "rag_agent = Agent(\n    name=\"RAG Agent\",\n    instructions=\"Answer using ONLY retrieved context. Say 'needs CRM lookup' for order questions.\",\n    model=\"gpt-4o\",\n    tools=[\n        pinecone_retrieval_tool,\n        handoff(\"CRM Agent\", \"order or account questions\")\n    ]\n)\n\ndef pinecone_retrieval_tool(query):\n    # Vector search implementation\n    results = pinecone_index.query(vector=embedding(query), top_k=5)\n    return format_docs(results.matches)",
+        "language": "python"
+      },
+      {
+        "title": "CRM Agent with Ticket/Order Tools",
+        "description": "Handles order lookup and Zendesk ticket creation with structured outputs.",
+        "code": "@tool\ndef lookup_order(order_id: str) -> dict:\n    \"\"\"Lookup order status from Stripe/Zendesk\"\"\"\n    order = stripe.Order.retrieve(order_id)\n    ticket = zendesk.tickets.find(order.customer_id)\n    return {\n        'status': order.status,\n        'total': order.amount,\n        'tickets': [t.id for t in ticket]\n    }\n\ncrm_agent = Agent(\n    name=\"CRM Agent\",\n    instructions=\"Use tools for order lookup and ticket creation. Always return structured JSON.\",\n    tools=[lookup_order, create_ticket_tool]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Escalation Agent with Human Handoff",
+        "description": "Final safety net that creates urgent tickets and notifies humans.",
+        "code": "escalation_agent = Agent(\n    name=\"Escalation Agent\",\n    instructions=\"\"\"Escalate complex issues to humans. Create high-priority Zendesk ticket\n    with full conversation context and notify support@company.com.\"\"\",\n    tools=[create_urgent_ticket, notify_support],\n    max_turns=1  # Prevent loops\n)\n\ndef create_urgent_ticket(context: str, priority: str = 'urgent'):\n    ticket = zendesk.tickets.create(\n        subject=\"AI Escalation\",\n        description=context,\n        priority=priority,\n        tags=['ai-escalation']\n    )\n    notify_support(f\"Escalated: {ticket.id}\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Router Agent",
+        "description": "Validates handoff decisions prevent loops and enforce routing rules.",
+        "code": "from vex_sdk import VexGuardrail\n\nrouter_guardrail = VexGuardrail(\n    project_id=\"your-project-id\",\n    guardrail_id=\"router-handoff-validator\",\n    verifications=[\n        \"response_accuracy>0.9\",\n        \"no_agent_loops\",\n        \"valid_handoff_target\"\n    ]\n)\n\n# Wrap router agent output\nresult = router_agent.run(query)\nvalidated_result = router_guardrail.validate(result)\nif validated_result.is_valid:\n    exec(validated_result.output)\nelse:\n    escalation_agent.run(query + \" [Router failed validation]\")",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering + Tone Guardrail on RAG Agent",
+        "description": "Strips PII from knowledge responses and enforces professional tone.",
+        "code": "rag_guardrail = VexGuardrail(\n    project_id=\"your-project-id\",\n    guardrail_id=\"rag-pii-tone\",\n    verifications=[\n        \"pii_filtering\",\n        \"tone_consistency:professional\",\n        \"response_accuracy>0.85\",\n        \"no_hallucinations\"\n    ]\n)\n\nrag_result = rag_agent.run(query)\nfinal_response = rag_guardrail.validate(rag_result)\n\nif not final_response.is_valid:\n    logger.warning(f\"RAG validation failed: {final_response.issues}\")\n    return escalation_agent.run(query)",
+        "language": "python"
+      },
+      {
+        "title": "CRM Tool Output + Policy Compliance Guardrail",
+        "description": "Validates structured tool outputs and ensures policy compliance before handoff.",
+        "code": "crm_guardrail = VexGuardrail(\n    project_id=\"your-project-id\",\n    guardrail_id=\"crm-compliance\",\n    verifications=[\n        \"json_schema_valid\",\n        \"policy_compliance\",\n        \"escalation_trigger:no_refunds_without_auth\",\n        \"pii_redaction\"\n    ],\n    schema={\n        \"type\": \"object\",\n        \"properties\": {\n            \"order_id\": {\"type\": \"string\"},\n            \"status\": {\"type\": \"string\"},\n            \"action\": {\"type\": \"string\"}\n        }\n    }\n)\n\ncrm_result = crm_agent.run(query)\nvalidated_crm = crm_guardrail.validate(crm_result)\n\n# Only handoff if validated\nif validated_crm.is_valid:\n    handoff_to_escalation(validated_crm.output)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Customer Support",
+      "description": "Deploy Vex guardrails today to eliminate handoff loops, PII leaks, and compliance failures in your production support agents."
+    }
+  }
+}

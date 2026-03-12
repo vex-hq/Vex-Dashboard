@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build voice agents with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI voice agents",
+      "Pydantic AI guardrails",
+      "voice agents reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Pydantic AI enables type-safe, production-ready conversational AI pipelines that process real-time speech with structured LLM outputs. Guardrails are essential due to the high-stakes nature of voice interactions, where latency, safety, and coherence failures can damage user trust and brand reputation. Vex provides runtime verification to catch subtle issues like validator rejections and streaming failures before they impact live conversations.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Pydantic AI",
+      "description": "Voice agents follow a real-time pipeline: microphone audio streams to a speech-to-text service (Whisper/FasterWhisper), generating text transcripts fed into a Pydantic AI agent for reasoning and tool execution. The agent produces structured JSON responses validated against Pydantic models, which are then converted to speech via text-to-speech (ElevenLabs/PlayHT) for sub-second round-trip latency. \n\nPydantic AI's Agent class handles conversation state and tool calls, with result validators ensuring output schemas match expected formats. Nested tool calls for database lookups or API integrations must maintain dependency context, while streaming responses enable low-latency partial TTS generation. The pipeline requires end-to-end monitoring for latency budgets under 500ms.\n\nCritical components include WebSocket connections for bidirectional audio/text streaming, async event loops for non-blocking processing, and safety filters to block harmful responses before TTS synthesis.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│ Speech-to-Text   │───▶│ Pydantic AI     │\n│     (WebSocket) │    │   (Whisper)      │    │   Agent         │\n└─────────────────┘    └──────────────────┘    │ + Validators    │\n                                               │ + Vex Guardrails│\n                                               └─────────────────┘\n                                                         │\n                                               ┌─────────────────┐\n                                               │ Text-to-Speech  │\n                                               │   (ElevenLabs)  │\n                                               └─────────────────┘\n                                                         │\n                                               ┌─────────────────┘\n                                               │   Speakers      │\n                                               └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Validator rejecting valid but unexpected outputs",
+        "description": "LLM generates semantically correct responses that fail Pydantic schema validation due to minor formatting differences",
+        "severity": "critical",
+        "mitigation": "Vex result validators with fuzzy matching and retry logic before schema enforcement"
+      },
+      {
+        "name": "Tool retry masking persistent errors",
+        "description": "Agent retries failed tool calls indefinitely without surfacing root cause database/API issues",
+        "severity": "high",
+        "mitigation": "Vex max_retry limits and error classification to trigger human intervention"
+      },
+      {
+        "name": "Streaming validation failures mid-generation",
+        "description": "Partial streaming responses fail validation, causing entire conversation turn to drop",
+        "severity": "high",
+        "mitigation": "Vex incremental streaming validators with graceful degradation"
+      },
+      {
+        "name": "Missing safety filtering in real-time responses",
+        "description": "Unfiltered LLM outputs bypass content moderation before TTS synthesis",
+        "severity": "critical",
+        "mitigation": "Vex safety classifiers running parallel to main pipeline"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent with Pydantic AI",
+        "description": "Core agent setup with speech-to-text integration and structured response validation",
+        "code": "from pydantic_ai import Agent, tool\nfrom pydantic import BaseModel, Field\nimport asyncio\nfrom openai import AsyncOpenAI\n\nclass VoiceResponse(BaseModel):\n    response_text: str = Field(..., max_length=200)\n    intent: str\n    confidence: float\n\n@tool\nasync def get_weather(city: str) -> str:\n    return f\"Weather in {city}: 72°F sunny\"\n\nvoice_agent = Agent(\n    'gpt-4o-mini',\n    result_model=VoiceResponse,\n    tools=[get_weather],\n    model_kwargs={'temperature': 0.1}\n)\n\nasync def process_voice_input(audio_text: str) -> VoiceResponse:\n    return await voice_agent.run(audio_text)\n\n# Usage\nresult = asyncio.run(process_voice_input('What's the weather in SF?'))\nprint(result.response_text)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Streaming Pipeline",
+        "description": "WebSocket handler for continuous speech processing with sub-second latency",
+        "code": "import websockets\nimport json\nfrom faster_whisper import WhisperModel\n\nwhisper_model = WhisperModel(\"base\", device=\"cpu\")\n\nasync def voice_websocket_handler(websocket):\n    async for message in websocket:\n        # Speech-to-text\n        segments, _ = whisper_model.transcribe(message, beam_size=5)\n        transcript = ' '.join(seg.text for seg in segments)\n        \n        # Pydantic AI processing\n        result = await process_voice_input(transcript)\n        \n        # Send TTS payload\n        await websocket.send(json.dumps({\n            'tts_text': result.response_text,\n            'confidence': result.confidence\n        }))\n\n# Run server\nstart_server = websockets.serve(voice_websocket_handler, 'localhost', 8765)\nasyncio.get_event_loop().run_until_complete(start_server)\nasyncio.get_event_loop().run_forever()",
+        "language": "python"
+      },
+      {
+        "title": "Conversation State Management",
+        "description": "Maintaining multi-turn context with dependency injection for tools",
+        "code": "from typing import Dict, Any\n\nclass ConversationState:\n    def __init__(self):\n        self.history: list = []\n        self.user_context: Dict[str, Any] = {}\n\nasync def process_with_state(state: ConversationState, input_text: str) -> VoiceResponse:\n    context = {\n        'history': state.history[-5:],\n        'user_id': state.user_context.get('user_id')\n    }\n    \n    result = await voice_agent.run(input_text, context=context)\n    state.history.append({'input': input_text, 'output': result})\n    return result\n\n# Stateful processing\nstate = ConversationState()\nresult1 = await process_with_state(state, 'Hi, I need restaurant recs')\nresult2 = await process_with_state(state, 'Italian please')",
+        "language": "python"
+      },
+      {
+        "title": "Latency Monitoring Wrapper",
+        "description": "Pipeline wrapper measuring end-to-end latency budgets",
+        "code": "import time\nfrom contextlib import contextmanager\n\n@contextmanager\ndef latency_monitor(stage: str, budget_ms: int):\n    start = time.time()\n    try:\n        yield\n    finally:\n        duration = (time.time() - start) * 1000\n        if duration > budget_ms:\n            print(f'⚠️ {stage} exceeded budget: {duration:.0f}ms > {budget_ms}ms')\n\nasync def monitored_pipeline(audio: bytes) -> str:\n    with latency_monitor('stt', 150):\n        transcript = await stt_pipeline(audio)\n    \n    with latency_monitor('llm', 250):\n        response = await process_voice_input(transcript)\n    \n    with latency_monitor('tts', 100):\n        audio_out = await tts_synthesize(response.response_text)\n    \n    return audio_out",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Result Validator on Agent",
+        "description": "Add Vex as primary result validator to catch schema failures early",
+        "code": "from vex_sdk import Vex, Guardrail\nfrom pydantic_ai import Agent\n\nvex = Vex(api_key='vex-your-key')\n\n@vex.guardrail('voice-agent-safety')\ndef safety_filter(content: str) -> bool:\n    return 'harmful' not in content.lower()\n\nvoice_agent_with_vex = Agent(\n    'gpt-4o-mini',\n    result_model=VoiceResponse,\n    result_validator=[\n        Guardrail('pydantic-validation'),\n        Guardrail('voice-latency', max_duration_ms=400),\n        safety_filter\n    ],\n    tools=[get_weather]\n)\n\n# Vex monitors all runs automatically\nresult = await voice_agent_with_vex.run('user input')\n\n# Check guardrail verdicts\nverdicts = vex.get_latest_verdicts('voice-agent-safety')\nif not all(v.passed for v in verdicts):\n    print('❌ Guardrail failure detected')",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Response Validation",
+        "description": "Incremental validation for streaming TTS generation",
+        "code": "from vex_sdk import StreamingGuardrail\n\n@vex.streaming_guardrail('voice-streaming')\ndef validate_streaming_chunks(chunks: list[str]) -> bool:\n    partial = ''.join(chunks)\n    return (\n        len(partial) < 200 and  # Length budget\n        safety_filter(partial) and  # Safety\n        partial.endswith(('.', '!', '?'))  # Coherent sentence\n    )\n\nasync def stream_voice_response(input_text: str):\n    stream = voice_agent_with_vex.stream(input_text)\n    \n    async for chunk in stream:\n        if not validate_streaming_chunks(chunk):\n            # Fallback to safe response\n            yield 'I need to think about that...'\n            return\n        yield chunk\n\n# Usage in WebSocket\nasync for tts_chunk in stream_voice_response(transcript):\n    await websocket.send(tts_chunk)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Guardrail",
+        "description": "Multi-turn coherence checking with conversation state",
+        "code": "@vex.guardrail('conversation-coherence')\ndef check_coherence(state: ConversationState, new_response: VoiceResponse) -> bool:\n    if not state.history:\n        return True\n    \n    last_user = state.history[-1]['input']\n    last_ai = state.history[-2]['output'].response_text if len(state.history) > 1 else ''\n    \n    # Check topical continuity\n    continuity_score = semantic_similarity(last_user, new_response.response_text)\n    \n    return (\n        continuity_score > 0.6 and\n        new_response.confidence > 0.7 and\n        len(new_response.response_text) > 5\n    )\n\n# Integrated into stateful processing\nasync def coherent_process(state: ConversationState, text: str) -> VoiceResponse:\n    result = await voice_agent_with_vex.run(text)\n    if not check_coherence(state, result):\n        result.response_text = \"Let me clarify that for you...\"\n    return result",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI Voice Agents",
+      "description": "Add Vex guardrails today to protect your real-time voice conversations from silent failures."
+    }
+  }
+}

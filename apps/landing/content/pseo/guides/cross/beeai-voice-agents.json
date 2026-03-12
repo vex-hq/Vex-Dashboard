@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with BeeAI + Vex Guardrails",
+    "description": "Learn how to build voice agents with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI voice agents",
+      "BeeAI guardrails",
+      "voice agents reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI, IBM's open-source framework, enables building production-grade voice agents with memory, tools, and observability for real-time conversational AI. Voice agents demand sub-second latency and perfect reliability, making guardrails essential to prevent unbounded memory growth, tool injection attacks, and incoherent conversations. Vex provides runtime verification to ensure response safety, latency compliance, and conversation coherence in high-risk voice pipelines.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with BeeAI",
+      "description": "Voice agents with BeeAI follow a real-time pipeline: microphone audio streams through speech-to-text (STT) for transcription, feeding into BeeAI's agent core for LLM reasoning with memory and tools. The agent maintains conversation state across turns, invoking tools like database queries or APIs when needed. The LLM response is routed to text-to-speech (TTS) for audio playback, all within sub-second end-to-end latency.\n\nBeeAI's event-driven architecture emits hooks for agent actions (tool calls, memory updates, final responses), ideal for Vex integration. Memory persistence handles long sessions, but risks unbounded growth without bounds checking. The pipeline requires safety filtering at each stage to block harmful content.",
+      "diagram": "Mic → [STT: Whisper] → BeeAI Agent Core → [LLM: Granite] → [Tools/DB] → [TTS: Piper] → Speaker\n                 ↑                           ↓\n              Vex Listener ← Events: memory/tool/response\n\nAgent Memory ↔ Persistence Layer (Redis)\nLatency Budget: STT<200ms + LLM<400ms + TTS<200ms"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long voice sessions accumulate conversation history without eviction, causing OOM errors and slow reasoning",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory token count per session and enforces eviction policies"
+      },
+      {
+        "name": "Tool Injection via STT",
+        "description": "Adversarial audio inputs craft tool calls bypassing validation, executing unauthorized actions",
+        "severity": "critical",
+        "mitigation": "Vex validates tool parameters against schemas before execution"
+      },
+      {
+        "name": "Latency Budget Violations",
+        "description": "Pipeline stages exceed sub-second requirements, causing unnatural conversation flow",
+        "severity": "high",
+        "mitigation": "Vex enforces per-stage and end-to-end latency SLOs with circuit breaking"
+      },
+      {
+        "name": "Incoherent Conversation State",
+        "description": "Serialization errors corrupt memory state, causing hallucinated context or repetitive responses",
+        "severity": "high",
+        "mitigation": "Vex verifies memory state integrity and response coherence against conversation history"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic BeeAI Voice Agent Pipeline",
+        "description": "Core pipeline integrating STT, BeeAI agent, and TTS with event hooks for Vex",
+        "code": "import beeai\nfrom vex import VexClient\nimport whisper, piper_tts\n\n# Initialize components\nstt = whisper.load_model('tiny.en')\nagent = beeai.Agent(model='granite-3b')\nagent.add_tool(beeai.Tool('query_db', schema={'sql': 'string'}))\n\n# Vex client for observability\nvex = VexClient(api_key='vex-key')\n\nclass VoiceAgent:\n    def __init__(self):\n        self.memory = {}\n        \n    async def process_audio(self, audio_bytes):\n        # STT\n        text = stt.transcribe(audio_bytes)['text']\n        \n        # Agent reasoning with events\n        with agent.events() as events:\n            response = await agent.run(text, memory=self.memory)\n            \n            # Emit to Vex\n            for event in events:\n                vex.record_event('beeai_event', {'type': event.type, 'data': event.data})\n        \n        # TTS\n        audio_out = piper_tts.synthesize(response)\n        return audio_out",
+        "language": "python"
+      },
+      {
+        "title": "Memory Management with Token Limits",
+        "description": "Implement conversation memory with automatic truncation to prevent unbounded growth",
+        "code": "def truncate_memory(memory, max_tokens=4000):\n    tokens = len(str(memory).split())\n    if tokens > max_tokens:\n        # Keep last N turns\n        history = memory['history'][-4:]  # Last 4 exchanges\n        memory = {'history': history}\n    return memory\n\n# In voice agent\nasync def process_audio(self, audio_bytes):\n    text = stt.transcribe(audio_bytes)['text']\n    \n    # Vex verification\n    if not vex.verify('memory_size', {'tokens': len(str(self.memory).split())}):\n        self.memory = truncate_memory(self.memory)\n    \n    response = await agent.run(text, memory=self.memory)\n    self.memory['history'].append({'user': text, 'assistant': response})\n    return piper_tts.synthesize(response)",
+        "language": "python"
+      },
+      {
+        "title": "Tool Schema Validation",
+        "description": "Strict tool parameter validation prevents injection attacks from STT input",
+        "code": "from pydantic import BaseModel, validator\n\nclass DBQueryTool(BaseModel):\n    sql: str\n    \n    @validator('sql')\n    def validate_sql(cls, v):\n        forbidden = ['DROP', 'DELETE', 'UPDATE']\n        if any(word in v.upper() for word in forbidden):\n            raise ValueError('Dangerous SQL detected')\n        return v\n\n# Register validated tool\ntool = beeai.Tool('query_db')\ntool.schema = DBQueryTool.model_json_schema()\nagent.add_tool(tool)\n\n# Vex double-checks\nasync def safe_tool_call(tool_name, params):\n    verdict = vex.verify('tool_safety', {'tool': tool_name, 'params': params})\n    if not verdict:\n        raise ValueError('Tool call blocked by Vex')\n    return await agent.execute_tool(tool_name, params)",
+        "language": "python"
+      },
+      {
+        "title": "Latency Monitoring Wrapper",
+        "description": "Wrap pipeline stages with latency guards for sub-second performance",
+        "code": "import time\nfrom vex import VexClient\n\nclass LatencyGuard:\n    def __init__(self):\n        self.budgets = {'stt': 0.2, 'llm': 0.4, 'tts': 0.2}\n    \n    async def measure(self, stage, func, *args):\n        start = time.time()\n        result = await func(*args)\n        latency = time.time() - start\n        \n        if latency > self.budgets[stage]:\n            vex.record_violation('latency_budget', {'stage': stage, 'measured': latency})\n            raise TimeoutError(f'{stage} exceeded budget')\n        \n        vex.record_metric('latency', {'stage': stage, 'value': latency})\n        return result\n\n# Usage\nguard = LatencyGuard()\ntext = await guard.measure('stt', stt.transcribe, audio_bytes)\nresponse = await guard.measure('llm', agent.run, text)\naudio = await guard.measure('tts', piper_tts.synthesize, response)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Capture all BeeAI events for comprehensive observability and verification",
+        "code": "from vex import VexClient\nfrom beeai import Agent\n\nvex = VexClient(api_key='your-vex-key', project='voice-agent')\n\n@vex.listener('beeai_voice_agent')\ndef handle_beeai_events(event):\n    if event.type == 'agent_start':\n        vex.set_context('session_id', event.session_id)\n        vex.set_verification('response_appropriateness', threshold=0.9)\n    \n    elif event.type == 'memory_update':\n        tokens = len(event.data['content'].split())\n        vex.verify('memory_growth', {'tokens': tokens, 'max': 4000})\n    \n    elif event.type == 'tool_call':\n        vex.verify('tool_safety', {\n            'tool': event.data['name'],\n            'params': event.data['parameters']\n        })\n    \n    elif event.type == 'agent_complete':\n        vex.verify('coherence', {'response': event.data['output']})\n\n# Attach to agent\nagent = Agent()\nagent.add_event_listener(vex_listener=handle_beeai_events)\nvex.deploy_pipeline('beeai-voice-v1')",
+        "language": "python"
+      },
+      {
+        "title": "Response Safety Filtering",
+        "description": "Real-time content moderation for voice responses with safety verdicts",
+        "code": "async def safe_voice_response(agent_output: str) -> str:\n    # Vex safety check\n    safety_verdict = vex.verify('response_appropriateness', {\n        'text': agent_output,\n        'categories': ['hate', 'violence', 'sexual'],\n        'threshold': 0.95\n    })\n    \n    if not safety_verdict:\n        # Fallback safe response\n        return \"I can't assist with that request. Let's talk about something else.\"\n    \n    return agent_output\n\n# In main pipeline\nresponse = await agent.run(user_input)\nsafe_response = await safe_voice_response(response)\naudio = piper_tts.synthesize(safe_response)\n\n# Log verdict\nvex.record_verdict('safety_filter', {'passed': safety_verdict, 'input': response[:100]})",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Guard",
+        "description": "Verify response maintains context from conversation history",
+        "code": "from vex.llm import LLMVerifier\n\ncoherence_checker = LLMVerifier(\n    provider='granite',\n    prompt_template=\"\"\"Verify if this response maintains conversation coherence:\n\nHistory: {history}\nUser: {user_input}\nResponse: {response}\n\nIs the response coherent and contextually appropriate? Return JSON: {{\"coherent\": true/false, \"reason\": \"...\"}}\"\"\"\n)\n\ndef check_coherence(history, user_input, response):\n    verdict = coherence_checker.verify({\n        'history': history[-3:],\n        'user_input': user_input,\n        'response': response\n    })\n    \n    if not verdict.get('coherent', False):\n        vex.record_violation('coherence_fail', verdict['reason'])\n        return False\n    return True\n\n# Pipeline integration\nif check_coherence(memory['history'], text, agent_response):\n    memory['history'].append({'user': text, 'assistant': agent_response})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Voice Agents",
+      "description": "Deploy Vex guardrails today to achieve production reliability for your real-time voice agents."
+    }
+  }
+}

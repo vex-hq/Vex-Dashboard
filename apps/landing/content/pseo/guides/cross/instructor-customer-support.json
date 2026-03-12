@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Instructor + Vex Guardrails",
+    "description": "Learn how to build customer support with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor customer support",
+      "Instructor guardrails",
+      "customer support reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Instructor enables structured extraction of user intents, ticket details, and escalation triggers from unstructured conversations. Instructor patches LLM clients to return validated Pydantic models, but hallucinations, partial extractions, and schema violations can lead to incorrect ticket creation or missed escalations. Vex guardrails ensure response accuracy, PII filtering, and policy compliance in high-risk RAG+CRM environments.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Instructor",
+      "description": "The typical architecture starts with user queries routed through a RAG pipeline that retrieves relevant knowledge base articles and CRM customer data. Instructor-wrapped LLM calls extract structured outputs like TicketRequest (with fields for issue_type, priority, customer_id) and ResponsePlan (tone, escalation_trigger, suggested_actions). Tool calling handles CRM lookups and ticket creation via APIs.\n\nThe agent maintains conversation state, validating each turn against Pydantic schemas for consistency. Nested extractions handle complex cases like multi-issue tickets or sentiment analysis with policy checks. Failures trigger retries or human escalation.\n\nVex integrates at verification points to catch hallucinations, enforce tone guidelines, filter PII, and ensure compliance before CRM writes or customer responses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Instructor LLM  │\n│                 │    │  + RAG Retrieval  │\n└─────────────────┘    │  + CRM Context    │\n                       └──────┬──────────────┘\n                              │ Structured\n                              ▼ Output\n                       ┌──────────────────┐\n                       │ Pydantic Models  │───▶┌──────────────┐\n                       │ - TicketRequest  │    │ CRM Tools    │\n                       │ - ResponsePlan   │    │ - Create     │\n                       │ - Escalation     │    │ - Lookup     │\n                       └──────────────────┘    └──────────────┘\n                                   ▲\n                              ┌────┴────┐\n                              │   Vex   │\n                              │Guardrails│\n                              └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor retries fail after max_attempts when LLM consistently produces invalid schemas",
+        "severity": "critical",
+        "mitigation": "Vex fallback routing to human agents or simplified schema extraction"
+      },
+      {
+        "name": "Model hallucinating enum values outside schema",
+        "description": "LLM generates invalid priority='urgent-asap' when schema expects 'low|medium|high'",
+        "severity": "high",
+        "mitigation": "Vex enum validation with semantic correction to closest valid value"
+      },
+      {
+        "name": "Partial extraction missing required fields",
+        "description": "customer_id or issue_type omitted from TicketRequest despite being in context",
+        "severity": "high",
+        "mitigation": "Vex required field enforcement with RAG context re-injection"
+      },
+      {
+        "name": "PII accidentally included in responses",
+        "description": "Phone numbers, emails, or account numbers leaked in automated replies",
+        "severity": "critical",
+        "mitigation": "Vex PII detection and redaction before response generation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Ticket Extraction with Instructor",
+        "description": "Patch OpenAI client to extract structured TicketRequest from customer query",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom openai import OpenAI\nfrom typing import Literal\n\nclass TicketRequest(BaseModel):\n    customer_id: str\n    issue_type: Literal['billing', 'technical', 'order', 'other']\n    priority: Literal['low', 'medium', 'high']\n    description: str\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=TicketRequest,\n    messages=[\n        {\"role\": \"system\", \"content\": \"Extract ticket details from customer message\"},\n        {\"role\": \"user\", \"content\": \"My order #12345 hasn't shipped and I need to update payment\"}\n    ]\n)\n\nticket = response.model\nprint(ticket.customer_id)  # '12345'",
+        "language": "python"
+      },
+      {
+        "title": "RAG Context Injection for Accurate Extraction",
+        "description": "Combine knowledge base retrieval with customer query for better structured extraction",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\nfrom typing import List, Literal\n\nclass KnowledgeContext(BaseModel):\n    articles: List[str]\n    customer_history: str\n\nclass SupportResponse(BaseModel):\n    diagnosis: str\n    resolution_steps: List[str]\n    escalation_required: bool = False\n\n# Mock RAG retrieval\nrag_context = KnowledgeContext(\n    articles=[\"Shipping delays: check carrier status\"], \n    customer_history=\"Repeat billing issues\"\n)\n\nclient = from_openai(OpenAI())\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=SupportResponse,\n    messages=[\n        {\"role\": \"system\", \"content\": \"Use provided context to diagnose issue\"},\n        {\"role\": \"user\", \"content\": str(rag_context) + \"\\nCustomer: Still no shipment!\"}\n    ]\n)\n\nprint(response.model.resolution_steps)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Instructor with Zod Schemas",
+        "description": "Extract ticket data using Instructor's TypeScript mode with Zod validation",
+        "code": "import { Instructor, OpenAI } from 'instructor';\nimport { z } from 'zod';\n\nconst client = new Instructor(new OpenAI({\n  apiKey: process.env.OPENAI_API_KEY,\n}));\n\nconst TicketSchema = z.object({\n  customerId: z.string(),\n  issueType: z.enum(['billing', 'technical', 'order', 'other']),\n  priority: z.enum(['low', 'medium', 'high']),\n  description: z.string(),\n});\n\ntype Ticket = z.infer<typeof TicketSchema>;\n\nconst result = await client.chat.completions.create({\n  model: 'gpt-4o',\n  schema: TicketSchema,\n  messages: [\n    {\n      role: 'system',\n      content: 'Extract ticket details from customer message',\n    },\n    {\n      role: 'user',\n      content: 'My order #12345 payment failed twice',\n    },\n  ],\n}) as Ticket;\n\nconsole.log(result.customerId); // '12345'",
+        "language": "typescript"
+      },
+      {
+        "title": "Escalation Detection with Nested Schemas",
+        "description": "Detect complex escalations requiring human intervention using nested Pydantic models",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Literal, Optional\nfrom instructor import from_openai\n\nclass EscalationTrigger(BaseModel):\n    trigger_type: Literal['vip_customer', 'legal_threat', 'repeated_failure']\n    confidence: float\n\nclass AgentResponse(BaseModel):\n    primary_action: str\n    follow_up: str\n    escalation: Optional[EscalationTrigger] = None\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=AgentResponse,\n    messages=[\n        {\"role\": \"user\", \"content\": \"This is the 5th time! I want to speak to your manager NOW!\"}\n    ]\n)\n\nif response.model.escalation:\n    print(f\"ESCALATE: {response.model.escalation.trigger_type}\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Instructor Calls with Vex Verification",
+        "description": "Add Vex guardrails for PII filtering and policy compliance around Instructor extraction",
+        "code": "from vex import verify\nfrom instructor import from_openai\nfrom pydantic import BaseModel\n\nclass SafeTicket(BaseModel):\n    customer_id: str\n    issue_type: str\n    priority: str\n\nclient = from_openai(OpenAI())\n\n@verify(guards=[\n    \"pii_filter\",\n    \"policy_compliance\",\n    \"response_accuracy\"\n])\ndef extract_ticket(query: str) -> SafeTicket:\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=SafeTicket,\n        messages=[{\"role\": \"user\", \"content\": query}]\n    ).model\n\n# Vex automatically retries failed validations\nticket = extract_ticket(\"Call me at 555-1234 about order #ABC123\")\n# PII redacted by Vex guardrail\nprint(ticket.customer_id)  # 'ABC123' (phone filtered)",
+        "language": "python"
+      },
+      {
+        "title": "Tone Consistency + Escalation Guardrails",
+        "description": "Ensure empathetic tone and proper escalation detection with Vex semantic checks",
+        "code": "from vex import verify, Guardrail\nfrom pydantic import BaseModel\n\nclass ToneCheck(Guardrail):\n    name = \"empathetic_tone\"\n    prompt = \"Rate empathy 1-10. Must be >=8 for customer support\"\n\nclass EscalationCheck(Guardrail):\n    name = \"escalation_trigger\"\n    prompt = \"Should this be escalated to human? Y/N only\"\n\n@verify(guards=[ToneCheck(), EscalationCheck()])\ndef generate_response(ticket: dict) -> str:\n    from instructor import from_openai\n    client = from_openai(OpenAI())\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=str,\n        messages=[\n            {\"role\": \"system\", \"content\": \"Always empathetic, professional tone\"},\n            {\"role\": \"user\", \"content\": f\"Ticket: {ticket}\"}\n        ]\n    ).model\n\nresponse = generate_response({\"issue\": \"very angry customer\"})\nprint(response)  # Vex ensures proper tone/escalation",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + Instructor Pipeline",
+        "description": "Complete TypeScript pipeline with Vex verification wrapping Instructor extraction",
+        "code": "import { verify } from 'vex-sdk';\nimport { Instructor, OpenAI } from 'instructor';\nimport { z } from 'zod';\n\nconst instructor = new Instructor(new OpenAI());\n\nconst ticketSchema = z.object({\n  customerId: z.string(),\n  issueType: z.enum(['billing', 'technical', 'order']),\n  priority: z.enum(['low', 'medium', 'high']),\n});\n\ntype Ticket = z.infer<typeof ticketSchema>;\n\nconst extractTicket = verify<Ticket>({\n  guards: ['pii_filter', 'policy_compliance', 'response_accuracy'],\n  fn: async (query: string) => {\n    return await instructor.chat.completions.create({\n      model: 'gpt-4o',\n      schema: ticketSchema,\n      messages: [{ role: 'user', content: query }],\n    }) as Ticket;\n  },\n});\n\nconst ticket = await extractTicket(\n  'Contact 555-1234 re: order #VIP001 payment issue'\n);\nconsole.log(ticket.customerId); // 'VIP001' (phone filtered by Vex)",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Customer Support",
+      "description": "Add Vex guardrails today to eliminate hallucinations and ensure compliance in production."
+    }
+  }
+}

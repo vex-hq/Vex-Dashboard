@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build data extraction with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK data extraction",
+      "Vercel AI SDK guardrails",
+      "data extraction reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with Vercel AI SDK enables seamless structured output from unstructured documents using schema-guided LLM calls in streaming UIs. Guardrails are essential to mitigate partial hallucinations in streams, inconsistent schemas across providers, and unvalidated tool results that can corrupt downstream data pipelines. Vex integration ensures schema compliance and field accuracy for reliable production deployments.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Vercel AI SDK",
+      "description": "The architecture starts with document ingestion into a Vercel Edge Function, where Vercel AI SDK's `generateText` or `streamText` invokes an LLM with a structured output schema. The LLM extracts fields like invoice amounts or entity names into Zod-validated objects, streamed to React Server Components for real-time UI updates. Post-processing validates completeness before persisting to a database like Vercel Postgres.\n\nKey components include the AI SDK's `createStructuredOutput` for schema enforcement, provider adapters (OpenAI, Anthropic), and streaming UI hooks. Failures occur when partial streams hallucinate or schemas drift across models, breaking type consistency.\n\nVex middleware wraps `generateText`/`streamText` to verify outputs against the schema before rendering, catching issues at the edge without blocking streams.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│ Unstructured    │───▶│ Vercel Edge      │───▶│ Structured      │\n│ Documents       │    │ Function +       │    │ Output Schema   │\n│ (PDF/Text)      │    │ AI SDK           │    │ (Zod/JSON)      │\n└─────────────────┘    │ + Vex Middleware │    └──────────┬──────┘\n                       └──────────┬──────┘               │\n                                  │                      │\n                       ┌──────────▼──────┐    ┌──────────▼──────┐\n                       │ Streaming UI    │◀───│ Database/        │\n                       │ (React Server   │    │ Downstream Apps  │\n                       │ Components)     │    └─────────────────┘\n                       └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "LLM generates plausible but incorrect field values mid-stream, corrupting UI before completion",
+        "severity": "high",
+        "mitigation": "Vex semantic verification on stream chunks against document context"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Unvalidated extraction results render in UI despite schema violations",
+        "severity": "critical",
+        "mitigation": "Pre-render Vex schema compliance checks"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLMs produce varying field completeness and types for same schema",
+        "severity": "high",
+        "mitigation": "Vex cross-provider normalization and completeness scoring"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Long document processing exceeds Vercel Edge limits, dropping incomplete extractions",
+        "severity": "medium",
+        "mitigation": "Vex async verification with timeout-aware partial result handling"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Schema-Guided Extraction",
+        "description": "Define extraction schema and use createStructuredOutput for reliable parsing",
+        "code": "import { createStructuredOutput } from 'ai/rsc';\nimport { z } from 'zod';\n\nconst invoiceSchema = z.object({\n  invoiceNumber: z.string().min(1),\n  totalAmount: z.number().positive(),\n  date: z.string().datetime(),\n  vendor: z.string().min(1)\n});\n\nexport async function extractInvoice(document: string) {\n  const result = await createStructuredOutput({\n    model: openai('gpt-4o'),\n    schema: invoiceSchema,\n    prompt: `Extract invoice details from: ${document}`\n  });\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming Extraction UI",
+        "description": "Stream extraction results to React Server Components with useChat",
+        "code": "import { useChat } from 'ai/react';\nimport { extractInvoice } from './extraction';\n\nexport function ExtractionUI({ document }: { document: string }) {\n  const { messages, append, isLoading } = useChat({\n    body: { document },\n    initialMessages: [{ role: 'user', content: 'Extract invoice data' }],\n    onResponse: async (response) => {\n      const result = await extractInvoice(document);\n      append({ role: 'assistant', content: JSON.stringify(result) });\n    }\n  });\n  return <div>{/* Render messages */}</div>;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Document Batch Extraction",
+        "description": "Process multiple documents with parallel schema validation",
+        "code": "import { generateText } from 'ai';\nimport { z } from 'zod';\n\nconst batchSchema = z.array(invoiceSchema);\n\nexport async function extractBatch(documents: string[]) {\n  const results = await Promise.all(\n    documents.map(async (doc) => {\n      const { text } = await generateText({\n        model: openai('gpt-4o'),\n        prompt: `Extract from: ${doc}`,\n        schema: invoiceSchema,\n        temperature: 0\n      });\n      return text;\n    })\n  );\n  return batchSchema.parse(results);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Error Handling with Fallback",
+        "description": "Graceful degradation when extraction fails schema validation",
+        "code": "import { createStructuredOutput } from 'ai/rsc';\n\nexport async function safeExtract(document: string) {\n  try {\n    return await createStructuredOutput({\n      model: openai('gpt-4o'),\n      schema: invoiceSchema,\n      prompt: document,\n      mode: 'json'\n    });\n  } catch (error) {\n    console.error('Extraction failed:', error);\n    return {\n      invoiceNumber: 'UNKNOWN',\n      totalAmount: 0,\n      date: new Date().toISOString(),\n      vendor: 'UNKNOWN',\n      _error: true\n    };\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText",
+        "description": "Wrap extraction calls with Vex schema compliance verification",
+        "code": "import { createVex } from '@vex_dev/sdk/ai';\nimport { generateText } from 'ai';\n\nconst vex = createVex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\nexport async function verifiedExtract(document: string) {\n  const result = await vex(\n    generateText.bind(null, {\n      model: openai('gpt-4o'),\n      schema: invoiceSchema,\n      prompt: `Extract invoice from: ${document}`\n    }),\n    {\n      checks: ['schema_compliance'],\n      riskProfile: 'medium',\n      context: { document }\n    }\n  );\n  return result.text;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming with Vex Validation",
+        "description": "Verify stream chunks for partial hallucinations before UI render",
+        "code": "import { createVex } from '@vex_dev/sdk/ai';\nimport { streamText } from 'ai';\n\nconst vex = createVex({ projectId: 'your-project-id' });\n\nexport async function* verifiedStream(document: string) {\n  const stream = await vex(\n    streamText({\n      model: openai('gpt-4o'),\n      schema: invoiceSchema,\n      prompt: document\n    }),\n    {\n      checks: ['partial_hallucination'],\n      stream: true,\n      riskProfile: 'medium'\n    }\n  );\n\n  for await (const chunk of stream) {\n    if (chunk.verified) yield chunk;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Batch Verification Pipeline",
+        "description": "Scale extraction with Vex async verification for high-volume processing",
+        "code": "import { createVex } from '@vex_dev/sdk/ai';\n\nconst vex = createVex({ projectId: 'your-project-id' });\n\nexport async function verifiedBatch(documents: string[]) {\n  const tasks = documents.map((doc, i) =>\n    vex(\n      extractInvoice(doc),\n      {\n        taskId: `doc-${i}`,\n        checks: ['schema_compliance', 'field_accuracy'],\n        riskProfile: 'medium',\n        async: true\n      }\n    )\n  );\n\n  const results = await Promise.all(tasks);\n  return results.filter(r => r.verified);\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Data Extraction",
+      "description": "Add Vex middleware today to eliminate extraction failures and ensure 100% schema compliance."
+    }
+  }
+}

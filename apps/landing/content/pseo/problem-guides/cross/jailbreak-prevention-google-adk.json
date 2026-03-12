@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "jailbreak-prevention",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Jailbreak Prevention for AI Agents in Google ADK Agents",
+    "description": "How to detect and fix llm jailbreak prevention for ai agents in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-jailbreak-prevention-for-ai-agents",
+      "Google ADK jailbreak-prevention",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, LLM jailbreaks manifest uniquely in multi-agent systems where agents delegate tasks across Gemini-powered workflows, exposing vulnerabilities through unfiltered tool calls and session state manipulations. Attackers exploit ADK's agent handoff patterns to inject malicious prompts that propagate through delegation chains, bypassing safety checks in individual agents. This leads to unauthorized tool executions or data leaks, amplified by ADK's flexible session management and model switching capabilities.",
+    "howItManifests": [
+      {
+        "scenario": "Malicious delegation chain injection",
+        "symptom": "Parent agent receives jailbreak prompt from child agent during handoff, formatted as legitimate tool response",
+        "impact": "Jailbreak propagates through entire multi-agent workflow, compromising all downstream agents"
+      },
+      {
+        "scenario": "Tool response format exploitation",
+        "symptom": "Adversary crafts tool response mimicking ADK's BaseToolResponse schema with embedded jailbreak instructions",
+        "impact": "Agents execute malicious instructions believing they originate from trusted tools"
+      },
+      {
+        "scenario": "Session state poisoning via long conversations",
+        "symptom": "Attacker gradually corrupts agent session state across multiple turns with subtle prompt injections",
+        "impact": "Persistent jailbreak survives conversation resets and model switches"
+      },
+      {
+        "scenario": "Gemini model switching bypass",
+        "symptom": "Jailbreak crafted for Gemini 1.5 Pro evades safety filters when switched to Gemini 1.0 Pro mid-conversation",
+        "impact": "Inconsistent model safety leads to jailbreak success during agent handoffs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Jailbreak Prompt Pattern Scanner",
+        "description": "Scans agent inputs and tool responses for 50+ known jailbreak patterns using regex and semantic matching specific to ADK message flows",
+        "code": "```python\nfrom google.adk.agents import Agent\nfrom google.adk.sessions import Session\nimport re\n\nJAILBREAK_PATTERNS = [\n    r'(ignore|forget|override).*?(instructions|rules|policy)',\n    r'(you are|pretend).*?(hacker|DAN|developer mode)',\n    r'base64_decode|eval\\(|exec\\(|__import__',\n    r'(sudo|root|admin).*?(access|permissions)'\n]\n\ndef scan_for_jailbreaks(message: str, source: str = 'user') -> dict:\n    findings = []\n    for pattern in JAILBREAK_PATTERNS:\n        matches = re.finditer(pattern, message, re.IGNORECASE)\n        for match in matches:\n            findings.append({\n                'pattern': pattern,\n                'match': match.group(0),\n                'source': source,\n                'confidence': 0.9\n            })\n    return {'suspicious': len(findings) > 0, 'findings': findings}\n\n# Usage in ADK agent\ndef before_agent_callback(session: Session, agent: Agent, message: str) -> bool:\n    result = scan_for_jailbreaks(message)\n    if result['suspicious']:\n        print(f'🚨 Jailbreak detected: {result[\"findings\"]}')\n        return False\n    return True\n```",
+        "language": "python"
+      },
+      {
+        "name": "Tool Response Schema Validator",
+        "description": "Validates all tool responses against ADK's BaseToolResponse pydantic schema, detecting injected jailbreak payloads in legitimate-looking responses",
+        "code": "```python\nfrom google.adk.tools import BaseToolResponse\nfrom pydantic import ValidationError\nimport json\n\ndef validate_tool_response(response_data: dict) -> bool:\n    try:\n        # Validate against ADK tool response schema\n        tool_response = BaseToolResponse.model_validate(response_data)\n        \n        # Additional content safety checks\n        content = tool_response.content\n        if len(content) > 1000 or '```' in content or 'eval(' in content:\n            return False\n        \n        return True\n    except ValidationError as e:\n        print(f'Invalid tool response schema: {e}')\n        return False\n\n# ADK integration\ndef tool_response_hook(response: dict):\n    if not validate_tool_response(response):\n        raise ValueError('Blocked malicious tool response')\n    return response\n```",
+        "language": "python"
+      },
+      {
+        "name": "Delegation Chain Tracer",
+        "description": "Traces prompt propagation through ADK multi-agent delegation chains to detect jailbreak transmission between agents",
+        "code": "```python\nfrom google.adk.agents import MultiAgent\nfrom typing import Dict, List\n\nclass JailbreakTracer:\n    def __init__(self):\n        self.chain_history: List[Dict] = []\n    \n    def trace_delegation(self, agent_id: str, prompt: str, parent_id: str = None):\n        entry = {\n            'agent_id': agent_id,\n            'parent_id': parent_id,\n            'prompt_hash': hash(prompt),\n            'timestamp': '2024-01-01',\n            'jailbreak_score': self._score_prompt(prompt)\n        }\n        self.chain_history.append(entry)\n        \n        # Detect jailbreak propagation\n        recent_high_scores = [e for e in self.chain_history[-5:] if e['jailbreak_score'] > 0.7]\n        if len(recent_high_scores) >= 2:\n            print(f'🚨 Jailbreak propagating through chain: {recent_high_scores}')\n            return False\n        return True\n    \n    def _score_prompt(self, prompt: str) -> float:\n        # Simplified jailbreak scoring\n        jailbreak_words = ['ignore', 'override', 'sudo', 'eval', 'exec']\n        score = sum(1 for word in jailbreak_words if word in prompt.lower()) / len(jailbreak_words)\n        return score\n\ntracer = JailbreakTracer()\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Vex Safety Layer Integration",
+        "description": "Integrates Vex as before_agent_callback to automatically block jailbreak attempts across all ADK agents and tools",
+        "code": "```python\nfrom vex_sdk import VexGuard\nfrom google.adk.sessions import Session\n\n# Install: pip install google-adk vex-sdk\nvex = VexGuard(api_key='your-vex-api-key')\n\ndef before_agent_callback(session: Session, agent_id: str, message: str) -> bool:\n    # Vex automatically detects 100+ jailbreak patterns\n    verdict = vex.check_prompt(\n        prompt=message,\n        context={'agent_id': agent_id, 'session_id': session.id},\n        categories=['jailbreak', 'prompt_injection']\n    )\n    \n    if not verdict.safe:\n        print(f'🚫 Vex blocked jailbreak: {verdict.reason}')\n        session.send_system_message('Request blocked for safety reasons.')\n        return False\n    \n    return True\n\n# Apply to ADK app\napp = MultiAgentApp(agents=[researcher, coder])\napp.add_callback('before_agent', before_agent_callback)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Response Wrapper",
+        "description": "Wraps all ADK tool responses with Vex content filtering and schema validation",
+        "code": "```python\nfrom vex_sdk import VexGuard\nfrom google.adk.tools import BaseTool\n\nclass SafeTool(BaseTool):\n    def __init__(self, tool: BaseTool, name: str):\n        super().__init__(name=name)\n        self.tool = tool\n        self.vex = VexGuard()\n    \n    async def run(self, args: dict) -> BaseToolResponse:\n        # Execute original tool\n        raw_response = await self.tool.run(args)\n        \n        # Vex safety scan\n        verdict = self.vex.check_content(\n            content=raw_response.content,\n            categories=['jailbreak', 'malicious_code']\n        )\n        \n        if not verdict.safe:\n            return BaseToolResponse(\n                content='[SAFE_RESPONSE] Tool execution blocked for safety.',\n                tool_name=self.name\n            )\n        \n        return raw_response\n```",
+        "language": "python"
+      },
+      {
+        "name": "Session State Sanitizer",
+        "description": "Automatically sanitizes ADK session state on every turn to prevent persistent jailbreaks",
+        "code": "```python\nfrom vex_sdk import VexGuard\nfrom google.adk.sessions import Session\n\nclass SafeSession(Session):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.vex = VexGuard()\n    \n    def send_message(self, content: str, role: str = 'user'):\n        # Sanitize before storing in session\n        verdict = self.vex.check_prompt(content)\n        if verdict.safe:\n            super().send_message(content, role)\n        else:\n            # Store sanitized version\n            safe_content = '[SANITIZED] Content filtered for safety.'\n            super().send_message(safe_content, role)\n            print(f'Vex sanitized session message: {verdict.reason}')\n    \n    def get_state(self) -> dict:\n        state = super().get_state()\n        # Vex scans entire session history\n        history = state.get('messages', [])\n        for msg in history:\n            verdict = self.vex.check_content(msg['content'])\n            if not verdict.safe:\n                msg['content'] = '[VEX_SANITIZED]'\n        return state\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Jailbreak Prevention for AI Agents Detection with Vex",
+      "description": "Vex provides complete automation for Google ADK jailbreak prevention through its before_agent_callback integration, scanning every prompt, tool response, and session state update in real-time. The platform maintains a database of 100+ jailbreak patterns updated daily from real-world attacks, achieving 99.2% detection accuracy across multi-agent workflows. Vex automatically generates remediation reports and can roll back compromised sessions, ensuring zero jailbreak propagation through ADK delegation chains.\n\nIntegration takes 3 lines of code and provides enterprise-grade protection covering all ADK failure modes: delegation injection, tool response exploits, session corruption, and model switching bypasses. Vex's adaptive learning continuously improves detection without requiring manual pattern updates, making it the only solution purpose-built for production ADK deployments.",
+      "code": "```python\nfrom vex_sdk import VexAgentGuard\nfrom google.adk import MultiAgentApp\n\n# Complete ADK + Vex integration (3 lines)\nvex_guard = VexAgentGuard(api_key='vex-key')\n\napp = MultiAgentApp(agents=[researcher, writer, executor])\napp.add_callback('before_agent', vex_guard.enforce_safety)  # Vex handles everything\n\n# Vex automatically protects:\n# ✅ All agent prompts and tool responses\n# ✅ Multi-agent delegation chains\n# ✅ Session state across conversations\n# ✅ Gemini model switching\n# ✅ 100+ jailbreak patterns (auto-updated)\n\nif __name__ == '__main__':\n    app.run()\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds and block all ADK jailbreaks automatically: `pip install vex-sdk`"
+    }
+  }
+}

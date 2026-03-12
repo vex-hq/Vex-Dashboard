@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with BeeAI + Vex Guardrails",
+    "description": "Learn how to build workflow automation with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI workflow automation",
+      "BeeAI guardrails",
+      "workflow automation reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI enables robust workflow automation agents that orchestrate multi-step tasks with API integrations, conditional logic, and human approvals. Vex provides essential guardrails to prevent memory leaks, tool injection attacks, serialization failures, and model output inconsistencies common in production BeeAI deployments. This integration guide shows how to register Vex as an event listener to ensure reliable, secure workflow execution.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with BeeAI",
+      "description": "BeeAI workflow agents follow a structured multi-step execution pattern: task decomposition → API orchestration → conditional branching → human approval gates → final execution. Each step maintains agent memory for context, uses tools for external API calls, and persists state across sessions. The architecture supports rollback mechanisms and idempotent operations for resilience.\n\nKey components include: BeeAI Agent with Granite LLM, ToolRegistry for API integrations, MemoryManager for session state, and EventBus for observability. Human-in-the-loop occurs via approval callbacks before high-risk actions. Vex integrates via the EventBus to monitor and validate every execution phase.\n\nThis pattern excels for enterprise workflows like order processing, invoice approval, and customer onboarding, but requires strict guardrails for production reliability.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│  BeeAI Agent     │\n│                 │    │  (Granite LLM)   │\n└─────────────────┘    │  + MemoryManager │\n                       └──────┬─────────────┘\n                              │\n                       ┌──────▼─────────────┐\n                       │   Tool Execution   │◄──┐\n                       │  (API Calls)       │   │\n                       └──────┬─────────────┘   │\n                              │                 │\n                       ┌──────▼─────────────┐   │\n                       │Conditional Logic   │   │\n                       │+ Human Approval    │───┘\n                       └──────┬─────────────┘\n                              │\n                       ┌──────▼─────────────┐\n                       │   Vex Guardrails   │\n                       │(Event Listener)    │\n                       └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long-running workflow sessions accumulate conversation history without pruning, causing OOM errors and degraded performance.",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory usage per session and enforces automatic truncation thresholds."
+      },
+      {
+        "name": "Tool Injection via Prompt Manipulation",
+        "description": "Adversarial inputs bypass tool validation, enabling unauthorized API calls or data exfiltration.",
+        "severity": "critical",
+        "mitigation": "Vex validates tool parameters against predefined schemas before execution."
+      },
+      {
+        "name": "State Serialization Failures",
+        "description": "Agent memory contains non-serializable objects, breaking persistence across restarts or human handoffs.",
+        "severity": "high",
+        "mitigation": "Vex sanitizes and validates state before persistence with automatic recovery."
+      },
+      {
+        "name": "Granite Output Format Drift",
+        "description": "Model outputs deviate from expected JSON/tool call formats, breaking workflow parsing.",
+        "severity": "high",
+        "mitigation": "Vex enforces structured output validation with fallback prompting."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Workflow Agent Setup",
+        "description": "Initialize BeeAI agent with workflow tools and memory for multi-step task execution.",
+        "code": "from beeai import Agent, MemoryManager\nfrom beeai.tools import ToolRegistry\n\n# Initialize workflow agent\nmemory = MemoryManager(max_history=50)\ntool_registry = ToolRegistry()\n\nagent = Agent(\n    model='granite-13b',\n    memory=memory,\n    tools=tool_registry,\n    system_prompt=\"You are a workflow automation agent. Execute tasks step-by-step with API calls and request human approval for high-risk actions.\"\n)\n\n# Register workflow tools\ntool_registry.register_tool('api_call', {\n    'description': 'Make authenticated API calls',\n    'parameters': {'url': 'str', 'method': 'str', 'payload': 'dict'}\n})",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Step Task Decomposition",
+        "description": "Agent breaks down complex workflows into sequential, conditional steps with state tracking.",
+        "code": "def execute_workflow(task: str):\n    steps = agent.plan(task)  # Decomposes into steps\n    \n    for step in steps:\n        if step.requires_approval:\n            approval = request_human_approval(step.summary)\n            if not approval:\n                agent.rollback()\n                return \"Workflow rejected\"\n        \n        result = agent.execute_step(step)\n        agent.memory.save(step.id, result)\n        \n        if step.is_final:\n            return agent.finalize()\n\nworkflow_result = execute_workflow(\"Process customer order #12345\")",
+        "language": "python"
+      },
+      {
+        "title": "Idempotent API Integration",
+        "description": "Ensure API calls are safe to retry with built-in idempotency keys and rollback support.",
+        "code": "import uuid\nimport requests\n\n@tool_registry.tool\ndef safe_api_call(url: str, method: str, payload: dict = None):\n    idempotency_key = str(uuid.uuid4())\n    headers = {'Idempotency-Key': idempotency_key}\n    \n    try:\n        response = requests.request(method, url, json=payload, headers=headers)\n        return {'success': response.status_code < 400, 'data': response.json()}\n    except Exception as e:\n        agent.trigger_rollback(idempotency_key)\n        return {'success': False, 'error': str(e)}\n\n# Usage in workflow\nresult = safe_api_call('https://api.example.com/orders', 'POST', {'order_id': '12345'})",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Approval",
+        "description": "Implement approval gates for high-risk actions with state preservation.",
+        "code": "def request_human_approval(summary: str) -> bool:\n    # Persist current state before approval\n    agent.memory.checkpoint()\n    \n    print(f\"\\n🔍 APPROVAL REQUIRED:\")\n    print(f\"Summary: {summary}\")\n    print(f\"Current State: {agent.memory.get_summary()}\")\n    \n    response = input(\"Approve? (y/n): \").lower()\n    return response == 'y'\n\n# Integrated into workflow\nif step.risk_level == 'high':\n    if not request_human_approval(step.description):\n        agent.restore_checkpoint()\n        return \"Action blocked by human review\"",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Hook Vex into BeeAI's EventBus to monitor all agent events with workflow-specific verifications.",
+        "code": "from vex_sdk import Vex\nfrom beeai.events import EventBus\n\n# Initialize Vex client\nvex = Vex(api_key=\"your-vex-api-key\")\n\n# Define workflow-specific verifiers\n@policies.workflow\nclass WorkflowVerifier:\n    def verify_action_correctness(self, event):\n        if event.tool == 'api_call':\n            assert event.params['url'].startswith('https://approved-domain.com')\n    \n    def check_permissions(self, event):\n        user_permissions = agent.memory.get('user_permissions')\n        assert event.user_id in user_permissions\n    \n    def verify_idempotency(self, event):\n        assert 'Idempotency-Key' in event.headers\n\n# Register Vex listener\nbus = EventBus()\nbus.register_listener(vex.listener(WorkflowVerifier()))",
+        "language": "python"
+      },
+      {
+        "title": "Memory Growth Guardrails",
+        "description": "Prevent unbounded memory accumulation in long-running workflow sessions.",
+        "code": "@vex.guard('memory_overflow')\ndef monitor_workflow_memory(event):\n    session_memory = len(event.agent_memory)\n    \n    if session_memory > 100:  # Max 100 exchanges\n        # Auto-prune oldest exchanges\n        event.agent_memory = event.agent_memory[-75:]\n        vex.log.warning(f\"Memory pruned from {session_memory} to 75 exchanges\")\n    \n    # Enforce memory budget\n    if event.memory_size > 50_000_000:  # 50MB limit\n        raise MemoryOverflowError(\"Workflow memory limit exceeded\")\n\nbus.register_listener(monitor_workflow_memory)",
+        "language": "python"
+      },
+      {
+        "title": "Tool Injection + Output Validation",
+        "description": "Block malicious tool calls and enforce Granite output formatting.",
+        "code": "@vex.guard('tool_safety')\ndef validate_workflow_tools(event):\n    if event.type == 'tool_call':\n        # Block dangerous URLs\n        dangerous_domains = ['shell-exec', 'eval', 'localhost']\n        for domain in dangerous_domains:\n            assert domain not in event.params['url']\n        \n        # Validate JSON output format\n        if event.model == 'granite':\n            assert validate_json_schema(event.output, expected_tool_schema)\n\n@vex.guard('rollback_safety')\ndef ensure_rollback_capability(event):\n    if event.requires_rollback:\n        checkpoint = agent.memory.get_checkpoint(event.workflow_id)\n        assert checkpoint is not None\n\nbus.register_listener([validate_workflow_tools, ensure_rollback_capability])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Workflow Automation",
+      "description": "Install Vex today with `pip install vex-sdk` and register as BeeAI event listener to eliminate workflow failures."
+    }
+  }
+}

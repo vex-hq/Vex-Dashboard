@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents rag pipeline",
+      "Amazon Bedrock Agents guardrails",
+      "rag pipeline reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable building sophisticated RAG pipelines with managed knowledge bases, action groups, and guardrails for enterprise-scale document retrieval and synthesis. Integrating Vex provides runtime verification to catch hallucinations, ensure source faithfulness, and validate citations in high-risk deployments. Guardrails are critical to maintain trust and compliance in multi-turn agent interactions.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Amazon Bedrock Agents",
+      "description": "The architecture starts with a Bedrock Knowledge Base using vector search (e.g., OpenSearch or Pinecone) for retrieving relevant document chunks based on user queries. Retrieved contexts are assembled and passed to the Bedrock Agent, which invokes an action group Lambda function to preprocess and format the context before synthesis by the agent's foundation model (e.g., Claude or Llama). Guardrails filter inputs/outputs, and the agent maintains session state for multi-turn conversations, attributing sources via citations.\n\nAction groups handle custom logic like chunk re-ranking or metadata filtering, while the knowledge base manages embeddings and retrieval. The agent orchestrates the flow, ensuring context relevance and synthesizing grounded responses. Session attributes persist state across invocations.\n\nVerification post-processing wraps agent responses to check faithfulness to retrieved sources, detecting hallucinations and validating citation accuracy before delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Query    │───▶│ Bedrock Agent    │───▶│  Knowledge Base  │\n│                 │    │ + Guardrails     │    │ (Vector Search)  │\n└─────────────────┘    │                  │    └─────────┬───────┘\n                       │  invoke_agent()  │              │\n                       └──────────┬───────┘              │\n                                  │                      │\n                       ┌──────────▼───────┐    ┌─────────▼───────┐\n                       │ Action Group     │    │ Retrieved       │\n                       │ (Lambda)         │◀───│ Documents       │\n                       └──────────────────┘    └─────────────────┘\n                                  │                      │\n                       ┌──────────▼───────┐              │\n                       │ Vex.verify()     │◀─────────────┘\n                       │ (Faithfulness,   │\n                       │ Citations)       │\n                       └──────────────────┘\n                                  │\n                       ┌──────────▼───────┐\n                       │ Verified Response│\n                       │ w/ Sources       │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups may return invalid JSON or missing required fields, causing agent parsing failures.",
+        "severity": "critical",
+        "mitigation": "Wrap Lambda responses with structured validation before returning to agent"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies lead to incomplete retrieval, causing context gaps and hallucinations.",
+        "severity": "high",
+        "mitigation": "Verify retrieved context relevance and coverage against query semantics"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Built-in guardrails miss custom enterprise policies like PII exposure or confidential data leakage.",
+        "severity": "high",
+        "mitigation": "Add Vex custom policies for domain-specific compliance checks"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Session attributes not properly maintained lead to context loss in conversational RAG flows.",
+        "severity": "medium",
+        "mitigation": "Validate session state continuity and context preservation across turns"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Bedrock Agent Client and Knowledge Base",
+        "description": "Set up boto3 client for Bedrock Agent Runtime and invoke with session management.",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime', region_name='us-east-1')\n\nagent_id = 'YOUR_AGENT_ID'\nagent_alias_id = 'YOUR_AGENT_ALIAS_ID'\nsession_id = 'unique-session-id'\n\n# Initial agent invocation\nresponse = bedrock_agent.invoke_agent(\n    agentId=agent_id,\n    agentAliasId=agent_alias_id,\n    sessionId=session_id,\n    inputText='What are the key features of our Q3 product launch?',\n    enableTrace=True\n)\n\n# Get completion\ncompletion_response = bedrock_agent.get_agent_invocation(\n    agentId=agent_id,\n    agentAliasId=agent_alias_id,\n    sessionId=session_id,\n    invocationId=response['invocationId']\n)\nprint(json.dumps(completion_response['completion', 2]))",
+        "language": "python"
+      },
+      {
+        "title": "Action Group Lambda for Context Preprocessing",
+        "description": "Lambda function to re-rank and format retrieved documents for agent context.",
+        "code": "import json\n\ndef lambda_handler(event, context):\n    # Parse Bedrock request\n    request_body = json.loads(event['requestBody'])\n    query = request_body['inputText']\n    \n    # Mock retrieval from knowledge base\n    retrieved_docs = [\n        {'content': 'Q3 launch features AI analytics...', 'metadata': {'source': 'q3-report.pdf', 'page': 5}},\n        {'content': 'New pricing model introduced...', 'metadata': {'source': 'pricing.pdf', 'page': 12}}\n    ]\n    \n    # Re-rank by relevance (semantic similarity)\n    reranked_docs = sorted(retrieved_docs, key=lambda x: len(query.split()) / len(x['content'].split()), reverse=True)[:3]\n    \n    response = {\n        'retrievedDocuments': [\n            {\n                'content': {'text': doc['content']},\n                'metadata': {'relevanceScore': 0.95, 'source': doc['metadata']['source']}\n            } for doc in reranked_docs\n        ],\n        'citations': [{'generatedTextChunkIndex': 0, 'sourceTextChunkIndex': 0}]\n    }\n    \n    return {\n        'responseBody': json.dumps(response),\n        'sessionState': {'promptSession': {'sessionAttributes': {'query_history': query}}},\n        'statusCode': 200\n    }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Bedrock Agent Invocation Wrapper",
+        "description": "Node.js wrapper for Bedrock Agent with TypeScript types and error handling.",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand, GetAgentInvocationCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nconst agentId = 'YOUR_AGENT_ID';\nconst agentAliasId = 'YOUR_AGENT_ALIAS_ID';\nconst sessionId = `session-${Date.now()}`;\n\ninterface AgentResponse {\n  completion: string;\n  citations?: Array<{generatedTextChunkIndex: number; sourceTextChunkIndex: number}>;\n}\n\nasync function invokeBedrockAgent(query: string): Promise<AgentResponse> {\n  const invokeParams = {\n    agentId,\n    agentAliasId,\n    sessionId,\n    inputText: query,\n    enableTrace: true,\n  };\n\n  const invokeCommand = new InvokeAgentCommand(invokeParams);\n  const invokeResponse = await client.send(invokeCommand);\n\n  const getCommand = new GetAgentInvocationCommand({\n    agentId,\n    agentAliasId,\n    sessionId,\n    invocationId: invokeResponse.invocationId!,\n  });\n\n  const completionResponse = await client.send(getCommand);\n  return {\n    completion: completionResponse.completion!,\n    citations: completionResponse.citations,\n  };\n}\n\n// Usage\n(async () => {\n  const response = await invokeBedrockAgent('Summarize Q3 financials');\n  console.log(response);\n})();",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Retrieval with Metadata Filtering",
+        "description": "Custom retrieval logic with source filtering and relevance scoring.",
+        "code": "import boto3\nfrom typing import List, Dict\n\nkb_client = boto3.client('bedrock-agent-runtime')\n\ndef retrieve_from_kb(knowledge_base_id: str, query: str, filter_pattern: str = None) -> List[Dict]:\n    retrieval_config = {\n        'vectorSearchConfiguration': {\n            'numberOfResults': 5,\n            'overrideSearchType': 'HYBRID',\n            'filterPattern': filter_pattern  # e.g., \"metadata.department:finance\"\n        }\n    }\n    \n    response = kb_client.retrieve(\n        knowledgeBaseId=knowledge_base_id,\n        retrievalQuery={'text': query},\n        retrievalConfiguration=retrieval_config\n    )\n    \n    return [\n        {\n            'content': result['content']['text'],\n            'metadata': result['metadata'],\n            'score': result.get('score', 0.0),\n            'location': result['location']['type']\n        }\n        for result in response['retrievalResults']\n    ]\n\n# Usage\ndocs = retrieve_from_kb('YOUR_KB_ID', 'Q3 revenue growth', 'metadata.year:\"2024\"')\n",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Source Faithfulness and Hallucinations",
+        "description": "Wrap agent response with Vex to validate response faithfulness to retrieved sources.",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        \"source_faithfulness\",\n        \"hallucination_detection\",\n        \"context_relevance\"\n    ],\n    risk_profile=\"high\"\n)\ndef verified_agent_response(agent_completion: str, retrieved_docs: list, query: str) -> dict:\n    return {\n        \"response\": agent_completion,\n        \"sources\": [doc['metadata']['source'] for doc in retrieved_docs],\n        \"query\": query\n    }\n\n# Usage\ndef process_rag_pipeline(query: str):\n    # Agent invocation\n    agent_response = bedrock_agent.invoke_agent(...)\n    docs = retrieve_from_kb('kb-id', query)\n    \n    verified = verified_agent_response(\n        agent_response['completion'],\n        docs,\n        query\n    )\n    return verified",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification for Citation Accuracy",
+        "description": "Verify citation mapping accuracy between generated response chunks and source documents.",
+        "code": "import { verify } from 'vex-sdk';\n\ntype AgentOutput = {\n  completion: string;\n  citations: Array<{generatedTextChunkIndex: number; sourceTextChunkIndex: number}>;\n  sources: Array<{content: string; metadata: {source: string}}>\n};\n\nconst verifier = verify({\n  checks: ['citation_accuracy', 'source_faithfulness'],\n  riskProfile: 'high',\n  customMetrics: {\n    citation_coverage: ({citations, sources}) => citations.length / sources.length\n  }\n});\n\nexport async function verifyRagOutput(output: AgentOutput): Promise<boolean> {\n  const result = await verifier.verify({\n    input: output.completion,\n    context: output.sources.map(s => s.content).join('\\n'),\n    metadata: {\n      citations: output.citations,\n      source_count: output.sources.length\n    }\n  });\n  \n  return result.passed && result.metrics.citation_coverage > 0.8;\n}\n\n// Usage\nconst agentOutput = await invokeBedrockAgent('query');\nconst isValid = await verifyRagOutput(agentOutput);",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Turn Session State Validation",
+        "description": "Verify context preservation across agent conversation turns with Vex session tracking.",
+        "code": "import vex\nfrom typing import Dict, Any\n\nvex_session = vex.Session(risk_profile=\"high\")\n\n@vex_session.verify(\n    checks=[\n        \"context_relevance\",\n        \"session_state_consistency\",\n        \"temporal_reasoning\"\n    ]\n)\ndef multi_turn_agent(query: str, session_state: Dict[str, Any], docs: list) -> Dict:\n    return {\n        \"response\": f\"Answering: {query}\",\n        \"session_state\": {\n            **session_state,\n            \"turn_count\": session_state.get('turn_count', 0) + 1,\n            \"recent_docs\": [d['metadata']['source'] for d in docs[-3:]]\n        },\n        \"citations\": len(docs)\n    }\n\n# Conversation loop\ndef chat_loop():\n    session_state = {\"turn_count\": 0}\n    \n    for query in [\"What is Q3 revenue?\", \"How does it compare to Q2?\"]:\n        docs = retrieve_from_kb('kb-id', query)\n        result = multi_turn_agent(query, session_state, docs)\n        session_state = result['session_state']\n        print(result['response'])\n        \nchat_loop()",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents RAG Pipeline",
+      "description": "Install Vex SDK today and wrap your agent invocations to eliminate hallucinations and ensure citation accuracy in production."
+    }
+  }
+}

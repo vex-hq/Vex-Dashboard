@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in CrewAI Agents",
+    "description": "How to detect and fix responsible ai governance for agents in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "CrewAI ai-governance",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, Responsible AI Governance for Agents fails when autonomous agents enter delegation loops, hallucinate tool outputs, drift from tasks, or produce inconsistent quality across roles. These issues arise from CrewAI's task delegation patterns and agent.execute_task() API, where lack of oversight allows errors to propagate unchecked through the crew. Without governance, agents amplify unreliability in multi-agent workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly delegate identical tasks in infinite cycles",
+        "impact": "Complete workflow stall, infinite token consumption, no task completion"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agent fabricates tool results (e.g., 'API returned 404' when successful)",
+        "impact": "Downstream agents act on false data, cascading failures"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Research agent pivots to marketing analysis mid-task",
+        "impact": "Final deliverables irrelevant to original business objectives"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Writer agent produces 50-word summaries vs Researcher’s 2000-word reports",
+        "impact": "Unbalanced crew output, integration failures in final assembly"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Delegation Loop Detector",
+        "description": "Scans CrewAI task execution logs for repeated delegation patterns between same agent pairs",
+        "code": "from crewai import Agent, Task\nfrom collections import defaultdict\n\ndef detect_delegation_loops(crew):\n    task_history = defaultdict(list)\n    \n    def loop_callback(task: Task, agent: Agent, output):\n        task_history[(task.description[:50], agent.name)].append(output)\n        # Flag loops: same task+agent > 3 executions\n        if len(task_history[(task.description[:50], agent.name)]) > 3:\n            print(f'🚨 DELEGATION LOOP: {agent.name} repeated task 4+ times')\n            return {'loop_detected': True, 'count': len(task_history[(task.description[:50], agent.name)])}\n    \n    return loop_callback",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Tracer",
+        "description": "Detects fabricated tool outputs by validating agent tool calls against actual API responses",
+        "code": "import re\nfrom crewai_tools import tool\n\ndef detect_hallucinated_tools(task_output):\n    # Common hallucination patterns\n    hallucination_patterns = [\n        r'API returned error|404|500|failed to connect',\n        r'No results found|empty response',\n        r'unable to retrieve|timed out'\n    ]\n    \n    for pattern in hallucination_patterns:\n        if re.search(pattern, task_output, re.IGNORECASE):\n            print(f'🚨 HALLUCINATION: {pattern} in output')\n            return {'hallucinated': True, 'pattern': pattern}\n    return {'hallucinated': False}",
+        "language": "python"
+      },
+      {
+        "name": "Task Drift Monitor",
+        "description": "Compares agent output semantics against original task description using keyword overlap",
+        "code": "from sklearn.feature_extraction.text import TfidfVectorizer\nfrom sklearn.metrics.pairwise import cosine_similarity\n\ndef detect_task_drift(original_task, agent_output):\n    vectorizer = TfidfVectorizer(stop_words='english')\n    tfidf_matrix = vectorizer.fit_transform([original_task, agent_output])\n    \n    similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]\n    \n    if similarity < 0.3:\n        print(f'🚨 TASK DRIFT: Semantic similarity {similarity:.2f} < 0.3 threshold')\n        return {'drifted': True, 'similarity': similarity}\n    return {'drifted': False, 'similarity': similarity}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Delegation Guardrails",
+        "description": "Limits task delegation depth and blocks loops using CrewAI's max_iterations",
+        "code": "from crewai import Crew, Agent, Task\n\nresearcher = Agent(\n    role='Researcher',\n    goal='Research accurately without loops',\n    max_iterations=3,  # Hard limit\n    verbose=True\n)\n\n# Task with delegation context limit\ntask = Task(\n    description='Research market trends',\n    agent=researcher,\n    context=['Do not delegate more than 2 levels deep'],\n    max_iterations=2\n)\n\ncrew = Crew(agents=[researcher], tasks=[task])\ncrew.kickoff()",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Forces tool verification before agent processing using CrewAI's tool callbacks",
+        "code": "from crewai_tools import BaseTool\nfrom pydantic import BaseModel, Field\n\nclass VerifiedSerperTool(BaseTool):\n    name: str = 'Verified Search'\n    description: str = 'Search with validation'\n    \n    class Input(BaseModel):\n        query: str = Field(..., description='Search query')\n    \n    def _run(self, query: str) -> str:\n        # Real tool call\n        result = self.search(query)\n        # Validate before return\n        if not result or len(result) < 10:\n            return f'VALIDATION FAILED: Insufficient results for \"{query}\". Raw: {result}'\n        return result[:2000]  # Truncate safely",
+        "language": "python"
+      },
+      {
+        "name": "Output Schema Enforcement",
+        "description": "Uses CrewAI's output pydantic models to standardize quality across agents",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import List\n\nclass StandardizedOutput(BaseModel):\n    summary: str = Field(..., max_length=500, description='500 char max summary')\n    key_findings: List[str] = Field(..., max_items=5, description='Max 5 bullets')\n    confidence: float = Field(..., ge=0.0, le=1.0)\n    sources: List[str] = Field(..., min_items=1)\n\n# Agent with enforced output schema\ntask = Task(\n    description='Analyze data',\n    expected_output=StandardizedOutput,\n    output_pydantic=StandardizedOutput\n)\n\nagent = Agent(..., output_pydantic=StandardizedOutput)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex integrates as a step callback in CrewAI's task execution pipeline, automatically detecting delegation loops, hallucinations, task drift, and quality inconsistencies in real-time. Using CrewAI's task callbacks, Vex wraps agent.execute_task() with governance checks that run parallel evaluations and block problematic outputs before they propagate through the crew. This prevents error cascades while maintaining workflow velocity.\n\nVex's agent governance suite includes semantic drift detection (via embedding distance), tool hallucination validation (against ground truth APIs), delegation cycle analysis (via task graph traversal), and output quality normalization (via schema enforcement). Results feed into Vex's remediation engine, which can auto-retry failed tasks, inject human-in-loop reviews, or dynamically adjust agent parameters.\n\nIntegration requires one line per CrewAI task: `task.callback = vex_governance_callback`. Vex handles the rest, providing observability dashboards, automated remediation, and compliance reporting for enterprise-grade agent governance.",
+      "code": "pip install crewai vex-sdk\n\nfrom crewai import Crew, Agent, Task\nimport vex\n\n# Initialize Vex governance\nvex.init(project='crewai-governance')\n\n# Vex callback for all CrewAI tasks\ndef vex_governance_callback(task: Task, agent: Agent, output):\n    # Vex auto-detects 4 failure modes\n    result = vex.evaluate_agent_output(\n        framework='crewai',\n        agent_role=agent.role,\n        task_desc=task.description,\n        output=output,\n        checks=[\n            'delegation_loop',\n            'tool_hallucination',\n            'task_drift',\n            'output_quality'\n        ]\n    )\n    \n    if not result['passed']:\n        vex.log_failure(result)\n        raise ValueError(f'Vex blocked: {result[\"issues\"]}')\n    \n    return output\n\n# Apply to crew\nresearcher = Agent(role='Researcher', goal='Research')\ntask = Task(description='Research Q4 trends')\ntask.callback = vex_governance_callback  # Single line integration\n\ncrew = Crew(agents=[researcher], tasks=[task])\ncrew.kickoff()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk` and one callback line to govern your CrewAI agents today."
+    }
+  }
+}

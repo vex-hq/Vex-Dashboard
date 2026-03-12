@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build data extraction with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents data extraction",
+      "n8n AI Agents guardrails",
+      "data extraction reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Data Extraction workflows with n8n AI Agents enables powerful schema-guided LLM calls to parse unstructured documents into structured JSON outputs. However, complex agent chains and unvalidated AI responses introduce risks like schema violations, incomplete extractions, and recursive failures. Vex provides essential guardrails to verify schema compliance, field accuracy, and data completeness before downstream actions.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with n8n AI Agents",
+      "description": "n8n workflows typically start with a trigger node (HTTP Request or File Watcher) that receives unstructured documents like PDFs or emails. An AI Agent node configured with a structured output schema processes the content using an LLM like GPT-4, generating JSON matching the defined schema. Subsequent nodes handle validation, storage, or API calls with the extracted data.\n\nThe AI Agent node uses tools and memory for multi-step reasoning, but outputs often bypass validation before reaching action nodes like database inserts or CRM updates. This creates failure points where malformed JSON or missing fields propagate downstream. Vex integrates as a webhook node immediately after AI Agent outputs to catch these issues.\n\nCommon patterns include chaining multiple AI Agents for hierarchical extraction (document → sections → entities) and using memory nodes for conversation context, both of which amplify risks without verification.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   Trigger Node  │───▶│   AI Agent Node  │───▶│   Vex Webhook │\n│ (HTTP/File)     │    │ (Schema-Guided   │    │   (Guardrails) │\n└─────────────────┘    │  LLM Extraction)  │    └──────────────┘\n                       └──────────────────┘           │\n                                                      ▼\n                                               ┌──────────────┐\n                                               │ Action Nodes │\n                                               │ (DB/CRM/API) │\n                                               └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI Agent outputs triggering subsequent workflow runs create infinite loops when validation fails",
+        "severity": "critical",
+        "mitigation": "Vex webhook blocks invalid outputs before they reach trigger nodes"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Malformed JSON from schema-guided extraction crashes database inserts or API calls",
+        "severity": "high",
+        "mitigation": "Vex schema compliance checks ensure structured output validity"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "Extracted PII or API keys passed to downstream tools without sanitization",
+        "severity": "high",
+        "mitigation": "Vex data masking and PII detection before action nodes"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated document context leads to extraction drift across agent chains",
+        "severity": "medium",
+        "mitigation": "Vex completeness validation against source document"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n AI Agent Node with Structured Schema",
+        "description": "Configure AI Agent node with JSON schema for invoice extraction",
+        "code": "const schema = {\n  type: 'object',\n  properties: {\n    invoiceNumber: { type: 'string' },\n    date: { type: 'string', format: 'date' },\n    totalAmount: { type: 'number' },\n    lineItems: {\n      type: 'array',\n      items: {\n        type: 'object',\n        properties: {\n          description: { type: 'string' },\n          quantity: { type: 'number' },\n          unitPrice: { type: 'number' }\n        }\n      }\n    }\n  },\n  required: ['invoiceNumber', 'totalAmount']\n};\n\n// AI Agent prompt\nreturn {\n  json: {\n    instruction: `Extract invoice data from this document as valid JSON matching the schema. Document: ${{ $json.document }}`,\n    schema: schema\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Schema Compliance Guardrail",
+        "description": "Verify AI Agent output matches extraction schema before downstream processing",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst result = await vex.verify({\n  input: {\n    document: items[0].json.document,\n    extractedData: items[0].json.extracted\n  },\n  checks: [\n    {\n      type: 'json_schema',\n      name: 'invoice_schema_compliance',\n      schema: {\n        type: 'object',\n        properties: {\n          invoiceNumber: { type: 'string' },\n          totalAmount: { type: 'number', minimum: 0 }\n        },\n        required: ['invoiceNumber']\n      },\n      path: '$.extractedData'\n    }\n  ]\n});\n\nreturn {\n  verified: result.passed,\n  issues: result.issues,\n  data: result.output\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Field Accuracy Validation with Source Grounding",
+        "description": "Cross-verify extracted amounts against document text using semantic similarity",
+        "code": "const checks = [\n  {\n    type: 'field_accuracy',\n    name: 'total_amount_verification',\n    path: '$.extractedData.totalAmount',\n    groundTruth: '={{ $json.document }}',\n    threshold: 0.95,\n    metric: 'semantic_similarity'\n  },\n  {\n    type: 'completeness',\n    name: 'required_fields_present',\n    path: '$.extractedData',\n    requiredFields: ['invoiceNumber', 'date', 'lineItems']\n  }\n];\n\nconst result = await vex.verify({\n  input: items[0].json,\n  checks: checks\n});\n\nif (!result.passed) {\n  throw new Error(`Extraction failed validation: ${JSON.stringify(result.issues)}`);\n}\n\nreturn result.output;",
+        "language": "typescript"
+      },
+      {
+        "title": "Type Consistency and Data Quality Checks",
+        "description": "Ensure numeric fields parse correctly and line items are complete",
+        "code": "const typeChecks = [\n  {\n    type: 'type_consistency',\n    name: 'numeric_fields_valid',\n    path: '$.extractedData.totalAmount',\n    expectedType: 'number'\n  },\n  {\n    type: 'array_length',\n    name: 'line_items_minimum',\n    path: '$.extractedData.lineItems',\n    minLength: 1,\n    maxLength: 50\n  },\n  {\n    type: 'regex_match',\n    name: 'invoice_number_format',\n    path: '$.extractedData.invoiceNumber',\n    pattern: '^INV-\\d{6}$'\n  }\n];\n\nreturn await vex.verify({\n  input: items[0].json,\n  checks: typeChecks,\n  policy: 'block_on_failure'\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex Webhook Node After AI Agent",
+        "description": "Insert Vex verification as HTTP Request node immediately after AI Agent output",
+        "code": "// n8n HTTP Request Node configuration\nconst webhookUrl = 'https://api.vex.dev/v1/verify/your-task-id';\n\nreturn {\n  method: 'POST',\n  url: webhookUrl,\n  headers: {\n    'Authorization': `Bearer ${{ $env.VEX_API_KEY }}`,\n    'Content-Type': 'application/json'\n  },\n  body: {\n    input: {\n      document: '={{ $json.document }}',\n      aiOutput: '={{ $json.extracted }}'\n    },\n    checks: ['invoice_schema_compliance', 'field_accuracy', 'type_consistency']\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Dynamic Schema Loading from n8n Credentials",
+        "description": "Load extraction schemas from n8n credentials for different document types",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst schemas = {\n  invoice: { /* schema definition */ },\n  receipt: { /* schema definition */ }\n};\n\nconst documentType = items[0].json.metadata?.type || 'invoice';\n\nconst vex = new Vex({ projectId: 'your-project-id' });\n\nconst result = await vex.verify({\n  input: items[0].json,\n  checks: [\n    {\n      type: 'json_schema',\n      name: `${documentType}_compliance`,\n      schema: schemas[documentType],\n      path: '$.aiOutput'\n    }\n  ],\n  metadata: { workflowId: $workflow.id, nodeId: $node.id }\n});\n\nreturn result.passed ? [result.output] : [];",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Workflow Branching with Vex Results",
+        "description": "Route verified data to actions, failed extractions to human review",
+        "code": "// Code node after Vex webhook\nconst vexResult = items[0].json;\n\nif (vexResult.passed) {\n  // Route to production actions\n  return [{\n    json: {\n      status: 'verified',\n      data: vexResult.output,\n      confidence: vexResult.metrics.confidence\n    }\n  }];\n} else {\n  // Route to human review queue\n  return [{\n    json: {\n      status: 'failed',\n      issues: vexResult.issues,\n      data: items[0].json.aiOutput,\n      action: 'human_review'\n    }\n  }];\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Data Extraction",
+      "description": "Add Vex guardrails to your n8n workflows today and eliminate extraction failures with one webhook node."
+    }
+  }
+}

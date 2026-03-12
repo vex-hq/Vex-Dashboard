@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Haystack Agents",
+    "description": "How to detect and fix ai agent memory management in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Haystack memory-management",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack, AI Agent Memory Management problems manifest as pipelines losing conversational context across runs, causing agents to repeat queries or hallucinate forgotten details. Pipeline components like DocumentStores and custom memory nodes fail to persist state properly, leading to retrievers fetching irrelevant historical documents. This is exacerbated by Haystack's stateless pipeline design, where memory must be explicitly managed via custom components or external stores.",
+    "howItManifests": [
+      {
+        "scenario": "ConversationalRetrievalChain loses chat history between turns",
+        "symptom": "Agent responds 'I don't remember our previous conversation' despite chat history input",
+        "impact": "User experience breaks; agent appears forgetful and requires constant context re-entry"
+      },
+      {
+        "scenario": "Custom MemoryStore component fails silently on high load",
+        "symptom": "Pipeline runs without errors but returns empty memory context",
+        "impact": "Agent hallucinates answers instead of referencing conversation history"
+      },
+      {
+        "scenario": "InMemoryDocumentStore overflows in long conversations",
+        "symptom": "Retriever returns oldest irrelevant documents instead of recent chat context",
+        "impact": "Agent answers based on week-old conversations instead of current session"
+      },
+      {
+        "scenario": "PipelineConnectors don't flush memory between sessions",
+        "symptom": "New user inherits previous user's conversation context",
+        "impact": "Privacy violations and completely wrong personalized responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Context Drift Detector",
+        "description": "Checks if conversational memory state persists across pipeline runs by comparing session embeddings",
+        "code": "from haystack import Pipeline\nfrom haystack.components.embedders import SentenceTransformersTextEmbedder\nimport numpy as np\n\nmemory_pipeline = Pipeline()\nmemory_pipeline.add_component('embedder', SentenceTransformersTextEmbedder(model='all-MiniLM-L6-v2'))\n\nprev_context = 'user asked about AI agents'\nprev_embedding = memory_pipeline.run({'embedder': {'text': prev_context}})['embedder']['embedding']\n\n# Simulate next turn\ncurr_context = 'tell me more about memory management'\nresult = memory_pipeline.run({'embedder': {'text': curr_context}})\ncurr_embedding = result['embedder']['embedding']\n\ncosine_sim = np.dot(prev_embedding, curr_embedding) / (np.linalg.norm(prev_embedding) * np.linalg.norm(curr_embedding))\ndrift_detected = cosine_sim < 0.7\nprint(f'Memory drift detected: {drift_detected} (similarity: {cosine_sim:.3f})')",
+        "language": "python"
+      },
+      {
+        "name": "Conversation State Leakage Check",
+        "description": "Detects when previous user sessions contaminate current conversation memory",
+        "code": "from haystack.document_stores.in_memory import InMemoryDocumentStore\nfrom haystack import Document\n\nstore = InMemoryDocumentStore()\n\n# Simulate user A session\nuser_a_docs = [Document(content='User A asked about RAG pipelines')]\nstore.write_documents(user_a_docs)\n\n# Clear should happen here but doesn't\n# store.delete_documents(user_a_docs)\n\n# Simulate user B session\nuser_b_results = store.filter(lambda doc: 'User B' in doc.content, limit=5)\nleakage_detected = len(user_b_results) == 0  # Should be empty but gets user A docs\n\nprint(f'State leakage detected: {not leakage_detected}')",
+        "language": "python"
+      },
+      {
+        "name": "Memory Retention Rate Monitor",
+        "description": "Measures what percentage of conversation history is actually retrievable by the agent",
+        "code": "from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.builders import PromptBuilder\n\nchat_history = [\n    'User: What is Haystack?', 'Agent: Haystack is a framework...',\n    'User: How does memory work?', 'Agent: Memory uses DocumentStore...'\n]\n\nretriever = InMemoryEmbeddingRetriever(document_store=store)\nquery = 'memory management haystack'\nresults = retriever.run(query=query, top_k=3)\n\nretention_rate = sum(1 for doc in results['documents'] if any(hist in doc.content for hist in chat_history)) / len(results['documents'])\nprint(f'Memory retention rate: {retention_rate:.2%} - ALERT if < 80%')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Session-Scoped MemoryStore Component",
+        "description": "Custom component that isolates memory by user session ID",
+        "code": "from haystack import component\nfrom haystack.dataclasses import ChatMessage\nfrom typing import Dict, Any\n\n@component\nclass SessionMemoryStore:\n    @component.output_types(retrieved_history=list[ChatMessage])\n    def run(self, session_id: str, query: str) -> Dict[str, Any]:\n        if not hasattr(self, 'sessions'):\n            self.sessions = {}\n        \n        if session_id not in self.sessions:\n            self.sessions[session_id] = []\n        \n        # Retrieve relevant history\n        history = self.sessions[session_id][-5:]  # Last 5 exchanges\n        relevant_history = [msg for msg in history if 'memory' in msg.content.lower() or 'haystack' in msg.content.lower()]\n        \n        return {'retrieved_history': relevant_history}\n    \n    @component\n    def save(self, session_id: str, messages: list[ChatMessage]):\n        self.sessions[session_id].extend(messages[-2:])  # Save last exchange",
+        "language": "python"
+      },
+      {
+        "name": "Redis-Backed Persistent Memory",
+        "description": "Replace InMemoryDocumentStore with Redis for production memory persistence",
+        "code": "from haystack.document_stores.redis import RedisDocumentStore\nfrom haystack.integrations.langchain.document_stores import LangchainDocumentStore\n\nfrom langchain_community.vectorstores import Redis\nfrom langchain_openai import OpenAIEmbeddings\n\nredis_store = RedisDocumentStore(\n    url='redis://localhost:6379',\n    index='haystack_memory',\n    embedding_dim=384\n)\n\n# Session-specific key prefixing\nclass SessionRedisStore:\n    def __init__(self, redis_store, session_id):\n        self.redis_store = redis_store\n        self.session_id = session_id\n        self.namespace = f'memory:{session_id}'\n    \n    def write_memory(self, docs):\n        for doc in docs:\n            doc.meta['session_id'] = self.session_id\n        self.redis_store.write_documents(docs)\n    \n    def retrieve_memory(self, query, top_k=3):\n        results = self.redis_store.semantic_search(\n            query=query,\n            filters={'session_id': self.session_id},\n            top_k=top_k\n        )\n        return results",
+        "language": "python"
+      },
+      {
+        "name": "Memory Cleanup Pipeline Connector",
+        "description": "Automatically expires old conversation memory to prevent leaks",
+        "code": "from haystack import Pipeline\nfrom datetime import datetime, timedelta\nfrom haystack.components.writers import DocumentWriter\n\nclass MemoryCleanupConnector:\n    def __init__(self, document_store, ttl_hours=24):\n        self.store = document_store\n        self.ttl = timedelta(hours=ttl_hours)\n    \n    def cleanup_expired_sessions(self):\n        cutoff = datetime.now() - self.ttl\n        expired_docs = self.store.filter(lambda doc: doc.meta.get('created_at', datetime.now()) < cutoff)\n        self.store.delete_documents(expired_docs)\n        print(f'Cleaned {len(expired_docs)} expired memory documents')\n\n# Add to pipeline\nmemory_pipeline = Pipeline()\nmemory_pipeline.add_component('cleanup', MemoryCleanupConnector(store))\nmemory_pipeline.connect('cleanup', 'next_component')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that continuously monitors memory retention rates, detects context drift, and validates session isolation across all agent conversations. It automatically flags pipelines where memory retention drops below 85% or when cross-session contamination occurs, providing precise failure signatures and recommended fixes.\n\nVex's memory-specific detectors run as pipeline guards, injecting test conversations and measuring context preservation without impacting production traffic. When issues are detected, Vex can automatically apply remediation patterns like session-scoped stores or TTL cleanup, with rollback capabilities.\n\nThe integration requires only adding VexGuard as a pipeline component and defining memory quality thresholds, after which it provides real-time dashboards and auto-remediation workflows specific to Haystack's component architecture.",
+      "code": "from vex_sdk.haystack import VexGuard\nfrom haystack import Pipeline\n\n# Install: pip install haystack-ai vex-sdk\n\nagent_pipeline = Pipeline()\n\n# Add Vex as first component\nagent_pipeline.add_component(\n    'vex_memory_guard',\n    VexGuard(\n        detector_type='memory_management',\n        thresholds={'retention_rate': 0.85, 'context_drift': 0.7},\n        auto_remediate=True\n    )\n)\n\n# Connect to existing components\nagent_pipeline.connect('vex_memory_guard', 'retriever')\n\n# Vex auto-generates test cases and monitors\nresult = agent_pipeline.run({\n    'vex_memory_guard': {\n        'session_id': 'user_123',\n        'test_conversation': 'What is Haystack memory management?'\n    }\n})\n\nprint('Vex Status:', result['vex_memory_guard']['health_status'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of VexGuard to your Haystack pipeline and eliminate memory management failures forever."
+    }
+  }
+}

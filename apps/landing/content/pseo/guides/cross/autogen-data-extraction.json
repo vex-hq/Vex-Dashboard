@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with AutoGen + Vex Guardrails",
+    "description": "Learn how to build data extraction with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen data extraction",
+      "AutoGen guardrails",
+      "data extraction reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with AutoGen enables multi-agent systems to parse unstructured documents into structured JSON schemas through collaborative LLM conversations. Guardrails are essential to prevent infinite loops, incorrect extractions, and schema violations that could lead to data loss or costly reprocessing. Vex integration ensures reliable outputs by validating schema compliance and field accuracy in real-time.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with AutoGen",
+      "description": "The typical AutoGen data extraction architecture involves a Supervisor Agent that orchestrates specialized Extractor Agents. Each Extractor focuses on specific document sections or schema fields, debating and refining extractions collaboratively. A final Validator Agent checks completeness and type consistency before outputting structured JSON.\n\nDocuments are chunked and routed to agents via function calls, with conversation memory maintained across turns. Human-in-the-loop approval gates can be inserted for high-value extractions. The system scales by adding domain-specific agents for invoices, contracts, or medical records.\n\nVex integrates as a reply filter to catch failures early, validating Pydantic models against extraction schemas before agents proceed.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Input Doc     │───▶│ Supervisor Agent │\n│   (PDF/Text)    │    │   (Router)       │\n└─────────────────┘    └──────────┬───────┘\n                                │\n                ┌───────────────▼───────┐\n                │ Extractor Agents     │\n                │ - Invoice Agent      │\n                │ - Address Agent      │◄───Vex Filter\n                │ - Date Agent         │   (Schema Check)\n                └──────────┬────────────┘\n                           │\n                    ┌──────▼──────┐\n                    │ Validator   │───▶┌──────────────┐\n                    │ Agent       │    │ Structured   │\n                    └────────────┘    │ JSON Output   │\n                                      └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents repeatedly challenge each other's extractions without converging on a final answer",
+        "severity": "critical",
+        "mitigation": "Vex enforces max-turn limits and convergence criteria in reply filters"
+      },
+      {
+        "name": "Schema compliance failures",
+        "description": "Extracted JSON violates Pydantic models (missing required fields, wrong types)",
+        "severity": "high",
+        "mitigation": "Vex validates against extraction schema before reply acceptance"
+      },
+      {
+        "name": "Field accuracy drift",
+        "description": "Agents agree on plausible but factually incorrect extractions through groupthink",
+        "severity": "high",
+        "mitigation": "Vex cross-verifies key fields against source document embeddings"
+      },
+      {
+        "name": "Incomplete extractions",
+        "description": "Agents overlook optional fields or fail to extract all document entities",
+        "severity": "medium",
+        "mitigation": "Vex completeness checks ensure all schema fields are populated"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Schema with Pydantic",
+        "description": "Create a Pydantic model defining the target structured output for document extraction.",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional, List\n\nclass Address(BaseModel):\n    street: str = Field(..., description=\"Full street address\")\n    city: str\n    zip_code: Optional[str] = None\n\nclass Invoice(BaseModel):\n    invoice_number: str\n    date: str\n    total_amount: float\n    vendor: str\n    customer_address: Address\n    line_items: List[dict] = Field(default_factory=list)\n\n    class Config:\n        json_schema_extra = {\"example\": {...}}",
+        "language": "python"
+      },
+      {
+        "title": "Setup AutoGen Agents for Extraction",
+        "description": "Configure supervisor and extractor agents with clear roles for collaborative extraction.",
+        "code": "from autogen import AssistantAgent, UserProxyAgent, config_list_from_json\n\nconfig_list = config_list_from_json(\"OAI_CONFIG_LIST\")\n\nsupervisor = AssistantAgent(\n    name=\"Supervisor\",\n    llm_config={\"config_list\": config_list},\n    system_message=\"You route document chunks to specialized extraction agents.\"\n)\n\nextractor = AssistantAgent(\n    name=\"Extractor\",\n    llm_config={\"config_list\": config_list},\n    system_message=\"Extract invoice data into Pydantic Invoice model. Be precise.\"\n)\n\nuser_proxy = UserProxyAgent(\n    name=\"User\",\n    human_input_mode=\"NEVER\",\n    max_consecutive_auto_reply=5,\n    code_execution_config=False\n)",
+        "language": "python"
+      },
+      {
+        "title": "Initiate Multi-Agent Extraction",
+        "description": "Start the conversation with document text and schema instructions.",
+        "code": "document_text = \"Invoice #INV-1234 dated 2024-01-15... Total: $1,250.00...\"\n\nuser_proxy.initiate_chat(\n    supervisor,\n    message=f\"\"\"\nExtract this invoice using Invoice Pydantic schema:\n\\n{document_text}\n\nOutput ONLY valid JSON matching the schema.\"\"\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Parse and Validate Final Output",
+        "description": "Convert agent response to Pydantic model and handle validation errors.",
+        "code": "import json\n\nresponse = extractor.last_message()[\"content\"]\ntry:\n    extracted_invoice = Invoice.model_validate_json(response)\n    print(f\"✅ Valid extraction: {extracted_invoice.total_amount}\")\nexcept ValueError as e:\n    print(f\"❌ Schema violation: {e}\")\n    # Trigger human review or agent retry",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Setup Vex client with your API key for AutoGen integration.",
+        "code": "pip install autogen vex-sdk\n\nimport vex\n\nvex_client = vex.Vex(api_key=\"vex_abc123\")\n\n# Register default verifiers for data extraction\nvex_client.register_verifier(\n    \"extraction_schema\",\n    verifier=\"pydantic_validate\",\n    schema=Invoice.model_json_schema()\n)\n\nvex_client.register_verifier(\n    \"field_accuracy\",\n    verifier=\"semantic_match\",\n    threshold=0.9\n)",
+        "language": "python"
+      },
+      {
+        "title": "Register Vex as Reply Function Filter",
+        "description": "Intercept agent replies and validate before conversation continues.",
+        "code": "def vex_reply_filter(sender, recipient, msg):\n    \"\"\"Vex validation filter for AutoGen replies\"\"\"\n    \n    # Skip non-extraction messages\n    if \"Invoice\" not in msg.get(\"content\", \"\"):\n        return True\n    \n    result = vex_client.verify(\n        data=msg[\"content\"],\n        verifiers=[\"extraction_schema\", \"field_accuracy\"],\n        context={\"document\": document_text}\n    )\n    \n    if not result.valid:\n        print(f\"Vex blocked: {result.issues}\")\n        return False  # Block invalid reply\n    \n    return True\n\n# Register filter\ngroupchat.register_reply([None, None], reply_filter=vex_reply_filter)",
+        "language": "python"
+      },
+      {
+        "title": "Configure GroupChat with Vex Guardrails",
+        "description": "Setup GroupChat with turn limits and Vex monitoring for production use.",
+        "code": "from autogen import GroupChat, GroupChatManager\n\ngroupchat = GroupChat(\n    agents=[supervisor, extractor, validator],\n    messages=[],\n    max_round=10,  # Prevent infinite loops\n    reply_filter=vex_reply_filter\n)\n\nmanager = GroupChatManager(\n    groupchat=groupchat,\n    llm_config={\"config_list\": config_list}\n)\n\n# Production monitoring\nmonitor_id = vex_client.create_monitor(\n    name=\"invoice_extraction\",\n    verifiers=[\"extraction_schema\", \"field_accuracy\", \"completeness\"]\n)\n\nuser_proxy.initiate_chat(manager, message=document_prompt)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Data Extraction",
+      "description": "Get started with Vex free tier at vex.com to protect your production extraction pipelines today."
+    }
+  }
+}

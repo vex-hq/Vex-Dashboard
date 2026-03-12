@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build research agents with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents research agents",
+      "Amazon Bedrock Agents guardrails",
+      "research agents reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable building sophisticated Research Agents that leverage knowledge bases, action groups for web search, and guardrails for enterprise-grade deployments. These agents perform multi-step information gathering, analysis, and synthesis, but are prone to issues like malformed action responses and hallucinated claims. Vex provides post-processing verification with invoke_agent() wrappers to ensure source accuracy, recency, and bias-free outputs.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Amazon Bedrock Agents",
+      "description": "Research Agents on Bedrock follow a multi-step workflow: user queries trigger the agent, which invokes action groups (Lambda functions) for web search APIs like Tavily or SerpAPI, retrieves relevant documents from knowledge bases with RAG, and synthesizes responses using foundation models like Claude or Llama. Guardrails filter inputs/outputs for PII and content policy, while session state maintains context across turns. The architecture scales horizontally with provisioned throughput for high-volume research tasks.\n\nKey components include the Agent itself (orchestrator), Action Groups (custom Lambda for search/tools), Knowledge Bases (vector stores like OpenSearch), and Guardrails (pre/post-processing filters). Outputs flow through invoke_agent() API calls, making it ideal for Vex verification wrappers.\n\nFailure often occurs in Lambda response formatting or KB chunking, leading to incomplete retrievals or agent loops.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Bedrock Agent    │\n└─────────────────�┘    │ - Orchestrator   │\n                       │ - Session State  │\n                       └────────┬─────────┘\n                                │\n                ┌───────────────▼───────────────┐\n                │ Action Groups (Lambda)        │\n                │ - Web Search (Tavily/Serp)    │◀──────┐\n                │ - Data Analysis Tools         │       │\n                └───────────────▲───────────────┘       │\n                                │                      │\n                       ┌────────▼────────┐    ┌────────▼──────┐\n                       │ Knowledge Base  │    │   Guardrails   │\n                       │ - RAG Retrieval │    │ - PII Filter   │\n                       │ - Vector Store  │    │ - Content      │\n                       └─────────────────┘    │   Policy       │\n                                              └────────────────┘\n\n                       Vex.verify() Wrapper\n                       ┌─────────────────────┐\n                       │ Verified Response   │\n                       │ - Sources/Accuracy  │\n                       │ - Recency/Bias      │\n                       └─────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups often return non-JSON or incorrectly structured responses, causing agent parsing failures and infinite loops.",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() with Vex verification to validate action group outputs against schema before agent processing."
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies in KB vector stores fail to retrieve contextually relevant documents, leading to hallucinated or incomplete research.",
+        "severity": "high",
+        "mitigation": "Vex source verification cross-checks retrieved documents against query relevance and supplements with web search validation."
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Bedrock guardrails miss research-specific violations like citing outdated sources or biased viewpoints.",
+        "severity": "medium",
+        "mitigation": "Layer Vex bias detection and recency checks atop Bedrock guardrails for comprehensive policy enforcement."
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Multi-turn research conversations lose context due to session timeouts or state corruption, requiring query repetition.",
+        "severity": "high",
+        "mitigation": "Vex maintains verified session summaries and claim provenance across invocations for stateful reliability."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation (Python)",
+        "description": "Core invoke_agent call with session management for research workflows.",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\nagent_id = 'YOUR_AGENT_ID'\nagent_alias_id = 'YOUR_AGENT_ALIAS_ID'\nsession_id = 'research-session-123'\n\nresponse = bedrock_agent.invoke_agent(\n    agentId=agent_id,\n    agentAliasId=agent_alias_id,\n    sessionId=session_id,\n    inputText=\"Research latest AI regulations in EU\",\n    enableTrace=True\n)\n\n# Process streaming response\ncompletion = ''\nfor event in response['completion']:\n    chunk = event['chunk']\n    if 'bytes' in chunk:\n        completion += chunk['bytes'].decode()\n\nprint(json.dumps({'response': completion}, indent=2))",
+        "language": "python"
+      },
+      {
+        "title": "Action Group Lambda for Web Search (Python)",
+        "description": "Lambda function implementing web search action for research agents.",
+        "code": "import json\nimport requests\n\ndef lambda_handler(event, context):\n    # Parse agent input\n    task = json.loads(event['input']['task'])\n    query = task.get('searchQuery', '')\n    \n    # Call search API (Tavily example)\n    search_response = requests.post(\n        'https://api.tavily.com/search',\n        json={'api_key': 'YOUR_TAVILY_KEY', 'query': query, 'max_results': 5}\n    ).json()\n    \n    # Return Bedrock Action Group format\n    return {\n        'task': {\n            'finalAnswer': f\"Found {len(search_response['results'])} sources for '{query}'\",\n            'completionStatus': 'COMPLETED'\n        },\n        'response': {\n            'sources': [r['url'] for r in search_response['results']],\n            'snippets': [r['content'] for r in search_response['results']]\n        }\n    }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Client with Session State",
+        "description": "Node.js client for multi-turn research conversations.",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\nconst AGENT_ID = 'YOUR_AGENT_ID';\nconst ALIAS_ID = 'YOUR_AGENT_ALIAS_ID';\n\nasync function invokeResearchAgent(query: string, sessionId: string) {\n  const command = new InvokeAgentCommand({\n    agentId: AGENT_ID,\n    agentAliasId: ALIAS_ID,\n    sessionId: sessionId,\n    inputText: query,\n    enableTrace: true,\n  });\n\n  const response = await client.send(command);\n  let completion = '';\n\n  for await (const chunk of response.completion!) {\n    if (chunk.bytes) {\n      completion += new TextDecoder().decode(chunk.bytes);\n    }\n  }\n\n  return { response: completion, sessionId };\n}\n\n// Usage\ninvokeResearchAgent('Latest quantum computing breakthroughs', 'qc-research-001');",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base RAG Integration (Python)",
+        "description": "Associate knowledge base with agent for document retrieval.",
+        "code": "import boto3\n\nbedrock_agent = boto3.client('bedrock-agent')\n\n# Create Knowledge Base\nkb_response = bedrock_agent.create_knowledge_base(\n    name='research-docs',\n    roleArn='arn:aws:iam::ACCOUNT:role/BedrockKBRole',\n    knowledgeBaseConfiguration={\n        'type': 'VECTOR',\n        'vectorKnowledgeBaseConfiguration': {\n            'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'\n        }\n    },\n    storageConfiguration={\n        'type': 'OPENSEARCH_SERVERLESS'\n    }\n)\n\n# Associate with Agent\nbedrock_agent.associate_agent_knowledge_base(\n    agentId='YOUR_AGENT_ID',\n    knowledgeBaseId=kb_response['knowledgeBaseId'],\n    description='Research document store',\n    knowledgeBaseState='ENABLED'\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Wrapper for invoke_agent()",
+        "description": "Wrap Bedrock agent calls with Vex verification for research accuracy.",
+        "code": "import vex\n\nfrom your_bedrock_client import invoke_bedrock_agent\n\n@vex.workflow(\n    checks=[\n        'source_verification',\n        'claim_accuracy',\n        'recency_check',\n        'bias_detection'\n    ],\n    risk_profile='medium'\n)\ndef verified_research_agent(query: str, session_id: str):\n    # Call Bedrock Agent\n    raw_response = invoke_bedrock_agent(query, session_id)\n    \n    # Vex verifies post-processing\n    verified = vex.verify({\n        'input': query, \n        'agent_output': raw_response,\n        'context': {'type': 'research_agent', 'session': session_id}\n    })\n    \n    return {\n        'response': verified.output,\n        'sources': verified.metadata.sources,\n        'claims': verified.metadata.claims,\n        'warnings': verified.metadata.issues\n    }\n\n# Usage\nresult = verified_research_agent('2024 AI regulations EU', 'session-123')",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification Middleware",
+        "description": "Async middleware pattern for Bedrock agent verification.",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: 'YOUR_VEX_KEY' });\n\nasync function verifiedBedrockAgent(query: string, sessionId: string) {\n  // Raw Bedrock call\n  const rawResponse = await invokeBedrockAgent(query, sessionId);\n  \n  // Vex verification\n  const verified = await vex.verify({\n    input: query,\n    output: rawResponse,\n    checks: ['source_verification', 'claim_accuracy', 'recency_check', 'bias_detection'],\n    context: {\n      agent: 'bedrock-research',\n      session: sessionId,\n      risk_profile: 'medium'\n    }\n  });\n  \n  return {\n    response: verified.output,\n    provenance: verified.provenance,\n    score: verified.trust_score,\n    issues: verified.issues\n  };\n}\n\nexport { verifiedBedrockAgent };",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Session Verification (Python)",
+        "description": "Maintain verified state across research conversations.",
+        "code": "import vex\nimport json\n\nclass VerifiedResearchSession:\n    def __init__(self, session_id: str):\n        self.session_id = session_id\n        self.verified_history = []\n    \n    @vex.workflow(\n        checks=['claim_accuracy', 'recency_check'],\n        session_persistence=True\n    )\n    def query(self, question: str):\n        # Bedrock agent call\n        agent_response = invoke_bedrock_agent(question, self.session_id)\n        \n        # Verify with conversation history\n        verified = vex.verify({\n            'input': question,\n            'agent_output': agent_response,\n            'session_history': self.verified_history[-3:],  # Last 3 turns\n            'domain': 'research'\n        })\n        \n        self.verified_history.append({\n            'query': question,\n            'verified_output': verified.output,\n            'sources': verified.metadata.get('sources', [])\n        })\n        \n        return verified\n    \n# Usage\nsession = VerifiedResearchSession('research-001')\nresult1 = session.query('EU AI Act details')\nresult2 = session.query('Recent updates to the act?')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Research Agents",
+      "description": "Integrate Vex verification in minutes to eliminate hallucination risks and ensure trustworthy research outputs - start your free trial today."
+    }
+  }
+}

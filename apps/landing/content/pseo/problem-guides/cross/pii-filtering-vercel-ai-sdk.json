@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Vercel AI SDK pii-filtering",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK agents, PII filtering failures occur when streaming responses from `generateText` or `streamText` bypass validation, exposing sensitive data like emails or phone numbers in real-time UIs. Tool calls returning unfiltered user data from databases or APIs compound the issue, as results are directly rendered without PII redaction. Edge runtime constraints exacerbate this, limiting complex filtering during high-throughput agent interactions.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming agent responses with hallucinated PII",
+        "symptom": "Partial tokens in `streamText` contain realistic-looking emails/SSNs before completion",
+        "impact": "Real-time UI displays unfiltered PII during typing effect, violating GDPR/CCPA"
+      },
+      {
+        "scenario": "Tool call results from user database queries",
+        "symptom": "Structured tool outputs with `generateObject` include raw customer emails/phone numbers",
+        "impact": "Frontend directly renders unvalidated tool results exposing PII to end-users"
+      },
+      {
+        "scenario": "Multi-turn agent conversations with context retention",
+        "symptom": "Previous user messages containing PII re-emerge in agent summaries via `streamUI`",
+        "impact": "Conversation history leaks PII across sessions in persistent chat UIs"
+      },
+      {
+        "scenario": "Edge function timeouts during PII scanning",
+        "symptom": "Complex regex/LLM PII detection times out in 5s Vercel edge runtime",
+        "impact": "Unfiltered responses served during peak traffic due to filtering timeouts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream PII Token Interception",
+        "description": "Intercepts `streamText` chunks to detect PII patterns in real-time streaming",
+        "code": "import { streamText } from 'ai';\nimport { z } from 'zod';\n\nconst detectPII = (text: string) => {\n  const emailRegex = /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g;\n  const phoneRegex = /\\(?(\\d{3})\\)?[-.\\s]?(\\d{3})[-.\\s]?(\\d{4})/g;\n  return {\n    hasEmail: emailRegex.test(text),\n    hasPhone: phoneRegex.test(text),\n    matches: [...text.match(emailRegex) || [], ...text.match(phoneRegex) || []]\n  };\n};\n\nconst result = await streamText({\n  model: openai('gpt-4o-mini'),\n  onFinish: ({ text }) => {\n    const pii = detectPII(text);\n    if (pii.hasEmail || pii.hasPhone) {\n      console.error('PII detected:', pii.matches);\n    }\n  }\n});\n\nfor await (const chunk of result.textStream) {\n  const pii = detectPII(chunk);\n  if (pii.hasEmail || pii.hasPhone) {\n    console.warn('Streaming PII detected:', pii.matches);\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call PII Validator",
+        "description": "Validates structured tool outputs before rendering in agent UIs",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst tools = {\n  getUser: z.object({\n    id: z.number(),\n    email: z.string().email(),\n    phone: z.string().optional()\n  })\n};\n\nconst { object } = await generateObject({\n  model: openai('gpt-4o'),\n  tools,\n  toolChoice: 'getUser',\n  onToolCall: ({ toolCall }) => {\n    const result = toolCall.args;\n    if (result.email || result.phone) {\n      console.error('Tool call contains PII:', { email: result.email, phone: result.phone });\n      // Block rendering\n      throw new Error('PII in tool result');\n    }\n  }\n});\n\nconsole.log('Safe tool result:', object);",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Message History Scanner",
+        "description": "Scans conversation history for PII leakage across turns",
+        "code": "import { streamUI } from 'ai/rsc';\nimport { messageHistory } from './chat-history';\n\nconst scanHistoryPII = (messages: any[]) => {\n  return messages.some(msg => \n    /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/.test(msg.content)\n  );\n};\n\nconst ui = await streamUI({\n  model: openai('gpt-4o'),\n  messages: messageHistory,\n  beforeGenerate: () => {\n    if (scanHistoryPII(messageHistory)) {\n      console.error('PII found in conversation history');\n      return { error: 'Conversation contains sensitive data' };\n    }\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Middleware",
+        "description": "Real-time PII replacement in streaming responses with Vercel AI SDK",
+        "code": "import { createStreamableValue } from 'ai/rsc';\nimport { redactPII } from '@vex_dev/sdk';\n\nexport async function streamAgentResponse(userMessage: string) {\n  const stream = createStreamableValue('');\n  \n  (async () => {\n    const { textStream } = await streamText({\n      model: openai('gpt-4o-mini'),\n      prompt: userMessage\n    });\n    \n    for await (const chunk of textStream) {\n      const cleanChunk = await redactPII(chunk, {\n        types: ['EMAIL', 'PHONE', 'SSN'],\n        replace: '[REDACTED]'\n      });\n      stream.update(cleanChunk);\n    }\n    \n    stream.done();\n  })();\n  \n  return stream.value;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Call Wrapper",
+        "description": "Filters PII from tool results before UI rendering",
+        "code": "import { generateObject } from 'ai';\nimport { safeToolCall } from '@vex_dev/sdk';\n\nconst safeTools = {\n  getCustomer: safeToolCall(\n    async ({ id }) => {\n      const customer = await db.customer.findUnique({ where: { id } });\n      return {\n        id: customer.id,\n        name: customer.name,\n        // PII auto-filtered by safeToolCall\n        email: '[REDACTED]',\n        phone: '[REDACTED]'\n      };\n    },\n    { piiFields: ['email', 'phone'] }\n  )\n};\n\nconst result = await generateObject({\n  model: openai('gpt-4o'),\n  tools: safeTools\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Edge-Optimized PII Filter",
+        "description": "Lightweight regex filtering for Vercel edge runtime compliance",
+        "code": "import { NextRequest } from 'next/server';\nimport { generateText } from 'ai';\n\nexport const runtime = 'edge';\n\nconst EDGE_PII_FILTER = /\\b(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|\\d{3}[-.]?\\d{3}[-.]?\\d{4})\\b/gi;\n\nexport async function POST(req: NextRequest) {\n  const { prompt } = await req.json();\n  \n  const { text } = await generateText({\n    model: openai('gpt-4o-mini'),\n    prompt,\n    maxTokens: 1000 // Edge timeout safe\n  });\n  \n  const safeText = text.replace(EDGE_PII_FILTER, '[SAFE]');\n  \n  return Response.json({ safeText });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex provides middleware integration for Vercel AI SDK that automatically detects and redacts PII across `generateText`, `streamText`, and `generateObject` calls. The SDK wraps your existing agent patterns with zero-config PII scanning using regex, LLM classification, and custom rulesets. Detection happens in <50ms even on Vercel edge runtime.\n\nVex captures 100% of streaming tokens, tool call arguments/results, and conversation history for continuous PII monitoring. False positives are auto-tuned per application, and redacted data is logged for compliance audits. Integration requires one line of middleware in your AI route handlers.\n\nRemediation is automatic: PII is replaced inline during streaming, tool calls are blocked before execution, and risky conversations trigger human review workflows. Vex maintains type safety with Vercel AI SDK's Zod schemas while enforcing PII policies.",
+      "code": "import { createMiddleware } from '@vex_dev/sdk/vercel-ai';\nimport { generateText, streamText } from 'ai';\n\n// One-line Vex integration\ncreateMiddleware({\n  projectId: 'your-vex-project',\n  rules: {\n    PII: {\n      patterns: ['EMAIL', 'PHONE', 'SSN'],\n      action: 'REDACT',\n      confidence: 0.9\n    }\n  }\n});\n\n// Your existing code works unchanged\nexport async function chatHandler(messages: any[]) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n    tools: yourTools\n    // Vex auto-scans everything\n  });\n  \n  return result;\n}\n\n// PII automatically detected/redacted/blocked",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in 60 seconds to block PII leaks across all your Vercel AI SDK agents"
+    }
+  }
+}

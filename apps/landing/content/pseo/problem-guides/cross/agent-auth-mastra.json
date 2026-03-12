@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Mastra Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Mastra agent-auth",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, AI Agent Authentication and Authorization issues manifest when workflow steps fail to validate credentials between transitions, allowing unauthorized tool calls or stale auth tokens from memory retrieval. Agent tools often return malformed auth data due to unvalidated API responses, while sync integrations expose sensitive tokens causing agent confusion and privilege escalation. These failures are amplified by Mastra's workflow orchestration patterns where auth state isn't persisted correctly across agent steps.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent receives expired JWT from previous workflow step without token refresh",
+        "impact": "Unauthorized API calls fail silently, breaking workflow execution"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "OAuth callback returns partial token object missing refresh_token field",
+        "impact": "Agent stuck in infinite re-auth loop, exhausting API rate limits"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Retrieved conversation memory contains revoked access token",
+        "impact": "Agent attempts privileged operations with invalid credentials"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Third-party webhook pushes unescaped auth headers into agent context",
+        "impact": "Agent parses credentials as prompt content, leaking secrets in responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Auth Token Expiration Monitor",
+        "description": "Detects expired JWT tokens in Mastra workflow transitions using token parsing",
+        "code": "import jwt from 'jsonwebtoken';\n\nimport { MastraAgent, WorkflowContext } from 'mastra';\n\nexport function detectExpiredAuth(ctx: WorkflowContext): boolean {\n  const authHeader = ctx.workflow.memory?.auth?.token;\n  if (!authHeader) return false;\n  \n  try {\n    const decoded = jwt.decode(authHeader) as any;\n    if (!decoded || !decoded.exp) return false;\n    \n    return Date.now() >= decoded.exp * 1000;\n  } catch {\n    return true; // Malformed token\n  }\n}\n\n// Usage in Mastra workflow step\nagent.onTransition('apiCall', (ctx) => {\n  if (detectExpiredAuth(ctx)) {\n    throw new Error('Auth token expired - requires refresh');\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Auth Validator",
+        "description": "Validates Mastra agent tool responses contain complete OAuth token structure",
+        "code": "interface OAuthToken {\n  access_token: string;\n  refresh_token?: string;\n  expires_in: number;\n  token_type: 'Bearer';\n}\n\nexport function validateOAuthResponse(data: any): boolean {\n  const required: (keyof OAuthToken)[] = ['access_token', 'expires_in', 'token_type'];\n  return required.every(field => data[field] !== undefined && data[field] !== '');\n}\n\n// Mastra agent tool validation\nconst authTool = agent.createTool({\n  name: 'getOAuthToken',\n  execute: async (params) => {\n    const result = await fetchOAuthToken(params);\n    if (!validateOAuthResponse(result)) {\n      throw new Error('Incomplete OAuth token response from provider');\n    }\n    return result;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Auth Pollution Scanner",
+        "description": "Scans Mastra memory retrieval for embedded auth secrets causing prompt injection",
+        "code": "const AUTH_PATTERNS = [\n  /Bearer\\s+[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+/g,\n  /access_token\\s*:\\s*[\"']?[A-Za-z0-9-_]+[\"']?/gi,\n  /refresh_token\\s*:\\s*[\"']?[A-Za-z0-9-_]+[\"']?/gi\n];\n\nexport function scanMemoryForSecrets(memory: string): string[] {\n  const secrets: string[] = [];\n  AUTH_PATTERNS.forEach(pattern => {\n    const matches = memory.match(pattern);\n    if (matches) secrets.push(...matches);\n  });\n  return secrets;\n}\n\n// Mastra memory retrieval hook\nagent.onMemoryRetrieve((memory) => {\n  const leakedSecrets = scanMemoryForSecrets(memory.content);\n  if (leakedSecrets.length > 0) {\n    console.warn('⚠️ Auth secrets detected in memory:', leakedSecrets);\n    return { ...memory, content: '[REDACTED_AUTH_DATA]' };\n  }\n  return memory;\n});",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Auto-Refreshing Auth Middleware",
+        "description": "Mastra middleware that automatically refreshes expired tokens before workflow steps",
+        "code": "import { MastraAgent } from 'mastra';\n\nexport class AuthRefreshMiddleware {\n  async handle(ctx: any, next: () => Promise<void>) {\n    const token = ctx.workflow.memory?.auth?.token;\n    if (this.isTokenExpired(token)) {\n      const refreshed = await this.refreshToken(ctx.workflow.memory.auth);\n      ctx.workflow.memory.auth.token = refreshed.access_token;\n      ctx.workflow.memory.auth.expires_at = Date.now() + refreshed.expires_in * 1000;\n    }\n    await next();\n  }\n\n  private isTokenExpired(token: string): boolean {\n    try {\n      const decoded = jwt.decode(token) as any;\n      return decoded?.exp * 1000 < Date.now();\n    } catch {\n      return true;\n    }\n  }\n}\n\n// Install in Mastra agent\nconst agent = new MastraAgent({\n  middleware: [new AuthRefreshMiddleware()]\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Token Vault Integration",
+        "description": "Isolates auth tokens from agent memory using Mastra secure storage",
+        "code": "import { MastraAgent, SecureVault } from 'mastra';\n\nconst vault = new SecureVault();\n\nexport async function getSecureAuthToken(scope: string) {\n  const cached = await vault.get(`auth:${scope}`);\n  if (cached && !isExpired(cached)) return cached;\n  \n  const token = await fetchTokenForScope(scope);\n  await vault.set(`auth:${scope}`, token, token.expires_in);\n  return token;\n}\n\n// Mastra workflow step using secure tokens\nagent.createWorkflowStep('secureApiCall', async (ctx) => {\n  const token = await getSecureAuthToken(ctx.params.scope);\n  const response = await fetch(ctx.params.url, {\n    headers: { Authorization: `Bearer ${token.access_token}` }\n  });\n  return response.json();\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Auth-Aware Memory Sanitizer",
+        "description": "Strips auth data from Mastra memory before agent context injection",
+        "code": "const SENSITIVE_PATTERNS = [\n  { pattern: /Authorization:\\s*Bearer\\s+[\\w\\-]+\\.[\\w\\-]+\\.[\\w\\-]+\\/?/gi, replace: 'Authorization: Bearer [REDACTED]' },\n  { pattern: /(access|refresh)_token\\s*[:=]\\s*[\"']?[^\\s\"',;]+/gi, replace: '$1_token: [REDACTED]' }\n];\n\nexport function sanitizeMemoryForAgent(content: string): string {\n  return SENSITIVE_PATTERNS.reduce((clean, { pattern, replace }) => {\n    return clean.replace(pattern, replace);\n  }, content);\n}\n\n// Mastra memory pipeline\nagent.setMemoryProcessor({\n  async retrieve(key: string) {\n    const memory = await agent.storage.get(key);\n    return {\n      ...memory,\n      content: sanitizeMemoryForAgent(memory.content)\n    };\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly into Mastra's agent pipeline as middleware, automatically scanning every workflow transition, tool call, and memory retrieval for authentication failures. It employs runtime token validation, memory content analysis, and integration response monitoring using Mastra-specific patterns to catch expired tokens, malformed OAuth responses, and secret leakage before they cascade into agent failures. Vex provides real-time alerting and automated remediation through token refresh proxies and secure memory sanitization, reducing MTTR from hours to seconds.\n\nThe Vex SDK hooks into Mastra's workflow orchestration layer, intercepting all agent-tool interactions and context transitions. It maintains a shadow auth state synchronized with your Mastra workflows, proactively refreshing tokens and validating scopes. When integrated, Vex generates comprehensive compliance reports showing auth drift, token lifespan analytics, and failure patterns specific to your Mastra agent deployments.\n\nConfiguration is declarative - define your auth providers, token validation rules, and sensitivity thresholds once, and Vex handles continuous monitoring across all agent instances without code changes to your core Mastra workflows.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { MastraAgent } from 'mastra';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  detectors: {\n    authTokenExpiration: {\n      patterns: ['jwt.exp < now()', 'oauth.expires_in < 300'],\n      severity: 'critical'\n    },\n    memorySecretLeakage: {\n      patterns: ['Bearer [A-Za-z0-9-_]+\\\\.[A-Za-z0-9-_]+', 'access_token:\\s*[^\\s]+'],\n      severity: 'high'\n    },\n    malformedOAuth: {\n      schema: {\n        access_token: 'string',\n        expires_in: 'number',\n        token_type: 'Bearer'\n      }\n    }\n  }\n});\n\n// Mastra + Vex integration\nasync function createSecureAgent() {\n  const agent = new MastraAgent();\n  \n  // Vex middleware scans all transitions\n  agent.use(vex.middleware({\n    autoRemediate: ['authTokenExpiration'],\n    alertOn: ['memorySecretLeakage']\n  }));\n  \n  // Vex tool wrapper validates all outputs\n  agent.tools.forEach(tool => {\n    tool.execute = vex.wrap(tool.execute, {\n      validateSchema: true,\n      checkAuthTokens: true\n    });\n  });\n  \n  return agent;\n}\n\nconst secureAgent = await createSecureAgent();\n\n// Vex auto-generates remediation\nvex.on('authTokenExpiration', async ({ ctx }) => {\n  const refreshed = await ctx.refreshAuthToken();\n  ctx.workflow.memory.auth = refreshed;\n  return { fixed: true };\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in your Mastra agents today to eliminate auth failures with zero-config monitoring and auto-remediation."
+    }
+  }
+}

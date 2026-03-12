@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build code generation with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack code generation",
+      "Llama Stack guardrails",
+      "code generation reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Llama Stack provides a standardized Python interface for building sophisticated Llama-powered agents with built-in safety, memory, and tool execution capabilities, making it ideal for code generation workflows. Integrating Vex guardrails ensures generated code is safe, syntactically valid, and free from credential leaks before execution. This combination delivers reliable, production-ready code generation while mitigating common agentic failure modes.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Llama Stack",
+      "description": "The typical Llama Stack code generation architecture features an agent loop where the LLM receives a coding task, generates code using its reasoning capabilities, and leverages tools for sandbox execution and testing. Memory bank stores previous iterations and test results, while safety shields filter outputs. The agent iterates until tests pass or limits are reached.\n\nKey components include the LlamaStackClient for agent orchestration, sandbox tools for secure execution, and structured memory retrieval for context. Vex verification wraps each agent turn to validate code safety and correctness before tool execution.\n\nThis setup handles iterative refinement automatically, with the agent self-correcting based on test feedback while Vex ensures no malicious patterns emerge during refinement.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Task     │───▶│ LlamaStack Agent │\n│ (\"Build API...\")  │    │ + Memory Bank    │\n└─────────────────�┘    │                  │\n                       │  ┌────────────┐   │\n                       │  │ Vex.verify()│◀──┘\n                       │  │Guardrails   │\n                       │  └────────────┘\n                       ▼\n                ┌──────────────────┐\n                │ Sandbox Executor │\n                │ + Test Runner    │\n                └──────────┬───────┘\n                           │\n                       ┌───▼───┐\n                       │Tests  │──► PASS/FAIL\n                       │Pass?  │\n                       └───────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious code injection",
+        "description": "Agent generates code with system compromise patterns, file deletion, or network attacks",
+        "severity": "critical",
+        "mitigation": "Vex code safety scanner blocks execution of dangerous patterns before sandbox"
+      },
+      {
+        "name": "Credential leakage",
+        "description": "Generated code embeds API keys, passwords, or secrets from memory/context",
+        "severity": "critical",
+        "mitigation": "Vex credential detector scans outputs and redacts sensitive patterns"
+      },
+      {
+        "name": "Unsafe dependency injection",
+        "description": "Code installs/executes untrusted packages via pip/os.system",
+        "severity": "high",
+        "mitigation": "Vex dependency whitelist blocks unauthorized package operations"
+      },
+      {
+        "name": "Infinite execution loops",
+        "description": "Agent generates recursive code that exceeds sandbox timeouts",
+        "severity": "high",
+        "mitigation": "Vex execution bounds checker validates loop structures pre-execution"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Llama Stack Client",
+        "description": "Set up the LlamaStack client with sandbox tools and memory configuration for code generation",
+        "code": "from llama_stack_client import LlamaStackClient\nimport vex\n\n# Initialize Llama Stack with code generation tools\nclient = LlamaStackClient(\n    model=\"llama-3.1-70b\",\n    tools=[\n        \"code_sandbox\",\n        \"pytest_runner\",\n        \"file_validator\"\n    ],\n    memory_config={\"max_context\": 128000}\n)\n\n# Configure Vex for high-risk code generation\nvex.configure(profile=\"codegen-high-risk\")",
+        "language": "python"
+      },
+      {
+        "title": "Core Agent Loop with Sandbox",
+        "description": "Main agent loop that generates, tests, and refines code iteratively",
+        "code": "def codegen_agent(task: str, max_iterations: int = 5):\n    conversation = client.new_conversation()\n    \n    for i in range(max_iterations):\n        response = conversation.say(task)\n        \n        # Extract generated code from structured response\n        code = response.tool_calls[0].parameters.get(\"code\", \"\")\n        \n        # Vex verification happens here (see integration section)\n        verified_code = vex.verify(code, checks=[\"code_safety\", \"syntax_validity\"])\n        \n        if verified_code.status == \"approved\":\n            result = client.tools[\"code_sandbox\"].execute(verified_code.content)\n            if result.tests_passed:\n                return verified_code.content\n    \n    raise Exception(\"Max iterations exceeded\")",
+        "language": "python"
+      },
+      {
+        "title": "Test-Driven Refinement",
+        "description": "Agent uses test failures to iteratively improve code quality",
+        "code": "def refine_with_tests(code: str, test_results: dict):\n    feedback = f\"\"\"\nPrevious code failed tests:\n{test_results}\n\nRefine the code to fix these issues:\n1. {test_results['failures'][0]['error']}\n2. Ensure all tests pass.\n    \"\"\"\n    \n    refinement_prompt = f\"FIX THIS CODE: {code}\\nFEEDBACK: {feedback}\"\n    refined_response = client.conversations.say(refinement_prompt)\n    \n    return refined_response.content",
+        "language": "python"
+      },
+      {
+        "title": "Memory-Augmented Code Context",
+        "description": "Leverage memory bank to maintain project context across iterations",
+        "code": "def load_project_context(project_id: str):\n    memory_docs = client.memory.search(\n        query=f\"project:{project_id}\",\n        limit=10\n    )\n    \n    context = \"\\n\".join([\n        doc.content for doc in memory_docs\n        if \"code\" in doc.metadata.get(\"type\", \"\")\n    ])\n    \n    return f\"Project context:\\n{context}\\n\\nGenerate next component:\"",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Agent Responses with Vex",
+        "description": "Post-process every agent turn through Vex verification before tool execution",
+        "code": "def safe_agent_turn(conversation, message):\n    raw_response = conversation.say(message)\n    \n    # Extract code from response\n    code_content = raw_response.content\n    \n    # Vex verification with codegen-specific checks\n    verification = vex.verify(\n        code_content,\n        checks=[\n            \"code_safety\",\n            \"syntax_validity\",\n            \"no_credential_leakage\",\n            \"dependency_safety\",\n            \"execution_sandboxing\"\n        ],\n        context={\n            \"allowed_packages\": [\"numpy\", \"pandas\", \"requests\"],\n            \"max_exec_time\": 30\n        }\n    )\n    \n    if verification.status == \"approved\":\n        return verification.content\n    else:\n        # Auto-refine on failure\n        return conversation.say(f\"Fix this code: {code_content}\\nIssues: {verification.issues}\")",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Guardrails",
+        "description": "Verify code is safe for sandbox before execution with runtime bounds",
+        "code": "def verified_sandbox_execute(code: str):\n    sandbox_check = vex.verify(\n        code,\n        checks=[\n            \"execution_sandboxing\",\n            \"no_system_calls\",\n            \"dependency_safety\"\n        ],\n        sandbox_config={\n            \"memory_limit\": \"256MB\",\n            \"cpu_limit\": \"1.0\",\n            \"network\": \"blocked\",\n            \"allowed_paths\": [\"/tmp\"]\n        }\n    )\n    \n    if sandbox_check.status == \"approved\":\n        return client.tools[\"code_sandbox\"].execute(sandbox_check.content)\n    else:\n        raise ValueError(f\"Sandbox execution blocked: {sandbox_check.issues}\")",
+        "language": "python"
+      },
+      {
+        "title": "Credential Leak Prevention",
+        "description": "Scan generated code for embedded secrets before any execution",
+        "code": "def scan_for_credentials(code: str, known_secrets: list = None):\n    results = vex.verify(\n        code,\n        checks=[\"no_credential_leakage\", \"no_hardcoded_secrets\"],\n        secrets=known_secrets or [\n            \"sk-\", \"ak-\", \"AWS_ACCESS_KEY\"\n        ]\n    )\n    \n    if results.detections:\n        clean_code = results.remediated_content\n        client.memory.store(\n            f\"credential_fix_{hash(code)}\",\n            f\"Removed secrets from code\"\n        )\n        return clean_code\n    \n    return code",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack Code Generation",
+      "description": "Install Vex SDK today and wrap your Llama Stack agents to eliminate code generation risks."
+    }
+  }
+}

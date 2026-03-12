@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK agentic rag",
+      "Vercel AI SDK guardrails",
+      "agentic rag reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Agentic RAG with Vercel AI SDK enables multi-step retrieval agents that autonomously plan queries, fetch from multiple sources, and synthesize attributed responses in streaming UIs. However, complex agentic flows introduce risks like partial hallucinations in streams, unvalidated tool results, and inconsistent outputs across LLM providers. Vex middleware integration provides runtime verification for source faithfulness, hallucination detection, and query accuracy to ensure reliable production deployments.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Vercel AI SDK",
+      "description": "The architecture begins with a user query routed to an agent loop via Vercel AI SDK's `generateText` or `streamText`. The agent plans retrieval queries using an LLM, executes parallel tool calls to vector stores (e.g., Pinecone, Supabase) and web search APIs, then synthesizes results with source attribution. Responses stream back to React Server Components, enabling real-time UI updates with citations.\n\nKey components include the `createStreamableUI` for rendering partial results, tool definitions for retrieval (semantic search, keyword fallback), and a router to handle multi-turn reasoning. Edge functions host the API route, but complex planning loops risk timeouts without proper guardrails.\n\nVex intercepts `streamText` calls to verify each agent step: query planning against user intent, retrieval faithfulness to sources, and final synthesis for cross-source consistency.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vercel AI SDK    │\n│   (Next.js RSC) │    │  streamText()    │\n└─────────────────┘    │ + Vex Middleware  │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │   Agent Loop      │◀┐\n                       │ 1. Plan Queries   │ │└─ Tool Results\n                       │ 2. Retrieve       │ │\n                       │ 3. Synthesize     │ │\n                       └────────┬──────────┘ │\n                                │             │\n                       ┌────────▼──────────┐ │\n                       │ Vector DB + Web   │─┘\n                       │    Search Tools   │\n                       └──────────────────┘\n                                 │\n                        ┌────────▼──────────┐\n                        │ Verified Stream   │\n                        │ w/ Citations      │\n                        └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Agent generates plausible but incorrect facts mid-stream before final verification",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks on streaming chunks against retrieved sources"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Retrieval tools return irrelevant or empty results streamed without filtering",
+        "severity": "high",
+        "mitigation": "Vex validates tool outputs for relevance and completeness before synthesis"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLMs format citations/tools differently, breaking UI parsing",
+        "severity": "high",
+        "mitigation": "Vex normalizes structured outputs with schema enforcement"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Multi-step planning loops exceed Vercel edge limits (10s cold start)",
+        "severity": "medium",
+        "mitigation": "Vex early termination + async verification offloads heavy checks"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Agentic RAG Stream with Tool Calls",
+        "description": "Core streaming agent using Vercel AI SDK with retrieval tools and citation tracking",
+        "code": "import { generateText, tool } from 'ai';\nimport { createStreamableUI } from 'ai/rsc';\nimport { openai } from '@ai-sdk/openai';\n\nimport { pineconeIndex } from './vector-stores/pinecone';\n\nconst searchTool = tool({\n  description: 'Search company documents',\n  parameters: z.object({ query: z.string() }),\n  execute: async ({ query }) => {\n    const results = await pineconeIndex.query({\n      vector: embedding(query),\n      topK: 5,\n      includeMetadata: true\n    });\n    return {\n      sources: results.matches.map((m, i) => `\n[Source ${i+1}] ${m.metadata?.text || ''}\nScore: ${m.score}`)\n    };\n  }\n});\n\nexport async function agenticRAG(query: string) {\n  const ui = createStreamableUI();\n\n  ui.update(<div>Planning retrieval...</div>);\n\n  const { text, toolResults } = await generateText({\n    model: openai('gpt-4o'),\n    prompt: `Answer using ONLY these sources:\\n\\n{{sources}}\\n\\nQuery: ${query}`,\n    tools: { search: searchTool },\n    toolChoice: 'auto',\n    maxTokens: 2000\n  });\n\n  ui.update(<>\n    <div>{text}</div>\n    {toolResults?.map((result, i) => (\n      <div key={i}>Sources: {result.content.sources.join('\\n')}</div>\n    ))}\n  </>);\n\n  return ui.value;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Turn Agent Loop",
+        "description": "Handles iterative refinement with query planning and source synthesis",
+        "code": "import { streamText, createStreamableValue } from 'ai';\nimport { z } from 'zod';\n\nconst planQueryTool = tool({\n  description: 'Plan optimal retrieval queries',\n  parameters: z.object({\n    queries: z.array(z.string()),\n    reasoning: z.string()\n  }),\n  execute: async ({ queries }) => {\n    // Execute parallel searches\n    const results = await Promise.all(\n      queries.map(q => searchTool.execute({ query: q }))\n    );\n    return { combinedSources: results.flatMap(r => r.sources) };\n  }\n});\n\nexport async function* agentLoop(query: string) {\n  const planningResult = await generateText({\n    model: openai('gpt-4o'),\n    tools: { planQuery: planQueryTool },\n    prompt: `Plan 2-3 specific queries for: ${query}`\n  });\n\n  const stream = await streamText({\n    model: openai('gpt-4o'),\n    tools: { search: searchTool },\n    messages: [\n      { role: 'user', content: query },\n      planningResult\n    ]\n  });\n\n  for await (const chunk of stream.textStream) {\n    yield chunk;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Citation Tracking UI",
+        "description": "React Server Component for rendering streaming responses with source attribution",
+        "code": "import { Suspense } from 'react';\nimport { agenticRAG } from './agent-rag';\n\nexport default async function RAGPage({ params }: { params: { query: string } }) {\n  return (\n    <Suspense fallback={<div>Generating answer...</div>}> \n      <div className=\"prose max-w-2xl mx-auto p-8\">\n        {await agenticRAG(params.query)}\n      </div>\n    </Suspense>\n  );\n}\n\nexport const revalidate = 3600; // 1 hour",
+        "language": "typescript"
+      },
+      {
+        "title": "Edge-Optimized API Route",
+        "description": "Vercel Edge Runtime handler for streaming Agentic RAG",
+        "code": "import { NextRequest } from 'next/server';\n\nexport const runtime = 'edge';\n\nexport async function POST(req: NextRequest) {\n  const { query } = await req.json();\n\n  const stream = await agentLoop(query);\n\n  return new Response(stream, {\n    headers: {\n      'Content-Type': 'text/plain; charset=utf-8',\n      'Cache-Control': 'no-cache',\n      'Connection': 'keep-alive',\n    },\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for streamText",
+        "description": "Wraps Vercel AI SDK streams with source faithfulness and hallucination checks",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { streamText } from 'ai';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!\n});\n\nexport async function* verifiedAgentStream(query: string) {\n  const rawStream = await streamText({\n    model: openai('gpt-4o'),\n    tools: { search: searchTool },\n    messages: [{ role: 'user', content: query }]\n  });\n\n  // Vex verifies streaming chunks\n  const verifiedStream = await vex.verify.stream({\n    stream: rawStream.textStream,\n    checks: [\n      'source-faithfulness',\n      'hallucination-detection',\n      { hallucination: { threshold: 0.8 } },\n      'citation-verification'\n    ],\n    context: {\n      query,\n      sources: toolResults?.sources || []\n    }\n  });\n\n  for await (const chunk of verifiedStream) {\n    if (chunk.verified) {\n      yield chunk.content;\n    } else {\n      // Insert correction or citation\n      yield `[VEX: ${chunk.issues?.[0]?.type}] `;\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Result Validation",
+        "description": "Validates retrieval tool outputs before agent synthesis",
+        "code": "import { createVex } from '@vex_dev/sdk';\n\nconst vex = createVex({ /* config */ });\n\nconst validatedSearchTool = tool({\n  ...searchTool,\n  execute: async (params) => {\n    const rawResults = await searchTool.execute(params);\n\n    const validation = await vex.verify.tool({\n      toolName: 'search',\n      input: params,\n      output: rawResults,\n      checks: [\n        'query-relevance',\n        'result-completeness',\n        { retrieval: { minScore: 0.7 } }\n      ]\n    });\n\n    if (!validation.passed) {\n      throw new Error(`Tool validation failed: ${validation.issues}`);\n    }\n\n    return rawResults;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Query Planning Accuracy Check",
+        "description": "Ensures agent-planned queries align with user intent",
+        "code": "export async function verifiedPlanning(query: string) {\n  const planningStream = await streamText({\n    model: openai('gpt-4o'),\n    tools: { planQuery: planQueryTool }\n  });\n\n  const planningResult = await vex.verify.plan({\n    plannedQueries: planningStream.toolResults,\n    originalQuery: query,\n    checks: [\n      'query-planning-accuracy',\n      'cross-source-consistency',\n      { intentAlignment: { threshold: 0.85 } }\n    ]\n  });\n\n  if (!planningResult.passes) {\n    // Fallback to single direct query\n    return directRetrieval(query);\n  }\n\n  return planningStream;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Agentic RAG",
+      "description": "Add Vex middleware in <5 minutes to eliminate hallucinations and ensure source attribution - start your free trial at vex.dev"
+    }
+  }
+}

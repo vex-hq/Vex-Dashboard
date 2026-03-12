@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Claude Tool Use Agents",
+    "description": "How to detect and fix ai agent memory management in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Claude Tool Use memory-management",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, AI Agent Memory Management problems manifest as agents losing track of prior tool results, context history, or decision states during multi-turn interactions, leading to repetitive tool calls and inconsistent reasoning. This is exacerbated by Claude's stateless message API where memory must be manually maintained across `messages.create()` calls, causing drift in long-running agent loops. Common issues include forgotten tool outputs, hallucinated prior states, and context overflow from unpruned conversation histories.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-step research agent calling web_search tool repeatedly",
+        "symptom": "Agent calls web_search with identical queries despite having results in prior messages",
+        "impact": "Infinite loops, API quota exhaustion, and incomplete task execution"
+      },
+      {
+        "scenario": "Code generation agent with iterative debugging",
+        "symptom": "Forgets previous error messages and fixes, regenerating same broken code",
+        "impact": "Stuck in debugging loops, producing inconsistent code versions"
+      },
+      {
+        "scenario": "Database query agent building complex JOIN queries",
+        "symptom": "Loses track of which tables were already queried, re-querying same data",
+        "impact": "Performance degradation, duplicate data processing, incorrect aggregations"
+      },
+      {
+        "scenario": "Customer support agent handling multi-turn conversations",
+        "symptom": "References incorrect prior customer details or conversation history",
+        "impact": "Customer frustration, incorrect resolutions, trust erosion"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Duplicate Tool Call Detection",
+        "description": "Scans conversation history for identical tool calls with matching parameters within session",
+        "code": "```python\nimport re\n\ndef detect_duplicate_tool_calls(messages):\n    tool_calls = []\n    for msg in messages:\n        if msg.type == 'tool_use':\n            tool_name = msg.name\n            params = str(msg.input)\n            tool_calls.append((tool_name, params))\n    \n    duplicates = []\n    seen = {}\n    for i, (name, params) in enumerate(tool_calls):\n        key = f'{name}:{params}'\n        if key in seen:\n            duplicates.append({\n                'type': 'duplicate_tool_call',\n                'tool': name,\n                'params': params,\n                'first_occurence': seen[key],\n                'current_index': i\n            })\n        seen[key] = i\n    return duplicates\n```",
+        "language": "python"
+      },
+      {
+        "name": "Memory Reference Drift Check",
+        "description": "Detects when agent references non-existent prior tool results or conversation states",
+        "code": "```typescript\nfunction detectMemoryDrift(messages: any[]): MemoryDriftIssue[] {\n  const issues: MemoryDriftIssue[] = [];\n  const toolResults = new Map<string, any>();\n\n  messages.forEach((msg, index) => {\n    if (msg.type === 'tool_result') {\n      toolResults.set(msg.tool_use_id, msg.content);\n    }\n\n    if (msg.type === 'user' || msg.type === 'assistant') {\n      // Extract tool result references\n      const toolIds = msg.content.match(/tool_use_id=[\"']([a-zA-Z0-9-]+)[\"']/g);\n      if (toolIds) {\n        toolIds.forEach(id => {\n          const toolId = id.match(/([a-zA-Z0-9-]+)/)?.[1];\n          if (toolId && !toolResults.has(toolId)) {\n            issues.push({\n              type: 'memory_drift',\n              referenced_tool_id: toolId,\n              message_index: index,\n              description: `References non-existent tool result ${toolId}`\n            });\n          }\n        });\n      }\n    }\n  });\n\n  return issues;\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Context Window Overflow Monitor",
+        "description": "Tracks token count and detects when conversation history exceeds safe memory limits",
+        "code": "```python\ndef detect_context_overflow(messages, model='claude-3-5-sonnet-20240620'):\n    MAX_TOKENS = {'claude-3-5-sonnet-20240620': 200000}\n    max_tokens = MAX_TOKENS.get(model, 100000)\n    \n    total_tokens = 0\n    for msg in messages:\n        content = msg.content[0].text if isinstance(msg.content, list) else msg.content\n        total_tokens += len(content) // 4  # Rough token estimation\n    \n    return {\n        'overflow': total_tokens > max_tokens * 0.8,\n        'current_tokens': total_tokens,\n        'max_tokens': max_tokens,\n        'utilization': total_tokens / max_tokens\n    }\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Result Caching Layer",
+        "description": "Cache tool results with TTL and inject summaries into context instead of full history",
+        "code": "```python\nimport json\nfrom typing import Dict, Any, Optional\nimport time\n\nclass ToolMemoryCache:\n    def __init__(self, ttl_seconds: int = 3600):\n        self.cache: Dict[str, Dict[str, Any]] = {}\n        self.ttl = ttl_seconds\n    \n    def store_result(self, tool_use_id: str, result: str, tool_name: str):\n        self.cache[tool_use_id] = {\n            'result': result,\n            'summary': self._summarize_result(result),\n            'tool_name': tool_name,\n            'timestamp': time.time()\n        }\n    \n    def get_summary(self, tool_use_id: str) -> Optional[str]:\n        if tool_use_id in self.cache:\n            cached = self.cache[tool_use_id]\n            if time.time() - cached['timestamp'] < self.ttl:\n                return f\"[{cached['tool_name']}] {cached['summary']}\"\n        return None\n    \n    def _summarize_result(self, result: str) -> str:\n        # Simple summarization - truncate and extract key info\n        return result[:200] + '...' if len(result) > 200 else result\n\n# Usage in Claude loop\ncache = ToolMemoryCache()\n\n# After tool result\ncache.store_result(tool_use_id, tool_result.content[0].text, tool_name)\n\n# Before next API call, inject summaries\ncontext_summaries = [cache.get_summary(tid) for tid in relevant_tool_ids if cache.get_summary(tid)]\nif context_summaries:\n    system_prompt += f\"\\nRecent tool results:\\n{\"\".join(context_summaries)}\"\n```",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Pruning Strategy",
+        "description": "Automatically prune old messages while preserving critical tool results and decisions",
+        "code": "```typescript\nfunction pruneConversation(messages: any[], maxTokens: number = 150000): any[] {\n  let currentTokens = 0;\n  const pruned: any[] = [];\n  const criticalMessages: string[] = [];\n\n  // First pass: identify critical tool results\n  messages.forEach(msg => {\n    if (msg.type === 'tool_result' || msg.role === 'user') {\n      criticalMessages.push(msg.id || JSON.stringify(msg));\n    }\n  });\n\n  // Second pass: prune while preserving critical messages\n  for (let i = messages.length - 1; i >= 0; i--) {\n    const msg = messages[i];\n    const msgTokens = estimateTokens(msg.content || '');\n\n    if (currentTokens + msgTokens > maxTokens && \n        !criticalMessages.includes(msg.id || JSON.stringify(msg))) {\n      continue;\n    }\n\n    pruned.unshift(msg);\n    currentTokens += msgTokens;\n  }\n\n  return pruned.slice(0, 100); // Safety limit\n}\n\nfunction estimateTokens(text: string): number {\n  return Math.ceil(text.length / 4);\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "State Persistence Middleware",
+        "description": "Extract and persist structured agent state across API calls",
+        "code": "```python\nimport json\n\nfrom typing import Dict, Any, Optional\n\nclass AgentStateManager:\n    def __init__(self):\n        self.state: Dict[str, Any] = {\n            'completed_tasks': [],\n            'pending_tools': {},\n            'key_facts': {},\n            'decision_log': []\n        }\n    \n    def extract_state_from_messages(self, messages):\n        \"\"\"Parse messages to extract structured state\"\"\"\n        for msg in messages:\n            if msg.type == 'tool_result':\n                tool_id = msg.tool_use_id\n                self.state['completed_tasks'].append({\n                    'tool_id': tool_id,\n                    'status': 'completed',\n                    'timestamp': msg.timestamp\n                })\n            elif msg.type == 'user' and 'task' in msg.content.lower():\n                self.state['decision_log'].append({\n                    'type': 'user_task',\n                    'content': msg.content[:100]\n                })\n        return self.state\n    \n    def inject_state_into_prompt(self) -> str:\n        state_summary = f\"\"\"\nAGENT STATE SUMMARY:\n- Completed: {len(self.state['completed_tasks'])} tasks\n- Key Facts: {len(self.state['key_facts'])} items\n- Recent Decisions: {self.state['decision_log'][-3:]}\n        \"\"\"\n        return state_summary\n\n# Usage\nstate_manager = AgentStateManager()\nstate = state_manager.extract_state_from_messages(messages)\nsystem_prompt = state_manager.inject_state_into_prompt() + original_system_prompt\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex provides production-grade observability for Claude Tool Use agents by automatically wrapping `client.messages.create()` calls with `vex.verify()`. This captures full conversation traces, tool call sequences, and memory state transitions, enabling detection of duplicate tool calls, memory drift, and context overflow in real-time. Vex's agent-specific assertions validate that tool results are referenced correctly and conversation history remains coherent across turns.\n\nThe platform automatically flags memory management issues with precise callstack traces and provides one-click remediation templates. Vex maintains a baseline of healthy agent behavior and alerts when memory patterns deviate, preventing cascading failures before they impact production workflows. Integration takes under 5 minutes with the `vex-sdk` and works seamlessly with Anthropic's native tool use APIs.",
+      "code": "```python\nfrom vex import verify\nfrom anthropic import Anthropic\n\nclient = Anthropic()\ntool_cache = ToolMemoryCache()\n\n@verify(\n    assert_no_duplicate_tool_calls=True,\n    assert_memory_coherence=True,\n    max_context_tokens=150000,\n    agent_name=\"research_agent\"\n)\ndef reliable_claude_agent(messages, tools):\n    # Inject cached tool summaries\n    summaries = [tool_cache.get_summary(tid) for tid in recent_tool_ids]\n    if summaries:\n        messages[0]['content'].append({\n            'type': 'text',\n            'text': 'RECENT TOOL RESULTS:\\n' + '\\n'.join(summaries)\n        })\n    \n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        messages=messages,\n        tools=tools,\n        tool_choice=\"auto\"\n    )\n    \n    # Cache new tool results\n    if response.stop_reason == 'tool_use':\n        for tool_use in getattr(response, 'tool_use_contents', []):\n            tool_cache.store_result(\n                tool_use.id,\n                tool_use.input,\n                tool_use.name\n            )\n    \n    return response\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to automatically detect and prevent AI Agent Memory Management failures in your Claude Tool Use workflows."
+    }
+  }
+}

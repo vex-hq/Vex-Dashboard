@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with BeeAI + Vex Guardrails",
+    "description": "Learn how to build agentic rag with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI agentic rag",
+      "BeeAI guardrails",
+      "agentic rag reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI enables building production-ready Agentic RAG agents that autonomously plan retrieval queries, fetch from multiple sources, and synthesize attributed responses. Guardrails are essential to prevent unbounded memory growth, tool injection attacks, and hallucinated outputs in multi-step reasoning flows. Vex provides runtime verification to ensure source faithfulness and query accuracy in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with BeeAI",
+      "description": "The Agentic RAG architecture in BeeAI features a central agent with long-term memory that decomposes user queries into sub-queries, dispatches tools for retrieval from vector stores and knowledge bases, and synthesizes responses with citations. Tools handle semantic search, reranking, and multi-source aggregation while the agent maintains conversation state across turns. Observability is built-in via event hooks for monitoring planning, retrieval, and generation steps.\n\nKey components include the BeeAI Agent with MemoryManager for state persistence, ToolRegistry for retrieval tools, and Granite LLM for reasoning. The agent loop processes events like 'plan_query', 'retrieve_docs', 'synthesize_response', enabling autonomous iteration until convergence. This creates powerful but complex systems prone to drift without verification.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   BeeAI Agent    │\n└─────────────────┼───▶│ ┌──────────────┐ │\n                  │    │ │MemoryManager │ │\n                  │    │ └──────────────┘ │\n                  │    │ ┌──────────────┐ │  ┌─────────────────┐\n                  └────│ │  ToolRegistry │ │──│ Retrieval Tools │\n                       │ │  (Search,     │ │  │ - VectorStore   │\n                       │ │   Rerank)     │ │  │ - KnowledgeBase │\n                       │ └──────────────┘ │  └─────────────────┘\n                       └──────────────────┘\n                                   │\n                        ┌─────────────────┐\n                        │ Vex Event       │\n                        │ Listener        │\n                        └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Memory Growth",
+        "description": "Agent memory accumulates all conversation history and retrieved docs without pruning, causing OOM errors in long sessions",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory usage per session and enforces relevance-based truncation"
+      },
+      {
+        "name": "Source Attribution Drift",
+        "description": "Agent synthesizes responses that lose connection to retrieved sources, leading to hallucinated citations",
+        "severity": "high",
+        "mitigation": "Vex verifies citation faithfulness against raw retrieved chunks"
+      },
+      {
+        "name": "Query Planning Inaccuracy",
+        "description": "Agent generates suboptimal sub-queries that miss relevant information or retrieve noise",
+        "severity": "high",
+        "mitigation": "Vex scores query relevance against final answer coverage"
+      },
+      {
+        "name": "Tool Injection via Malicious Input",
+        "description": "Adversarial queries exploit tool validation gaps to execute unintended retrieval patterns",
+        "severity": "critical",
+        "mitigation": "Vex sanitizes tool inputs and validates query intent"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Agentic RAG Agent Setup",
+        "description": "Initialize BeeAI agent with retrieval tools and memory for multi-step RAG",
+        "code": "from beeai import Agent, MemoryManager\nfrom beeai.tools import VectorSearchTool, KnowledgeBaseTool\n\nagent = Agent(\n    name=\"rag-agent\",\n    llm=\"granite-3b\",\n    memory=MemoryManager(max_history=50),\n    tools=[\n        VectorSearchTool(index_name=\"docs\"),\n        KnowledgeBaseTool(sources=[\"wiki\", \"manuals\"])\n    ]\n)\n\n@agent.on('query')\ndef handle_query(ctx):\n    plan = agent.plan_query(ctx.user_input)\n    docs = agent.execute_tools(plan)\n    response = agent.synthesize(plan, docs)\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Source Retrieval Tool",
+        "description": "Custom tool that aggregates and reranks results from multiple retrieval sources",
+        "code": "from beeai.tools import BaseTool\nfrom typing import List, Dict\n\nclass MultiSourceRetriever(BaseTool):\n    def __init__(self):\n        self.sources = ['vectorstore', 'kb', 'web']\n    \n    def execute(self, query: str) -> List[Dict]:\n        results = []\n        for source in self.sources:\n            source_docs = self._retrieve(source, query)\n            results.extend(source_docs)\n        return self._rerank(results, query)\n    \n    def _retrieve(self, source: str, query: str):\n        # Implementation per source\n        pass\n\nagent.tools.append(MultiSourceRetriever())",
+        "language": "python"
+      },
+      {
+        "title": "Agent Planning Loop",
+        "description": "Autonomous planning and execution loop with convergence criteria",
+        "code": "def agentic_rag_loop(agent, query: str, max_iterations=5):\n    ctx = {'query': query, 'sources': [], 'plan': None}\n    \n    for i in range(max_iterations):\n        if ctx.get('final_answer'):\n            break\n        \n        # Plan subqueries\n        plan = agent.plan(ctx)\n        ctx['plan'] = plan\n        \n        # Retrieve\n        sources = agent.retrieve(plan)\n        ctx['sources'].extend(sources)\n        \n        # Check convergence\n        if agent.converged(ctx):\n            ctx['final_answer'] = agent.synthesize(ctx)\n            break\n    \n    return ctx['final_answer']",
+        "language": "python"
+      },
+      {
+        "title": "Response with Citations",
+        "description": "Generate final response with source attribution and confidence scores",
+        "code": "def generate_cited_response(agent, ctx):\n    response = agent.llm.generate(\n        ctx['sources'],\n        instruction=\"Synthesize answer with citations: {query}\".format(\n            query=ctx['query']\n        )\n    )\n    \n    citations = extract_citations(response)\n    faithfulness = verify_citations(response, ctx['sources'])\n    \n    return {\n        'answer': response,\n        'citations': citations,\n        'faithfulness_score': faithfulness,\n        'sources_used': len(ctx['sources'])\n    }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Hook Vex into BeeAI agent events for runtime verification",
+        "code": "from vex import Vex\nfrom beeai import Agent\n\nvex = Vex(api_key=\"your-vex-key\")\n\n@vex.guardrail('agentic-rag')\ndef verify_agent_step(ctx):\n    return {\n        'memory_size': len(ctx['memory']),\n        'sources': ctx['sources'],\n        'response': ctx['response'],\n        'citations': ctx.get('citations', [])\n    }\n\n# Register with BeeAI agent\nagent.add_event_listener('after_execute', vex.verify)\nagent.add_event_listener('before_tool_call', vex.sanitize_input)\nagent.add_event_listener('after_synthesis', verify_agent_step)",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Check",
+        "description": "Verify citations match retrieved source content",
+        "code": "@vex.verification('source-faithfulness')\ndef check_citation_accuracy(ctx):\n    response = ctx['response']\n    sources = ctx['sources']\n    citations = extract_citations(response)\n    \n    valid_citations = 0\n    for citation in citations:\n        source_text = find_source(citation.source_id, sources)\n        if semantic_similarity(response, source_text) > 0.8:\n            valid_citations += 1\n    \n    score = valid_citations / len(citations) if citations else 1.0\n    return {'pass': score > 0.7, 'score': score}",
+        "language": "python"
+      },
+      {
+        "title": "Memory Growth Guardrail",
+        "description": "Prevent unbounded memory accumulation with automatic pruning",
+        "code": "@vex.guardrail('memory-bounds')\ndef enforce_memory_limit(ctx):\n    memory = ctx['agent_memory']\n    token_count = count_tokens(memory)\n    \n    if token_count > 100000:  # 100k token limit\n        # Prune least relevant history\n        relevant_scores = score_relevance(memory, ctx['current_query'])\n        memory = prune_memory(memory, relevant_scores, keep_tokens=50000)\n        ctx['agent_memory'] = memory\n    \n    return {'memory_tokens': token_count, 'action': 'pruned' if token_count > 100000 else 'ok'}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Agentic RAG",
+      "description": "Deploy Vex guardrails today to eliminate hallucination risks and ensure production reliability."
+    }
+  }
+}

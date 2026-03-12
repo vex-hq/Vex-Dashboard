@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with DSPy + Vex Guardrails",
+    "description": "Learn how to build customer support with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy customer support",
+      "DSPy guardrails",
+      "customer support reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming LLMs for customer support agents through composable, optimizable modules rather than manual prompting. Customer support use cases demand high reliability due to real-world consequences like incorrect order lookups or policy violations. Vex guardrails wrap DSPy module forward() calls to catch failures like overfitting prompts and assertion violations before they reach customers.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with DSPy",
+      "description": "The DSPy customer support agent follows a RAG pattern with CRM integration. User queries trigger a DSPy ChainOfThought module for intent classification, followed by a retrieval module querying a knowledge base and CRM APIs. Tool-calling modules handle order lookups and ticket creation, with a final response generation module ensuring tone consistency.\n\nKey DSPy signatures include classify_intent(), retrieve_context(), call_tools(), and generate_response(). Optimization compiles these modules against training data from support interactions. The pipeline processes queries sequentially: intent → retrieval → tools → response.\n\nVex verification wraps each module's forward() call, checking response accuracy, PII filtering, tone, policy compliance, and escalation triggers before outputs propagate.",
+      "diagram": "┌─────────────────┐\n│   User Query    │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐  vex.verify()\n│ Intent Classify │◄──────────────┐\n│   (DSPy module) │               │\n└─────────┬───────┘               │\n          │                       │\n┌─────────▼───────┐  vex.verify() │\n│ Knowledge RAG   │◄──────────────┘\n│   Retrieval     │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐  vex.verify()\n│ Tool Calling    │◄──────── CRM\n│ (Order/Ticket)  │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐  vex.verify()\n│ Final Response  │──────────────┐\n│   Generation    │              │\n└─────────────────┘              │\n                               │\n                          ┌────▼────┐\n                          │Customer │\n                          └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Overfitted Intent Classification",
+        "description": "DSPy optimization overfits to training examples, misclassifying edge-case customer queries",
+        "severity": "critical",
+        "mitigation": "Vex verifies classification confidence and fallback routing"
+      },
+      {
+        "name": "Hallucinated CRM Data",
+        "description": "Chain-of-thought reasoning fabricates plausible but incorrect order details from CRM",
+        "severity": "critical",
+        "mitigation": "Vex cross-validates tool outputs against CRM API responses"
+      },
+      {
+        "name": "Unfiltered PII Exposure",
+        "description": "Response generation leaks customer phone numbers, emails, or account numbers",
+        "severity": "high",
+        "mitigation": "Vex scans all outputs with regex and NER for PII before delivery"
+      },
+      {
+        "name": "Tone Inconsistency",
+        "description": "Module composition creates sarcastic or overly casual responses violating brand voice",
+        "severity": "medium",
+        "mitigation": "Vex sentiment analysis ensures professional, empathetic tone"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "DSPy Intent Classification Module",
+        "description": "Basic DSPy signature for classifying customer support intents with CoT reasoning",
+        "code": "import dspy\n\nclass ClassifyIntent(dspy.Signature):\n    '''Classify customer support intent.'''\n    query = dspy.InputField()\n    intent = dspy.OutputField(desc='billing|technical|order|escalation')\n    reasoning = dspy.OutputField(desc='Step-by-step reasoning')\n\nclass IntentModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.classify = dspy.ChainOfThought(ClassifyIntent)\n    \n    def forward(self, query: str) -> dict:\n        return self.classify(query=query)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Context Retrieval",
+        "description": "DSPy module retrieving relevant KB articles and CRM context for the query",
+        "code": "class RetrieveContext(dspy.Module):\n    def __init__(self, retriever):\n        super().__init__()\n        self.retriever = retriever\n        self.generate_query = dspy.ChainOfThought('query -> search_query')\n    \n    def forward(self, query: str, crm_data: dict) -> dict:\n        search_query = self.generate_query(query=query).search_query\n        kb_results = self.retriever(search_query)\n        context = {'kb': kb_results, 'crm': crm_data}\n        return {'context': context, 'query': query}",
+        "language": "python"
+      },
+      {
+        "title": "Tool Calling for Order Lookup",
+        "description": "DSPy signature calling CRM APIs for order status and ticket creation",
+        "code": "class ToolCall(dspy.Signature):\n    '''Call CRM tools for customer support.'''\n    context = dspy.InputField()\n    intent = dspy.InputField()\n    tools_needed = dspy.OutputField(desc='order_lookup|create_ticket|none')\n    tool_params = dspy.OutputField(desc='JSON parameters')\n\nclass ToolModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.tools = dspy.ChainOfThought(ToolCall)\n    \n    def forward(self, context: dict, intent: str) -> dict:\n        pred = self.tools(context=context, intent=intent)\n        return self._execute_tools(pred)",
+        "language": "python"
+      },
+      {
+        "title": "Final Response Generation",
+        "description": "Generate customer-facing response with proper tone and escalation logic",
+        "code": "class GenerateResponse(dspy.Signature):\n    '''Generate helpful customer support response.'''\n    context = dspy.InputField()\n    intent = dspy.InputField()\n    tools_result = dspy.InputField()\n    response = dspy.OutputField(desc='Professional, empathetic response')\n    escalate = dspy.OutputField(desc='yes|no')\n\nclass ResponseModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = dspy.ChainOfThought(GenerateResponse)\n    \n    def forward(self, context: dict, intent: str, tools_result: dict) -> dict:\n        return self.generate(context=context, intent=intent, tools_result=tools_result)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Intent Classification with Vex",
+        "description": "Verify intent classification catches overfitting and confidence issues",
+        "code": "import vex\n\n@vex.verify(\n    assertions=[\n        {'type': 'exact_match', 'field': 'intent', 'values': ['billing', 'technical', 'order', 'escalation']},\n        {'type': 'confidence_threshold', 'field': 'intent', 'min': 0.8}\n    ],\n    risk_profile='high'\n)\ndef safe_intent_classify(query: str) -> dict:\n    module = IntentModule()\n    result = module.forward(query)\n    return result\n\n# Usage\nresult = safe_intent_classify('My order #12345 never arrived')\nprint(result.intent)  # Verified output",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering on Tool Outputs",
+        "description": "Protect customer data in CRM responses with comprehensive PII detection",
+        "code": "@vex.verify(\n    filters=[\n        {'type': 'pii_redact', 'fields': ['response', 'tools_result']},\n        {'type': 'regex_block', 'pattern': r'\\b\\d{3}-\\d{3}-\\d{4}\\b', 'action': 'block'}\n    ],\n    risk_profile='high'\n)\ndef safe_tool_call(context: dict, intent: str) -> dict:\n    module = ToolModule()\n    result = module.forward(context, intent)\n    return result\n\n# Blocks responses containing SSNs\ncrm_data = safe_tool_call(context, 'order')",
+        "language": "python"
+      },
+      {
+        "title": "Tone + Policy + Escalation Verification",
+        "description": "Comprehensive final verification ensuring brand compliance and escalation logic",
+        "code": "@vex.verify(\n    assertions=[\n        {'type': 'sentiment', 'field': 'response', 'min_score': 0.7, 'tone': 'professional'},\n        {'type': 'policy_compliance', 'policy': 'support_policy_v1'},\n        {'type': 'keyword_required', 'field': 'response', 'keywords': ['happy to help', 'let me check']}\n    ],\n    risk_profile='high'\n)\ndef safe_generate_response(context: dict, intent: str, tools_result: dict) -> dict:\n    module = ResponseModule()\n    result = module.forward(context, intent, tools_result)\n    return result\n\n# Production-safe response generation\nfinal_response = safe_generate_response(context, intent, tools)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Customer Support",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your DSPy modules to eliminate support failures."
+    }
+  }
+}

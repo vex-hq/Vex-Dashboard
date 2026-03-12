@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix context window management for ai agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "OpenAI Assistants API context-window-management",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, Context Window Management issues arise when agent threads accumulate excessive messages, files, and tool outputs, silently exceeding model token limits during runs. This leads to truncated context, hallucinations in function calls, and degraded performance as the API doesn't enforce hard limits on thread history. Agents built with persistent threads for multi-turn conversations are particularly vulnerable, manifesting as incomplete reasoning or irrelevant responses.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support agent with persistent thread",
+        "symptom": "Run completes but final response references early conversation details incorrectly",
+        "impact": "Agent loses conversational coherence, frustrating users and requiring manual thread resets"
+      },
+      {
+        "scenario": "Code interpreter agent processing iterative debugging sessions",
+        "symptom": "Function calls fail validation with hallucinated arguments after 50+ turns",
+        "impact": "Development workflow breaks as agent can't maintain execution context"
+      },
+      {
+        "scenario": "File search agent with growing attachment list",
+        "symptom": "Retrieval tool returns empty results despite relevant files",
+        "impact": "RAG pipeline fails silently, delivering hallucinated answers"
+      },
+      {
+        "scenario": "Multi-tool agent chaining function calls over time",
+        "symptom": "Thread token count exceeds 128k silently, causing 400 errors on new runs",
+        "impact": "Production agents crash unpredictably during peak usage"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Token Limit Monitor",
+        "description": "Calculates total token usage across thread messages and detects when approaching model limits",
+        "code": "from openai import OpenAI\nimport tiktoken\n\nclient = OpenAI()\nencoding = tiktoken.encoding_for_model('gpt-4o')\n\ndef check_thread_context_limit(thread_id: str, model: str = 'gpt-4o', warning_threshold: int = 100000) -> dict:\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    total_tokens = 0\n    \n    for msg in messages.data:\n        # Content tokens\n        if msg.content:\n            for block in msg.content:\n                if block.type == 'text':\n                    total_tokens += len(encoding.encode(block.text.value))\n        # Tool output tokens\n        if msg.tool_outputs:\n            for output in msg.tool_outputs:\n                total_tokens += len(encoding.encode(output['body']))\n    \n    limit = 128000 if 'gpt-4o' in model else 8192\n    usage_pct = (total_tokens / limit) * 100\n    \n    return {\n        'total_tokens': total_tokens,\n        'limit': limit,\n        'usage_pct': usage_pct,\n        'over_limit': total_tokens > limit,\n        'needs_cleanup': usage_pct > warning_threshold\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Run Completion Token Overflow Check",
+        "description": "Inspects completed run metadata for truncation indicators and excessive input tokens",
+        "code": "import openai\nfrom typing import Dict, Any\n\ndef detect_context_overflow(run: Dict[str, Any]) -> bool:\n    # Check for truncation in usage\n    if hasattr(run, 'usage') and run.usage:\n        if run.usage.prompt_tokens + run.usage.completion_tokens > 127000:\n            return True\n    \n    # Check for incomplete tool calls (common overflow symptom)\n    if run.status == 'completed' and run.required_action:\n        return True\n    \n    # Check last message for context loss indicators\n    messages = openai.beta.threads.messages.list(run.thread_id)\n    last_msg = messages.data[0]\n    \n    truncation_indicators = [\n        'i forgot',\n        'earlier context',\n        'previous conversation',\n        \"don't remember\",\n        'context window'\n    ]\n    \n    if last_msg.role == 'assistant':\n        content = last_msg.content[0].text.value.lower()\n        if any(indicator in content for indicator in truncation_indicators):\n            return True\n    \n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Message History Analyzer",
+        "description": "TypeScript function to analyze thread message patterns for context bloat",
+        "code": "import OpenAI from 'openai';\n\nconst openai = new OpenAI();\n\nexport async function analyzeThreadBloat(threadId: string): Promise<{ bloated: boolean; score: number }> {\n  const messages = await openai.beta.threads.messages.list(threadId);\n  \n  let codeTokens = 0;\n  let fileTokens = 0;\n  let totalMessages = 0;\n  let recentMessages = 0;\n  \n  for (const msg of messages.data) {\n    totalMessages++;\n    if (Date.now() - new Date(msg.created_at * 1000).getTime() < 24 * 60 * 60 * 1000) {\n      recentMessages++;\n    }\n    \n    // Count code interpreter and file heavy messages\n    if (msg.tool_outputs?.some(t => t.type === 'code_interpreter')) {\n      codeTokens += 2000; // Estimate\n    }\n    if (msg.annotations?.some(a => a.type === 'file_citation')) {\n      fileTokens += 1500;\n    }\n  }\n  \n  const bloatScore = (codeTokens + fileTokens) / totalMessages + (totalMessages - recentMessages) * 10;\n  \n  return {\n    bloated: bloatScore > 5000 || totalMessages > 100,\n    score: bloatScore\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Smart Thread Pruning",
+        "description": "Automatically removes old messages while preserving critical context",
+        "code": "from openai import OpenAI\nfrom datetime import datetime, timedelta\n\ndef prune_thread_context(thread_id: str, max_messages: int = 50, days_old: int = 7):\n    client = OpenAI()\n    messages = client.beta.threads.messages.list(thread_id=thread_id, limit=200)\n    \n    cutoff_date = datetime.now() - timedelta(days=days_old)\n    keep_messages = []\n    delete_ids = []\n    \n    # Prioritize: system messages, recent convos, tool outputs\n    for msg in messages.data:\n        msg_date = datetime.fromtimestamp(msg.created_at)\n        is_critical = (\n            msg.role == 'system' or\n            msg.tool_outputs or\n            msg_date > cutoff_date or\n            len(keep_messages) < 10  # Keep first 10 regardless\n        )\n        \n        if is_critical and len(keep_messages) < max_messages:\n            keep_messages.append(msg)\n        else:\n            delete_ids.append(msg.id)\n    \n    # Delete old messages\n    for msg_id in delete_ids:\n        client.beta.threads.messages.delete(thread_id=thread_id, message_id=msg_id)\n    \n    # Add summary of pruned content\n    if delete_ids:\n        summary = f\"Pruned {len(delete_ids)} old messages. Active context: {len(keep_messages)} messages.\"\n        client.beta.threads.messages.create(\n            thread_id=thread_id,\n            role=\"system\",\n            content=summary\n        )\n    \n    return len(keep_messages)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Message Batching",
+        "description": "Creates summary threads for long conversations instead of letting context explode",
+        "code": "from openai import OpenAI\nimport tiktoken\n\ndef create_summary_thread(original_thread_id: str):\n    client = OpenAI()\n    encoding = tiktoken.encoding_for_model('gpt-4o')\n    \n    # Get recent conversation\n    messages = client.beta.threads.messages.list(\n        thread_id=original_thread_id,\n        limit=30,\n        order=\"desc\"\n    )\n    \n    conv_summary = \"Summarize this conversation concisely, preserving key facts, user preferences, and unresolved issues: \"\n    for msg in messages.data[:20]:  # Last 20 messages\n        role = \"User\" if msg.role == \"user\" else \"Assistant\"\n        content = msg.content[0].text.value[:1000] if msg.content else \"\"\n        conv_summary += f\"\\n{role}: {content}\"\n    \n    # Create summary thread\n    new_thread = client.beta.threads.create()\n    \n    summary_response = client.beta.threads.messages.create(\n        thread_id=new_thread.id,\n        role=\"user\",\n        content=conv_summary\n    )\n    \n    run = client.beta.threads.runs.create(\n        thread_id=new_thread.id,\n        assistant_id=\"your-summary-assistant-id\"\n    )\n    \n    return new_thread.id",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Context Window TypeScript Hook",
+        "description": "TypeScript middleware that switches models based on thread token usage",
+        "code": "import OpenAI from 'openai';\n\nconst openai = new OpenAI();\n\nexport async function dynamicContextRun(threadId: string, assistantId: string) {\n  // Check current thread token usage\n  const threadInfo = await checkThreadTokenUsage(threadId);\n  \n  let model = 'gpt-4o-mini';\n  if (threadInfo.usagePct < 30) {\n    model = 'gpt-4o-mini';  // Small context\n  } else if (threadInfo.usagePct < 80) {\n    model = 'gpt-4o';       // Medium context\n  } else {\n    // Large context - prune first\n    await pruneThreadSafely(threadId);\n    model = 'gpt-4o';\n  }\n  \n  const run = await openai.beta.threads.runs.create(threadId, {\n    assistant_id: assistantId,\n    model,\n    instructions: `Context usage: ${Math.round(threadInfo.usagePct)}%. Be concise.`\n  });\n  \n  return run;\n}\n\nasync function checkThreadTokenUsage(threadId: string) {\n  const messages = await openai.beta.threads.messages.list(threadId);\n  // Simplified token estimation\n  const tokenEstimate = messages.data.reduce((sum, msg) => {\n    return sum + (msg.content?.[0]?.text?.value?.length || 0) / 4;\n  }, 0);\n  \n  return {\n    usagePct: Math.min((tokenEstimate / 128000) * 100, 100),\n    totalTokens: tokenEstimate\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates directly with OpenAI Assistants API run completion webhooks, automatically detecting context window overflow by analyzing thread message counts, token estimates, and response quality metrics. When thresholds are exceeded, Vex triggers intelligent remediation workflows including thread pruning, summary thread creation, and model switching without interrupting agent operation.\n\nThe platform maintains conversation state across interventions by generating context-preserving summaries and injecting them into new threads. Vex's verification engine continuously monitors post-fix performance, ensuring remediation actually improves agent reliability rather than just masking symptoms.\n\nIntegration requires a single webhook configuration in your Assistant's run completion events, with Vex handling all detection, alerting, and automated recovery logic.",
+      "code": "import vex\n\nfrom openai import OpenAI\n\n@vex.verification(\n    name=\"openai-assistants-context-window\",\n    description=\"Detects and fixes context window overflow in OpenAI Assistant threads\",\n    webhook_trigger=\"run.completed\"\n)\ndef verify_assistant_context(event: dict) -> vex.VerificationResult:\n    client = OpenAI()\n    thread_id = event['data']['object']['thread_id']\n    run = event['data']['object']\n    \n    # DETECT: Check context health\n    context_health = check_thread_context_limit(thread_id)\n    \n    if context_health['needs_cleanup']:\n        # FIX: Prune and summarize\n        pruned_count = prune_thread_context(thread_id)\n        \n        return vex.VerificationResult(\n            passed=False,\n            issue=\"ContextWindowOverflow\",\n            remediation_executed=True,\n            remediation_summary=f\"Pruned {pruned_count} messages from thread\",\n            metrics={\n                'before_tokens': context_health['total_tokens'],\n                'after_messages': pruned_count\n            }\n        )\n    \n    return vex.VerificationResult(passed=True)\n\n# Install: pip install openai vex-sdk\n# Deploy: vex deploy --webhook openai-assistants-context-window",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of code to automatically prevent context window failures in your OpenAI Assistants - start your free trial now."
+    }
+  }
+}

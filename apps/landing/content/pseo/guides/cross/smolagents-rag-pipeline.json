@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Smolagents + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Smolagents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Smolagents rag pipeline",
+      "Smolagents guardrails",
+      "rag pipeline reliability",
+      "Vex Smolagents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG Pipeline with Smolagents enables lightweight, code-driven document retrieval and synthesis using Hugging Face's simple agent framework. However, agent-generated code for vector search, context assembly, and LLM calls introduces risks like hallucinations, unsafe executions, and citation errors. Vex provides essential verification to ensure source faithfulness and context relevance in high-risk production deployments.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Smolagents",
+      "description": "The Smolagents RAG pipeline starts with a retriever agent using vector search (e.g., FAISS or Pinecone) to fetch relevant document chunks from a knowledge base based on user queries. A context assembler agent then ranks and concatenates retrieved chunks, applying relevance filters before passing to a synthesizer agent. The synthesizer uses an LLM to generate responses with source attribution, often via code agents that execute embedding lookups and formatting logic.\n\nSmolagents' code-based reasoning shines in dynamic retrieval but amplifies risks when agents generate Python for database queries or LLM prompts without safeguards. Multi-step flows compound errors across retrieval, assembly, and synthesis phases. Vex wraps these agent runs to verify outputs against source faithfulness and hallucination criteria.\n\nKey components include embedding models (e.g., sentence-transformers), vector stores, and lightweight LLMs, all orchestrated via smolagents' simple agent.run() interface.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Retriever Agent  │───▶│ Context Assembler │\n└─────────────────┘    │ (Vector Search)   │    │   (Rank+Concat)   │\n                       └──────────────────┘    └──────────────────┘\n                                    │                    │\n                                    ▼                    ▼\n                           ┌──────────────────┐    ┌──────────────────┐\n                           │   Vector Store   │◀──▶│  Knowledge Base  │\n                           │     (FAISS)      │    │ (Doc Chunks)     │\n                           └──────────────────┘    └──────────────────┘\n                                               │\n                                               ▼\n                                       ┌──────────────────┐\n                              Vex     │ Synthesizer Agent │\n                              Verify  │   (LLM + Cite)    │ ───▶ Response\n                                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Code agent generating unsafe Python execution",
+        "description": "Smolagents code agents may generate exec() calls or import dangerous modules during dynamic retrieval logic",
+        "severity": "critical",
+        "mitigation": "Wrap agent.run() with vex.verify() using code_safety checks"
+      },
+      {
+        "name": "Tool agent misinterpreting tool descriptions",
+        "description": "Retriever agents misparse vector store tool schemas, returning irrelevant chunks",
+        "severity": "high",
+        "mitigation": "Vex context_relevance verification on retrieved documents"
+      },
+      {
+        "name": "Multi-step reasoning errors compounding",
+        "description": "Errors in retrieval propagate through assembly and synthesis, creating hallucinated citations",
+        "severity": "high",
+        "mitigation": "End-to-end source_faithfulness checks across pipeline stages"
+      },
+      {
+        "name": "Hallucination in synthesized responses",
+        "description": "LLM synthesis ignores provided context, fabricating facts despite retrieved sources",
+        "severity": "critical",
+        "mitigation": "Vex hallucination_detection with citation_accuracy scoring"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Setup Smolagents RAG Retriever",
+        "description": "Initialize FAISS vector store and retriever agent with embedding model",
+        "code": "from smolagents import CodeAgent, tool\nfrom sentence_transformers import SentenceTransformer\nimport faiss\nimport numpy as np\n\nembedder = SentenceTransformer('all-MiniLM-L6-v2')\n\ndocuments = [\"Doc1: AI safety...\", \"Doc2: RAG patterns...\"]\nembeddings = embedder.encode(documents)\ndimension = embeddings.shape[1]\nindex = faiss.IndexFlatL2(dimension)\nindex.add(np.array(embeddings))\n\n@tool\ndef retrieve_docs(query: str, top_k: int = 3) -> list:\n    query_emb = embedder.encode([query])\n    distances, indices = index.search(query_emb, top_k)\n    return [documents[i] for i in indices[0]]\n\nretriever = CodeAgent(tools=[retrieve_docs])",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly Agent",
+        "description": "Rank and format retrieved chunks for LLM context",
+        "code": "from smolagents import Agent\n\ndef assemble_context(query: str, docs: list) -> str:\n    ranked_docs = sorted(docs, key=lambda d: len(d.split()))  # Simple relevance proxy\n    context = \"\\n\".join([f\"[DOC{i+1}] {doc}\" for i, doc in enumerate(ranked_docs[:4])])\n    return f\"Query: {query}\\nContext:\\n{context}\"\n\nassembler = Agent(system_prompt=\"Assemble relevant context from retrieved docs\")",
+        "language": "python"
+      },
+      {
+        "title": "RAG Synthesizer with Citations",
+        "description": "Generate answer with source attribution markers",
+        "code": "@tool\ndef synthesize_answer(query: str, context: str) -> str:\n    prompt = f\"\"\"Answer using ONLY the provided context. Cite sources as [DOC1], [DOC2] etc.\n\nContext: {context}\n\nAnswer:\"\"\"\n    response = llm_client.chat.completions.create(\n        model=\"gpt-4o-mini\",\n        messages=[{\"role\": \"user\", \"content\": prompt}]\n    )\n    return response.choices[0].message.content\n\nsynthesizer = CodeAgent(tools=[synthesize_answer])",
+        "language": "python"
+      },
+      {
+        "title": "Full RAG Pipeline Orchestration",
+        "description": "Chain retriever → assembler → synthesizer",
+        "code": "def rag_pipeline(query: str):\n    # Step 1: Retrieve\n    docs = retriever.run(f\"retrieve relevant docs for: {query}\")\n    \n    # Step 2: Assemble\n    context = assembler.run(f\"assemble context for query: {query} from docs: {docs}\")\n    \n    # Step 3: Synthesize\n    answer = synthesizer.run(f\"synthesize answer for: {query} using context: {context}\")\n    return answer\n\nresult = rag_pipeline(\"What is RAG?\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Retriever with Context Relevance",
+        "description": "Ensure retrieved documents are semantically relevant to query",
+        "code": "import vex\n\n@vex.verify(checks=[\"context_relevance\"])\ndef safe_retrieve(query: str):\n    return retriever.run(f\"retrieve relevant docs for: {query}\")\n\nrelevant_docs = safe_retrieve(\"What is RAG?\")\n# Vex auto-rejects if cosine similarity < 0.7",
+        "language": "python"
+      },
+      {
+        "title": "End-to-End Source Faithfulness Check",
+        "description": "Verify final answer stays faithful to retrieved sources",
+        "code": "@vex.verify(\n    checks=[\"source_faithfulness\", \"hallucination_detection\"],\n    risk_profile=\"high\"\n)\ndef safe_rag_pipeline(query: str):\n    docs = safe_retrieve(query)\n    context = assembler.run(f\"assemble: {query} docs: {docs}\")\n    return synthesizer.run(f\"synthesize: {query} context: {context}\")\n\nverified_answer = safe_rag_pipeline(\"Explain RAG architecture\")",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy Validation",
+        "description": "Check that [DOC1], [DOC2] citations match actual sources used",
+        "code": "@vex.verify(\n    checks=[\"citation_accuracy\"],\n    sources=documents  # Ground truth doc store\n)\ndef validate_citations(answer: str, sources: list):\n    # Vex extracts [DOCn] markers and validates against source indices\n    return \"APPROVED\"\n\nstatus = validate_citations(verified_answer, documents)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Smolagents RAG Pipeline",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your agent.run() calls today to eliminate hallucinations and ensure production-grade reliability."
+    }
+  }
+}

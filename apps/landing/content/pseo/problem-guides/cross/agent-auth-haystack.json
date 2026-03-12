@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Haystack Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Haystack agent-auth",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, AI Agent Authentication and Authorization issues manifest when components attempt unauthorized access to protected resources like vector stores, APIs, or external services without proper credential propagation or role-based access control. These failures often appear as silent token errors in retrievers, generators rejecting API keys, or custom components crashing due to 401/403 responses that aren't surfaced through Haystack's error handling. Without explicit auth middleware, pipelines process requests with insufficient privileges, leading to incomplete retrievals or hallucinated responses claiming access to restricted data.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever missing API key for vector database",
+        "symptom": "Empty document results despite valid queries",
+        "impact": "Generator hallucinates answers from no context"
+      },
+      {
+        "scenario": "Generator component lacks auth headers for LLM provider",
+        "symptom": "Pipeline hangs or returns 401 errors silently",
+        "impact": "Production timeouts and failed user requests"
+      },
+      {
+        "scenario": "Custom RAG component can't access enterprise knowledge base",
+        "symptom": "Partial results with 'permission denied' in logs",
+        "impact": "Inconsistent agent performance across users"
+      },
+      {
+        "scenario": "Multi-tenant pipeline with role-based document access",
+        "symptom": "Users see each other's private documents",
+        "impact": "Data leakage and compliance violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor HTTP 401/403 Responses in Pipeline",
+        "description": "Inject a Vex detector that captures authentication failures across all HTTP-bound components",
+        "code": "from vex_sdk import VexDetector\nfrom haystack import Pipeline\n\nclass AuthFailureDetector(VexDetector):\n    def __init__(self):\n        super().__init__(name='auth_failures')\n        self.failure_count = 0\n\n    def detect(self, inputs, outputs, component_name):\n        for output in outputs:\n            if hasattr(output, 'meta') and output.meta.get('status_code') in [401, 403]:\n                self.failure_count += 1\n                self.log_issue(f\"Auth failure in {component_name}: {output.meta.get('error')}\")\n        return self.failure_count > 0\n\n# Usage in pipeline\ndetector = AuthFailureDetector()\npipeline.add_component('auth_detector', detector)",
+        "language": "python"
+      },
+      {
+        "name": "Validate Credential Propagation Through Pipeline",
+        "description": "Test if auth tokens survive component handoffs by tracing headers",
+        "code": "from vex_sdk import VexTestCase\nfrom haystack.components import OpenAIChatGenerator\n\nclass AuthPropagationTest(VexTestCase):\n    def test_pipeline_auth_flow(self):\n        pipeline = Pipeline()\n        pipeline.add_component('generator', OpenAIChatGenerator(api_key='test-key'))\n        \n        result = pipeline.run({'generator': {'message': 'test'}})\n        \n        # Vex assertion\n        self.assertTrue(\n            'Bearer test-key' in str(result),\n            'Auth token not propagated to generator'\n        )\n        \nVexTestCase.run(AuthPropagationTest())",
+        "language": "python"
+      },
+      {
+        "name": "Scan Pipeline Components for Auth Dependencies",
+        "description": "Static analysis of component constructors for missing auth parameters",
+        "code": "from vex_sdk import VexScanner\nimport inspect\nfrom haystack.components import ElasticsearchDocumentStore\n\nclass AuthDependencyScanner(VexScanner):\n    AUTH_PARAMS = {'api_key', 'token', 'password', 'bearer'}\n    \n    def scan_component(self, component):\n        sig = inspect.signature(component.__init__)\n        missing_auth = []\n        \n        for param_name in self.AUTH_PARAMS:\n            if param_name not in sig.parameters:\n                missing_auth.append(param_name)\n                \n        if missing_auth:\n            self.log_vulnerability(f'{component.__class__.__name__} missing auth params: {missing_auth}')\n        \nscanner = AuthDependencyScanner()\nscanner.scan([ElasticsearchDocumentStore, OpenAIChatGenerator])",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Auth Middleware Component",
+        "description": "Centralized component that injects credentials into all downstream requests",
+        "code": "from haystack import component\nfrom typing import Dict, Any\n\n@component\nclass AuthMiddleware:\n    def __init__(self, api_key: str, base_url: str = None):\n        self.api_key = api_key\n        self.base_url = base_url\n\n    @component.output_types(retrieved_documents=dict, generated=dict)\n    def run(self, query: str, user_role: str = 'user'):\n        # Inject auth headers\n        headers = {'Authorization': f'Bearer {self.api_key}', 'X-User-Role': user_role}\n        \n        return {\n            'retrieved_documents': {'query': query, 'headers': headers},\n            'generated': {'headers': headers}\n        }\n\n# Pipeline integration\npipeline = Pipeline()\npipeline.add_component('auth', AuthMiddleware(api_key='sk-...'))",
+        "language": "python"
+      },
+      {
+        "name": "Role-Based Document Filter",
+        "description": "Filter retrieved documents based on user permissions before generation",
+        "code": "from haystack import component\n\n@component\nclass RoleBasedFilter:\n    def __init__(self):\n        self.roles = {'admin': ['*'], 'user': ['public'], 'guest': []}\n\n    @component.input_types(documents=list)\n    @component.output_types(filtered_documents=list)\n    def run(self, documents: list, user_role: str):\n        allowed_types = self.roles.get(user_role, [])\n        \n        filtered = [\n            doc for doc in documents\n            if any(allowed in doc.meta.get('access', '') for allowed in allowed_types)\n        ]\n        \n        return {'filtered_documents': filtered}\n\n# Add to pipeline after retriever\npipeline.add_component('filter', RoleBasedFilter())\npipeline.connect('retriever', 'filter')\npipeline.connect('filter', 'generator')",
+        "language": "python"
+      },
+      {
+        "name": "Credential Vault Integration",
+        "description": "Secure credential injection using environment-based vaults",
+        "code": "import os\nfrom haystack.utils import ComponentDeviceSentinels\nfrom dotenv import load_dotenv\n\nload_dotenv()\n\nclass SecureAuthConfig:\n    @staticmethod\n    def get_credentials(environment: str):\n        return {\n            'api_key': os.getenv(f'{environment.upper()}_API_KEY'),\n            'vector_store_url': os.getenv(f'{environment.upper()}_VECTOR_URL'),\n            'user_pool_id': os.getenv(f'{environment.upper()}_USER_POOL')\n        }\n\n# Environment-aware pipeline\nconfig = SecureAuthConfig.get_credentials('prod')\n\nretriever = ElasticsearchDocumentStore(\n    url=config['vector_store_url'],\n    api_key=config['api_key']  # Securely injected\n)\n\ngenerator = OpenAIChatGenerator(api_key=config['api_key'])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that automatically instruments your entire pipeline for auth-related failures. It monitors HTTP status codes, traces credential propagation, and validates role-based access controls across all components without requiring code changes. Vex captures 401/403 responses, empty retrievals due to permissions, and token expiration issues, providing detailed traces with remediation suggestions.\n\nThe Vex agent runs continuous validation tests including auth propagation checks, privilege escalation detection, and credential leakage scans. It generates synthetic test cases that simulate different user roles and permission levels, ensuring your pipeline handles multi-tenant scenarios correctly. Integration takes 3 lines of code and provides instant observability into auth failures.\n\nVex also auto-generates remediation code snippets specific to your pipeline structure, handling everything from OpenAI token injection to Elasticsearch role mapping. This eliminates manual debugging of intermittent 403 errors and ensures compliance with enterprise security requirements.",
+      "code": "from vex_sdk.haystack import VexHaystackAgent\nfrom haystack import Pipeline\n\n# 3-line integration\nvex = VexHaystackAgent(workspace_id='your-workspace')\n\npipeline = Pipeline()  # Your existing pipeline\npipeline.add_component('vex_monitor', vex.auth_guard())\n\n# Auto-generates tests and monitors\nvex.run_continuous_validation(pipeline, scenarios=['multi-tenant', 'token-expiry', 'role-escalation'])\n\n# View results\nprint(vex.get_auth_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install haystack-ai vex-sdk` and eliminate auth failures in 3 lines of code."
+    }
+  }
+}

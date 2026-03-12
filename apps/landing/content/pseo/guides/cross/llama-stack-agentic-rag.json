@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack agentic rag",
+      "Llama Stack guardrails",
+      "agentic rag reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Llama Stack provides a standardized Python interface for building sophisticated Llama-powered agents with built-in safety, memory, and tool capabilities, making it ideal for Agentic RAG systems that autonomously plan queries and synthesize multi-source information. Guardrails are essential due to the high-risk nature of autonomous retrieval agents, where failures in source faithfulness, hallucination, or query planning can propagate misinformation. Vex integration ensures reliable outputs through post-processing verification of agent turns.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Llama Stack",
+      "description": "Agentic RAG with Llama Stack follows a multi-turn agent loop where the PlanningAgent generates query strategies, RetrievalAgent executes vector and keyword searches across multiple sources (databases, web, enterprise docs), and SynthesisAgent generates responses with source attribution. Llama Stack's SafetyShield filters inputs/outputs, MemoryBank maintains conversation context and retrieved chunks, and ToolAgent handles external API calls for real-time data. The architecture emphasizes autonomous loop control with turn limits and structured tool responses.\n\nKey components include the LlamaStackClient for agent orchestration, custom tools for retrieval (Pinecone, Weaviate, etc.), and memory-backed reasoning traces. The agent iteratively refines queries based on retrieval quality scores and synthesizes final answers with verifiable citations. This creates a robust but complex system prone to drift without verification.\n\nVex wraps the final agent response before delivery, verifying source faithfulness and hallucination using the high-risk profile configuration.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ PlanningAgent     │\n└─────────────────┘    │ (llama_stack)     │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ RetrievalAgent    │────▶ ┌──────────────┐\n                       │ (Multi-source)    │    │ Multiple      │\n                       └────────┬──────────┘    │ Sources       │\n                                │               │ (Pinecone,    │\n                       ┌────────▼──────────┐    │ Web, Docs)    │\n                       │ SynthesisAgent    │◀────└──────────────┘\n                       │ + Vex.verify()    │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Verified Response │\n                       │ w/ Citations      │\n                       └───────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Safety shield false positives",
+        "description": "Llama Stack's SafetyShield blocks benign technical content about security or medical topics",
+        "severity": "high",
+        "mitigation": "Vex custom safety assertions override with domain-specific allowlists"
+      },
+      {
+        "name": "Agent loop exhaustion",
+        "description": "Turn limits exceeded without resolution due to poor query planning",
+        "severity": "critical",
+        "mitigation": "Vex query planning accuracy checks terminate ineffective loops early"
+      },
+      {
+        "name": "Tool schema violations",
+        "description": "Retrieval tools return malformed JSON breaking synthesis",
+        "severity": "high",
+        "mitigation": "Vex structured output enforcement on tool responses"
+      },
+      {
+        "name": "Memory hallucination",
+        "description": "MemoryBank associates wrong documents to conversation context",
+        "severity": "medium",
+        "mitigation": "Vex source faithfulness verification traces memory retrievals"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Llama Stack Client",
+        "description": "Set up the core LlamaStackClient with agent configuration for Agentic RAG",
+        "code": "from llama_stack_client import LlamaStackClient\nfrom llama_stack_client.types import AgentConfig\n\nclient = LlamaStackClient(\n    model='llama-3.2-90b',\n    base_url='https://api.llamastack.ai/v1',\n    api_key='your-api-key'\n)\n\nrag_agent_config = AgentConfig(\n    name='agentic-rag',\n    system_prompt='You are an Agentic RAG expert. Plan queries, retrieve from multiple sources, synthesize with citations.',\n    max_turns=8,\n    tools=['retrieval_tool', 'web_search_tool'],\n    memory=True\n)\n\nrag_agent = client.create_agent(config=rag_agent_config)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Source Retrieval Tool",
+        "description": "Custom tool implementation for Pinecone vector search and keyword fallback",
+        "code": "from llama_stack_client import Tool\nfrom typing import Dict, List\n\n@pydantic.dataclass\nclass RetrievalInput:\n    query: str\n    source_type: str = 'vector'\n\n@pydantic.dataclass\nclass RetrievalOutput:\n    chunks: List[Dict[str, str]]\n    source_ids: List[str]\n    relevance_scores: List[float]\n\nretrieval_tool = Tool(\n    name='multi_source_retrieve',\n    description='Retrieve from Pinecone, Weaviate, or web sources',\n    input_schema=RetrievalInput,\n    output_schema=RetrievalOutput,\n    func=lambda input: pinecone_retrieve(input.query) + web_search(input.query)\n)\n\nrag_agent.add_tool(retrieval_tool)",
+        "language": "python"
+      },
+      {
+        "title": "Agent Loop Execution",
+        "description": "Execute the full Agentic RAG workflow with memory and safety",
+        "code": "async def execute_agentic_rag(query: str) -> str:\n    conversation = client.new_conversation()\n    \n    # Initial planning turn\n    planning_turn = await rag_agent.send_message(\n        conversation_id=conversation.id,\n        message=query,\n        safety_check=True\n    )\n    \n    # Autonomous loop\n    for turn in range(rag_agent.config.max_turns):\n        response = await rag_agent.process_turn(conversation_id=conversation.id)\n        if response.is_final:\n            return response.content\n    \n    return 'Max turns exceeded'",
+        "language": "python"
+      },
+      {
+        "title": "Citation Synthesis",
+        "description": "Final synthesis step with source attribution formatting",
+        "code": "def format_with_citations(synthesis: str, sources: List[Dict]) -> str:\n    formatted = synthesis\n    for i, source in enumerate(sources, 1):\n        formatted += f'\\n\\n[{i}] {source[\"title\"]} (Source ID: {source[\"id\"]})'\n        formatted += f'\\nRelevance: {source[\"score\"]:.2f}'\n    return formatted\n\n# In agent response handler\nfinal_response = format_with_citations(\n    response.synthesis,\n    response.retrieved_sources\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Basic Vex Verification Wrapper",
+        "description": "Wrap Llama Stack agent responses with Vex high-risk verification",
+        "code": "import vex\n\n@vex.workflow(\n    risk_profile='high',\n    assertions=[\n        'source_faithfulness',\n        'no_hallucination',\n        'structured_citations',\n        'query_relevance'\n    ]\n)\nasync def verified_agentic_rag(query: str) -> str:\n    raw_response = await execute_agentic_rag(query)\n    \n    verified = vex.verify(\n        raw_response,\n        context={\n            'retrieved_sources': conversation.sources,\n            'query_plan': planning_turn.content,\n            'agent_turns': conversation.turn_history\n        }\n    )\n    \n    return verified.content if verified.passed else verified.failure_explanation",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Check",
+        "description": "Verify synthesis matches retrieved chunks with citation validation",
+        "code": "@vex.assertion('source_faithfulness')\ndef check_source_faithfulness(response: str, sources: List[Dict]) -> bool:\n    for citation in extract_citations(response):\n        source_content = get_source_by_id(sources, citation.source_id)\n        if semantic_similarity(response, source_content) < 0.85:\n            return False\n    return True\n\n# Integrated in Vex workflow\nvex.verify(raw_response, custom_assertions=[check_source_faithfulness])",
+        "language": "python"
+      },
+      {
+        "title": "Query Planning Validation",
+        "description": "Ensure agent planning turns produce relevant retrieval strategies",
+        "code": "@vex.assertion('query_planning_accuracy')\ndef validate_query_plan(plan: str, original_query: str) -> bool:\n    plan_embedding = embed(plan)\n    query_embedding = embed(original_query)\n    \n    # Check if plan addresses core query intent\n    intent_match = cosine_similarity(plan_embedding, query_embedding) > 0.75\n    \n    # Check for retrieval strategy presence\n    has_strategy = any(keyword in plan.lower() for keyword in \n                      ['retrieve', 'search', 'vector', 'keyword', 'sources'])\n    \n    return intent_match and has_strategy\n\n# Called within Vex verification\nplanning_verified = validate_query_plan(planning_turn.content, user_query)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack Agentic RAG",
+      "description": "Integrate Vex today to eliminate hallucination and ensure source faithfulness in production."
+    }
+  }
+}

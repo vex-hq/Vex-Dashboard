@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Vercel AI SDK tool-loop-detection",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK agents, tool loops manifest as infinite or excessively long cycles where the agent repeatedly calls the same tools like `search` or `calculate` without progressing toward a final answer, often due to unhandled edge cases in tool responses or missing loop-breaking logic in `generateText` streams. This is exacerbated by the SDK's streaming nature via `streamText`, where partial tool calls accumulate without validation, leading to high token usage and timeouts in Vercel Edge functions. Developers commonly overlook loop detection in agent patterns using `useChat` or custom tool chains, resulting in unresponsive UIs and escalated costs.",
+    "howItManifests": [
+      {
+        "scenario": "Recursive math solver agent calling `calculate` tool on its own output",
+        "symptom": "StreamText output shows repeating 'Calling calculate...' tokens without resolution",
+        "impact": "Edge function hits 30s timeout, user sees frozen spinner in React UI"
+      },
+      {
+        "scenario": "Search agent trapped in `webSearch` -> `summarize` -> `webSearch` cycle",
+        "symptom": "Tool call history in `useChat` grows >50 calls with identical queries",
+        "impact": "Token costs spike 10x, inconsistent structured output across OpenAI/Anthropic"
+      },
+      {
+        "scenario": "Multi-tool agent with unvalidated `getWeather` -> `getLocation` ping-pong",
+        "symptom": "Partial hallucinations in stream like 'Weather in [location] requires location... Calling getLocation...'",
+        "impact": "Broken streaming UI with unterminated tool call spinners"
+      },
+      {
+        "scenario": "Custom agent with stateful tools lacking convergence criteria",
+        "symptom": "generateText loop exceeds 100 iterations per `streamText` call",
+        "impact": "High Vercel function invocation costs and poor user experience"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Cycle Monitor",
+        "description": "Tracks repeated tool calls within streamText sessions using a Set of call signatures",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nconst toolCalls = new Set<string>();\n\nawait streamText({\n  model: openai('gpt-4o'),\n  tools: {\n    search: { /* ... */ },\n    calculate: { /* ... */ }\n  },\n  onToolCall: (call) => {\n    const signature = `${call.toolName}:${JSON.stringify(call.args)}`;\n    if (toolCalls.has(signature)) {\n      throw new Error(`Tool loop detected: ${signature}`);\n    }\n    toolCalls.add(signature);\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Iteration Counter Middleware",
+        "description": "Counts generation cycles in agent loop and alerts on thresholds",
+        "code": "let iterationCount = 0;\nconst MAX_ITERATIONS = 20;\n\nconst result = await streamText({\n  model: openai('gpt-4o'),\n  maxIterations: MAX_ITERATIONS,\n  experimental_onToolCall: (params) => {\n    iterationCount++;\n    if (iterationCount > MAX_ITERATIONS) {\n      console.warn('Potential tool loop: exceeded', MAX_ITERATIONS, 'iterations');\n      return { toolCallId: null, toolCalls: [] };\n    }\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Token Velocity Detector",
+        "description": "Monitors streaming token rate stagnation indicating loops",
+        "code": "import { createStreamableValue } from 'ai/rsc';\n\nlet lastTokenTime = Date.now();\nlet tokenCount = 0;\nlet stalled = false;\n\nconst stream = createStreamableValue();\n\n// In your streamText callback\nconst onFinish = (message) => {\n  tokenCount += message.content?.length || 0;\n  const now = Date.now();\n  if (now - lastTokenTime > 10000 && tokenCount < 50) {\n    stalled = true;\n    stream.done('LOOP_DETECTED: No progress in 10s');\n  }\n  lastTokenTime = now;\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Loop-Breaking Guardrails",
+        "description": "Adds convergence criteria and max iterations to streamText agent",
+        "code": "import { streamText } from 'ai';\nimport { z } from 'zod';\n\nconst agentStream = async (messages) => {\n  return streamText({\n    model: openai('gpt-4o'),\n    messages,\n    tools: {\n      search: { /* ... */ },\n      execute: {\n        parameters: z.object({}),\n        execute: async () => ({ content: 'Final answer generated' })\n      }\n    },\n    maxIterations: 10,\n    toolChoice: 'auto',\n    system: 'Break loops by calling \"execute\" when you have enough information. Max 10 tool calls.'\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Stateful Loop Prevention",
+        "description": "Uses message history deduplication in useChat agents",
+        "code": "import { useChat } from 'ai/react';\n\nfunction AgentChat() {\n  const { messages, append, isLoading } = useChat({\n    api: '/api/agent',\n    initialMessages: [],\n    onToolCall: ({ toolCallId, toolCalls }) => {\n      // Deduplicate tool calls\n      const seen = new Set(messages.map(m => \n        JSON.stringify(m.toolCalls?.[0]?.args)\n      ));\n      return toolCalls.filter(call => !seen.has(JSON.stringify(call.args)));\n    }\n  });\n  return <Chat messages={messages} />;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Timeout & Fallback Handler",
+        "description": "Implements stream timeout with emergency final answer",
+        "code": "import { streamText } from 'ai';\n\nconst withTimeout = async (input, timeoutMs = 30000) => {\n  return Promise.race([\n    streamText({ model: openai('gpt-4o'), ...input }),\n    new Promise((_, reject) => \n      setTimeout(() => reject(new Error('LOOP_TIMEOUT')), timeoutMs)\n    )\n  ]).catch((err) => {\n    if (err.message === 'LOOP_TIMEOUT') {\n      return { text: 'Final answer: Task completed after analysis.' };\n    }\n    throw err;\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex automates tool loop detection by injecting middleware into Vercel AI SDK's `generateText` and `streamText` calls, monitoring tool call patterns, iteration counts, and token velocity in real-time across deployments. It captures loop signatures (toolName+args hashes) and alerts teams via Slack/webhooks when cycles exceed configurable thresholds, preventing production incidents. Vex's agent observability traces full tool call graphs, automatically suggesting loop-breaking system prompts and maxIteration limits based on historical patterns.\n\nIntegration requires one line: wrap your AI SDK calls with `vex.middleware()`. Vex handles Edge function timeouts by force-terminating loops and injecting fallback responses, maintaining UI responsiveness. Remediation is automatic—Vex can deploy hotfixes updating `maxIterations` and tool schemas across your Vercel deployments.\n\nFor complex multi-tool agents, Vex builds dependency graphs showing `search->summarize->search` cycles and recommends convergence tools like 'execute' or 'finalize'. This reduces MTTR from hours to seconds while cutting token waste by 70%+.",
+      "code": "npm install ai @vex_dev/sdk\n\nimport { streamText } from 'ai';\nimport { vex } from '@vex_dev/sdk';\n\n// Single line integration\napp.post('/api/agent', vex.middleware(async (req) => {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools: { search: {/*...*/}, calculate: {/*...*/} },\n    // Vex auto-detects loops, injects guards\n  });\n  return result.toAIStreamResponse();\n}));\n\n// Vex dashboard shows: Loop Rate, Top Cycles, Auto-Fixes Deployed",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `vex.middleware()` to your Vercel AI SDK routes and eliminate tool loops forever."
+    }
+  }
+}

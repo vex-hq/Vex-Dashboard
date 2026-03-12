@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in n8n AI Agents Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "n8n AI Agents data-leakage",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, sensitive data leakage occurs when AI nodes process PII or credentials without output sanitization, passing raw data through workflow chains to external services. Common patterns like unvalidated AI Agent outputs feeding into HTTP Request or Email nodes expose secrets via recursive tool calls or memory injection. This creates silent leakage channels unique to n8n's node-based agent architecture.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node receives webhook with API keys, calls itself recursively via HTTP Request node with unsanitized `$json.data`",
+        "impact": "API keys leak to external services through infinite workflow loops"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "OpenAI node extracts customer SSN from conversation, passes raw output to Send Email node",
+        "impact": "PII emailed to support team and logged in n8n execution history"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "Custom Tool node receives `{{ $json.aiOutput }}` containing database credentials from upstream AI Agent",
+        "impact": "Secrets executed in Postgres node and stored in workflow memory"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Chat Memory node injects previous conversation containing credit card numbers into new AI Agent session",
+        "impact": "Stale PII reintroduced into every conversation thread"
+      }
+    ],
+    "detection": [
+      {
+        "name": "AI Node Output PII Scanner",
+        "description": "Detects PII patterns in AI Agent node outputs before they reach action nodes",
+        "code": "const detectPII = (data: any): boolean => {\n  const piiPatterns = [\n    /\\b\\d{3}-\\d{2}-\\d{4}\\b/g, // SSN\n    /\\b4[0-9]{12}(?:[0-9]{3})?\\b/g, // Visa\n    /\\b(?:[A-Z][A-Z ]{0,19}[A-Z])\\d{9}\\b/g, // API Keys\n    /(?=^.{6,}$)(([a-zA-Z0-9$&+,:;=?@#|'<>.^*()%!-]){1,}|\\S{1,})/g // Passwords\n  ];\n  \n  const text = JSON.stringify(data);\n  return piiPatterns.some(pattern => pattern.test(text));\n};\n\n// n8n Code Node after AI Agent\nconst items = $input.all();\nfor (const item of items) {\n  if (detectPII(item.json)) {\n    throw new Error('PII detected in AI Agent output: ' + JSON.stringify(item.json));\n  }\n}\nreturn items;",
+        "language": "typescript"
+      },
+      {
+        "name": "Credential Propagation Tracer",
+        "description": "Traces credential patterns through workflow node chains from AI Agent to actions",
+        "code": "const traceCredentials = (items: any[]): string[] => {\n  const credPatterns = [/secret[A-Za-z0-9_-]{8,}/gi, /api[-_]?key[A-Za-z0-9_-]{16,}/gi];\n  const leaked = [];\n  \n  items.forEach((item, index) => {\n    const nodeName = $workflow.nodes[index]?.name || 'unknown';\n    const data = JSON.stringify(item.json);\n    credPatterns.forEach(pattern => {\n      const matches = data.match(pattern);\n      if (matches) {\n        leaked.push(`${nodeName}: ${matches.join(', ')}`);\n      }\n    });\n  });\n  return leaked;\n};\n\nconst leaks = traceCredentials($input.all());\nif (leaks.length > 0) {\n  console.error('Credential leaks detected:', leaks);\n  return [{ json: { alert: 'CREDENTIAL_LEAK', details: leaks } }];\n}\nreturn $input.all();",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Leak Detector",
+        "description": "Scans Chat Memory node outputs for stale sensitive data injection",
+        "code": "interface MemoryLeak {\n  sessionId: string;\n  leakedData: string[];\n  ageDays: number;\n}\n\nconst scanMemory = (memoryItems: any[]): MemoryLeak[] => {\n  const leaks: MemoryLeak[] = [];\n  const SENSITIVE_PATTERNS = [\n    { pattern: /\\b\\d{16}\\b/g, type: 'CARD_NUMBER' },\n    { pattern: /xoxb-[0-9]{10,}/g, type: 'SLACK_TOKEN' }\n  ];\n  \n  memoryItems.forEach(item => {\n    const sessionId = item.json.sessionId;\n    const context = item.json.memoryContext || '';\n    const ageDays = (Date.now() - new Date(item.json.timestamp).getTime()) / (1000 * 60 * 60 * 24);\n    \n    SENSITIVE_PATTERNS.forEach(({ pattern, type }) => {\n      const matches = context.match(pattern);\n      if (matches && ageDays > 7) {\n        leaks.push({ sessionId, leakedData: matches, ageDays: Math.floor(ageDays) });\n      }\n    });\n  });\n  return leaks;\n};\n\nconst leaks = scanMemory($input.all());\nif (leaks.length > 0) {\n  throw new Error(`Stale memory leaks: ${JSON.stringify(leaks)}`);\n}\nreturn $input.all();",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Filter Node",
+        "description": "Automatically redacts sensitive data from AI Agent outputs before downstream nodes",
+        "code": "const redactPII = (text: string): string => {\n  const redactions = [\n    { pattern: /\\b\\d{3}-\\d{2}-\\d{4}\\b/g, replacement: '[SSN_REDACTED]' },\n    { pattern: /\\b4[0-9]{12}(?:[0-9]{3})?\\b/g, replacement: '[CARD_REDACTED]' },\n    { pattern: /(?=^.{6,}$)(([a-zA-Z0-9$&+,:;=?@#|'<>.^*()%!-]){1,}|\\S{1,})/g, replacement: '[PASSWORD_REDACTED]' }\n  ];\n  \n  return redactions.reduce((cleaned, { pattern, replacement }) => {\n    return cleaned.replace(pattern, replacement);\n  }, text);\n};\n\nconst items = $input.all();\nconst cleanedItems = items.map(item => {\n  const cleanedJson = JSON.parse(redactPII(JSON.stringify(item.json)));\n  return { json: cleanedJson };\n});\n\nreturn cleanedItems;",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Parameter Validator",
+        "description": "Validates and sanitizes tool call parameters before execution",
+        "code": "interface SafeToolParams {\n  [key: string]: string | number | boolean;\n}\n\nconst sanitizeToolParams = (params: any): SafeToolParams => {\n  const safeParams: SafeToolParams = {};\n  const BLOCKED_PATTERNS = [/secret[A-Za-z0-9_-]{8,}/gi, /\\bkey[:=][\\s\\\"']*[A-Za-z0-9_-]{16,}/gi];\n  \n  Object.entries(params).forEach(([key, value]) => {\n    const strValue = String(value);\n    const hasSecrets = BLOCKED_PATTERNS.some(pattern => pattern.test(strValue));\n    \n    if (!hasSecrets) {\n      safeParams[key] = ['string', 'number', 'boolean'].includes(typeof value) ? value : '[SANITIZED]';\n    } else {\n      safeParams[key] = '[CREDENTIAL_BLOCKED]';\n      console.warn(`Blocked secret in tool param ${key}: ${strValue.substring(0, 20)}...`);\n    }\n  });\n  \n  return safeParams;\n};\n\nconst safeParams = sanitizeToolParams($json.toolParams);\nreturn [{ json: { safeParams, originalParamsBlocked: Object.keys($json.toolParams).length !== Object.keys(safeParams).length } }];",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Age Filter",
+        "description": "Filters out stale memory context older than 24 hours containing sensitive data",
+        "code": "const filterSafeMemory = (memoryItems: any[]) => {\n  const MAX_AGE_HOURS = 24;\n  const SAFE_PATTERNS = [/email/i, /name/i, /message/i];\n  \n  return memoryItems.filter(item => {\n    const ageHours = (Date.now() - new Date(item.json.timestamp).getTime()) / (1000 * 60 * 60);\n    const context = item.json.memoryContext || '';\n    \n    // Block if too old OR contains dangerous patterns\n    const isTooOld = ageHours > MAX_AGE_HOURS;\n    const hasDangerousData = !SAFE_PATTERNS.some(pattern => pattern.test(context));\n    \n    if (isTooOld) {\n      console.log(`Blocked stale memory: ${ageHours.toFixed(1)}h old`);\n    }\n    \n    return !(isTooOld || hasDangerousData);\n  });\n};\n\nconst safeMemory = filterSafeMemory($input.all());\nreturn safeMemory.length > 0 ? safeMemory : [{ json: { message: 'No safe memory context available' } }];",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after every AI Agent node in n8n workflows, automatically scanning outputs for PII, credentials, and stale memory injection before data reaches action nodes. It provides real-time blocking, workflow pausing, and remediation suggestions without modifying core workflow logic.\n\nThe Vex SDK hooks into n8n's execution context, tracing data lineage across node chains and applying framework-specific patterns for AI Agent leakage detection. When leakage is detected, Vex can automatically insert redaction nodes, notify workflow owners via Slack/Email, and generate fix PRs to GitHub repositories containing the workflow JSON.\n\nIntegration takes <2 minutes: npm install @vex_dev/sdk, add Vex Webhook node after AI Agents, configure with your Vex API key. Vex then monitors all executions, blocks leaks in real-time, and provides comprehensive dashboards showing leakage patterns by workflow, node type, and data category.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: $secrets.VEX_API_KEY,\n  framework: 'n8n',\n  workflowId: $execution.id\n});\n\nconst result = await vex.scan({\n  nodeType: 'n8n-ai-agent',\n  inputData: $json, \n  executionContext: {\n    workflowName: $workflow.name,\n    nodeName: $node.name,\n    timestamp: new Date().toISOString()\n  },\n  rules: ['pii-detection', 'credential-leak', 'memory-injection']\n});\n\nif (result.blocked) {\n  // Auto-insert redaction node\n  await vex.remediate({\n    action: 'insert-redaction',\n    position: 'post-ai-agent',\n    workflowId: $execution.id\n  });\n  \n  return [{ \n    json: { \n      vexBlocked: true, \n      leakedData: result.matches,\n      remediation: result.fixCode \n    } \n  }];\n}\n\n// Forward safe data\nreturn [{ json: { vexStatus: 'clean', data: $json } }];",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex webhook nodes to your n8n AI Agent workflows in 2 minutes to block all sensitive data leaks automatically"
+    }
+  }
+}

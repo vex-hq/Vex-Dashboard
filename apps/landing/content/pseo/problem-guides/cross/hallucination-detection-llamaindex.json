@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in LlamaIndex Agents",
+    "description": "How to detect and fix ai agent hallucination detection in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "LlamaIndex hallucination-detection",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex, AI agent hallucinations occur when the LLM generates responses that deviate from retrieved context or invent facts not grounded in indexed data sources. This is particularly prevalent in agent workflows using query engines, where retrieval failures or synthesizer overreach lead to unfaithful outputs. Vex provides robust detection by verifying LlamaIndex query results against source fidelity and relevance.",
+    "howItManifests": [
+      {
+        "scenario": "Retrieved context irrelevant to query",
+        "symptom": "Query engine returns top-k nodes with low semantic similarity to user question",
+        "impact": "Agent synthesizes plausible but factually wrong answers from unrelated documents"
+      },
+      {
+        "scenario": "Synthesizer hallucinating beyond source documents",
+        "symptom": "Response contains specific details, dates, or entities absent from retrieved context",
+        "impact": "User receives confident but fabricated information as authoritative truth"
+      },
+      {
+        "scenario": "Index staleness causing outdated responses",
+        "symptom": "Metadata timestamps show documents older than query recency requirements",
+        "impact": "Agent provides obsolete pricing, policies, or factual data"
+      },
+      {
+        "scenario": "Chunk boundary errors losing critical context",
+        "symptom": "Key sentences split across chunks, causing incomplete context retrieval",
+        "impact": "Agent misses crucial qualifying information, leading to misleading summaries"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Context Relevance Score Check",
+        "description": "Uses LlamaIndex's built-in node relevance scoring to detect low-quality retrievals before synthesis",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=3)\n\nresponse = query_engine.query('What is the latest pricing?')\n\n# Detection: Check if top nodes have sufficient relevance\nnode_scores = response.source_nodes\nlow_relevance = any(node.score < 0.7 for node in node_scores)\nif low_relevance:\n    print('⚠️ DETECTED: Retrieved context has low relevance scores')\n    print(f'Average score: {sum(n.score for n in node_scores)/len(node_scores):.2f}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Fact-Check with Source Alignment",
+        "description": "Extracts entities from response and verifies presence in source context using embedding similarity",
+        "code": "from llama_index.core import Settings\n\n# After query\nresponse_text = str(response)\nsource_text = ' '.join([node.text for node in response.source_nodes])\n\n# Simple entity extraction and verification\nresponse_entities = set(response_text.lower().split())\nsource_entities = set(source_text.lower().split())\n\nhallucinated = response_entities - source_entities\nif len(hallucinated) > 3:\n    print('⚠️ DETECTED: Potential hallucination -', len(hallucinated), 'unique terms not in source')\n    print('Examples:', list(hallucinated)[:5])\n",
+        "language": "python"
+      },
+      {
+        "name": "Response Drift Detection",
+        "description": "Compares response embedding against source context embeddings for semantic alignment",
+        "code": "import numpy as np\nfrom llama_index.core.embeddings import OpenAIEmbedding\n\nembed_model = OpenAIEmbedding()\nresponse_embedding = embed_model.get_text_embedding(response_text)\nsource_embeddings = [embed_model.get_text_embedding(node.text) for node in response.source_nodes]\n\n# Calculate cosine similarity\ncos_similarities = [\n    np.dot(response_embedding, src_emb) / (np.linalg.norm(response_embedding) * np.linalg.norm(src_emb))\n    for src_emb in source_embeddings\n]\n\navg_similarity = np.mean(cos_similarities)\nif avg_similarity < 0.75:\n    print(f'⚠️ DETECTED: Response drift - similarity: {avg_similarity:.3f}')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retrieval with Reranking",
+        "description": "Combines vector search with reranking to ensure context relevance before synthesis",
+        "code": "from llama_index.core import VectorStoreIndex\nfrom llama_index.core.retrievers import VectorIndexRetriever\nfrom llama_index.llms.openai import OpenAI\n\nfrom llama_index.core.query_engine import RetrieverQueryEngine\nfrom llama_index.core.postprocessor import SimilarityPostprocessor\n\nindex = VectorStoreIndex.from_documents(documents)\nretriever = VectorIndexRetriever(index=index, similarity_top_k=8)\n\n# Fix: Rerank and filter low-relevance results\npostprocessor = SimilarityPostprocessor(similarity_cutoff=0.8)\n\nquery_engine = RetrieverQueryEngine(\n    retriever=retriever,\n    node_postprocessors=[postprocessor]\n)\n\nresponse = query_engine.query('What is the latest pricing?')\nprint('✅ Fixed: Only high-relevance context used:', len(response.source_nodes))\n",
+        "language": "python"
+      },
+      {
+        "name": "Faithful Response Synthesizer",
+        "description": "Forces strict adherence to source context with custom prompt engineering",
+        "code": "from llama_index.core.prompts import PromptTemplate\n\nfaithfulness_prompt = PromptTemplate(\n    \"Context information is below.\\n---------------------\\n{context_str}\\n---------------------\\n\"\n    \"Given the context information and no additional knowledge, \"\n    \"answer the query focusing ONLY on information in the context. \"\n    \"If the context doesn't contain the answer, say 'Insufficient context'.\\n\"\n    \"Query: {query_str}\\n\"\n    \"Answer: \"\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=5,\n    response_mode='compact',\n    # Fix: Enforce faithfulness\n    text_qa_template=faithfulness_prompt\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Metadata Filtering for Freshness",
+        "description": "Filters index retrieval by document metadata to prevent stale data usage",
+        "code": "from datetime import datetime, timedelta\nfrom llama_index.core.schema import TextNode\n\n# Add metadata filtering\nindex = VectorStoreIndex.from_documents(documents)\n\nquery_engine = index.as_query_engine(filters=[\n    # Fix: Only use documents from last 30 days\n    MetadataFilter(\n        key='created_at',\n        value=datetime.now() - timedelta(days=30),\n        operator=ComparisonOperator.GT\n    )\n])\n\nresponse = query_engine.query('Current pricing?')\nprint('✅ Fixed: Fresh data only -', [n.metadata.get('created_at') for n in response.source_nodes])\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex automates hallucination detection by wrapping LlamaIndex query engines with semantic verification layers that continuously monitor response fidelity against source context. It implements multi-layered checks including relevance scoring, entity grounding, temporal freshness validation, and semantic drift detection, flagging issues in real-time during agent execution.\n\nThe Vex integration requires minimal code changes - simply wrap your query_engine.query() calls with vex.verify(). Vex automatically instruments your LlamaIndex workflows, providing detailed failure diagnostics and suggesting optimal fixes based on the specific hallucination pattern detected. This shifts hallucination detection from manual monitoring to continuous automated quality assurance.\n\nVex maintains a historical baseline of your agent's performance, enabling drift detection and automatic remediation through dynamic prompt adjustment and retrieval optimization.",
+      "code": "import vex\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Install: pip install llama-index vex-sdk\n\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=5)\n\n# Vex automation - single line integration\n@vex.verify(test_name='llama_hallucination_check')\ndef agent_query(question: str):\n    response = query_engine.query(question)\n    return {\n        'answer': str(response),\n        'sources': [node.text for node in response.source_nodes],\n        'metadata': response.metadata\n    }\n\n# Run with automatic hallucination detection\nresult = agent_query('What is the latest pricing model?')\n\n# Vex automatically detects:\n# ✅ Context relevance\n# ✅ Hallucination flags\n# ✅ Source freshness\n# ✅ Semantic alignment\nprint('Vex Score:', result.get('vex_score', 'N/A'))\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LlamaIndex queries to eliminate hallucinations automatically."
+    }
+  }
+}

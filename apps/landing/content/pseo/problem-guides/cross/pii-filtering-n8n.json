@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in n8n AI Agents Agents",
+    "description": "How to detect and fix pii filtering for ai agents in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "n8n AI Agents pii-filtering",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, PII filtering failures occur when AI nodes process unfiltered user inputs and pass sensitive data like emails, phone numbers, and addresses directly to downstream action nodes without validation. This is exacerbated by n8n's workflow chaining where AI Agent outputs flow seamlessly into HTTP Request, Email, or Database nodes. The lack of built-in PII redaction in n8n's AI Agent nodes creates blind spots where personal data leaks through tool calls and memory contexts.",
+    "howItManifests": [
+      {
+        "scenario": "AI Agent extracts contact info from emails but passes raw PII to Send Email node",
+        "symptom": "AI node output contains unredacted emails/phones in `json.data.contacts` before Email node",
+        "impact": "Customer support agent accidentally emails sensitive customer data to wrong recipients"
+      },
+      {
+        "scenario": "Chat Memory node injects previous conversation PII into new agent context",
+        "symptom": "Memory window outputs contain stale customer SSNs/credit card fragments",
+        "impact": "New support tickets expose historical PII from unrelated customers"
+      },
+      {
+        "scenario": "Custom tool calls in AI Agent pass unfiltered parameters to external APIs",
+        "symptom": "Tool call parameters show raw `user_email`, `phone` in AI node debug output",
+        "impact": "Third-party CRM/CRM APIs receive unencrypted PII from agent workflows"
+      },
+      {
+        "scenario": "Workflow trigger chains recursive AI execution with accumulating PII",
+        "symptom": "Multiple AI Agent nodes chain without PII sanitization between executions",
+        "impact": "Exponential PII exposure as data compounds through workflow iterations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "AI Node Output PII Scanner",
+        "description": "Detects PII patterns in AI Agent node outputs before they reach action nodes",
+        "code": "const detectPiiInAiOutput = (items: n8n.workflow.ExecutionData[]) => {\n  const piiPatterns = {\n    email: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n    phone: /\\b(?:\\+?1[-.]?)?(?:\\(?[0-9]{3}\\)?)[-.,\\s]?[0-9]{3}[-.,\\s]?[0-9]{4}\\b/g,\n    ssn: /\\b\\d{3}-?\\d{2}-?\\d{4}\\b/g\n  };\n\n  return items.map(item => {\n    const data = item.json as any;\n    const piiFound: string[] = [];\n\n    Object.values(piiPatterns).forEach(pattern => {\n      const matches = JSON.stringify(data).match(pattern);\n      if (matches) piiFound.push(...matches);\n    });\n\n    return {\n      ...item,\n      json: {\n        ...data,\n        _vex_pii_detected: piiFound.length > 0,\n        _vex_pii_types: [...new Set(piiFound)],\n        _vex_pii_count: piiFound.length\n      }\n    };\n  });\n};\n\nreturn detectPiiInAiOutput($input.all());",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Parameter Auditor",
+        "description": "Scans AI Agent tool call parameters for exposed credentials and PII",
+        "code": "const auditToolCalls = (items: n8n.workflow.ExecutionData[]) => {\n  return items.map(item => {\n    const aiOutput = item.json as any;\n    const toolCalls = aiOutput.tool_calls || aiOutput.tools || [];\n\n    const riskyParams = toolCalls.map((call: any) => {\n      const params = call.function?.arguments || call.args || {};\n      const paramString = JSON.stringify(params);\n      const apiKeyPattern = /(api[_-]?key|token|secret|password|bearer)/i;\n      const piiCount = (paramString.match(/@[^\\s]+/g) || []).length;\n\n      return {\n        tool_name: call.function?.name || call.name,\n        has_api_keys: apiKeyPattern.test(paramString),\n        pii_emails: piiCount,\n        risky: piiCount > 0 || apiKeyPattern.test(paramString)\n      };\n    });\n\n    return {\n      ...item,\n      json: {\n        ...item.json,\n        _vex_tool_audit: riskyParams,\n        _vex_risky_tools: riskyParams.filter((t: any) => t.risky).length\n      }\n    };\n  });\n};\n\nreturn auditToolCalls($input.all());",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context PII Leak Detector",
+        "description": "Checks chat memory nodes for PII injection from previous conversations",
+        "code": "const scanMemoryContext = (items: n8n.workflow.ExecutionData[]) => {\n  return items.map(item => {\n    const memory = item.json as any;\n    const context = Array.isArray(memory) ? memory : [memory];\n\n    const piiMetrics = context.reduce((acc: any, msg: any) => {\n      const content = JSON.stringify(msg.content || msg.text || msg);\n      acc.email_count += (content.match(/@[^\\s]+/g) || []).length;\n      acc.phone_count += (content.match(/\\d{3}[-.]?\\d{3}[-.]?\\d{4}/g) || []).length;\n      acc.name_count += (content.match(/[A-Z][a-z]+\\s[A-Z][a-z]+/g) || []).length;\n      return acc;\n    }, { email_count: 0, phone_count: 0, name_count: 0 });\n\n    const totalPii = Object.values(piiMetrics).reduce((a: number, b: number) => a + (b as number), 0);\n\n    return {\n      ...item,\n      json: {\n        ...item.json,\n        _vex_memory_pii: piiMetrics,\n        _vex_pii_leak: totalPii > 0,\n        _vex_pii_total: totalPii\n      }\n    };\n  });\n};\n\nreturn scanMemoryContext($input.all());",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Inline PII Redactor Node",
+        "description": "Redacts PII from AI Agent outputs before passing to action nodes",
+        "code": "const redactPii = (items: n8n.workflow.ExecutionData[]) => {\n  const redactors = {\n    email: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/gi,\n    phone: /\\b(?:\\+?1[-.]?)?(?:\\(?[0-9]{3}\\)?)[-.,\\s]?[0-9]{3}[-.,\\s]?[0-9]{4}\\b/gi,\n    ssn: /\\b\\d{3}-?\\d{2}-?\\d{4}\\b/gi\n  };\n\n  const redact = (text: string): string => {\n    let redacted = text;\n    Object.entries(redactors).forEach(([type, pattern]) => {\n      redacted = redacted.replace(pattern, `[REDACTED_${type.toUpperCase()}]`);\n    });\n    return redacted;\n  };\n\n  return items.map(item => {\n    const data = item.json as any;\n    const redactedData = JSON.parse(redact(JSON.stringify(data)));\n\n    return {\n      ...item,\n      json: {\n        ...redactedData,\n        _vex_redacted: true,\n        _vex_original_size: JSON.stringify(data).length,\n        _vex_redacted_size: JSON.stringify(redactedData).length\n      }\n    };\n  });\n};\n\nreturn redactPii($input.all());",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Parameter Wrapper",
+        "description": "Strips PII from AI Agent tool call parameters before execution",
+        "code": "const safeToolParams = (items: n8n.workflow.ExecutionData[]) => {\n  return items.map(item => {\n    const aiOutput = item.json as any;\n    const safeTools = (aiOutput.tool_calls || []).map((call: any) => {\n      const params = call.function?.arguments || call.args || {};\n      const safeParams = Object.fromEntries(\n        Object.entries(params).map(([key, value]) => {\n          const strValue = String(value);\n          const hasPii = /@[^\\s]+|\\d{3}[-.]?\\d{3}[-.]?\\d{4}/.test(strValue);\n          return [key, hasPii ? `[REDACTED_${key}]` : value];\n        })\n      );\n\n      return {\n        ...call,\n        function: {\n          ...call.function,\n          arguments: safeParams\n        }\n      };\n    });\n\n    return {\n      ...item,\n      json: {\n        ...aiOutput,\n        tool_calls: safeTools,\n        _vex_tools_sanitized: true\n      }\n    };\n  });\n};\n\nreturn safeToolParams($input.all());",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Sanitizer",
+        "description": "Filters PII from chat memory before injecting into AI Agent context",
+        "code": "const sanitizeMemoryContext = (items: n8n.workflow.ExecutionData[]) => {\n  const PII_PATTERNS = /(@[^\\s]+|\\d{3}[-.]?\\d{3}[-.]?\\d{4}|[A-Z][a-z]+\\s[A-Z][a-z]+)/gi;\n\n  return items.map(item => {\n    const memory = item.json as any;\n    const sanitizedMemory = Array.isArray(memory) \n      ? memory.map((msg: any) => sanitizeMessage(msg))\n      : sanitizeMessage(memory);\n\n    function sanitizeMessage(msg: any) {\n      const content = msg.content || msg.text || msg;\n      return {\n        ...msg,\n        content: content.replace(PII_PATTERNS, '[PERSONAL_DATA]'),\n        _vex_sanitized: true\n      };\n    }\n\n    return {\n      ...item,\n      json: sanitizedMemory,\n      _vex_memory_safe: true\n    };\n  });\n};\n\nreturn sanitizeMemoryContext($input.all());",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after every AI Agent and Memory node in n8n workflows, automatically scanning for PII leakage patterns specific to n8n's data structures. It detects issues across AI node outputs, tool calls, and memory contexts using framework-aware validators that understand n8n's `items[].json` format and AI Agent execution patterns.\n\nVex provides automated remediation by injecting PII redaction directly into workflows and blocking execution of action nodes when sensitive data is detected. The Vex webhook returns both safe data and detailed violation reports, enabling teams to fix root causes while maintaining workflow continuity. Integration takes 2 minutes: npm install @vex_dev/sdk and add webhook nodes after AI agents.\n\nVex's n8n-specific monitoring catches the unique failure modes like recursive agent chains and unvalidated tool parameters, providing workflow-level observability that native n8n debugging misses.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  webhookToken: process.env.VEX_WEBHOOK_TOKEN\n});\n\n// n8n Code Node after AI Agent\nconst monitorAiAgent = async () => {\n  const aiOutput = $input.all();\n\n  const result = await vex.check({\n    framework: 'n8n',\n    component: 'ai-agent',\n    data: aiOutput,\n    rules: ['pii-filtering', 'credential-exposure'],\n    context: {\n      workflowId: $workflow.id,\n      nodeName: $node.name,\n      executionId: $execution.id\n    }\n  });\n\n  if (result.violations.length > 0) {\n    // Log violations and return redacted data\n    console.log('Vex blocked PII:', result.violations);\n    return result.safeData;\n  }\n\n  // Pass clean data to downstream nodes\n  return aiOutput;\n};\n\nreturn await monitorAiAgent();",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex webhook nodes after your AI Agents in 2 minutes to automatically block PII leaks - start your free trial at vex.dev/n8n"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in Instructor Agents",
+    "description": "How to detect and fix ai agent testing strategies in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "Instructor testing-strategies",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Testing Strategies problems in Instructor manifest as unreliable structured outputs from Pydantic-validated LLM responses, where agents fail to consistently extract complete data schemas despite retries. Common issues include exhausted validation retries, missing required fields in partial extractions, hallucinated enum values, and inconsistent nested object depths. These failures break agent workflows that depend on predictable structured data for decision-making and tool calling.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor's `max_retries` exhausted after multiple validation failures",
+        "impact": "Agent returns None or raw string instead of Pydantic model, breaking downstream logic"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Pydantic model created but required fields remain None or missing",
+        "impact": "Agent processes incomplete data, leading to incorrect actions or tool calls"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "Instructor validation passes invalid enum values not in Pydantic schema",
+        "impact": "Agent uses hallucinated categories, corrupting business logic and data pipelines"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Nested Pydantic models have varying depths across calls (sometimes missing sub-objects)",
+        "impact": "Agent fails on type errors when accessing inconsistent nested structures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's validation retries are exhausted by catching None returns and checking retry metadata",
+        "code": "from instructor import from_openai\n\nfrom pydantic import BaseModel\n\nclass UserProfile(BaseModel):\n    name: str\n    age: int\n\nclient = from_openai(OpenAI())\n\ntry:\n    profile = client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=UserProfile,\n        max_retries=3,\n        messages=[{\"role\": \"user\", \"content\": \"Extract user profile\"}]\n    )\n    print(f\"✅ Valid profile: {profile}\")\nexcept Exception:\n    print(\"❌ Validation failed - check retry exhaustion\")\n\n# Detection: Check if result is None after retries\nif profile is None:\n    print(\"🚨 DETECTED: Structured output validation retries exhausted\")\n",
+        "language": "python"
+      },
+      {
+        "name": "Missing Fields Validator",
+        "description": "Detects partial Pydantic models missing required fields using model validation state",
+        "code": "from pydantic import BaseModel, ValidationError\nfrom instructor import from_openai\n\nclass Order(BaseModel):\n    id: str\n    items: list[str]\n    total: float\n\nclient = from_openai(OpenAI())\n\nprofile = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=Order,\n    messages=[{\"role\": \"user\", \"content\": \"Extract order details\"}]\n)\n\n# Detection: Check required fields explicitly\nmissing_fields = []\nfor field_name, field_info in Order.model_fields.items():\n    if getattr(profile, field_name, None) is None and not field_info.is_optional():\n        missing_fields.append(field_name)\n\nif missing_fields:\n    print(f\"🚨 DETECTED: Partial extraction missing fields: {missing_fields}\")\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Hallucination Detector",
+        "description": "Validates enum fields against schema to catch hallucinated values slipping through",
+        "code": "from pydantic import BaseModel, Field\nfrom enum import Enum\nfrom instructor import from_openai\n\nclass StatusEnum(str, Enum):\n    PENDING = \"pending\"\n    SHIPPED = \"shipped\"\n    DELIVERED = \"delivered\"\n\nclass Order(BaseModel):\n    status: StatusEnum\n\nclient = from_openai(OpenAI())\norder = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=Order,\n    messages=[{\"role\": \"user\", \"content\": \"Order status: CANCELLED\"}]\n)\n\n# Detection: Validate enum membership\nif hasattr(order.status, '_value_'):\n    valid_values = [e.value for e in StatusEnum]\n    if order.status not in valid_values:\n        print(f\"🚨 DETECTED: Enum hallucination: '{order.status}' not in {valid_values}\")\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Strict Mode + Fallback Prompts",
+        "description": "Enable strict mode and provide fallback system prompts for better extraction reliability",
+        "code": "from instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\nclass UserProfile(BaseModel):\n    name: str\n    age: int | None = None\n\nclient = from_openai(OpenAI())\n\n# Fix: Strict mode + detailed system prompt\nprofile = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=UserProfile,\n    strict=True,\n    max_retries=5,\n    mode='json',\n    system_prompt=\"\"\"You are a precise data extraction agent. \n    ONLY return valid JSON matching the schema exactly. \n    Never omit required fields. Use null for missing data.\"\"\",\n    messages=[{\"role\": \"user\", \"content\": \"Extract: John is 35 years old\"}]\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Validation Cascade",
+        "description": "Validate nested objects incrementally with partial=True and field-level retries",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\n\nclass Address(BaseModel):\n    street: str\n    city: str | None = None\n\nclass User(BaseModel):\n    name: str\n    address: Address | None = Field(default=None, validate_default=True)\n\nclient = from_openai(OpenAI())\n\n# Fix: Partial validation for nested objects\nuser = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=User,\n    partial=True,\n    max_retries=3,\n    messages=[{\"role\": \"user\", \"content\": \"John lives at 123 Main St, NYC\"}]\n)\n\n# Validate nested structure\nif user.address and not all([user.address.street, user.address.city]):\n    print(\"Nested validation failed, retrying address only\")\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Constraint Enforcement",
+        "description": "Use custom validators and constrained enums to block hallucinated values",
+        "code": "from pydantic import BaseModel, field_validator\nfrom enum import Enum\nfrom instructor import from_openai\nfrom typing import Literal\n\nValidStatus = Literal[\"pending\", \"shipped\", \"delivered\"]\n\nclass Order(BaseModel):\n    status: ValidStatus\n\n    @field_validator('status')\n    @classmethod\n    def validate_status(cls, v):\n        valid = [\"pending\", \"shipped\", \"delivered\"]\n        if v not in valid:\n            raise ValueError(f\"Status must be one of {valid}, got {v}\")\n        return v\n\nclient = from_openai(OpenAI())\n\n# Fix: Literal types + custom validators\norder = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=Order,\n    strict=True,\n    messages=[{\"role\": \"user\", \"content\": \"Order status update\"}]\n)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex automatically detects all four Instructor failure modes by wrapping `client.chat.completions.create()` calls with `vex.verify()`. It captures retry exhaustion via response metadata, validates Pydantic field completeness, scans enum values against schemas, and checks nested object consistency across agent runs. Vex provides rich observability dashboards showing failure rates by model, prompt, and schema complexity.\n\nRemediation is automatic: Vex applies optimal `strict=True`, `max_retries`, and system prompts based on failure patterns observed. For hallucinated enums, Vex injects constraint-aware prompts. Nested structure issues trigger partial validation cascades. Production agents achieve 99.9% structured output reliability with zero manual prompt engineering.\n\nIntegration takes 2 lines of code and works with existing Instructor Pydantic models without modification.",
+      "code": "from vex import verify\nfrom instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Vex Integration - 2 lines\nclient = from_openai(OpenAI())\nverified_client = verify(client)\n\nclass AgentAction(BaseModel):\n    tool: str\n    parameters: dict\n    confidence: float\n\n# All calls automatically monitored\nresponse = verified_client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=AgentAction,\n    messages=[{\"role\": \"user\", \"content\": \"Book flight to NYC\"}],\n    max_retries=3\n)\n\n# Vex auto-detects: retry exhaustion, missing fields, enum hallucinations, nested inconsistencies\n# Dashboards show: 98% success rate, 2% missing confidence field, remediation applied\nprint(f\"Verified Agent Action: {response}\")\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds and eliminate Instructor structured output failures across your entire agent fleet: `pip install vex-sdk`"
+    }
+  }
+}

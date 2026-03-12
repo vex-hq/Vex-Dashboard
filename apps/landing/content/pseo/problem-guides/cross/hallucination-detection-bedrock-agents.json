@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Amazon Bedrock Agents hallucination-detection",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Hallucination in Amazon Bedrock Agents occurs when the agent generates factually incorrect or fabricated responses due to issues in action group Lambda responses, incomplete knowledge base retrievals, or guardrail bypasses. These hallucinations erode trust in enterprise deployments, particularly in multi-turn conversations where session state inconsistencies amplify errors. Vex provides robust post-processing detection by wrapping Bedrock's invoke_agent() API calls to catch and verify outputs against ground truth sources.",
+    "howItManifests": [
+      {
+        "scenario": "Action group Lambda functions returning malformed responses",
+        "symptom": "Agent outputs contain JSON parsing errors or unexpected fields from Lambda action group responses",
+        "impact": "Agent fails to execute subsequent actions or generates nonsensical responses based on invalid data"
+      },
+      {
+        "scenario": "Knowledge base retrieval missing relevant documents due to chunking",
+        "symptom": "Agent confidently cites non-existent document chunks or fabricates details not present in retrieved context",
+        "impact": "Critical business decisions based on hallucinated document references and missing key information"
+      },
+      {
+        "scenario": "Agent guardrails not catching domain-specific policy violations",
+        "symptom": "Agent provides responses violating industry-specific compliance (HIPAA, FINRA) despite guardrails",
+        "impact": "Regulatory non-compliance exposure and potential legal liabilities"
+      },
+      {
+        "scenario": "Session state loss between multi-turn agent invocations",
+        "symptom": "Agent forgets conversation context mid-session and generates contradictory or irrelevant responses",
+        "impact": "Poor user experience and inability to complete complex multi-step workflows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Lambda Response Schema Validation",
+        "description": "Detect malformed JSON from action group Lambda functions by validating against expected OpenAPI schema",
+        "code": "import json\nimport boto3\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef detect_lambda_malformed_response(agent_response):\n    try:\n        # Extract action group results\n        action_groups = agent_response.get('completion', {}).get('actionGroups', [])\n        for action in action_groups:\n            result = json.loads(action['result'])\n            # Validate required fields for your action group schema\n            if 'actionGroup' not in result or 'result' not in result:\n                return {'hallucination': True, 'type': 'malformed_lambda_response'}\n        return {'hallucination': False}\n    except json.JSONDecodeError:\n        return {'hallucination': True, 'type': 'json_parse_failure'}\n\n# Usage\nresponse = bedrock_agent.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId='session-123',\n    inputText='Process order #12345'\n)\nis_hallucinating = detect_lambda_malformed_response(response)",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Context Verification",
+        "description": "Cross-check agent citations against actual retrieved knowledge base chunks",
+        "code": "def verify_kb_retrieval(response):\n    try:\n        completion = response['completion']\n        if 'knowledgeBases' in completion:\n            for kb in completion['knowledgeBases']:\n                retrieved_chunks = kb.get('retrievedDocuments', [])\n                cited_content = extract_citations_from_text(completion['text'])\n                \n                for citation in cited_content:\n                    chunk_found = any(citation.lower() in chunk['content'].lower() \n                                    for chunk in retrieved_chunks)\n                    if not chunk_found:\n                        return {'hallucination': True, 'type': 'phantom_citation'}\n        return {'hallucination': False}\n    except Exception:\n        return {'hallucination': True, 'type': 'kb_verification_failed'}",
+        "language": "python"
+      },
+      {
+        "name": "Session State Consistency Check",
+        "description": "Verify agent maintains conversation context across turns using session attributes",
+        "code": "import re\n\ndef check_session_consistency(current_response, session_history):\n    current_text = current_response['completion']['text'].lower()\n    \n    # Extract entities from current response\n    entities = extract_entities(current_text)\n    \n    # Check if previously mentioned entities are acknowledged\n    for turn in session_history[-3:]:\n        prev_entities = extract_entities(turn['text'])\n        for entity in prev_entities:\n            if entity in current_text or re.search(rf'\\b{re.escape(entity)}\\b', current_text):\n                continue\n            return {'hallucination': True, 'type': 'context_loss'}\n    \n    return {'hallucination': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Structured Lambda Response Wrapper",
+        "description": "Standardize action group Lambda outputs with strict JSON schema validation",
+        "code": "import json\nimport boto3\nfrom jsonschema import validate, Draft7Validator\n\nLAMBDA_SCHEMA = {\n    'type': 'object',\n    'required': ['actionGroup', 'result'],\n    'properties': {\n        'actionGroup': {'type': 'string'},\n        'result': {'type': 'object', 'additionalProperties': True}\n    }\n}\n\ndef lambda_handler(event, context):\n    try:\n        # Your business logic here\n        result = process_business_logic(event)\n        \n        response = {\n            'actionGroup': event['actionGroup'],\n            'result': {\n                'status': 'success',\n                'data': result\n            }\n        }\n        \n        validator = Draft7Validator(LAMBDA_SCHEMA)\n        validator.validate(response)\n        \n        return {\n            'statusCode': 200,\n            'body': json.dumps(response),\n            'headers': {'Content-Type': 'application/json'}\n        }\n    except Exception as e:\n        return {\n            'statusCode': 400,\n            'body': json.dumps({\n                'actionGroup': event.get('actionGroup'),\n                'result': {'status': 'error', 'message': str(e)}\n            })\n        }",
+        "language": "python"
+      },
+      {
+        "name": "Enhanced Knowledge Base Chunking",
+        "description": "Implement semantic chunking and retrieval verification for Bedrock Knowledge Bases",
+        "code": "import boto3\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef invoke_agent_with_kb_verification(agent_id, alias_id, session_id, input_text):\n    response = bedrock_agent.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=alias_id,\n        sessionId=session_id,\n        inputText=input_text,\n        enableTrace=True  # Critical for KB retrieval debugging\n    )\n    \n    # Verify retrieved documents contain relevant content\n    trace = response.get('trace', {})\n    if 'orchestrationTrace' in trace:\n        kb_steps = [step for step in trace['orchestrationTrace'] \n                   if step.get('type') == 'knowledgeBase']\n        \n        for kb_step in kb_steps:\n            documents = kb_step.get('retrievedDocuments', [])\n            if not documents:\n                # Force re-retrieval with different parameters\n                response = bedrock_agent.invoke_agent(\n                    agentId=agent_id,\n                    agentAliasId=alias_id,\n                    sessionId=session_id,\n                    inputText=f\"[RETRIEVE]: {input_text}\",\n                    sessionState={\n                        'knowledgeBaseConfiguration': {\n                            'knowledgeBaseId': 'YOUR_KB_ID',\n                            'retrievalConfiguration': {\n                                'vectorSearchConfiguration': {\n                                    'numberOfResults': 10,\n                                    'overrideSearchType': 'HYBRID'\n                                }\n                            }\n                        }\n                    }\n                )\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Persistent Session State Management",
+        "description": "Maintain conversation context using Bedrock sessionState with custom attributes",
+        "code": "def invoke_agent_with_persistent_state(agent_id, alias_id, session_id, input_text, session_history):\n    session_state = {\n        'conversationMemory': {\n            'memoryType': 'SESSION_SUMMARY',\n            'numMemories': 5,\n            'conversationMemoryConfiguration': {\n                'storageConfiguration': {\n                    'type': 'SESSION_SUMMARY'\n                }\n            }\n        },\n        'sessionAttributes': {\n            'conversation_history': json.dumps(session_history[-10:]),\n            'user_entities': extract_session_entities(session_history),\n            'task_context': get_current_task_context(session_history)\n        }\n    }\n    \n    response = bedrock_agent.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=alias_id,\n        sessionId=session_id,\n        inputText=input_text,\n        sessionState=session_state\n    )\n    \n    # Update session history\n    session_history.append({\n        'input': input_text,\n        'output': response['completion']['text'],\n        'timestamp': datetime.now().isoformat()\n    })\n    \n    return response",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex automates hallucination detection by wrapping Bedrock Agent's invoke_agent() calls with comprehensive post-processing verification. It simultaneously validates Lambda responses against OpenAPI schemas, cross-references knowledge base retrievals with agent citations, monitors session state consistency, and enforces domain-specific guardrails. The platform provides real-time alerting, automated remediation workflows, and comprehensive dashboards for enterprise observability.\n\nIntegration requires only pip install boto3 vex-sdk and wrapping your existing invoke_agent() calls with vex.verify(). Vex handles the complexity of multi-modal verification (JSON schema, semantic similarity, compliance rules) while maintaining sub-second latency suitable for production workloads. Failed detections trigger fallback behaviors like knowledge base re-retrieval or human-in-the-loop escalation.",
+      "code": "import boto3\nfrom vex_sdk import VexVerifier\n\n# Initialize clients\nbedrock_agent = boto3.client('bedrock-agent-runtime')\nvex = VexVerifier(api_key='your-vex-api-key')\n\n@vex.verify(\n    checks=[\n        'bedrock_lambda_schema',\n        'knowledge_base_citation',\n        'session_context_loss',\n        'compliance_guardrails'\n    ],\n    fallback='retry_with_hybrid_search',\n    alert_on=['hallucination_detected']\n)\ndef safe_agent_invoke(agent_id, alias_id, session_id, input_text, session_history):\n    '''Vex-wrapped Bedrock Agent invocation'''\n    response = bedrock_agent.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=alias_id,\n        sessionId=session_id,\n        inputText=input_text,\n        sessionState=build_session_state(session_history)\n    )\n    \n    # Vex automatically validates:\n    # 1. Lambda action group JSON schemas\n    # 2. KB retrieval relevance & citation accuracy\n    # 3. Session state consistency\n    # 4. Domain compliance (HIPAA/FINRA/etc)\n    \n    return response\n\n# Usage - Vex handles everything automatically\nresult = safe_agent_invoke(\n    'YOUR_AGENT_ID',\n    'YOUR_ALIAS_ID',\n    'session-123',\n    'Process insurance claim #ABC123'\n    session_history\n)\nprint(result['completion']['text'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with `pip install vex-sdk` and wrap your Bedrock Agents in 5 minutes to eliminate hallucinations."
+    }
+  }
+}

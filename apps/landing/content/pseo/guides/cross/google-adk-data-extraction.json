@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Google ADK + Vex Guardrails",
+    "description": "Learn how to build data extraction with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK data extraction",
+      "Google ADK guardrails",
+      "data extraction reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with Google's Agent Development Kit (ADK) enables schema-guided extraction from unstructured documents using Gemini-powered multi-agent systems. Guardrails are essential to prevent common failures like circular agent dependencies, model output inconsistencies, and schema compliance violations that can corrupt extracted data. Vex provides runtime verification to ensure reliable, accurate extractions at scale.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Google ADK",
+      "description": "Google ADK orchestrates multi-agent workflows where a Router Agent delegates document chunks to Specialist Extraction Agents, each using Gemini models with structured schema prompts. The Specialists return JSON outputs that a Validator Agent merges and checks for completeness before final assembly. Session state tracks extraction progress across long documents, with tools handling retries and format normalization.\n\nThis agentic approach scales to large document sets but introduces risks from inter-agent handoffs and model variability. Vex integrates as a before_agent_callback to verify inputs/outputs against extraction schemas proactively.\n\nKey components include schema-defined Pydantic models, Gemini function calling, and ADK's session management for stateful conversations.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Input Docs    │───▶│  Router Agent     │\n│   (PDF/Text)    │    │  (Gemini 1.5 Pro) │\n└─────────────────┘    └────────┬──────────┘\n                               │ Delegate\n                    ┌──────────▼──────────┐\n                    │ Specialist Agents   │\n                    │ ┌─────────────┐     │\n                    │ │ Extractor 1 │◄──┐  │\n                    │ │ (Invoices)  │   │  │\n                    │ ├─────────────┤   │  │\n                    │ │ Extractor 2 │◄──┼──┘\n                    │ │ (Receipts)  │   │\n                    │ └─────────────┘   │\n                    └────────┬──────────┘\n                             │ Merge\n                      ┌──────▼──────┐\n                      │ Validator   │\n                      │ Agent       │ ──▶ ┌──────────────┐\n                      │ (Schema     │    │ Structured    │\n                      │  Check)     │    │ JSON Output   │\n                      └─────────────┘    └──────────────┘\n                             │\n                        ┌────▼────┐\n                        │   Vex   │\n                        │ Guard    │\n                        └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Router Agent endlessly delegates between Specialists due to incomplete task definitions",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation payloads contain valid task boundaries before agent execution"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different Gemini variants (1.5 Flash vs Pro) produce varying JSON structures for same schema",
+        "severity": "high",
+        "mitigation": "Vex enforces schema compliance regardless of model version using Pydantic validation"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Document chunk processing corrupts ADK session state across multiple extraction rounds",
+        "severity": "high",
+        "mitigation": "Vex snapshots and validates session state at each agent boundary"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "Specialist Agents return inconsistent JSON keys missing required schema fields",
+        "severity": "medium",
+        "mitigation": "Vex type-checks all tool outputs against unified extraction schema before merging"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Schema with Pydantic",
+        "description": "Create structured output models for invoice data extraction using Pydantic BaseModel",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import List, Optional\nfrom datetime import date\n\nclass LineItem(BaseModel):\n    description: str = Field(..., min_length=1)\n    quantity: float = Field(..., gt=0)\n    unit_price: float = Field(..., gt=0)\n    total: Optional[float] = None\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., pattern=r'^INV-\\d{6}')\n    date: date\n    vendor: str\n    total_amount: float = Field(..., gt=0)\n    line_items: List[LineItem] = Field(..., min_items=1)\n\nclass ExtractionResult(BaseModel):\n    invoices: List[Invoice] = Field(..., max_items=50)\n    confidence: float = Field(..., ge=0.0, le=1.0)\n    missing_fields: List[str] = []",
+        "language": "python"
+      },
+      {
+        "title": "Router Agent for Document Delegation",
+        "description": "Top-level agent that splits documents and delegates to specialists",
+        "code": "from google.adk.agents import LlmAgent\nfrom google.adk.tools import Tool\n\nrouter_prompt = \"\"\"\nYou route document chunks to the correct specialist:\n- invoices.pdf → InvoiceExtractor\n- receipts.jpg → ReceiptExtractor\n- contracts.docx → ContractExtractor\n\nRespond ONLY with: {{ \"agent\": \"AgentName\", \"chunk_id\": \"id\" }}\n\"\"\"\n\nrouter_agent = LlmAgent(\n    name=\"router\",\n    model=\"gemini-1.5-pro\",\n    system_prompt=router_prompt,\n    tools=[\n        Tool(\n            name=\"delegate_chunk\",\n            description=\"Delegate chunk to specialist\",\n            parameters={\n                \"type\": \"object\",\n                \"properties\": {\n                    \"agent\": {\"type\": \"string\"},\n                    \"chunk_id\": {\"type\": \"string\"}\n                }\n            }\n        )\n    ]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Specialist Extraction Agent",
+        "description": "Invoice specialist using function calling for structured extraction",
+        "code": "invoice_extractor = LlmAgent(\n    name=\"InvoiceExtractor\",\n    model=\"gemini-1.5-flash\",\n    system_prompt=\"\"\"You extract invoice data using the exact schema.\n    Return partial results if uncertain. Never hallucinate numbers.\n    Use function calling for structured output.\"\"\",\n    tools=[\n        Tool(\n            name=\"extract_invoice\",\n            description=\"Extract invoice data from text\",\n            parameters=Invoice.model_json_schema()\n        )\n    ]\n)\n\ndef extract_from_chunk(chunk_text: str) -> ExtractionResult:\n    response = invoice_extractor.run(chunk_text)\n    return Invoice.parse_raw(response.tool_calls[0].args)",
+        "language": "python"
+      },
+      {
+        "title": "Validator Agent for Final Schema Check",
+        "description": "Merges specialist outputs and validates completeness",
+        "code": "validator_agent = LlmAgent(\n    name=\"Validator\",\n    model=\"gemini-1.5-pro\",\n    system_prompt=\"Validate merged extraction:\n    - All invoices have required fields\n    - Line items sum to total_amount\n    - Dates are valid\n    Flag missing data but never fabricate.\",\n    tools=[\n        Tool(\n            name=\"validate_extraction\",\n            description=\"Final validation\",\n            parameters=ExtractionResult.model_json_schema()\n        )\n    ]\n)\n\ndef final_validation(results: List[dict]) -> ExtractionResult:\n    merged = validator_agent.run({\"results\": results})\n    return ExtractionResult.parse_raw(merged.content)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install Vex SDK and Configure",
+        "description": "Install dependencies and initialize Vex client for ADK integration",
+        "code": "pip install google-adk vex-sdk pydantic[email protected]\n\nfrom vex import Vex\nfrom pydantic import BaseModel\n\nvex = Vex(api_key=\"your-vex-api-key\")\n\n# Define verification suite for data extraction\nextraction_suite = vex.create_suite(\n    name=\"adk-data-extraction\",\n    risk_profile=\"medium\",\n    verifications=[\n        \"schema_compliance\",\n        \"field_accuracy\",\n        \"completeness_validation\",\n        \"type_consistency\"\n    ]\n)\n\n# Create guard for extraction schema\nextraction_guard = extraction_suite.create_guard(\n    name=\"invoice_schema\",\n    schema=Invoice.model_json_schema(),\n    required_fields=[\"invoice_number\", \"total_amount\"]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Add Vex before_agent_callback",
+        "description": "Intercept all agent calls to verify inputs/outputs against schema",
+        "code": "from google.adk import AgentWorkflow\nfrom vex.guards import Guard\n\n@vex.guard(extraction_suite)\ndef before_agent_callback(agent_name: str, input_data: dict, session_state: dict) -> bool:\n    \"\"\"Vex verification before each agent execution\"\"\"\n    \n    # Verify input contains document text\n    if 'text' not in input_data:\n        vex.log_error(f\"{agent_name}: Missing document text\")\n        return False\n    \n    # Schema compliance for tool parameters\n    if 'tool_calls' in input_data:\n        for tool_call in input_data['tool_calls']:\n            if not extraction_guard.validate(tool_call.get('args', {})):\n                vex.log_error(f\"{agent_name}: Schema violation in {tool_call['name']}\")\n                return False\n    \n    # Session state consistency\n    if 'extraction_progress' in session_state:\n        if not isinstance(session_state['extraction_progress'], list):\n            vex.log_error(f\"{agent_name}: Corrupted session state\")\n            return False\n    \n    return True\n\n# Apply to ADK workflow\nworkflow = AgentWorkflow(agents=[router_agent, invoice_extractor, validator_agent])\nworkflow.add_callback('before_agent', before_agent_callback)",
+        "language": "python"
+      },
+      {
+        "title": "Runtime Monitoring and Auto-Recovery",
+        "description": "Vex monitors extraction quality and triggers agent retries on failures",
+        "code": "from typing import Dict, Any\n\n@vex.guard(extraction_suite)\ndef after_agent_callback(agent_name: str, output: Dict[str, Any], session_state: Dict) -> str:\n    \"\"\"Post-agent verification with auto-recovery\"\"\"\n    \n    # Parse and validate structured output\n    try:\n        result = ExtractionResult.parse_obj(output.get('content', {}))\n        \n        # Completeness check\n        missing = []\n        for invoice in result.invoices:\n            if not invoice.line_items:\n                missing.append(f\"Invoice {invoice.invoice_number}: no line items\")\n        \n        if missing and result.confidence < 0.8:\n            # Trigger retry with Router Agent\n            vex.trigger_recovery(\n                agent_name=\"router_agent\",\n                input_data={\"retry_chunk\": output.get('chunk_id'), \"issues\": missing}\n            )\n            return \"retry\"\n        \n    except Exception as e:\n        vex.log_error(f\"{agent_name}: {str(e)}\")\n        return \"failed\"\n    \n    # Success: update session state\n    session_state.setdefault('extraction_progress', []).append({\n        'agent': agent_name,\n        'chunk_id': output.get('chunk_id'),\n        'confidence': result.confidence\n    })\n    \n    return \"success\"\n\nworkflow.add_callback('after_agent', after_agent_callback)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Data Extraction",
+      "description": "Add Vex guardrails today to achieve 99.9% schema compliance on your production extraction pipelines."
+    }
+  }
+}

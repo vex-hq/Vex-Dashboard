@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Vercel AI SDK Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Vercel AI SDK drift-monitoring",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Vercel AI SDK manifests as subtle degradations in agent reliability during streaming interactions, where partial hallucinations creep into real-time responses and tool calls produce unvalidated outputs. This is exacerbated by the SDK's emphasis on low-latency streaming UIs, where edge function timeouts and provider inconsistencies amplify drift over time. Without proper monitoring, these issues erode user trust in production agentic applications built with generateText and streamText.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming responses with partial hallucinations",
+        "symptom": "Intermittent factual inaccuracies appear mid-stream in `streamText` responses",
+        "impact": "Users receive misleading information before correction, damaging credibility"
+      },
+      {
+        "scenario": "Tool call results not validated before display",
+        "symptom": "Unstructured or erroneous tool outputs rendered directly via `streamObject`",
+        "impact": "Critical actions execute with bad data, causing downstream failures"
+      },
+      {
+        "scenario": "Inconsistent structured output across providers",
+        "symptom": "`generateObject` schemas fail validation between OpenAI/Anthropic models",
+        "impact": "Type errors crash React Server Components in production"
+      },
+      {
+        "scenario": "Edge function timeouts on complex agent tasks",
+        "symptom": "`streamText` with tool loops exceed Vercel 30s timeout limits",
+        "impact": "Partial responses delivered, leaving users with incomplete agent interactions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Hallucination Detector",
+        "description": "Intercepts `streamText` chunks to detect factual drift using semantic similarity against ground truth",
+        "code": "```typescript\nimport { createStreamableValue } from 'ai/rsc';\nimport { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport async function detectStreamDrift(input: string) {\n  const stream = await streamText({\n    model: openai('gpt-4o'),\n    prompt: input,\n  });\n\n  const vexStream = vex.monitorStream(stream, {\n    detector: 'hallucination',\n    threshold: 0.3,\n    groundTruth: 'Expected factual response about topic',\n  });\n\n  let hasDrift = false;\n  for await (const chunk of vexStream) {\n    if (chunk.vex?.driftDetected) {\n      hasDrift = true;\n      console.warn('Hallucination detected:', chunk.vex.evidence);\n    }\n  }\n\n  return { hasDrift, stream };\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Validation Monitor",
+        "description": "Validates `generateObject` tool results against Zod schemas before rendering",
+        "code": "```typescript\nimport { generateObject } from 'ai';\nimport { z } from 'zod';\nimport { Vex } from '@vex_dev/sdk';\n\nconst ToolSchema = z.object({\n  action: z.enum(['email', 'sms', 'call']),\n  recipient: z.string().email(),\n});\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport async function safeToolCall(input: string) {\n  const result = await generateObject({\n    model: openai('gpt-4o'),\n    schema: ToolSchema,\n    prompt: input,\n  });\n\n  // Vex validation layer\n  const validated = await vex.validateOutput(result, {\n    schema: ToolSchema,\n    detector: 'tool-drift',\n  });\n\n  if (!validated.valid) {\n    throw new Error(`Tool drift: ${validated.errors}`);\n  }\n\n  return result;\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Timeout & Latency Tracker",
+        "description": "Monitors `streamText` duration and flags edge function timeout risks",
+        "code": "```typescript\nimport { streamText } from 'ai';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport async function monitorAgentLatency(input: string) {\n  const start = Date.now();\n  const stream = await streamText({\n    model: openai('gpt-4o'),\n    tools: { /* complex toolset */ },\n    prompt: input,\n  });\n\n  const monitored = vex.monitorStream(stream, {\n    detector: 'performance',\n    timeoutThreshold: 25000, // 25s before Vercel edge timeout\n    latencyAlert: 15000,\n  });\n\n  let totalDuration = 0;\n  for await (const chunk of monitored) {\n    if (chunk.vex?.timeoutRisk) {\n      console.warn('Edge timeout imminent:', chunk.vex.remainingMs);\n    }\n    totalDuration = Date.now() - start;\n  }\n\n  return { stream, metrics: { totalDuration } };\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fallback Content Moderation",
+        "description": "Implement defensive streaming with Vex content filters for partial responses",
+        "code": "```typescript\nimport { createStreamableValue } from 'ai/rsc';\nimport { streamText } from 'ai';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport default async function SafeStreamUI({ prompt }: { prompt: string }) {\n  const stream = createStreamableValue();\n\n  (async () => {\n    try {\n      const textStream = await streamText({\n        model: openai('gpt-4o'),\n        prompt,\n      });\n\n      const safeStream = vex.filterStream(textStream, {\n        blocks: ['harmful', 'hallucination'],\n        fallback: 'I need to verify this information...',\n      });\n\n      let result = '';\n      for await (const chunk of safeStream) {\n        result += chunk;\n        stream.update(result);\n      }\n      stream.done();\n    } catch (error) {\n      stream.error(error);\n    }\n  })();\n\n  return stream.value;\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Structured Output Guardrails",
+        "description": "Enforce consistent schema validation across all providers",
+        "code": "```typescript\nimport { generateObject, generateText } from 'ai';\nimport { z } from 'zod';\nimport { Vex } from '@vex_dev/sdk';\n\nconst ResponseSchema = z.object({\n  intent: z.string(),\n  confidence: z.number().min(0.7),\n  action: z.string().optional(),\n});\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport async function guardedAgent(input: string) {\n  // Try structured first\n  try {\n    const result = await generateObject({\n      model: openai('gpt-4o'),\n      schema: ResponseSchema,\n      prompt: input,\n    });\n    return result;\n  } catch (e) {\n    // Fallback with Vex normalization\n    const text = await generateText({ model: openai('gpt-4o'), prompt: input });\n    const normalized = await vex.normalizeToSchema(text, ResponseSchema);\n    return normalized;\n  }\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Async Task Offloading",
+        "description": "Move complex agent tasks to durable functions to avoid edge timeouts",
+        "code": "```typescript\nimport { streamText } from 'ai';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport async function smartAgentTask(input: string) {\n  // Quick response for UI\n  const quickStream = await streamText({\n    model: openai('gpt-4o-mini'),\n    maxTokens: 50,\n    prompt: `Acknowledge: ${input}`,\n  });\n\n  // Complex task in background\n  const taskId = await vex.queueAgentTask({\n    input,\n    model: openai('gpt-4o'),\n    tools: true,\n    maxDuration: 300000, // 5min\n  });\n\n  return {\n    immediate: quickStream,\n    taskId,\n    status: await vex.getTaskStatus(taskId),\n  };\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex provides middleware that wraps Vercel AI SDK's core functions (generateText, streamText, generateObject) with automatic drift detection. The SDK captures streaming chunks, tool calls, and structured outputs, running them through specialized detectors for hallucinations, schema violations, and performance degradation. When drift is detected, Vex can automatically apply fallbacks, queue long-running tasks, or trigger human review workflows.\n\nIntegration takes <5 minutes by wrapping your existing AI calls with `vex.monitorStream()` and `vex.validateOutput()`. The platform maintains historical baselines of your agent's healthy behavior, using statistical drift detection to flag regressions before they impact users. Remediation is proactive - Vex can rewrite problematic responses, swap models, or adjust parameters in real-time.\n\nFor production Vercel deployments, Vex Edge Middleware ensures monitoring without performance overhead, with detailed dashboards showing drift trends across deployments, providers, and user segments.",
+      "code": "```typescript\nimport { createMiddleware } from '@vex_dev/sdk/vercel';\nimport { generateText, streamText, generateObject } from 'ai';\n\nexport const vexMiddleware = createMiddleware({\n  apiKey: process.env.VEX_API_KEY!,\n  detectors: {\n    hallucination: { threshold: 0.25 },\n    schema: { strict: true },\n    performance: { timeout: 25000 },\n  },\n  autoRemediate: true,\n});\n\n// All AI calls automatically monitored\nexport async function monitoredStream(input: string) {\n  return streamText({\n    model: openai('gpt-4o'),\n    prompt: input,\n  }); // Vex middleware wraps automatically\n}\n\n// Works with RSC too\nexport default async function AgentUI({ input }: { input: string }) {\n  const { textStream } = await monitoredStream(input);\n  // Vex drift signals available in headers\n  return <StreamRenderer stream={textStream} />;\n}\n```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `npm install @vex_dev/sdk` and one line of middleware to eliminate AI agent drift in your Vercel AI SDK apps today."
+    }
+  }
+}

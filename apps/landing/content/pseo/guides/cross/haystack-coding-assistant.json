@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Haystack + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack ai coding assistant",
+      "Haystack guardrails",
+      "ai coding assistant reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with Haystack enables a powerful code-aware LLM agent that processes repository context, executes code in sandboxes, validates tests, and iteratively debugs issues. Guardrails are essential to prevent pipeline failures like type mismatches, irrelevant retrievals, hallucinations, and silent errors that could lead to incorrect code suggestions or security vulnerabilities. Vex integration ensures reliability through verification of code correctness, security, and compliance in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Haystack",
+      "description": "The architecture starts with a Retriever component that fetches relevant code files and documentation from a repository index based on user queries. These documents feed into a PromptBuilder that constructs context-aware prompts for the LLM Generator, which produces code solutions. A SandboxExecutor runs the generated code in isolation, followed by a TestValidator that checks outputs against unit tests and expected behaviors. An IterativeDebugger loops back if issues are detected, refining prompts with error feedback.\n\nHaystack pipelines orchestrate these components modularly, allowing easy insertion of Vex as a custom verification node after generation and execution. This ensures medium-risk scenarios like security scanning and license checks are enforced before final output. The pipeline handles failures gracefully with retry logic and fallback prompts.",
+      "diagram": "User Query\n    |\n    v\n[Retriever] --> [PromptBuilder] --> [LLM Generator] --> [Vex Verifier]\n    ^                                           |             |\n    |                                           v             v\n[Repo Index]                            [SandboxExecutor] [TestValidator]\n                                                  |             |\n                                                  v             |\n                                           [IterativeDebugger] <--|\n                                                             Fail/Retry"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever outputs non-text documents or Generator returns malformed JSON, breaking downstream SandboxExecutor.",
+        "severity": "high",
+        "mitigation": "Vex schema validation enforces strict typing between components."
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Poor embeddings lead to unrelated code snippets, causing hallucinated or incorrect solutions.",
+        "severity": "medium",
+        "mitigation": "Vex relevance scoring filters documents before prompt construction."
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM invents APIs or logic not present in repo context, leading to runtime failures.",
+        "severity": "critical",
+        "mitigation": "Vex context faithfulness checks against retrieved documents."
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "SandboxExecutor or TestValidator crashes without propagating errors to user.",
+        "severity": "high",
+        "mitigation": "Vex error monitoring and structured logging in pipeline."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Retrieval-Augmented Pipeline",
+        "description": "Core Haystack pipeline for retrieving repo context and generating code suggestions.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.utils import ComponentDevice\n\nretriever = InMemoryEmbeddingRetriever(document_store=repo_index, embedder=code_embedder)\ngenerator = OpenAIGenerator(model='gpt-4o')\n\ncode_assist_pipe = Pipeline()\ncode_assist_pipe.add_component('retriever', retriever)\ncode_assist_pipe.add_component('generator', generator)\ncode_assist_pipe.connect('retriever', 'generator')\n\nresult = code_assist_pipe.run({'retriever': {'query': 'fix this bug in auth.py'}, 'generator': {'prompt': 'Write fix: {{query}}\\nContext: {{documents}}'}})",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Code Execution Component",
+        "description": "Custom component to safely execute generated code and capture outputs/errors.",
+        "code": "from haystack import component\nimport subprocess\nimport tempfile\nimport os\n\n@component\nclass SandboxExecutor:\n    @component.output_types(output=str, error=str)\n    def run(self, code: str) -> dict:\n        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n            f.write(code)\n            filepath = f.name\n        try:\n            result = subprocess.run(['python', filepath], capture_output=True, text=True, timeout=30)\n            os.unlink(filepath)\n            return {'output': result.stdout, 'error': result.stderr}\n        except subprocess.TimeoutExpired:\n            os.unlink(filepath)\n            return {'output': '', 'error': 'Execution timeout'}\n\nsandbox = SandboxExecutor()",
+        "language": "python"
+      },
+      {
+        "title": "Test Validation Component",
+        "description": "Validates generated code against predefined unit tests from the repository.",
+        "code": "from haystack import component\nimport pytest\nimport sys\n\n@component\nclass TestValidator:\n    @component.output_types(passed=bool, failures=list)\n    def validate(self, code: str, tests: str) -> dict:\n        with tempfile.NamedTemporaryFile(mode='w', suffix='.py') as code_file, \\\n             tempfile.NamedTemporaryFile(mode='w', suffix='_test.py') as test_file:\n            code_file.write(code)\n            code_file.flush()\n            test_file.write(tests)\n            test_file.flush()\n            sys.path.insert(0, os.path.dirname(code_file.name))\n            result = pytest.main([test_file.name, '-v', '--tb=short'])\n        return {'passed': result == 0, 'failures': []}",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Debugging Loop",
+        "description": "Pipeline with conditional branching for iterative refinement based on test failures.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import PromptBuilder\n\ndebug_pipe = Pipeline()\ndebug_pipe.add_component('prompt', PromptBuilder(template=debug_template))\ndebug_pipe.add_component('generator', generator)\ndebug_pipe.add_component('sandbox', sandbox)\ndebug_pipe.add_component('validator', test_validator)\n\ndebug_pipe.connect('prompt', 'generator')\ndebug_pipe.connect('generator', 'sandbox')\ndebug_pipe.connect('sandbox', 'validator')\n\n# Conditional retry on failure\nresult = debug_pipe.run({'prompt': {'query': bug_query, 'context': repo_docs}})\nif not result['validator']['passed']:\n    retry_prompt = f\"Fix errors: {result['validator']['failures']}\"",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Custom Verifier Component",
+        "description": "Add Vex as pipeline component for comprehensive verification after code generation.",
+        "code": "from haystack import component\nfrom vex_sdk import VexClient, VerificationSuite\n\n@component\nclass VexVerifier:\n    def __init__(self):\n        self.vex = VexClient(api_key='your-vex-key')\n        self.suite = VerificationSuite(\n            checks=['code_correctness', 'security_vuln_scan', 'no_credential_leak', 'dependency_safety']\n        )\n\n    @component.output_types(verified=bool, issues=list)\n    def verify(self, code: str, context: list) -> dict:\n        report = self.vex.verify(self.suite, {'code': code, 'repo_context': context})\n        return {'verified': report.passed, 'issues': report.issues}\n\nvex_verifier = VexVerifier()\ncode_assist_pipe.add_component('vex', vex_verifier)\ncode_assist_pipe.connect('generator', 'vex')",
+        "language": "python"
+      },
+      {
+        "title": "Risk-Profiled Pipeline with Vex",
+        "description": "Medium-risk profile configuration with Vex blocking on critical issues.",
+        "code": "from vex_sdk import RiskProfile\n\nvex_config = {\n    'risk_profile': RiskProfile.MEDIUM,\n    'block_on': ['security_vulnerability', 'credential_leak'],\n    'warn_on': ['license_compliance', 'dependency_safety'],\n    'timeout': 30\n}\n\n@component\nclass ConfiguredVex:\n    def __init__(self, config: dict):\n        self.vex = VexClient(api_key='your-key', config=config)\n\n    def run_pipeline_with_vex(self, pipeline_result: dict) -> dict:\n        verified = self.vex.verify_suite(pipeline_result['code'], vex_config)\n        if not verified.passed:\n            raise ValueError(f'Verification failed: {verified.issues}')\n        return pipeline_result\n\npipe_with_vex = Pipeline().add_component('vex_guard', ConfiguredVex(vex_config))",
+        "language": "python"
+      },
+      {
+        "title": "Full Pipeline with Vex Integration",
+        "description": "Complete AI Coding Assistant pipeline integrating all components with Vex guardrails.",
+        "code": "full_pipeline = Pipeline()\nfull_pipeline.add_component('retriever', retriever)\nfull_pipeline.add_component('prompt', prompt_builder)\nfull_pipeline.add_component('generator', generator)\nfull_pipeline.add_component('vex', vex_verifier)\nfull_pipeline.add_component('sandbox', sandbox)\nfull_pipeline.add_component('validator', test_validator)\n\nfull_pipeline.connect('retriever', 'prompt')\nfull_pipeline.connect('prompt', 'generator')\nfull_pipeline.connect('generator', 'vex')\nfull_pipeline.connect('vex', 'sandbox')\nfull_pipeline.connect('sandbox', 'validator')\n\n# Run with Vex safety net\nresult = full_pipeline.run({\n    'retriever': {'query': 'Implement user auth endpoint'},\n    'prompt': {'template': code_prompt}\n})\n\nif result['vex']['verified']:\n    print('Safe code ready:', result['generator']['replies'][0])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack AI Coding Assistant",
+      "description": "Integrate Vex today to protect your coding agent from security risks and ensure production reliability."
+    }
+  }
+}

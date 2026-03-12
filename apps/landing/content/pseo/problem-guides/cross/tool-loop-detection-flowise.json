@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Flowise Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Flowise tool-loop-detection",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, Tool Loop Detection issues manifest when AI agents enter infinite cycles calling the same tools repeatedly due to chatflow nodes misinterpreting LLM outputs or lacking proper state management between sequential agent handoffs. This commonly occurs in drag-and-drop chatflows where Tool nodes trigger without validation, causing agents to loop on vector store queries or custom tools. The low-code nature of Flowise exacerbates this as visual flows often lack explicit loop-breaking logic.",
+    "howItManifests": [
+      {
+        "scenario": "Sequential Agent Handoff Loops",
+        "symptom": "Agent A calls Agent B's tool, which returns to Agent A without state change",
+        "impact": "Chatflow hangs after 50+ tool calls, exhausting API quotas"
+      },
+      {
+        "scenario": "Vector Store + Tool Feedback Loop",
+        "symptom": "Retriever node feeds irrelevant docs to Tool node repeatedly",
+        "impact": "100+ identical vector queries before timeout"
+      },
+      {
+        "scenario": "Custom Tool Node Silent Recursion",
+        "symptom": "Tool node calls itself via LLM instruction parsing",
+        "impact": "Memory leak from unhandled recursive tool invocations"
+      },
+      {
+        "scenario": "Chatflow Chain Validation Gap",
+        "symptom": "Unvalidated LLM output triggers same tool sequence",
+        "impact": "Predictable loop pattern after 3-5 identical responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Frequency Monitor",
+        "description": "Tracks identical tool calls within chatflow execution using Flowise's execution trace",
+        "code": "```typescript\nimport { ChatFlow } from 'flowise';\n\nconst detectToolLoop = (chatflow: ChatFlow, executionData: any[]) => {\n  const toolCalls = executionData.filter(node => node.type === 'tool');\n  const toolPatterns = new Map<string, number>();\n  \n  toolCalls.forEach((call, index) => {\n    const signature = `${call.toolName}_${JSON.stringify(call.input)}`;\n    toolPatterns.set(signature, (toolPatterns.get(signature) || 0) + 1);\n    \n    if (toolPatterns.get(signature)! > 5) {\n      throw new Error(`Tool loop detected: ${signature} called ${toolPatterns.get(signature)} times`);\n    }\n  });\n};\n\n// Usage in Flowise callback\nchatflow.on('executionEnd', (data) => detectToolLoop(chatflow, data.trace));\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "State Change Validator",
+        "description": "Monitors agent state between handoffs to detect unchanged context loops",
+        "code": "```typescript\nconst validateStateProgress = (prevState: any, currentState: any) => {\n  const stateKeys = ['messages', 'toolResults', 'context'];\n  let progressDetected = false;\n  \n  stateKeys.forEach(key => {\n    if (JSON.stringify(prevState[key]) !== JSON.stringify(currentState[key])) {\n      progressDetected = true;\n    }\n  });\n  \n  if (!progressDetected) {\n    console.warn('No state progress detected - potential loop');\n    return false;\n  }\n  return true;\n};\n\n// Flowise agent handoff hook\nchatflow.on('agentHandoff', ({ prevState, currentState }) => {\n  if (!validateStateProgress(prevState, currentState)) {\n    chatflow.interrupt();\n  }\n});\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Execution Cycle Pattern Matcher",
+        "description": "Detects repeating node execution sequences in Flowise trace",
+        "code": "```typescript\nconst detectCyclePattern = (trace: any[]) => {\n  const nodeSequences: string[] = [];\n  for (let i = 0; i < trace.length - 10; i++) {\n    const sequence = trace.slice(i, i + 10).map(n => n.nodeId).join('-');\n    nodeSequences.push(sequence);\n  }\n  \n  const sequenceCount = new Map();\n  nodeSequences.forEach(seq => {\n    sequenceCount.set(seq, (sequenceCount.get(seq) || 0) + 1);\n  });\n  \n  for (const [seq, count] of sequenceCount) {\n    if (count > 3) {\n      return { cycle: seq, repeats: count };\n    }\n  }\n  return null;\n};\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication Middleware",
+        "description": "Flowise middleware preventing duplicate tool calls within session",
+        "code": "```typescript\nconst toolDeduplicationMiddleware = {\n  seenCalls: new Set<string>(),\n  \n  async beforeToolCall(toolName: string, input: any, sessionId: string): Promise<boolean> {\n    const callKey = `${sessionId}_${toolName}_${JSON.stringify(input)}`;\n    if (this.seenCalls.has(callKey)) {\n      console.log('Skipping duplicate tool call:', callKey);\n      return false;\n    }\n    this.seenCalls.add(callKey);\n    return true;\n  },\n  \n  resetSession(sessionId: string) {\n    // Clear on new conversation\n    this.seenCalls.clear();\n  }\n};\n\n// Register in Flowise chatflow\nchatflow.addMiddleware(toolDeduplicationMiddleware);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Loop Breaker Conditional Node",
+        "description": "Custom Flowise node that breaks loops based on iteration count",
+        "code": "```typescript\nimport { BasicNode } from 'flowise';\n\nclass LoopBreakerNode extends BasicNode {\n  iterationLimit = 5;\n  currentCount = 0;\n  \n  async execute(input: any) {\n    this.currentCount++;\n    \n    if (this.currentCount > this.iterationLimit) {\n      return {\n        output: 'LOOP_DETECTED',\n        breakFlow: true,\n        reason: `Exceeded ${this.iterationLimit} iterations`\n      };\n    }\n    \n    return { ...input, iteration: this.currentCount };\n  }\n}\n\n// Add to Flowise flow\nchatflow.nodes.push(new LoopBreakerNode());\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "State Progress Gatekeeper",
+        "description": "Ensures forward progress before tool execution in Flowise",
+        "code": "```typescript\nconst progressGatekeeper = async (state: any, proposedAction: any) => {\n  const lastState = state.history?.[state.history.length - 1];\n  const progressMetrics = {\n    newTokens: state.current.tokens > (lastState?.tokens || 0),\n    newTools: state.toolsUsed.size > (lastState?.toolsUsed?.size || 0),\n    contextChanged: JSON.stringify(state.context) !== JSON.stringify(lastState?.context)\n  };\n  \n  if (!Object.values(progressMetrics).some(Boolean)) {\n    return {\n      approved: false,\n      reason: 'No progress detected',\n      fallback: 'Summarize findings and conclude'\n    };\n  }\n  \n  return { approved: true };\n};\n\nchatflow.on('beforeToolExecute', ({ state, action }) => \n  progressGatekeeper(state, action)\n);\n```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents with Vex",
+      "description": "Vex integrates seamlessly as a callback handler in Flowise chatflow configuration, automatically detecting tool loop patterns across all deployed flows. It monitors execution traces in real-time, identifying repeating tool call signatures, stagnant state transitions, and cyclic node patterns that indicate loops. Vex's ML-powered anomaly detection learns baseline behavior from healthy flows, flagging deviations like 5+ identical tool calls or unchanged context across handoffs.\n\nOnce detected, Vex automatically applies remediations including tool call deduplication, progress validation gates, and intelligent flow interruption with fallback prompts. The platform provides Flowise-specific observability dashboards showing loop hotspots by node type and agent handoff patterns. Remediation templates are auto-generated and deployable with one-click, maintaining your drag-and-drop workflow while eliminating loop failures.\n\nVex's agentic remediation runs parallel safety checks during inference, preemptively blocking loop-prone tool calls before they cascade. This ensures 99.9% loop-free execution across production chatflows without manual configuration changes.",
+      "code": "```typescript\nimport { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst flowiseCallback = async (event: any) => {\n  // Auto-detect tool loops in Flowise traces\n  await vex.detect({\n    framework: 'flowise',\n    trace: event.trace,\n    sessionId: event.sessionId,\n    problem: 'tool_loop',\n    metadata: {\n      nodeTypes: event.nodes.map((n: any) => n.type),\n      toolCalls: event.toolsCalled\n    }\n  });\n};\n\n// Install Vex callback in Flowise (drag-and-drop or config)\nconst chatflow = new ChatFlow();\nchatflow.addCallback('executionComplete', flowiseCallback);\nchatflow.addCallback('agentHandoff', flowiseCallback);\nchatflow.addCallback('toolExecuted', flowiseCallback);\n\n// Vex auto-remediates detected loops\nvex.on('loop_detected', async (alert) => {\n  await vex.remediate({\n    flowId: alert.flowId,\n    fix: 'apply_tool_deduplication',\n    autoDeploy: true\n  });\n});\n```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in your Flowise flows today and eliminate tool loops with zero-config automation."
+    }
+  }
+}

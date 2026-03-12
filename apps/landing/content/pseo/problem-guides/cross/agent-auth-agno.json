@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "agno",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Agno Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Agno agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Agno agent-auth",
+      "Agno reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Agno, AI Agent Authentication and Authorization issues manifest when agents access unauthorized resources, impersonate users, or escalate privileges due to lax session management in multi-modal workflows. These problems are exacerbated by Agno's lightweight, model-agnostic design where agent.run() calls often bypass traditional auth layers, leading to fabricated credentials or privilege violations. Common failure modes like session memory recall amplify risks as agents reconstruct past auth contexts from unreliable memory stores.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-modal agent processing authenticated image uploads",
+        "symptom": "Agent extracts JWT from image metadata and uses it without validation",
+        "impact": "Cross-tenant data access via embedded credentials in images"
+      },
+      {
+        "scenario": "Agentic session memory storing OAuth refresh tokens",
+        "symptom": "Fabricated tokens from memory cause 401 errors or invalid grants",
+        "impact": "Session termination cascades to team coordination failures"
+      },
+      {
+        "scenario": "Structured output generating API keys in responses",
+        "symptom": "Nested schema validation fails on exposed credentials",
+        "impact": "Leaked keys enable lateral movement across services"
+      },
+      {
+        "scenario": "Team agent coordination sharing auth contexts",
+        "symptom": "Sub-agents inherit elevated privileges from coordinator",
+        "impact": "Contradictory privilege violations across agent swarm"
+      }
+    ],
+    "detection": [
+      {
+        "name": "JWT Token Extraction Monitor",
+        "description": "Detects when Agno agents parse JWTs from multi-modal inputs without signature validation",
+        "code": "from agno import Agent\nimport re\n\ndef detect_jwt_extraction(agent):\n    def monitor_inputs(inputs):\n        for input_data in inputs:\n            if 'image' in input_data or 'audio' in input_data:\n                # Extract potential JWT from base64 metadata\n                jwt_pattern = r'[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+'\n                if re.search(jwt_pattern, str(input_data)):\n                    print('🚨 JWT extracted from multi-modal input - validation missing')\n        return inputs\n    return monitor_inputs\n\n# Wrap agent\nagent = Agent()\nagent.input_processor = detect_jwt_extraction(agent)",
+        "language": "python"
+      },
+      {
+        "name": "Session Memory Auth Drift Detector",
+        "description": "Monitors fabricated auth tokens in Agno session memory across agent runs",
+        "code": "from agno import Agent\n\ndef detect_auth_drift(agent):\n    prev_tokens = set()\n    \n    def check_memory_drift(session):\n        current_tokens = set()\n        memory = session.get('memory', {})\n        \n        # Scan for common auth patterns in memory\n        for key, value in memory.items():\n            if any(pattern in str(value) for pattern in ['Bearer', 'eyJ', 'refresh_token']):\n                current_tokens.add(str(value)[:20])\n        \n        new_tokens = current_tokens - prev_tokens\n        if new_tokens:\n            print(f'🚨 New auth tokens in memory: {new_tokens}')\n        prev_tokens.update(current_tokens)\n        \n    agent.on_session_start(check_memory_drift)\n    return agent\n\nagent = detect_auth_drift(Agent())",
+        "language": "python"
+      },
+      {
+        "name": "Structured Output Credential Scanner",
+        "description": "Validates Agno structured outputs for embedded credentials before API calls",
+        "code": "from agno import Agent\nimport json\n\ndef scan_structured_creds(output):\n    if isinstance(output, dict):\n        for key, value in output.items():\n            if any(sensitive in key.lower() for sensitive in ['key', 'token', 'secret', 'password']):\n                print(f'🚨 Credential in structured output: {key}')\n            elif isinstance(value, str) and len(value) > 50 and any(pattern in value for pattern in ['eyJ', 'sk-', 'Bearer ']):\n                print('🚨 API key detected in structured output')\n    return output\n\nagent = Agent()\nagent.output_processor = scan_structured_creds",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Secure JWT Validator Middleware",
+        "description": "Implements proper JWT validation before Agno agent processing",
+        "code": "from agno import Agent\nimport jwt\nfrom cryptography.hazmat.primitives import serialization\n\nclass AuthMiddleware:\n    def __init__(self, public_key):\n        self.public_key = serialization.load_pem_public_key(public_key)\n    \n    def validate_jwt(self, token):\n        try:\n            # Verify signature and claims\n            decoded = jwt.decode(token, self.public_key, algorithms=['RS256'])\n            return decoded['sub'] == 'authorized-agent'\n        except:\n            return False\n    \n    def process(self, inputs):\n        for input_data in inputs:\n            if 'auth' in input_data:\n                if not self.validate_jwt(input_data['auth']):\n                    raise ValueError('Invalid JWT')\n        return inputs\n\nagent = Agent()\nagent.input_middleware = AuthMiddleware(PUBLIC_KEY_PEM)",
+        "language": "python"
+      },
+      {
+        "name": "Ephemeral Token Vault",
+        "description": "Stores auth tokens outside Agno session memory with TTL",
+        "code": "from agno import Agent\nimport time\nfrom typing import Dict\n\nclass TokenVault:\n    def __init__(self):\n        self.tokens: Dict[str, float] = {}\n    \n    def store(self, token_id: str, ttl: int = 300):\n        self.tokens[token_id] = time.time() + ttl\n    \n    def get(self, token_id: str) -> bool:\n        if token_id in self.tokens and time.time() < self.tokens[token_id]:\n            return True\n        self.tokens.pop(token_id, None)\n        return False\n\nvault = TokenVault()\n\ndef auth_guard(session):\n    token_id = session.get('auth_token_id')\n    if not vault.get(token_id):\n        raise PermissionError('Token expired')\n\nagent = Agent()\nagent.on_session_start(auth_guard)\n\n# Usage: vault.store('user123', 600) before agent.run()",
+        "language": "python"
+      },
+      {
+        "name": "Role-Based Agent Permissions",
+        "description": "Enforces RBAC for Agno team agent coordination",
+        "code": "from agno import Agent, Team\nfrom enum import Enum\n\nclass AgentRole(Enum):\n    OBSERVER = 'observer'\n    EDITOR = 'editor'\n    ADMIN = 'admin'\n\nPERMISSIONS = {\n    AgentRole.OBSERVER: ['read'],\n    AgentRole.EDITOR: ['read', 'write'],\n    AgentRole.ADMIN: ['read', 'write', 'delete']\n}\n\ndef rbac_wrapper(role: AgentRole):\n    def decorator(func):\n        def wrapper(*args, **kwargs):\n            action = kwargs.get('action')\n            if action and action not in PERMISSIONS[role]:\n                raise PermissionError(f'{role} cannot perform {action}')\n            return func(*args, **kwargs)\n        return wrapper\n    return decorator\n\n@rbac_wrapper(AgentRole.EDITOR)\ndef team_write_action(data):\n    return {'status': 'written'}\n\nteam = Team(agents=[Agent(tools=[team_write_action])])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex automates authentication monitoring by wrapping Agno's agent.run() with vex.verify() decorators that continuously validate JWT signatures, track token lifecycles, and enforce RBAC across multi-modal inputs and team coordination. The platform maintains baseline auth patterns from healthy Agno deployments and flags deviations like fabricated session tokens or privilege escalations in real-time. Remediation templates automatically inject secure middleware and ephemeral token vaults without modifying core agent logic.\n\nFor team deployments, Vex correlates auth failures across agent swarms, identifying coordination issues where sub-agents inherit unauthorized contexts. Integration requires only pip install agno vex-sdk and decorator application, enabling zero-config monitoring of all auth surfaces in Agno workflows.",
+      "code": "pip install agno vex-sdk\n\nfrom agno import Agent\nfrom vex import verify\n\n@verify('auth-jwt-validation', \n        patterns=['eyJ[^\\s]{50,}'],  # JWT patterns\n        remediation='inject_jwt_middleware')\ndef secure_agent_run(inputs):\n    agent = Agent()\n    result = agent.run(inputs)\n    return result\n\n@verify('auth-token-lifecycle',\n        memory_patterns=['Bearer', 'refresh_token'],\n        remediation='deploy_token_vault')\ndef team_coordination(inputs):\n    team = Team(agents=[Agent(), Agent()])\n    return team.run(inputs)\n\n# Vex auto-generates reports and fixes\nresult = secure_agent_run({'image': 'data:...', 'auth': 'eyJ...'})\n\n# View automated remediation\nprint(vex.status())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to automatically secure your Agno agents against auth failures."
+    }
+  }
+}

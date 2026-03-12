@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Instructor + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor workflow automation",
+      "Instructor guardrails",
+      "workflow automation reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies structured output extraction from LLMs by patching clients to return validated Pydantic models, perfect for workflow automation agents that need reliable task planning and execution. In multi-step workflows with API calls, conditional logic, and human approvals, Instructor's parsing can fail due to hallucinated enums, missing fields, or inconsistent nesting. Vex provides essential guardrails to verify action correctness, permissions, idempotency, and rollback safety, ensuring production reliability.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Instructor",
+      "description": "A typical Instructor-powered workflow automation agent follows a multi-step execution pattern: the LLM generates a structured TaskPlan (Pydantic model) containing sequenced actions, conditions, and API payloads. The agent executes actions sequentially, calling external APIs while validating permissions and handling human-in-the-loop approvals via webhooks or queues. Conditional branching and error recovery use the structured plan's metadata for decision-making.\n\nInstructor patches the OpenAI client to enforce schema validation on TaskPlan extraction, retrying on failures like missing required fields. Vex wraps these extractions and action executions to verify business logic invariants. Rollback mechanisms track state changes across steps, enabling safe recovery from partial failures.\n\nThe architecture scales via async task queues (Celery/ BullMQ) and integrates with approval systems like Slack or custom UIs, with all critical decisions flowing through verified Instructor outputs.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│  Instructor LLM   │\n│                 │    │  (TaskPlan)       │\n└─────────────────┘    │  vex.verify()     │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Workflow Executor │\n                       │ - API Calls       │──┐\n                       │ - Conditions      │  │\n                       │ - Human Approval  │  │\n                       └────────┬──────────┘  │\n                                │             │\n                       ┌────────▼──────────┐  │\n                       │   State Store     │  │\n                       │ (Redis/Postgres)  │◀─┘\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor retries fail when LLM consistently produces invalid TaskPlan structures",
+        "severity": "high",
+        "mitigation": "Vex verifies final output meets workflow invariants before execution"
+      },
+      {
+        "name": "Partial extraction missing required fields",
+        "description": "TaskPlan missing critical fields like 'api_endpoint' or 'rollback_steps'",
+        "severity": "critical",
+        "mitigation": "Vex enforces complete field presence and semantic validity"
+      },
+      {
+        "name": "Model hallucinating enum values outside schema",
+        "description": "LLM generates invalid ActionType enum values like 'CREATE_USER_ACCOUNT'",
+        "severity": "high",
+        "mitigation": "Vex validates enum values against business-allowed operations"
+      },
+      {
+        "name": "Nested object extraction producing inconsistent depth",
+        "description": "Inconsistent nesting in conditional_branches or rollback_steps arrays",
+        "severity": "medium",
+        "mitigation": "Vex checks structural consistency across workflow steps"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Instructor TaskPlan Pydantic Model",
+        "description": "Core structured output model for workflow steps with actions and conditions",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import List, Literal, Optional\nfrom instructor import from_openai\n\nclass Action(BaseModel):\n    type: Literal['api_call', 'human_approval', 'condition_check']\n    endpoint: Optional[str] = None\n    payload: dict = {}\n    idempotency_key: str\n\nclass TaskPlan(BaseModel):\n    steps: List[Action] = Field(..., min_items=1, max_items=10)\n    rollback_steps: List[Action] = []\n    requires_approval: bool = False\n\nclient = from_openai(OpenAI())\n\ntask_plan = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=TaskPlan,\n    messages=[{\"role\": \"user\", \"content\": \"Plan workflow to update user profile\"}]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Basic Workflow Executor",
+        "description": "Executes Instructor-generated TaskPlan with error handling",
+        "code": "async def execute_workflow(plan: TaskPlan):\n    results = []\n    for step in plan.steps:\n        if step.type == 'api_call':\n            response = await api_client.post(step.endpoint, json=step.payload)\n            results.append({'status': 'success', 'step_id': step.idempotency_key})\n        elif step.type == 'human_approval':\n            await send_slack_approval(step.idempotency_key)\n            await wait_for_approval(step.idempotency_key)\n    if plan.requires_approval:\n        await final_human_review(results)\n    return results",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Instructor Equivalent with Zod",
+        "description": "Zod schema mirroring Python Pydantic for Node.js workflows",
+        "code": "import { z } from 'zod';\nimport { createInstructor } from '@instructor-ai/instructor';\n\nconst ActionSchema = z.object({\n  type: z.enum(['api_call', 'human_approval', 'condition_check']),\n  endpoint: z.string().optional(),\n  payload: z.record(z.any()),\n  idempotency_key: z.string()\n});\n\nconst TaskPlanSchema = z.object({\n  steps: z.array(ActionSchema).min(1).max(10),\n  rollback_steps: z.array(ActionSchema).default([]),\n  requires_approval: z.boolean().default(false)\n});\n\nconst instructor = createInstructor({ mode: 'json' });\n\nconst taskPlan = await instructor.chat.completions.create({\n  model: 'gpt-4o',\n  schema: TaskPlanSchema,\n  messages: [{ role: 'user', content: 'Plan workflow to update user profile' }]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "TypeScript Workflow State Management",
+        "description": "Tracks execution state with rollback capability",
+        "code": "interface WorkflowState {\n  stepResults: Record<string, any>;\n  completedSteps: string[];\n  rollbackExecuted: boolean;\n}\n\nconst redis = new Redis();\n\nasync function executeWorkflow(plan: TaskPlan): Promise<WorkflowState> {\n  const state: WorkflowState = { stepResults: {}, completedSteps: [], rollbackExecuted: false };\n  \n  for (const step of plan.steps) {\n    state.stepResults[step.idempotency_key] = await executeStep(step);\n    state.completedSteps.push(step.idempotency_key);\n    await redis.set(`workflow:${plan.id}`, JSON.stringify(state));\n  }\n  \n  return state;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify TaskPlan Action Correctness",
+        "description": "Ensure generated actions match allowed operations and have valid payloads",
+        "code": "from vex import verify\n\n@verify(guards=[\n    \"action.type in ['api_call', 'human_approval']\",\n    \"action.endpoint in allowed_endpoints\",\n    \"len(action.payload) > 0 if action.type == 'api_call' else True\"\n])\ndef safe_task_plan(plan: TaskPlan) -> TaskPlan:\n    return plan\n\n# Usage\nverified_plan = safe_task_plan(task_plan)\nexecutor.execute(verified_plan)",
+        "language": "python"
+      },
+      {
+        "title": "Permission Validation Wrapper",
+        "description": "Verify user permissions before executing API actions",
+        "code": "from vex import verify\n\nasync def execute_with_permissions(plan: TaskPlan, user_id: str):\n    @verify(guards=[\n        f\"user_has_permission('{user_id}', action.endpoint)\",\n        \"action.idempotency_key not in executed_keys\",\n        \"plan.rollback_steps is not None\"\n    ])\n    async def safe_execute(plan: TaskPlan):\n        return await executor.execute(plan)\n    \n    return await safe_execute(plan)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex for Idempotency & Rollback",
+        "description": "Verify idempotency keys unique and rollback configured",
+        "code": "import { verify } from 'vex-sdk';\n\nconst verifyWorkflow = verify({\n  guards: [\n    'plan.steps.every(step => step.idempotency_key && step.idempotency_key.length > 0)',\n    '!plan.steps.map(s => s.idempotency_key).some(redis.exists)',\n    'plan.rollback_steps.length > 0 || !plan.requires_approval',\n    'userPermissions[userId].includes(plan.steps[0].endpoint)'\n  ]\n});\n\nconst safeExecute = async (plan: TaskPlan, userId: string) => {\n  const verifiedPlan = verifyWorkflow(plan);\n  return await workflowExecutor.execute(verifiedPlan);\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Workflow Automation",
+      "description": "Add Vex verification to your Instructor workflows today with one pip install and start preventing production failures."
+    }
+  }
+}

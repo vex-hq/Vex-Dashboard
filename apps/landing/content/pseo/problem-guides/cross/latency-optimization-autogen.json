@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in AutoGen Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "AutoGen latency-optimization",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, LLM Latency Optimization for AI Agents manifests as excessive delays in multi-agent conversations due to high token volumes from verbose responses, redundant agent interactions, and inefficient tool calls. Agents frequently generate long-winded replies during debates or code reviews, causing cumulative latency spikes that make real-time applications unresponsive. This is exacerbated by AutoGen's default retry mechanisms and lack of built-in token budgeting.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent debate workflows",
+        "symptom": "Agents generate 2k+ token responses per turn during back-and-forth discussions",
+        "impact": "30-60s latency per conversation turn, total session timeout"
+      },
+      {
+        "scenario": "Code review agents with execution feedback loops",
+        "symptom": "Code agent + executor agent ping-pong with verbose error traces",
+        "impact": "5-10x latency increase from repeated full-context resubmissions"
+      },
+      {
+        "scenario": "Human-in-loop approval workflows",
+        "symptom": "Agents over-explain decisions waiting for human input",
+        "impact": "Idle latency accumulation during human response windows"
+      },
+      {
+        "scenario": "Group chat with termination conditions",
+        "symptom": "All agents respond to every message before convergence check",
+        "impact": "Exponential latency growth with agent count (n² scaling)"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token-per-Turn Monitor",
+        "description": "Tracks average tokens per agent response to detect verbose patterns",
+        "code": "from autogen import AssistantAgent, UserProxyAgent\nimport time\n\ndef latency_detector(conversation_history):\n    metrics = []\n    for msg in conversation_history[-10:]:\n        if 'content' in msg and msg['role'] != 'user':\n            token_count = len(msg['content'].split())\n            response_time = msg.get('timestamp', time.time()) - msg.get('prev_timestamp', 0)\n            if token_count > 1500 or response_time > 30:\n                metrics.append({\n                    'agent': msg.get('agent_name'),\n                    'tokens': token_count,\n                    'latency': response_time,\n                    'warning': 'High latency detected'\n                })\n    return {'alert': len(metrics) > 2, 'metrics': metrics}",
+        "language": "python"
+      },
+      {
+        "name": "Agent Response Time Profiler",
+        "description": "Measures individual agent latency contributions in group chat",
+        "code": "def profile_agent_latency(agent):\n    start_times = {}\n    def latency_wrapper(func):\n        def wrapper(*args, **kwargs):\n            agent_name = agent.name\n            start_times[agent_name] = time.time()\n            result = func(*args, **kwargs)\n            latency = time.time() - start_times[agent_name]\n            if latency > 20:\n                print(f'⚠️ {agent_name} latency: {latency:.1f}s')\n            return result\n        return wrapper\n    return latency_wrapper",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Turn Latency Tracker",
+        "description": "Detects when total conversation latency exceeds acceptable thresholds",
+        "code": "class LatencyTracker:\n    def __init__(self, max_latency=120):\n        self.start_time = time.time()\n        self.max_latency = max_latency\n        self.turn_count = 0\n    \n    def on_new_turn(self):\n        self.turn_count += 1\n        total_latency = time.time() - self.start_time\n        avg_latency = total_latency / self.turn_count\n        if total_latency > self.max_latency:\n            return {\n                'alert': True,\n                'total_latency': total_latency,\n                'avg_per_turn': avg_latency,\n                'recommendation': 'Implement token limits'\n            }\n        return {'alert': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Token Budget Enforcement",
+        "description": "Set max tokens per agent response using AutoGen's llm_config",
+        "code": "from autogen import AssistantAgent\n\nllm_config = {\n    \"config_list\": [{\n        \"model\": \"gpt-4\",\n        \"api_key\": os.environ[\"OPENAI_API_KEY\"],\n        \"max_tokens\": 500,  # Critical: limits verbose responses\n        \"temperature\": 0.1\n    }],\n    \"timeout\": 30,\n    \"cache_seed\": 42\n}\n\ncoder = AssistantAgent(\n    name=\"Coder\",\n    llm_config=llm_config,\n    system_message=\"Respond concisely. Max 400 words per response.\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Early Termination on Convergence",
+        "description": "Stop conversations when agents reach consensus to prevent latency waste",
+        "code": "def convergence_terminator(messages, sender, config):\n    if len(messages) < 3:\n        return False\n    \n    recent_msgs = messages[-3:]\n    agreements = sum(1 for msg in recent_msgs if 'agree' in msg.get('content', '').lower())\n    \n    if agreements >= 2:\n        print('✅ Consensus reached, terminating conversation')\n        return True\n    return False\n\n# Register as reply filter\nuser_proxy.register_reply(AssistantAgent, reply_func=convergence_terminator)",
+        "language": "python"
+      },
+      {
+        "name": "Selective Agent Activation",
+        "description": "Only activate relevant agents per turn instead of all agents responding",
+        "code": "from autogen import GroupChat, GroupChatManager\n\n# Smart routing based on message content\ndef smart_routing(messages, sender, config):\n    last_msg = messages[-1]['content'].lower()\n    relevant_agents = []\n    \n    if 'code' in last_msg:\n        relevant_agents = ['coder', 'executor']\n    elif 'review' in last_msg:\n        relevant_agents = ['reviewer']\n    else:\n        relevant_agents = ['planner']\n    \n    return relevant_agents[0] if relevant_agents else None\n\ngroupchat = GroupChat(agents=[coder, reviewer, executor], messages=[], max_round=10)\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a reply function filter in AutoGen workflows, automatically detecting latency patterns across all agent conversations. It monitors token counts, response times, and conversation efficiency in real-time, flagging issues like verbose agents or inefficient turn-taking before they impact production SLAs. Vex's remediation engine can dynamically adjust max_tokens, enforce convergence rules, and reroute conversations—all without code changes to your AutoGen agents.\n\nThe Vex SDK (`pip install vex-sdk`) provides drop-in integration via `register_vex_filter()`, which wraps your existing agent reply functions. Vex learns optimal latency patterns from your conversation history and applies progressive tightening of constraints. For multi-agent systems, it automatically identifies bottleneck agents and applies targeted fixes like response summarization or selective activation.\n\nProduction deployments benefit from Vex's alerting and auto-remediation, maintaining <10s conversation latency even under high agent concurrency. Integration takes 3 lines of code and works with any LLM provider configured in AutoGen.",
+      "code": "from autogen import AssistantAgent, UserProxyAgent, GroupChat\nfrom vex_sdk import VexAgentFilter\n\n# Install: pip install autogen vex-sdk\n\n# 3-line Vex integration\nvex_filter = VexAgentFilter(problem='llm-latency-optimization')\nuser_proxy = UserProxyAgent('user')\ncoder = AssistantAgent('coder', llm_config=llm_config)\n\n# Vex auto-registers as reply filter\nvex_filter.register_to_agent(user_proxy)\nvex_filter.register_to_agent(coder)\n\n# Your existing AutoGen workflow continues unchanged\ngroupchat = GroupChat(agents=[user_proxy, coder], messages=[])\nmanager = GroupChatManager(groupchat=groupchat)\n\nuser_proxy.initiate_chat(\n    manager,\n    message=\"Solve this latency issue\"\n)\n\n# Vex automatically:\n# ✅ Detects >1500 token responses\n# ✅ Enforces convergence termination\n# ✅ Alerts on >30s agent latency\n# ✅ Auto-fixes with token budgets",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and eliminate LLM latency issues in your AutoGen agents in 3 lines of code: `pip install vex-sdk`"
+    }
+  }
+}

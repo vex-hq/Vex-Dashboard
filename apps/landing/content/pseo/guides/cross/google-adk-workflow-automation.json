@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Google ADK + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK workflow automation",
+      "Google ADK guardrails",
+      "workflow automation reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Workflow Automation with Google's Agent Development Kit (ADK) enables sophisticated multi-agent systems powered by Gemini models for multi-step task execution, API integrations, and human-in-the-loop approvals. Guardrails are essential to prevent circular dependencies in agent delegation, output inconsistencies from model switching, session state corruption, and tool response mismatches. Vex provides runtime verification to ensure action correctness, permission validation, idempotency, and rollback capability in medium-risk workflows.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Google ADK",
+      "description": "The typical Google ADK workflow automation architecture features a Supervisor Agent that orchestrates specialized Worker Agents for tasks like API calls, data processing, and approval routing. Each agent leverages Gemini models with session state management for long-running conversations, incorporating conditional logic for branching execution paths and human-in-the-loop gates for critical decisions.\n\nAPI integrations occur through tool-equipped agents that handle external service calls, while delegation patterns enable task handoff between agents. Session persistence maintains context across steps, but introduces risks like state corruption. The architecture supports idempotent operations and rollback mechanisms via structured state tracking.\n\nVerification focuses on ensuring actions match intended outcomes, permissions are validated before API calls, operations are idempotent to handle retries safely, and rollback paths exist for error recovery.",
+      "diagram": "Supervisor Agent\n    |\n    +--> API Worker Agent --> External APIs\n    |\n    +--> Approval Worker --> Human-in-Loop\n    |\n    +--> Data Processor --> Conditional Logic\n    |\nVex Guardrails (before_agent_callback)\n    ↑\nGoogle ADK Session State"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Supervisor endlessly delegates between agents without termination conditions",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation graphs and enforces max delegation depth"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different Gemini variants produce incompatible tool response formats",
+        "severity": "high",
+        "mitigation": "Vex standardizes output schemas across model variants"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "State mutations during parallel agent execution corrupt workflow context",
+        "severity": "high",
+        "mitigation": "Vex snapshots and validates session state before agent execution"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "Agents expect different JSON schemas from shared API tools",
+        "severity": "medium",
+        "mitigation": "Vex enforces consistent tool response contracts"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Supervisor Agent Setup",
+        "description": "Create a supervisor agent that delegates to worker agents based on task type",
+        "code": "from google_adk.agents import SupervisorAgent, WorkerAgent\nfrom google_adk.session import Session\n\nsupervisor = SupervisorAgent(\n    model='gemini-2.0-flash-exp',\n    tools=[],\n    instructions=\"Delegate tasks to appropriate worker agents\"\n)\n\napi_worker = WorkerAgent(\n    model='gemini-2.0-flash-exp',\n    tools=[api_tool],\n    instructions=\"Handle API integrations\"\n)\n\nsession = Session(supervisor)\nsession.run('Process customer order with payment approval')",
+        "language": "python"
+      },
+      {
+        "title": "API Worker with Idempotency",
+        "description": "Implement idempotent API calls with request deduplication",
+        "code": "from google_adk.tools import Tool\n\napi_tool = Tool(\n    name='process_payment',\n    description='Process payment idempotently',\n    parameters={\n        'type': 'object',\n        'properties': {\n            'order_id': {'type': 'string'},\n            'amount': {'type': 'number'}\n        }\n    },\n    func=lambda params: payment_service.process(\n        order_id=params['order_id'],\n        amount=params['amount'],\n        idempotency_key=generate_idempotency_key(params)\n    )\n)",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Approval Agent",
+        "description": "Route high-value transactions for human approval",
+        "code": "approval_agent = WorkerAgent(\n    model='gemini-2.0-flash-exp',\n    instructions=\"\"\"Check if amount > $1000:\n    - Route to human approval\n    - Wait for approval signal\n    - Return approved/denied status\"\"\"\n)\n\ndef human_approval_gate(params):\n    if params['amount'] > 1000:\n        return await_approval(params)\n    return {'approved': True}",
+        "language": "python"
+      },
+      {
+        "title": "Conditional Workflow Router",
+        "description": "Route tasks based on workflow state and conditions",
+        "code": "def route_task(session_state, task):\n    if 'payment' in task:\n        return 'api_worker'\n    elif 'approval' in task:\n        return 'approval_agent'\n    elif 'data_processing' in task:\n        return 'data_processor'\n    return 'default_handler'\n\nsupervisor.delegate = lambda task: route_task(session.state, task)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex before_agent_callback",
+        "description": "Install Vex callback to verify actions before agent execution",
+        "code": "from vex_sdk import VexClient\nfrom google_adk import before_agent_callback\n\nvex = VexClient(api_key='your-vex-api-key')\n\n@before_agent_callback\ndef vex_guardrail(agent, session, action):\n    verification = vex.verify(\n        framework='google-adk',\n        use_case='workflow-automation',\n        checks={\n            'action_correctness': action,\n            'delegation_depth': session.get('delegation_count', 0) < 10,\n            'session_integrity': validate_session_state(session)\n        },\n        risk_profile='medium'\n    )\n    if not verification.passed:\n        raise Exception(f'Vex blocked: {verification.reason}')\n    return action",
+        "language": "python"
+      },
+      {
+        "title": "Permission Validation Guardrail",
+        "description": "Validate API permissions before tool execution",
+        "code": "@before_agent_callback\ndef permission_guardrail(agent, session, action):\n    if action.tool.name == 'process_payment':\n        user_permissions = get_user_permissions(session.user_id)\n        required_scope = 'payments:write'\n        \n        vex_result = vex.verify({\n            'permission_validation': required_scope in user_permissions,\n            'action': action\n        })\n        \n        if not vex_result.passed:\n            return {'error': 'Insufficient permissions'}\n    return action",
+        "language": "python"
+      },
+      {
+        "title": "Idempotency and Rollback Verification",
+        "description": "Ensure operations are idempotent with rollback capability",
+        "code": "@before_agent_callback\ndef idempotency_guardrail(agent, session, action):\n    if hasattr(action, 'idempotency_key'):\n        existing_result = check_idempotency_cache(action.idempotency_key)\n        if existing_result:\n            return existing_result\n    \n    rollback_plan = generate_rollback_plan(action)\n    session.set('rollback_plan', rollback_plan)\n    \n    vex.verify({\n        'idempotency': validate_idempotency(action),\n        'rollback_capability': rollback_plan is not None,\n        'action': action\n    })\n    \n    return action",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Workflow Automation",
+      "description": "Add Vex guardrails today to protect your multi-agent workflows from critical failures."
+    }
+  }
+}

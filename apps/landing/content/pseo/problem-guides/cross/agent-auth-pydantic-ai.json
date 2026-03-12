@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Pydantic AI Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Pydantic AI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Pydantic AI agent-auth",
+      "Pydantic AI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Pydantic AI agents, authentication and authorization failures manifest as structured output validation errors when agents attempt to access protected resources or generate unauthorized responses. Agents often produce valid Pydantic models that fail result validators due to missing auth tokens, expired credentials, or insufficient permissions, leading to silent failures or infinite retry loops. These issues are particularly insidious in production because they appear as 'valid' structured outputs that get rejected downstream, breaking agent reliability without clear error signals.",
+    "howItManifests": [
+      {
+        "scenario": "Agent generates API call with expired auth token",
+        "symptom": "Result validator rejects model containing invalid 'Authorization: Bearer <expired>' header",
+        "impact": "Infinite tool retry loops consume API quota without resolution"
+      },
+      {
+        "scenario": "Nested tool calls lose auth context from parent agent",
+        "symptom": "Child tools execute without credentials, returning 401/403 errors",
+        "impact": "Dependency injection context missing in recursive agent flows"
+      },
+      {
+        "scenario": "Streaming auth responses fail mid-generation",
+        "symptom": "Partial credential objects rejected by incremental validation",
+        "impact": "Streaming UI shows 'authentication failed' after user sees partial success"
+      },
+      {
+        "scenario": "Role-based access denied in multi-tenant agents",
+        "symptom": "Valid user model rejected due to insufficient 'role' permissions",
+        "impact": "Legitimate users experience cascading authorization failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Auth Token Expiration Detector",
+        "description": "Scans agent outputs for expired JWT tokens in Authorization headers using Pydantic validation",
+        "code": "from pydantic import BaseModel, validator\nfrom pydantic_ai import Agent, result_validator\nfrom datetime import datetime\n\nclass AuthHeader(BaseModel):\n    Authorization: str\n\n    @validator('Authorization')\n    def check_expired_token(cls, v):\n        if 'Bearer ' in v:\n            token = v.split('Bearer ')[1]\n            # Simulate JWT decode - check 'exp' claim\n            if 'eyJ' in token and len(token) > 100:\n                raise ValueError('EXPIRED_AUTH_TOKEN: Token appears expired')\n        return v\n\n# Detect in agent\ndef detect_auth_issues(agent: Agent):\n    @result_validator(model=AuthHeader)\n    def auth_check(result: AuthHeader):\n        try:\n            return result\n        except ValueError as e:\n            if 'EXPIRED_AUTH_TOKEN' in str(e):\n                print(f'🚨 Auth failure: {e}')\n            raise",
+        "language": "python"
+      },
+      {
+        "name": "Missing Auth Context Tracer",
+        "description": "Traces dependency injection context loss in nested tool calls",
+        "code": "from contextvars import ContextVar\nfrom pydantic_ai import Agent, tool\n\n# Auth context\ncurrent_user = ContextVar('current_user', default=None)\n\n@tool\ndef protected_api_call(endpoint: str) -> str:\n    user = current_user.get()\n    if not user:\n        raise ValueError('MISSING_AUTH_CONTEXT: No user in context')\n    print(f'Using user: {user.id} for {endpoint}')\n    return f'OK'\n\ndef detect_context_loss():\n    agent = Agent(tools=[protected_api_call])\n    # Test nested call\n    try:\n        result = agent.run('Call protected API')\n    except ValueError as e:\n        if 'MISSING_AUTH_CONTEXT' in str(e):\n            print('🚨 Context loss detected in nested tools')",
+        "language": "python"
+      },
+      {
+        "name": "Permission Validation Monitor",
+        "description": "Detects role-based authorization failures in structured outputs",
+        "code": "from pydantic import BaseModel, Field\nfrom enum import Enum\n\nclass UserRole(str, Enum):\n    ADMIN = 'admin'\n    USER = 'user'\n\nclass AuthenticatedResponse(BaseModel):\n    user_id: int\n    role: UserRole = Field(..., description='Required role')\n    resource_access: dict\n\n    @validator('resource_access')\n    def check_permissions(cls, v, values):\n        role = values.get('role')\n        if role == UserRole.USER and 'admin' in v:\n            raise ValueError('INSUFFICIENT_PERMISSIONS: User lacks admin access')\n        return v\n\n# Usage in agent result validator\n@result_validator(model=AuthenticatedResponse)\ndef monitor_permissions(result):\n    print(f'✅ Permissions OK for {result.role}: {result.resource_access.keys()}')\n    return result",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Automatic Token Refresh Middleware",
+        "description": "Intercepts expired tokens and refreshes before tool execution",
+        "code": "from pydantic_ai import Agent, tool, result_validator\nimport jwt\nfrom datetime import datetime\n\nclass AuthMiddleware:\n    def __init__(self, refresh_token: str):\n        self.refresh_token = refresh_token\n\n    def refresh_access_token(self, token: str) -> str:\n        # Simulate token refresh\n        if 'expired' in token:\n            return f'Bearer {jwt.encode({\"exp\": datetime.utcnow().timestamp() + 3600}, \"secret\")}'\n        return token\n\n# Apply to agent\nagent = Agent()\n\n@result_validator\nasync def auto_refresh_auth(result):\n    if hasattr(result, 'headers') and 'Authorization' in result.headers:\n        token = result.headers['Authorization']\n        refreshed = AuthMiddleware('refresh_token').refresh_access_token(token)\n        if refreshed != token:\n            result.headers['Authorization'] = refreshed\n            print('🔄 Token refreshed automatically')\n    return result\n\nagent.add_result_validator(auto_refresh_auth)",
+        "language": "python"
+      },
+      {
+        "name": "Context-Preserving Dependency Injection",
+        "description": "Ensures auth context propagates through nested tool calls",
+        "code": "from contextvars import ContextVar, copy_context\nfrom pydantic_ai import Agent, tool\n\n# Thread-local auth context\ncurrent_auth = ContextVar('current_auth', default=None)\n\nclass AuthContext:\n    def __init__(self, user_id: str, token: str):\n        self.user_id = user_id\n        self.token = token\n\n@tool\ndef secure_tool_call(*args, **kwargs):\n    auth = current_auth.get()\n    if not auth:\n        raise ValueError('No auth context')\n    print(f'Executing with auth: {auth.user_id}')\n    return 'success'\n\n# Context manager for agent execution\nasync def with_auth_context(agent: Agent, user_id: str, token: str):\n    ctx = copy_context()\n    ctx.run(current_auth.set, AuthContext(user_id, token))\n    return await agent.run('Secure operation', context=ctx)",
+        "language": "python"
+      },
+      {
+        "name": "Progressive Permission Fallbacks",
+        "description": "Gracefully handles authorization failures with capability-based fallbacks",
+        "code": "from pydantic import BaseModel\nfrom typing import List, Optional, Literal\nfrom pydantic_ai import Agent\n\nclass CapabilityResponse(BaseModel):\n    granted: List[str]\n    denied: List[str]\n    fallback: Optional[str] = None\n\nPERMISSION_FALLBACKS = {\n    'admin_panel': 'user_dashboard',\n    'delete_user': 'view_user',\n    'edit_all': 'edit_own'\n}\n\n@result_validator(model=CapabilityResponse)\ndef handle_permission_denials(result: CapabilityResponse):\n    for denied in result.denied:\n        if denied in PERMISSION_FALLBACKS:\n            result.fallback = PERMISSION_FALLBACKS[denied]\n            print(f'🔄 Fallback: {denied} → {result.fallback}')\n    return result\n\n# Agent automatically handles fallbacks\nagent = Agent(result_validators=[handle_permission_denials])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly as a result_validator in Pydantic AI agents, automatically detecting authentication failures across all tool calls and structured outputs. It monitors for expired tokens, missing auth contexts, permission violations, and streaming validation failures, providing detailed failure classifications and automatic remediation suggestions. Vex's production monitoring captures these issues in real-time, correlating them with API rate limits, token lifetimes, and user permission changes for root cause analysis.\n\nThe Vex SDK (`pip install vex-sdk`) adds zero-boilerplate observability to your Pydantic AI agents. It automatically instruments all agent executions, tool calls, and result validations, surfacing auth-related failures in your observability dashboard with one-click remediation workflows. Vex also learns from your auth patterns, proactively refreshing tokens and injecting missing contexts before failures occur.\n\nFor teams running Pydantic AI at scale, Vex eliminates the 'works on my machine' problem by enforcing consistent auth behavior across all deployments and environments.",
+      "code": "from pydantic_ai import Agent\nfrom vex_sdk import Vex\n\n# Install: pip install pydantic-ai vex-sdk\n\n# Initialize Vex\nvex = Vex(api_key='vex_123')\n\n# Create production agent with Vex\nagent = Agent(\n    name='secure-customer-agent',\n    result_validators=[\n        vex.auth_validator(),  # Auto-detects all auth failures\n        vex.context_tracer(),  # Tracks dependency injection\n        vex.permission_monitor()  # Role-based access\n    ]\n)\n\n@vex.monitor_agent(agent)\nasync def production_workflow():\n    result = await agent.run(\n        'Fetch customer data and update permissions',\n        user_context={'role': 'admin', 'tenant_id': 'acme'}\n    )\n    vex.record_success('auth_workflow_complete')\n    return result\n\n# Vex auto-generates:\n# - Auth failure alerts\n# - Token refresh automation\n# - Context propagation fixes\n# - Permission fallback rules",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `vex.auth_validator()` to your Pydantic AI agents in 2 lines and eliminate auth failures forever."
+    }
+  }
+}

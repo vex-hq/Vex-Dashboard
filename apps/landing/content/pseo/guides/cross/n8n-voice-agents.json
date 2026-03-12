@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build voice agents with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents voice agents",
+      "n8n AI Agents guardrails",
+      "voice agents reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Voice Agents with n8n AI Agents enables real-time conversational AI through speech-to-text, LLM reasoning, and text-to-speech pipelines. With sub-second latency requirements, these workflows demand robust guardrails to prevent failures like recursive loops, unsafe responses, or latency violations. Vex provides runtime verification to ensure response appropriateness, conversation coherence, and safety in production deployments.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with n8n AI Agents",
+      "description": "n8n Voice Agents typically start with a Webhook or Voice Gateway trigger capturing real-time audio input. This feeds into a Speech-to-Text node (e.g., Deepgram or Whisper) converting audio to text. The transcribed text passes to an AI Agent node with tools for reasoning and action-taking, maintaining conversation memory via Memory Window nodes. The agent's response is validated, then converted to speech via Text-to-Speech (e.g., ElevenLabs) and streamed back. Sub-workflows handle tool calls and error recovery.\n\nLatency is critical: STT (~200ms), LLM inference (~300ms), TTS (~150ms) must stay under 1s total. Memory nodes risk injecting stale context, while unvalidated AI outputs can trigger unsafe actions or infinite loops in tool chains. Vex integrates as a verification webhook post-AI Agent to catch these issues.\n\nThe workflow runs continuously, handling concurrent sessions with session IDs for state management.",
+      "diagram": "Webhook/Voice Gateway → STT (Deepgram) → AI Agent (w/ Memory) → [VEX Guardrail] → TTS (ElevenLabs) → Voice Output\n                          ↓\n                     Tool Calls (Actions)\n\nSession Memory ↔ AI Agent ↔ VEX Verification"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI Agent outputs trigger sub-workflows that loop back to the main agent, exhausting resources",
+        "severity": "critical",
+        "mitigation": "Vex recursion detector analyzes call stacks and session history before approving tool execution"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unfiltered LLM responses containing harmful instructions reach TTS or external APIs",
+        "severity": "critical",
+        "mitigation": "Vex safety filtering and response appropriateness checks block dangerous content"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI Agent includes API keys or secrets in tool parameters visible in logs or TTS output",
+        "severity": "high",
+        "mitigation": "Vex PII/credential redaction scrubs sensitive data from tool calls and responses"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Old conversation history confuses LLM, causing incoherent or hallucinated responses",
+        "severity": "high",
+        "mitigation": "Vex conversation coherence verification validates context relevance and recency"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Real-time Latency Budget Verification",
+        "description": "Verify end-to-end response stays under 800ms before TTS to maintain conversational flow",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst result = await vex.verify({\n  sessionId: $input.sessionId,\n  input: {\n    type: 'voice-agent',\n    latency: Date.now() - $input.startTime,\n    budget: 800\n  },\n  checks: ['latency'],\n  policy: 'voice-low-latency'\n});\n\nif (!result.pass) {\n  throw new Error(`Latency violation: ${result.reason}`);\n}\n\nreturn { verified: true, output: $input.aiResponse };",
+        "language": "typescript"
+      },
+      {
+        "title": "Response Appropriateness Check",
+        "description": "Ensure AI response is contextually appropriate before TTS synthesis",
+        "code": "const result = await vex.verify({\n  sessionId: $input.sessionId,\n  input: {\n    conversationHistory: $input.memoryWindow,\n    agentResponse: $input.aiOutput,\n    userIntent: $input.transcribedText\n  },\n  checks: ['appropriateness'],\n  policy: 'voice-conversation'\n});\n\nif (result.pass) {\n  return {\n    pass: true,\n    safeResponse: result.output?.cleaned || $input.aiOutput\n  };\n} else {\n  return {\n    pass: false,\n    fallback: 'I need a moment to process that.'\n  };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Safety Filtering for Voice Output",
+        "description": "Block harmful content from reaching TTS to prevent unsafe audio generation",
+        "code": "const safetyCheck = await vex.verify({\n  sessionId: $input.sessionId,\n  input: {\n    type: 'voice-response',\n    text: $input.aiResponse,\n    categories: ['hate', 'violence', 'sexual']\n  },\n  checks: ['safety'],\n  policy: 'voice-safety-high'\n});\n\nif (safetyCheck.pass) {\n  // Safe for TTS\n  return $input.aiResponse;\n} else {\n  // Log violation and return safe fallback\n  console.error('Safety violation:', safetyCheck.violations);\n  return 'I cannot assist with that request.';\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Conversation Coherence Validation",
+        "description": "Verify response maintains coherent conversation flow across memory window",
+        "code": "const coherenceCheck = await vex.verify({\n  sessionId: $input.sessionId,\n  input: {\n    fullContext: {\n      history: $input.last10turns,\n      currentUser: $input.transcript,\n      agentReply: $input.response\n    },\n    maxTokens: 4000\n  },\n  checks: ['coherence'],\n  policy: 'voice-coherent-dialogue'\n});\n\nreturn {\n  coherent: coherenceCheck.pass && !coherenceCheck.hallucinationDetected,\n  score: coherenceCheck.coherenceScore,\n  corrected: coherenceCheck.output?.corrected\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex Webhook After AI Agent Node",
+        "description": "Insert Vex verification as HTTP Request node immediately after AI Agent output",
+        "code": "// n8n HTTP Request Node configuration\nconst webhookUrl = 'https://api.vex.dev/v1/verify';\n\nconst payload = {\n  sessionId: $('Webhook').item.json.sessionId,\n  input: {\n    transcribedText: $('Deepgram STT').item.json.text,\n    aiResponse: $('AI Agent').item.json.output,\n    latencyMs: Date.now() - $('Webhook').item.json.startTime,\n    memoryContext: $('Memory Window').item.json.context\n  },\n  checks: ['latency', 'safety', 'coherence'],\n  policy: 'n8n-voice-agent'\n};\n\n// POST to Vex and only proceed if pass=true",
+        "language": "typescript"
+      },
+      {
+        "title": "Session Management with Vex",
+        "description": "Track conversation state across voice turns using Vex session IDs",
+        "code": "// Set in Webhook trigger, reuse across workflow\nconst sessionId = `voice-${$('Webhook').item.json.callId || crypto.randomUUID()}`;\n\n// Pass to all nodes\nconst vexResult = await fetch('https://api.vex.dev/v1/verify', {\n  method: 'POST',\n  headers: { 'Authorization': `Bearer ${$env.VEX_API_KEY}` },\n  body: JSON.stringify({\n    sessionId,\n    input: $('AI Agent').item.json,\n    persistent: true  // Maintains session history\n  })\n});\n\nconst verified = await vexResult.json();\nif (verified.pass) $('ElevenLabs TTS').item.json.text = verified.output;",
+        "language": "typescript"
+      },
+      {
+        "title": "Error Recovery Workflow",
+        "description": "Handle Vex failures gracefully with fallback responses",
+        "code": "// IF Node after Vex webhook: if $json.pass === false\nconst errorType = $('Vex Verify').item.json.reason;\n\nswitch(errorType) {\n  case 'latency':\n    return { text: 'One moment please...', quick: true };\n  case 'safety':\n    return { text: \"I can't help with that.\", endSession: true };\n  case 'recursion':\n    return { text: 'Let me recap...', resetMemory: true };\n  default:\n    return { text: 'Processing your request...', retry: true };\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Voice Agents",
+      "description": "Add Vex verification to your n8n workflows today and eliminate voice agent failures in production."
+    }
+  }
+}

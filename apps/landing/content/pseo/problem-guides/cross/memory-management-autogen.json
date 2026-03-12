@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in AutoGen Agents",
+    "description": "How to detect and fix ai agent memory management in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "AutoGen memory-management",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, AI Agent Memory Management issues arise from unbounded conversation histories stored in agent states, leading to context overflow and degraded performance. Agents retain full chat histories across multi-turn interactions, causing token bloat, repetitive loops, and loss of recency bias in long conversations. This manifests uniquely through AutoGen's group chat dynamics where memory accumulation across agents amplifies failure modes like infinite loops and uncontrolled token spending.",
+    "howItManifests": [
+      {
+        "scenario": "GroupChatManager with persistent agent memory",
+        "symptom": "Conversation history grows exponentially as each agent appends full context to every message",
+        "impact": "Token limits exceeded within 10-15 turns, causing 429 errors or truncated reasoning"
+      },
+      {
+        "scenario": "Sequential agent conversations without memory pruning",
+        "symptom": "Later agents receive complete history from previous agents, repeating resolved topics",
+        "impact": "Infinite loops as agents rehash same information, burning through API quotas"
+      },
+      {
+        "scenario": "Debate agents with accumulating justifications",
+        "symptom": "Each rebuttal includes full prior arguments, creating echo chamber reasoning",
+        "impact": "Agents converge on incorrect conclusions due to context dilution and recency bias loss"
+      },
+      {
+        "scenario": "Human-in-loop with long-running sessions",
+        "symptom": "Human feedback rounds compound with full chat history, overwhelming context window",
+        "impact": "Agents ignore recent human instructions buried in 50k+ token histories"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Conversation Length Monitor",
+        "description": "Tracks token count across agent chat histories and alerts on exponential growth",
+        "code": "from autogen import GroupChatManager, GroupChat\ndef monitor_memory_growth(agents, max_tokens=8000):\n    total_tokens = 0\n    for agent in agents:\n        if hasattr(agent, 'chat_messages'):\n            for convo in agent.chat_messages.values():\n                for msg in convo:\n                    total_tokens += len(msg['content']) // 4  # rough token estimate\n    growth_rate = total_tokens / len(agents)\n    if growth_rate > max_tokens:\n        print(f'⚠️ Memory overflow detected: {total_tokens} tokens')\n        return False\n    return True\n\n# Usage in group chat\ngroupchat = GroupChat(agents=agents, messages=[], max_round=20)\nmanager = GroupChatManager(groupchat=groupchat)\nfor i in range(20):\n    monitor_memory_growth(agents)",
+        "language": "python"
+      },
+      {
+        "name": "Loop Pattern Detector",
+        "description": "Identifies repetitive message patterns indicating stuck conversations",
+        "code": "import re\nfrom collections import Counter\ndef detect_conversation_loops(groupchat):\n    messages = groupchat.messages[-20:]  # last 20 messages\n    message_texts = [msg['content'] for msg in messages]\n    \n    # Check for repeated phrases\n    phrases = [re.findall(r'\\b\\w{4,}\\b', text.lower()) for text in message_texts]\n    all_words = [word for phrase in phrases for word in phrase]\n    word_freq = Counter(all_words)\n    \n    repeat_ratio = sum(count for count in word_freq.values() if count > 3) / len(all_words)\n    if repeat_ratio > 0.3:\n        print(f'🔄 Loop detected: {repeat_ratio:.2%} repetition rate')\n        return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Context Dilution Checker",
+        "description": "Measures if recent messages are buried too deep in conversation history",
+        "code": "def check_context_dilution(agent):\n    if not agent.chat_messages:\n        return False\n    \n    recent_convo = list(agent.chat_messages.values())[-1]\n    total_messages = len(recent_convo)\n    recent_messages = len([m for m in recent_convo[-5:] if 'human' in m.get('role', '').lower()])\n    \n    dilution_ratio = recent_messages / max(total_messages, 1)\n    if dilution_ratio < 0.1:\n        print(f'📜 Context dilution: recent msgs {dilution_ratio:.1%} of total')\n        return True\n    return False\n\n# Check all agents\nfor agent in agents:\n    check_context_dilution(agent)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Sliding Window Memory",
+        "description": "Maintains fixed-size recent message window, automatically pruning oldest context",
+        "code": "from autogen import register_function\nclass MemoryManager:\n    def __init__(self, max_messages=20):\n        self.max_messages = max_messages\n        self.message_window = []\n    \n    def add_message(self, message):\n        self.message_window.append(message)\n        if len(self.message_window) > self.max_messages:\n            self.message_window.pop(0)\n        return self.message_window[-10:]  # return recent context\n    \n    def get_context(self):\n        return self.message_window\n\n# Integrate with agent\nmemory_manager = MemoryManager()\ndef memory_filtered_reply(messages, sender, config):\n    context = memory_manager.add_message({'messages': messages[-1]})\n    return config['llm_client'].create(\n        messages=context + messages[-1:],\n        **config\n    )\n\n# Register as reply filter\nagent.register_reply([memory_filtered_reply], '')",
+        "language": "python"
+      },
+      {
+        "name": "Summary Compression",
+        "description": "Condenses conversation history into key summaries before each agent turn",
+        "code": "def create_summary_compressor(llm_client):\n    def compress_history(messages):\n        if len(messages) < 10:\n            return messages\n        \n        summary_prompt = f\"\"\"Summarize this conversation in 200 tokens, preserving:\\n1. Open questions\\n2. Key disagreements\\n3. Recent decisions\\n4. Pending tasks\\n\\nConversation:\\n{chr(10).join([f\"{m['role']}: {m['content'][:100]}...\" for m in messages[-15:]])}\"\"\"\n        \n        summary = llm_client.create([\n            {'role': 'system', 'content': 'You are a conversation summarizer.'},\n            {'role': 'user', 'content': summary_prompt}\n        ]).choices[0].message.content\n        \n        return [{'role': 'system', 'content': f'Conversation summary: {summary}'}] + messages[-3:]\n    return compress_history\n\n# Usage\ncompressor = create_summary_compressor(llm_client)\ndef summary_reply_filter(messages, sender, config):\n    compressed = compressor(messages)\n    return config['llm_client'].create(messages=compressed, **config)",
+        "language": "python"
+      },
+      {
+        "name": "Token Budget Enforcer",
+        "description": "Hard limit on context size with graceful degradation",
+        "code": "def token_budget_filter(max_tokens=4000):\n    def filter_fn(messages, sender, config):\n        total_tokens = sum(len(m['content']) // 4 for m in messages)\n        \n        if total_tokens > max_tokens:\n            # Keep last N messages to fit budget\n            tokens_per_msg = [len(m['content']) // 4 for m in messages]\n            keep_count = 0\n            running_total = 0\n            \n            for i, tokens in enumerate(reversed(tokens_per_msg)):\n                if running_total + tokens < max_tokens * 0.9:\n                    running_total += tokens\n                    keep_count += 1\n                else:\n                    break\n            \n            messages = messages[-keep_count:] + [{\n                'role': 'system',\n                'content': f'Note: Context truncated to {max_tokens} tokens. Focus on most recent exchange.'\n            }]\n        \n        return config['llm_client'].create(messages=messages, **config)\n    return filter_fn\n\n# Apply to agent\ntoken_filter = token_budget_filter(4000)\nagent.register_reply([token_filter], '')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates directly as a reply function filter in AutoGen, automatically detecting memory overflow patterns across all agent conversations. It monitors token growth rates, detects conversational loops through semantic similarity analysis, and flags context dilution in real-time without modifying core agent logic. When issues are detected, Vex can trigger automated remediation through registered fix functions or alert human operators.\n\nThe integration requires only `pip install autogen vex-sdk` and a single registration call. Vex maintains its own lightweight memory state separate from agent histories, ensuring zero performance overhead while providing comprehensive coverage across GroupChatManager, Sequential chats, and custom workflows. Configuration is done through simple JSON policies defining token budgets, loop thresholds, and remediation strategies.\n\nVex's AutoGen integration automatically instruments all LLM calls, providing dashboards for memory usage patterns, failure correlations, and cost projections. It supports both proactive prevention (pre-call filtering) and reactive recovery (post-response analysis), making it ideal for production AutoGen deployments.",
+      "code": "import vex\nfrom autogen import GroupChat, GroupChatManager\n\n# Install: pip install autogen vex-sdk\n\n# 1. Initialize Vex with AutoGen memory policy\nvex_client = vex.VexClient(\n    api_key=\"your-vex-key\",\n    policies={\n        \"memory_management\": {\n            \"max_tokens_per_agent\": 4000,\n            \"loop_detection_window\": 20,\n            \"max_growth_rate\": 1.2,\n            \"remediations\": [\"truncate\", \"summarize\"]\n        }\n    }\n)\n\n# 2. Register Vex as reply filter (intercepts ALL agent replies)\n@vex_client.register_filter(\"autogen-memory\")\ndef vex_memory_filter(messages, sender, config):\n    verdict = vex_client.check(\"memory_management\", {\n        \"messages\": messages,\n        \"agent_id\": sender.name,\n        \"token_count\": sum(len(m['content']) // 4 for m in messages)\n    })\n    \n    if verdict['action'] == 'truncate':\n        messages = vex_client.apply_remediation('truncate_context', messages)\n    elif verdict['action'] == 'summarize':\n        messages = vex_client.apply_remediation('summarize_history', messages)\n    \n    # Log to Vex dashboard\n    vex_client.log_conversation(sender.name, messages, verdict)\n    return config['llm_client'].create(messages=messages, **config)\n\n# 3. Apply to group chat\nfor agent in agents:\n    agent.register_reply([vex_memory_filter], '')\n\n# Vex now automatically prevents all memory issues\ngroupchat = GroupChat(agents=agents, messages=[])\nmanager = GroupChatManager(groupchat=groupchat)\nmanager.start()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and register as a single reply filter to eliminate memory issues across all your AutoGen agents instantly."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with AG2 + Vex Guardrails",
+    "description": "Learn how to build workflow automation with AG2 + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AG2 workflow automation",
+      "AG2 guardrails",
+      "workflow automation reliability",
+      "Vex AG2",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Workflow Automation with AG2 enables sophisticated multi-agent systems for multi-step task execution, API integrations, and human-in-the-loop approvals. Guardrails are essential to prevent conversation drift, ensure action correctness, and validate permissions in these complex workflows. Vex provides runtime verification to maintain reliability and safety in production deployments.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with AG2",
+      "description": "AG2's workflow automation typically involves a GroupChatManager orchestrating specialized agents: a Planner agent decomposes tasks, Executor agents handle API calls and conditional logic, and a Reviewer agent manages human approvals. Agents communicate via registered message hooks, enabling real-time monitoring. The architecture supports sequential and parallel execution with dynamic speaker selection for consensus on critical decisions.\n\nAPI integrations are handled by tool-enabled agents that validate inputs before execution, while human-in-the-loop steps pause workflows for approval via integrated UIs. Conditional branching uses agent reasoning to select paths, with rollback mechanisms implemented through state tracking and compensation actions. Vex integrates as a message hook to verify each step against defined policies.\n\nThis setup scales to enterprise workflows but introduces risks around off-topic drift and incorrect consensus, making structured verification critical.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Task     │───▶│  GroupChatManager │\n└─────────────────┘    │  (Vex Hook)       │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼──────────┐\n                       │ Planner Agent       │\n                       │ (Task Decomposition)│\n                       └──────────┬──────────┘\n                                  │\n             ┌────────────────────▼────────────────────┐\n             │ Executor Agents (API Calls, Conditions)  │\n             │                                          │\n             └──────────┬──────────┬──────────┬─────────┘\n                        │           │           │\n                   ┌────▼────┐ ┌────▼────┐ ┌────▼────┐\n                   │API Tool│ │Cond. Logic│ │Rollback │\n                   └────────┘ └──────────┘ └─────────┘\n                                  │\n                       ┌──────────▼──────────┐\n                       │ Reviewer Agent      │\n                       │ (Human Approval)    │\n                       └─────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent conversation spiraling off-topic",
+        "description": "Planner and executor agents diverge from workflow steps during extended reasoning",
+        "severity": "high",
+        "mitigation": "Vex message hooks enforce topic adherence and step progression checks"
+      },
+      {
+        "name": "Group chat consensus on incorrect facts",
+        "description": "Agents agree on invalid API responses or flawed conditional logic",
+        "severity": "critical",
+        "mitigation": "Vex verifies factual accuracy and idempotency before consensus"
+      },
+      {
+        "name": "Code execution agents producing harmful outputs",
+        "description": "Executor agents generate unsafe API calls or destructive rollback actions",
+        "severity": "critical",
+        "mitigation": "Vex permission validation blocks unauthorized or harmful actions"
+      },
+      {
+        "name": "Speaker selection bias in multi-agent groups",
+        "description": "Dominant agents bypass human approval or override valid consensus",
+        "severity": "medium",
+        "mitigation": "Vex monitors speaker patterns and enforces equitable participation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic AG2 Workflow Group Setup",
+        "description": "Initialize GroupChat with planner, executor, and reviewer agents for workflow automation",
+        "code": "from ag2 import GroupChat, GroupChatManager\nfrom ag2.agent import AssistantAgent\n\nplanner = AssistantAgent(name=\"Planner\", llm_config={\"model\": \"gpt-4\"})\nexecutor = AssistantAgent(name=\"Executor\", llm_config={\"model\": \"gpt-4o\"}, tools=[api_tool])\nreviewer = AssistantAgent(name=\"Reviewer\", llm_config={\"model\": \"gpt-4\"})\n\ngroupchat = GroupChat(agents=[planner, executor, reviewer], messages=[], max_round=20)\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"model\": \"gpt-4\"})\n\nresult = manager.initiate_chat(recipient=planner, message=\"Process order #12345\")",
+        "language": "python"
+      },
+      {
+        "title": "API Integration with Conditional Logic",
+        "description": "Executor agent handles API calls with branching based on response validation",
+        "code": "def process_order_api(order_id: str) -> dict:\n    # Simulated API call\n    response = requests.post(\"/orders\", json={\"id\": order_id, \"status\": \"pending\"})\n    return response.json()\n\ndef conditional_branch(result: dict) -> str:\n    if result.get(\"approved\"):\n        return \"execute_fulfillment\"\n    elif result.get(\"rejected\"):\n        return \"trigger_rollback\"\n    return \"request_human_review\"\n\napi_tool = {\"process_order\": process_order_api, \"decide_branch\": conditional_branch}",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Approval Handler",
+        "description": "Reviewer agent pauses workflow for human approval before critical actions",
+        "code": "def human_approval_gate(proposal: str) -> str:\n    print(f\"🚨 HUMAN APPROVAL NEEDED: {proposal}\")\n    approval = input(\"Approve? (y/n): \").strip().lower()\n    return \"approved\" if approval == 'y' else \"rejected\"\n\nreviewer_tools = [human_approval_gate]\nreviewer = AssistantAgent(\n    name=\"Reviewer\",\n    system_message=\"Always request human approval for orders > $1000\",\n    llm_config={\"model\": \"gpt-4\"},\n    tools=reviewer_tools\n)",
+        "language": "python"
+      },
+      {
+        "title": "Rollback and Idempotency Handler",
+        "description": "Implement safe rollback with idempotency checks for failed workflow steps",
+        "code": "import uuid\n\nclass WorkflowState:\n    def __init__(self):\n        self.execution_id = str(uuid.uuid4())\n        self.steps = []\n        self.can_rollback = True\n    \n    def record_step(self, step_name: str, result: dict):\n        self.steps.append({\"step\": step_name, \"result\": result, \"idempotent\": True})\n    \n    def safe_rollback(self, step_index: int):\n        if self.can_rollback and step_index < len(self.steps):\n            step = self.steps[step_index]\n            if step[\"idempotent\"]:\n                # Execute compensating transaction\n                print(f\"Rolling back {step['step']}\")\n                return True\n        return False\n\nstate = WorkflowState()",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Message Hook on GroupChat",
+        "description": "Add Vex as a message hook to verify all agent communications in real-time",
+        "code": "from vex_sdk import VexClient\nfrom ag2 import GroupChatManager\n\nvex = VexClient(api_key=\"your-vex-api-key\")\n\n@vex.message_hook()\ndef verify_workflow_message(sender: str, message: str, context: dict) -> bool:\n    policies = [\n        \"topic:workflow-automation\",\n        \"severity<=medium\",\n        \"no-harmful-actions\",\n        \"human-approval-required\"\n    ]\n    result = vex.verify_message(message, policies=policies, context=context)\n    return result.approved\n\n# Register hook with GroupChatManager\nmanager = GroupChatManager(\n    groupchat=groupchat,\n    llm_config={\"model\": \"gpt-4\"},\n    message_hooks=[verify_workflow_message]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Action Correctness Verification",
+        "description": "Validate API calls and conditional logic before execution with Vex",
+        "code": "@vex.action_hook(permissions=[\"api:write\", \"workflow:execute\"])\ndef verify_api_action(action: dict, context: WorkflowState) -> bool:\n    # Check action correctness\n    if action[\"type\"] == \"api_call\":\n        required_fields = [\"endpoint\", \"method\", \"payload\"]\n        if not all(action.get(f) for f in required_fields):\n            vex.block(\"missing-required-fields\")\n            return False\n        \n        # Idempotency check\n        if not context.is_idempotent(action[\"endpoint\"]):\n            vex.block(\"non-idempotent-action\")\n            return False\n    \n    # Permission validation\n    result = vex.verify_action(action, context=context.execution_id)\n    return result.approved",
+        "language": "python"
+      },
+      {
+        "title": "Human Approval and Rollback Guardrails",
+        "description": "Enforce human-in-the-loop and safe rollback with Vex policy enforcement",
+        "code": "@vex.decision_hook(decision_type=\"human-approval\")\ndef guard_human_approval(decision: str, evidence: dict) -> dict:\n    if decision == \"approved\" and evidence.get(\"amount\", 0) > 1000:\n        vex.enforce_policy([\n            \"multi-factor-approval\",\n            \"audit-log-required\",\n            \"rollback-enabled\"\n        ])\n    \n    # Rollback capability verification\n    if decision == \"rollback\":\n        rollback_result = state.safe_rollback(evidence[\"step_index\"])\n        if not rollback_result:\n            vex.block(\"rollback-failed\")\n            return {\"status\": \"blocked\", \"reason\": \"non-recoverable\"}\n    \n    return vex.approve_decision(decision, evidence)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AG2 Workflow Automation",
+      "description": "Install Vex today with `pip install ag2 vex-sdk` and register message hooks to protect your production workflows."
+    }
+  }
+}

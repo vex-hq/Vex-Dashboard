@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Semantic Kernel Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Semantic Kernel tool-loop-detection",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Semantic Kernel, Tool Loop Detection identifies infinite or repetitive cycles where AI agents repeatedly invoke the same plugins or execution groups without progressing toward task completion. This manifests uniquely through Kernel's plugin chaining and planner patterns, where sequential function invocations or malformed plans cause agents to loop on tools like web search or data processing plugins. Common triggers include planners generating cyclic execution graphs or memory recalls feeding invalid prior states back into the invocation loop.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining producing cascading errors",
+        "symptom": "Sequential plugin calls repeat identical function invocation patterns across multiple KernelFunctionInvocationContext cycles",
+        "impact": "Exponential memory consumption and timeout failures after 50+ identical tool calls"
+      },
+      {
+        "scenario": "Planner generating invalid execution plans",
+        "symptom": "ActionPlanner produces execution groups containing self-referential plugin dependencies",
+        "impact": "Agent stuck executing same plan segment repeatedly without state advancement"
+      },
+      {
+        "scenario": "Memory recall hallucinating past interactions",
+        "symptom": "SemanticMemory recall returns fabricated prior tool results triggering identical plugin re-invocations",
+        "impact": "Infinite loop between memory retrieval and tool execution consuming token budget"
+      },
+      {
+        "scenario": "Cross-plugin data contamination",
+        "symptom": "Shared ContextVariables between plugins cause output of one to trigger identical input patterns in another",
+        "impact": "Oscillating data flow between two plugins without convergence to final answer"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Invocation Pattern Tracker",
+        "description": "Monitors KernelFunctionInvocationContext for repeated function_id + input signature patterns across execution cycles",
+        "code": "```python\nfrom semantic_kernel import Kernel\nfrom semantic_kernel.contents import ChatHistory\n\nclass ToolLoopDetector:\n    def __init__(self):\n        self.invocation_history = {}\n        self.LOOP_THRESHOLD = 3\n    \n    def check_loop(self, context: KernelFunctionInvocationContext) -> bool:\n        func_id = f'{context.function.name}:{context.function.plugin_name}'\n        input_sig = hash(str(context.variables))\n        key = f'{func_id}:{input_sig}'\n        \n        count = self.invocation_history.get(key, 0) + 1\n        self.invocation_history[key] = count\n        \n        return count >= self.LOOP_THRESHOLD\n```",
+        "language": "python"
+      },
+      {
+        "name": "Execution Group Cycle Detection",
+        "description": "Analyzes Planner's execution groups for cyclic dependencies using graph traversal on KernelFunction references",
+        "code": "```typescript\nimport { Kernel } from '@semantic-kernel/core';\n\ninterface ExecutionNode {\n  functionName: string;\n  nextFunctions: string[];\n}\n\nfunction detectPlanCycles(planSteps: ExecutionNode[]): boolean {\n  const visited = new Set<string>();\n  const recStack = new Set<string>();\n  \n  function hasCycle(nodeName: string): boolean {\n    if (recStack.has(nodeName)) return true;\n    if (visited.has(nodeName)) return false;\n    \n    visited.add(nodeName);\n    recStack.add(nodeName);\n    \n    for (const next of planSteps.find(s => s.functionName === nodeName)?.nextFunctions || []) {\n      if (hasCycle(next)) return true;\n    }\n    \n    recStack.delete(nodeName);\n    return false;\n  }\n  \n  return planSteps.some(step => hasCycle(step.functionName));\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Context Variable Oscillation Monitor",
+        "description": "Tracks ContextVariables hash patterns across sequential invocations to detect data oscillation loops",
+        "code": "```python\ndef monitor_context_oscillation(context: KernelArguments) -> dict:\n    current_hash = hash(frozenset(context.items()))\n    history = getattr(monitor_context_oscillation, 'var_history', [])\n    \n    history.append(current_hash)\n    if len(history) > 10:\n        history.pop(0)\n    setattr(monitor_context_oscillation, 'var_history', history)\n    \n    oscillations = len(set(history)) / len(history) < 0.3\n    return {'is_oscillating': oscillations, 'stability_ratio': len(set(history)) / len(history)}\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Invocation Blacklist Filter",
+        "description": "Intercepts repeating function invocations and returns cached result or terminates with loop detection message",
+        "code": "```python\nfrom semantic_kernel.filters import KernelFunctionInvocationFilter\n\nclass LoopPreventionFilter(KernelFunctionInvocationFilter):\n    def __init__(self):\n        self.blacklist = {}\n    \n    async def on_function_invocation_async(\n        self, \n        function_invocation_context: KernelFunctionInvocationContext, \n        next: KernelFunctionInvocationFilterNext\n    ) -> KernelFunctionInvocationContext:\n        \n        func_key = f'{function_invocation_context.function.name}:{hash(str(function_invocation_context.variables))}'\n        \n        if func_key in self.blacklist:\n            function_invocation_context.result = 'LOOP_DETECTED: Repeated tool invocation prevented'\n            return function_invocation_context\n        \n        self.blacklist[func_key] = True\n        \n        result = await next(function_invocation_context)\n        return result\n```",
+        "language": "python"
+      },
+      {
+        "name": "Plan Validation Middleware",
+        "description": "Validates ActionPlanner output before execution, rejecting cyclic execution groups",
+        "code": "```typescript\nimport { ActionPlanner } from '@semantic-kernel/agents';\n\nfunction validatePlan(plan: any): boolean {\n  const functionCalls = new Set();\n  for (const step of plan.executionGroups.flatMap((g: any) => g.functions)) {\n    if (functionCalls.has(step.function.name)) {\n      console.warn('CYCLE_DETECTED:', step.function.name);\n      return false;\n    }\n    functionCalls.add(step.function.name);\n  }\n  return true;\n}\n\nconst planner = new ActionPlanner(kernel);\nconst plan = await planner.createPlan(goal);\nif (!validatePlan(plan)) {\n  throw new Error('Plan contains execution cycles');\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Loop Breaker",
+        "description": "Filters SemanticMemory recall results that match recent tool invocation patterns",
+        "code": "```python\nfrom semantic_kernel.memory import SemanticTextMemory\n\nclass LoopSafeMemory(SemanticTextMemory):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.recent_tools = set()\n    \n    async def search_async(self, query: str, **kwargs) -> list:\n        results = await super().search_async(query, **kwargs)\n        \n        # Filter out memories matching recent tool patterns\n        safe_results = [\n            r for r in results \n            if not any(tool_pattern in r.text.lower() for tool_pattern in self.recent_tools)\n        ]\n        \n        return safe_results[:3]\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a Semantic Kernel filter on function results, automatically detecting tool loop patterns across plugin invocations, planner execution groups, and memory recalls. The Vex SDK monitors invocation signatures, context variable states, and execution graph patterns in real-time, providing precise loop detection without modifying core agent logic. \n\nVex's loop detection captures the exact failing invocation patterns and automatically applies remediation strategies including invocation blacklisting, plan rewrites, and memory filtering. Integration requires only adding the Vex filter to your Kernel and configuring loop sensitivity thresholds. Vex maintains execution traces compatible with Semantic Kernel's telemetry, enabling root cause analysis of loop triggers across plugin chains.\n\nThe platform automatically generates remediation code snippets and can rewrite failing plans, reducing manual debugging time from hours to seconds while maintaining agent performance.",
+      "code": "```python\nfrom semantic_kernel import Kernel\nfrom vex_sdk import VexKernelFilter\n\n# Install: pip install semantic-kernel vex-sdk\n\nkernel = Kernel()\n\n# Add Vex as function result filter\nvex_filter = VexKernelFilter(\n    detector_id='sk-tool-loops',\n    config={\n        'loop_threshold': 3,\n        'track_context_variables': True,\n        'monitor_planner_graphs': True\n    }\n)\n\nkernel.filters.add(vex_filter)\n\n# Vex auto-detects and blocks loops\nresult = await kernel.invoke('MyPlugin', 'search_plugin', input='find weather')\n\n# Vex remediation automatically applied\nif 'LOOP_DETECTED' in str(result):\n    print('Vex blocked infinite tool loop')\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops in your Semantic Kernel agents with one line of code."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Mastra + Vex Guardrails",
+    "description": "Learn how to build voice agents with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra voice agents",
+      "Mastra guardrails",
+      "voice agents reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Mastra enables real-time conversational AI through workflows that integrate speech-to-text, LLM reasoning, and text-to-speech with sub-second latency. Guardrails are essential to prevent failures like malformed tool responses, stale memory context, and safety violations that can disrupt conversations or expose users to harmful content. Vex provides runtime verification as middleware to ensure reliability in this high-risk architecture.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Mastra",
+      "description": "Mastra voice agents follow a streaming pipeline: real-time speech-to-text (e.g., Deepgram) captures audio, feeding transcripts into Mastra workflows for LLM reasoning with tools and memory. The workflow orchestrates agent steps, knowledge retrieval, and third-party integrations before generating TTS output (e.g., ElevenLabs). Sub-second latency demands synchronous processing with minimal blocking operations.\n\nKey components include Mastra's AgentExecutor for tool calling, VectorStore for memory, and Workflow nodes for sequencing. Failures often occur at transitions between STT → reasoning → TTS, where unvalidated outputs or stale context cause hallucinations or delays. Vex middleware intercepts workflow steps to verify outputs against latency budgets and safety rules.\n\nThe pipeline emphasizes low-latency integrations and conversation state management across turns, making verification of coherence and appropriateness critical.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ Mastra Workflow  │\n│     (Input)      │    │   (Deepgram)     │    │  + Vex Middleware │\n└─────────────────┘    └──────────────────┘    │  (LLM + Tools)    │\n                                                │  (Memory/Vector)  │\n                                                └──────────┬────────┘\n                                                           │\n                                                ┌──────────▼────────┐\n                                                │ Text-to-Speech    │\n                                                │   (ElevenLabs)    │\n                                                └──────────────────┘\n│──────────── Vex Verification ────────────────▶│   Speakers       │\n│ Latency < 300ms | Safety | Coherence Check    │     (Output)     │\n└───────────────────────────────────────────────┘──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Unvalidated STT transcripts or LLM responses pass malformed data to TTS, causing garbled speech or infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex middleware schema validation on each Mastra workflow node output"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "External API tools return inconsistent JSON, breaking voice response formatting",
+        "severity": "high",
+        "mitigation": "Vex tool response verification with Pydantic-like schemas before workflow continuation"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Vector store returns outdated conversation history, causing incoherent responses",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks and recency validation on retrieved context"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Slow third-party APIs block the sub-second pipeline, injecting stale or partial data",
+        "severity": "critical",
+        "mitigation": "Vex latency budgets and fallback mechanisms for integration responses"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Voice Agent Workflow Setup",
+        "description": "Basic Mastra workflow integrating STT, LLM reasoning, and TTS with Vex middleware hook",
+        "code": "import { createWorkflow, AgentNode, ToolNode } from 'mastra/workflows';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst vex = new VexMiddleware({\n  projectId: 'your-vex-project',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst voiceAgentWorkflow = createWorkflow({\n  nodes: {\n    stt: new AgentNode({\n      model: 'gpt-4o-mini',\n      middleware: [vex.verify({\n        checks: ['latency < 200ms', 'json_schema'],\n        riskProfile: 'high'\n      })]\n    }),\n    reasoning: new AgentNode({\n      tools: [calendarTool, weatherTool],\n      middleware: [vex.verify({\n        checks: ['safety_filter', 'coherence'],\n        maxLatency: 300\n      })]\n    }),\n    tts: new ToolNode({\n      // ElevenLabs TTS integration\n    })\n  },\n  edges: [{ from: 'stt', to: 'reasoning' }, { from: 'reasoning', to: 'tts' }]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Real-time STT Integration with Validation",
+        "description": "Deepgram WebSocket STT with Vex transcript validation before LLM handoff",
+        "code": "import Deepgram from 'deepgram-sdk';\nimport { Vex } from '@vex_dev/sdk';\n\nconst deepgram = new Deepgram(process.env.DEEPGRAM_KEY);\nconst vex = new Vex({ projectId: 'voice-agent' });\n\nasync function* sttStream(audioStream: ReadableStream) {\n  const deepgramStream = deepgram.transcription.live({\n    punctuate: true,\n    interim_results: true\n  });\n\n  for await (const transcription of deepgramStream) {\n    const result = await vex.verify({\n      input: transcription.channel.alternatives[0].transcript,\n      checks: [\n        'length < 200', // Prevent verbose transcripts\n        'no_hate_speech',\n        'latency < 150ms'\n      ]\n    });\n\n    if (result.passed) {\n      yield {\n        transcript: result.output,\n        confidence: transcription.channel.alternatives[0].confidence,\n        timestamp: Date.now()\n      };\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Latency-Budgeted LLM Reasoning",
+        "description": "Mastra agent reasoning with strict 300ms budget enforcement",
+        "code": "import { AgentExecutor } from 'mastra/agents';\nimport { VexGuardrail } from '@vex_dev/sdk';\n\nconst reasoningAgent = new AgentExecutor({\n  model: 'gpt-4o-mini',\n  tools: [getUserCalendar, checkWeather],\n  maxIterations: 3\n});\n\nconst latencyGuardrail = new VexGuardrail({\n  name: 'voice-reasoning-latency',\n  checks: {\n    responseTime: { lt: 300, unit: 'ms' },\n    tokenUsage: { lt: 1500 },\n    appropriateness: 'voice_conversation'\n  }\n});\n\nexport async function reason(transcript: string, context: ConversationMemory) {\n  const start = performance.now();\n  const response = await reasoningAgent.invoke({\n    input: transcript,\n    context,\n    guardrails: [latencyGuardrail]\n  });\n\n  const latency = performance.now() - start;\n  \n  const verified = await vex.verify({\n    input: response.output,\n    metadata: { latency, contextRecency: context.lastUpdate }\n  });\n\n  return verified.output;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Conversation Memory with Staleness Check",
+        "description": "Vector store retrieval with Vex recency and relevance validation",
+        "code": "import { VectorStore } from 'mastra/memory';\nimport { Vex } from '@vex_dev/sdk';\n\nconst conversationMemory = new VectorStore({\n  embeddingModel: 'text-embedding-3-small',\n  collection: 'voice-sessions'\n});\n\nconst vexMemoryGuard = new Vex({\n  projectId: 'voice-agent',\n  checks: ['semantic_similarity > 0.8', 'timestamp < 5m']\n});\n\nexport async function retrieveContext(sessionId: string, query: string) {\n  const results = await conversationMemory.similaritySearch(query, 5);\n  \n  const verifiedContext = await vexMemoryGuard.verify({\n    input: results,\n    criteria: {\n      recency: { maxAge: 5 * 60 * 1000 }, // 5 minutes\n      relevance: { threshold: 0.75 },\n      coherence: 'ongoing_conversation'\n    }\n  });\n\n  return verifiedContext.filter(ctx => ctx.passed);\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Pipeline Middleware Setup",
+        "description": "Global Vex middleware for all Mastra workflow transitions",
+        "code": "import { Workflow } from 'mastra/workflows';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst voicePipelineMiddleware = new VexMiddleware({\n  projectId: 'mastra-voice-agent',\n  riskProfile: 'high',\n  defaultChecks: [\n    'latency_budget:300ms',\n    'safety_filter:strict',\n    'json_schema_validation',\n    'conversation_coherence'\n  ]\n});\n\n// Apply to entire Mastra workflow\nconst voiceAgent = new Workflow({\n  name: 'voice-agent-pipeline',\n  middleware: [voicePipelineMiddleware],\n  // ... rest of workflow config\n});\n\n// Per-node override for critical paths\nvoiceAgent.node('reasoning').middleware([\n  voicePipelineMiddleware.enforce({\n    maxLatency: 250,\n    safetyLevel: 'strict'\n  })\n]);",
+        "language": "typescript"
+      },
+      {
+        "title": "Safety Filtering for Voice Output",
+        "description": "Pre-TTS safety checks with automatic fallbacks",
+        "code": "import { VexSafetyFilter } from '@vex_dev/sdk';\n\nconst voiceSafetyFilter = new VexSafetyFilter({\n  categories: ['hate_speech', 'violence', 'sexual_content'],\n  voiceContext: true,\n  fallbackResponses: [\n    \"I can't help with that request.\",\n    \"Let me think of a better way to help you.\",\n    \"That's not something I can discuss right now.\"\n  ]\n});\n\nexport async function safeTTSOutput(llmResponse: string): Promise<string> {\n  const result = await voiceSafetyFilter.verify(llmResponse);\n  \n  if (!result.passed) {\n    console.warn('Safety violation detected:', result.violations);\n    return voiceSafetyFilter.getFallback(result.severity);\n  }\n\n  // Additional voice-specific checks\n  const voiceChecks = await vex.verify({\n    input: result.output,\n    checks: ['no_repetition', 'natural_prosody', 'length < 120']\n  });\n\n  return voiceChecks.output;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "End-to-End Latency Monitoring",
+        "description": "Pipeline-wide latency budget enforcement with alerts",
+        "code": "import { VexMonitor } from '@vex_dev/sdk';\n\nconst latencyMonitor = new VexMonitor({\n  pipeline: 'voice-agent',\n  budget: {\n    stt: 150,\n    reasoning: 250,\n    tts: 100,\n    total: 500 // ms\n  },\n  alerts: {\n    slack: process.env.SLACK_WEBHOOK,\n    threshold: '95th_percentile'\n  }\n});\n\nexport async function monitoredPipeline(audio: Buffer, sessionId: string) {\n  const spans = latencyMonitor.start('full_pipeline');\n  \n  spans.stt.start();\n  const transcript = await stt(audio);\n  spans.stt.end();\n  \n  spans.reasoning.start();\n  const response = await reason(transcript, sessionId);\n  spans.reasoning.end();\n  \n  spans.tts.start();\n  const speech = await tts(response);\n  spans.tts.end();\n  \n  const budgetCheck = await spans.complete();\n  \n  if (!budgetCheck.passed) {\n    await latencyMonitor.alert({\n      sessionId,\n      actual: budgetCheck.metrics,\n      budget: latencyMonitor.budget\n    });\n  }\n\n  return speech;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Voice Agents",
+      "description": "Add Vex middleware to your Mastra voice pipeline today for sub-second reliability with enterprise-grade safety guarantees."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "agno",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Agno + Vex Guardrails",
+    "description": "Learn how to build voice agents with Agno + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Agno voice agents",
+      "Agno guardrails",
+      "voice agents reliability",
+      "Vex Agno",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Agno enables real-time conversational AI through its lightweight, model-agnostic framework that handles multi-modal inputs seamlessly. However, the high-stakes nature of voice interactions—demanding sub-second latency, coherent dialogue, and safety—makes reliability critical. Vex provides essential guardrails to verify response appropriateness, latency budgets, conversation coherence, and safety filtering, preventing costly failures in production.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Agno",
+      "description": "Voice agents with Agno follow a real-time pipeline: audio input is transcribed via speech-to-text (e.g., Whisper or Deepgram), processed by an Agno agent for LLM reasoning with tools and memory, then synthesized back to speech using text-to-speech (e.g., ElevenLabs or PlayHT). Agno's agent.run() orchestrates this with session memory for context-aware responses. The architecture prioritizes low-latency components and streaming where possible to meet sub-second E2E requirements.\n\nKey components include Agno's Agent class configured with voice-specific tools (transcription, TTS), RAG for knowledge retrieval, and structured output schemas for parsing. Session state tracks conversation history to maintain coherence across turns. Vex wraps the agent.run() call to enforce SLAs on latency, safety, and output quality before TTS rendering.\n\nThis setup scales to production with WebSocket endpoints for bidirectional streaming, ensuring natural conversational flow while mitigating risks like hallucinated memory or unsafe responses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│ Speech-to-Text   │───▶│   Agno Agent    │\n│     Input       │    │   (Whisper)      │    │ (LLM + Tools)   │\n└─────────────────┘    └──────────────────┘    │  + Vex Verify   │\n                                               │                 │\n                                               └─────────────────┘\n                                                           │\n                                               ┌─────────────────┐\n                                               │ Text-to-Speech  │\n                                               │   (ElevenLabs)  │\n                                               └─────────────────┘\n                                                           │\n                                                   ┌─────────────────┐\n                                                   │   Speakers      │\n                                                   │    Output       │\n                                                   └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-modal agent misinterpreting audio inputs",
+        "description": "STT transcription errors lead to LLM reasoning on garbled text, producing irrelevant or unsafe responses",
+        "severity": "critical",
+        "mitigation": "Vex verifies transcription confidence scores and response appropriateness before TTS"
+      },
+      {
+        "name": "Agentic session memory recalling fabricated interactions",
+        "description": "Hallucinated conversation history causes context drift and incoherent dialogue flow",
+        "severity": "high",
+        "mitigation": "Vex checks conversation coherence against session state and flags memory fabrications"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "E2E response exceeding 500ms threshold breaks real-time conversational UX",
+        "severity": "critical",
+        "mitigation": "Vex enforces strict latency SLAs with automatic fallbacks to cached responses"
+      },
+      {
+        "name": "Safety filter bypasses",
+        "description": "LLM generates harmful content that slips through basic moderation checks",
+        "severity": "critical",
+        "mitigation": "Vex applies multi-layer safety verification including toxicity scoring and intent classification"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Agno Voice Agent Setup",
+        "description": "Initialize Agno agent with voice tools and session memory for conversational context",
+        "code": "from agno.agent import Agent\nfrom agno.tools import tool\n\n@tool\ndef transcribe_audio(audio_bytes: bytes) -> str:\n    \"\"\"Transcribe audio to text using Whisper API\"\"\"\n    # Implementation with openai/whisper\n    pass\n\nvoice_agent = Agent(\n    model=\"gpt-4o-mini\",\n    tools=[transcribe_audio],\n    show_tool_calls=True,\n    add_base_tools=False,\n    show_tool_outputs=True,\n    add_memory=True,\n    description=\"Real-time voice conversation agent\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Streaming Pipeline",
+        "description": "WebSocket handler for continuous audio input → agent → TTS output",
+        "code": "import asyncio\nimport websockets\nfrom agno import Agent\n\nasync def voice_websocket(websocket, path):\n    agent = Agent.from_config('voice-agent.yaml')\n    \n    async for message in websocket:\n        # Stream audio → STT → agent reasoning → TTS\n        transcript = await stt_pipeline(message)\n        response = await agent.run(transcript)\n        audio_out = await tts_pipeline(response)\n        await websocket.send(audio_out)\n\nstart_server = websockets.serve(voice_websocket, \"0.0.0.0\", 8765)\nasyncio.get_event_loop().run_until_complete(start_server)",
+        "language": "python"
+      },
+      {
+        "title": "Latency-Monitored Agent Execution",
+        "description": "Wrap agent.run() with timing decorators for sub-second SLA enforcement",
+        "code": "import time\nfrom agno.agent import Agent\n\nclass VoiceAgent:\n    def __init__(self):\n        self.agent = Agent(model='gpt-4o-mini', add_memory=True)\n    \n    async def run_with_latency_check(self, input_text: str, max_latency=0.5):\n        start_time = time.time()\n        response = await self.agent.run(input_text)\n        latency = time.time() - start_time\n        \n        if latency > max_latency:\n            raise TimeoutError(f\"Exceeded {max_latency}s latency budget\")\n        \n        return response",
+        "language": "python"
+      },
+      {
+        "title": "Structured Voice Response Schema",
+        "description": "Enforce JSON output for safe TTS rendering with safety fields",
+        "code": "from pydantic import BaseModel, Field\nfrom agno import Agent\n\nclass VoiceResponse(BaseModel):\n    text: str = Field(..., description=\"TTS text\")\n    safety_score: float = Field(..., ge=0.0, le=1.0)\n    intent: str = Field(..., pattern=\"^(safe|warning|blocked)$\")\n    latency_ms: int\n\nagent = Agent(\n    model=\"gpt-4o-mini\",\n    response_format=VoiceResponse,\n    instructions=\"Always return structured VoiceResponse with safety analysis\"\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Decorator for agent.run()",
+        "description": "Wrap Agno's agent.run() with vex.verify() for comprehensive guardrails",
+        "code": "from vex import verify\nfrom agno.agent import Agent\n\n@verify(\n    guards=[\n        \"response_appropriateness\",\n        \"latency_budget=500ms\",\n        \"conversation_coherence\",\n        \"safety_filtering\"\n    ]\n)\nasync def safe_voice_agent_run(agent: Agent, input_text: str):\n    \"\"\"Verified voice agent execution\"\"\"\n    return await agent.run(input_text)\n\n# Usage\nvoice_agent = Agent(model=\"gpt-4o-mini\", add_memory=True)\nresponse = await safe_voice_agent_run(voice_agent, \"Hello, how can I help?\")",
+        "language": "python"
+      },
+      {
+        "title": "Custom Vex Guard for Voice Safety",
+        "description": "Define voice-specific safety checks integrated with Agno session state",
+        "code": "from vex import Guard, verify\nfrom agno.agent import Agent\n\nclass VoiceSafetyGuard(Guard):\n    def __init__(self, session_history: list):\n        self.history = session_history\n    \n    async def check(self, response: str, context: dict) -> bool:\n        # Check toxicity, coherence with history, intent classification\n        toxicity_score = await self._toxicity_check(response)\n        coherence_score = self._check_coherence(response, self.history[-3:])\n        return toxicity_score < 0.1 and coherence_score > 0.8\n\n@verify(guards=[VoiceSafetyGuard(session_history)])\nasync def verified_voice_turn(agent: Agent, user_input: str, session_history: list):\n    return await agent.run(user_input)",
+        "language": "python"
+      },
+      {
+        "title": "Latency + Safety Pipeline with Fallbacks",
+        "description": "Production pipeline with Vex fallbacks for latency/safety violations",
+        "code": "from vex import verify, Fallback\nfrom agno.agent import Agent\n\n@verify(\n    guards=[\"latency_budget=450ms\", \"safety_filtering\"],\n    fallback=Fallback(\n        strategy=\"greeting\",\n        response=\"One moment please...\"\n    )\n)\nasync def production_voice_pipeline(audio_input: bytes, session_id: str):\n    transcript = await stt_transcribe(audio_input)\n    agent = Agent.load(session_id)  # Load session memory\n    response = await agent.run(transcript)\n    return await tts_synthesize(response)\n\n# Handles verification failures gracefully\nresult = await production_voice_pipeline(audio_bytes, \"user_123\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Agno Voice Agents",
+      "description": "Install Vex today with `pip install agno vex-sdk` and wrap your agent.run() calls to achieve production-grade reliability."
+    }
+  }
+}

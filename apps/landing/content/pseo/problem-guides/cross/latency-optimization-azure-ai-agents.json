@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in Azure AI Agent Service Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "Azure AI Agent Service latency-optimization",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, LLM Latency Optimization issues manifest as slow agent responses due to unoptimized token streaming, excessive grounding data retrieval from Bing and file search, and inefficient tool calling loops that exceed thread token limits. Agents experience cascading delays when Azure OpenAI models process large context windows without caching or truncation, particularly during multi-turn conversations with enterprise grounding enabled. This leads to poor user experience in production deployments where low latency is critical for interactive AI agents.",
+    "howItManifests": [
+      {
+        "scenario": "Excessive grounding data retrieval",
+        "symptom": "Bing Search and file search return 100K+ tokens per query",
+        "impact": "Azure OpenAI GPT-4o processing time exceeds 10s per turn"
+      },
+      {
+        "scenario": "Unoptimized tool calling loops",
+        "symptom": "Agents call tools 5+ times per response without convergence",
+        "impact": "Cumulative latency >30s, thread token limit exceeded"
+      },
+      {
+        "scenario": "No streaming or caching implemented",
+        "symptom": "Full response buffered before delivery to client",
+        "impact": "Perceived latency 3-5x actual generation time"
+      },
+      {
+        "scenario": "Large context windows without truncation",
+        "symptom": "Previous conversation history + grounding data >128K tokens",
+        "impact": "Azure OpenAI timeout errors and 500s during peak usage"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Grounding Token Bloat Monitor",
+        "description": "Detects when Bing/file search returns >50K tokens using Azure AI Projects client metrics",
+        "code": "from azure.ai.projects import AgentClient\nfrom time import perf_counter\n\nclient = AgentClient.from_azure_ai_project('your-project-id')\n\ndef monitor_grounding_latency(thread_id):\n    metrics = client.get_thread_metrics(thread_id)\n    grounding_tokens = 0\n    for step in metrics['steps']:\n        if step['type'] == 'grounding':\n            grounding_tokens += step['input_tokens']\n    \n    if grounding_tokens > 50000:\n        print(f'⚠️ GROUNDING BLOAT: {grounding_tokens} tokens')\n        return {'alert': 'high', 'tokens': grounding_tokens}\n    return {'status': 'healthy'}",
+        "language": "python"
+      },
+      {
+        "name": "Tool Loop Detector",
+        "description": "Identifies agent tool calling loops >4 iterations via Azure AI Projects step analysis",
+        "code": "from azure.ai.projects import AgentClient\n\ndef detect_tool_loops(thread_id):\n    client = AgentClient.from_azure_ai_project('your-project-id')\n    thread = client.get_thread(thread_id)\n    \n    tool_calls = [step for step in thread.steps if step.type == 'tool_call']\n    if len(tool_calls) > 4:\n        loop_time = sum(step.duration_ms for step in tool_calls) / 1000\n        print(f'🔄 TOOL LOOP: {len(tool_calls)} calls, {loop_time:.1f}s')\n        return {'alert': 'critical', 'loop_count': len(tool_calls)}\n    return {'status': 'ok'}",
+        "language": "python"
+      },
+      {
+        "name": "Streaming Latency Gap",
+        "description": "Measures time between first token and final token delivery",
+        "code": "import asyncio\nfrom azure.ai.projects import StreamingClient\n\nasync def measure_streaming_latency(thread_id):\n    client = StreamingClient.from_azure_ai_project('your-project-id')\n    first_token_time = None\n    last_token_time = None\n    \n    async for event in client.stream_thread(thread_id):\n        if event.type == 'token' and first_token_time is None:\n            first_token_time = perf_counter()\n        last_token_time = perf_counter()\n    \n    if first_token_time and last_token_time:\n        latency_gap = last_token_time - first_token_time\n        if latency_gap > 5.0:\n            print(f'⏳ STREAMING GAP: {latency_gap:.1f}s')\n            return {'alert': 'high', 'gap': latency_gap}\n    return {'status': 'healthy'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Grounding Token Limiter",
+        "description": "Configure max tokens for Bing/file search in agent spec",
+        "code": "from azure.ai.projects import AgentClient\n\nclient = AgentClient.from_azure_ai_project('your-project-id')\nagent_spec = client.get_agent_spec('your-agent-id')\n\n# Limit grounding data\nagent_spec['grounding'] = {\n    'bing_search': {'max_tokens': 8000, 'top_k': 3},\n    'file_search': {'max_tokens': 12000, 'chunk_size': 512}\n}\n\n# Enable context caching\nagent_spec['model_config'] = {\n    'cache_context': True,\n    'max_context_tokens': 32000\n}\n\nclient.update_agent_spec('your-agent-id', agent_spec)\nprint('✅ Grounding limits applied')",
+        "language": "python"
+      },
+      {
+        "name": "Streaming Response Handler",
+        "description": "Implement token-by-token streaming to client",
+        "code": "from fastapi import FastAPI\nfrom azure.ai.projects import StreamingClient\n\napp = FastAPI()\n\n@app.post('/chat/{thread_id}')\nasync def stream_chat(thread_id: str, message: str):\n    client = StreamingClient.from_azure_ai_project('your-project-id')\n    \n    async def stream_generator():\n        await client.send_message(thread_id, message)\n        async for event in client.stream_thread(thread_id):\n            if event.type == 'token':\n                yield {'delta': event.content}\n            elif event.type == 'done':\n                break\n    \n    return StreamingResponse(stream_generator(), media_type='text/plain')",
+        "language": "python"
+      },
+      {
+        "name": "Context Window Truncator",
+        "description": "Automatically truncate conversation history to fit token limits",
+        "code": "from azure.ai.projects import AgentClient\n\ndef truncate_context(thread_id, max_tokens=28000):\n    client = AgentClient.from_azure_ai_project('your-project-id')\n    thread = client.get_thread(thread_id)\n    \n    total_tokens = 0\n    keep_messages = []\n    \n    # Truncate from oldest messages\n    for msg in reversed(thread.messages):\n        msg_tokens = len(msg.content) // 4  # Rough token estimate\n        if total_tokens + msg_tokens < max_tokens:\n            keep_messages.append(msg)\n            total_tokens += msg_tokens\n        else:\n            break\n    \n    # Update thread context\n    client.truncate_thread_context(thread_id, keep_messages[::-1])\n    print(f'✅ Context truncated to {total_tokens} tokens')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically monitoring grounding token usage, tool calling patterns, and streaming performance across all agent threads. When latency anomalies are detected (grounding >50K tokens, tool loops >4 calls, streaming gaps >5s), Vex applies remediation policies including dynamic grounding limits, context truncation, and streaming optimization. \n\nVex's Azure AI Projects integration provides real-time dashboards showing P95 latency by agent, grounding efficiency ratios, and token utilization trends. Automated remediation runs every 5 minutes, maintaining <3s P95 response times while preserving agent reasoning quality. Enterprise policy compliance is maintained through configurable latency SLAs and rollback capabilities.\n\nThe Vex SDK (`pip install vex-sdk`) provides pre-built detectors for all common Azure AI Agent Service latency patterns, with one-line integration into existing agent deployments.",
+      "code": "from vex_sdk import Vex\nfrom azure.ai.projects import AgentClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex = Vex(project_id='your-vex-project')\n\n@vex.detector('azure-agent-latency', cron='*/5 * * * *')\ndef monitor_agent_latency():\n    client = AgentClient.from_azure_ai_project('your-project-id')\n    \n    # Scan all active threads\n    for thread in client.list_threads(status='active'):\n        metrics = client.get_thread_metrics(thread.id)\n        \n        # Latency anomaly detection\n        if metrics['grounding_tokens'] > 50000:\n            vex.trigger_remediation(\n                thread_id=thread.id,\n                issue='grounding_bloat',\n                fix='limit_bing_tokens',\n                config={'max_tokens': 8000}\n            )\n        \n        if metrics['tool_calls'] > 4:\n            vex.trigger_remediation(\n                thread_id=thread.id,\n                issue='tool_loop',\n                fix='truncate_context',\n                config={'max_tokens': 28000}\n            )\n    \n    print('✅ Vex latency monitoring complete')\n\nvex.deploy()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and deploy latency monitoring in <5 minutes: `pip install vex-sdk`"
+    }
+  }
+}

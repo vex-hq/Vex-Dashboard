@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Instructor + Vex Guardrails",
+    "description": "Learn how to build voice agents with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor voice agents",
+      "Instructor guardrails",
+      "voice agents reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Instructor enables reliable structured extraction from speech-to-text pipelines, ensuring LLM responses conform to Pydantic schemas for safe, predictable interactions. Guardrails are critical due to sub-second latency demands and high-stakes conversational risks like safety violations or incoherent dialogue. Vex provides runtime verification to catch Instructor's common failure modes before they disrupt real-time voice flows.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Instructor",
+      "description": "Voice agents process real-time audio through a speech-to-text (STT) service like Deepgram or Whisper, feeding transcripts to an Instructor-patched LLM client for structured reasoning. Instructor wraps the LLM call to validate outputs against Pydantic models, retrying on failures like missing fields or hallucinated enums. The validated response triggers text-to-speech (TTS) synthesis, maintaining conversational state across turns.\n\nLatency budgets (<500ms end-to-end) demand efficient verification, with Vex layered atop Instructor to enforce additional checks like response appropriateness and safety. Conversation coherence is tracked via session state, while nested extraction failures are mitigated through schema design and retry policies.\n\nThis pipeline handles interruptions, partial transcripts, and multi-turn context, requiring robust error recovery to prevent hangs or unsafe outputs.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│   STT (Deepgram) │───▶│ Instructor LLM  │\n│     Input       │    │   (~100ms)       │    │   + Vex Verify  │\n└─────────────────┘    └──────────────────┘    │   (~200ms)      │\n                                                └─────────────────┘\n                                                           │\n                                                ┌─────────────────┐\n                                                │   TTS (Eleven   │\n                                                │     Labs)       │\n                                                │   (~150ms)      │\n                                                └─────────────────┘\n                                                           │\n                                                ┌─────────────────┐\n                                                │   Speaker       │\n                                                │    Output       │\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor exhausts max_retries when LLM consistently fails schema validation, hanging the voice pipeline",
+        "severity": "critical",
+        "mitigation": "Vex timeout enforcement + fallback unstructured response path"
+      },
+      {
+        "name": "Latency budget exceeded",
+        "description": "STT+LLM+verification exceeds 500ms, causing unnatural conversation pauses",
+        "severity": "critical",
+        "mitigation": "Vex latency SLAs with streaming fallbacks"
+      },
+      {
+        "name": "Safety filter bypass",
+        "description": "Hallucinated responses evade content filters due to partial extraction",
+        "severity": "high",
+        "mitigation": "Vex pre/post safety verification layers"
+      },
+      {
+        "name": "Conversation incoherence",
+        "description": "Missing context fields break multi-turn dialogue flow",
+        "severity": "high",
+        "mitigation": "Vex coherence scoring against session state"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Instructor Pydantic Model for Voice Response",
+        "description": "Define structured response schema with conversation state and safety constraints",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Literal\nfrom instructor import from_openai\n\nclass VoiceResponse(BaseModel):\n    intent: Literal['greeting', 'question', 'command', 'farewell']\n    response_text: str = Field(..., max_length=150)\n    confidence: float = Field(..., ge=0.0, le=1.0)\n    requires_escalation: bool = False\n    conversation_state: dict[str, str] = {}\n\nclient = from_openai(OpenAI())",
+        "language": "python"
+      },
+      {
+        "title": "Basic Voice Pipeline with Instructor",
+        "description": "STT → Instructor LLM → TTS pipeline with structured extraction",
+        "code": "async def voice_pipeline(transcript: str, session_id: str) -> VoiceResponse:\n    response = client.chat.completions.create(\n        model=\"gpt-4o-mini\",\n        response_model=VoiceResponse,\n        messages=[\n            {\"role\": \"system\", \"content\": \"You are a voice assistant. Always respond conversationally within 150 chars.\"},\n            {\"role\": \"user\", \"content\": transcript}\n        ],\n        max_retries=3\n    )\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Instructor from OpenAI Chat Completions (TS)",
+        "description": "TypeScript equivalent using Instructor's OpenAI patch",
+        "code": "import { fromOpenai } from 'instructor';\nimport { OpenAI } from 'openai';\n\ntype VoiceResponse = {\n  intent: 'greeting' | 'question' | 'command' | 'farewell';\n  response_text: string;\n  confidence: number;\n  requires_escalation: boolean;\n};\n\nconst client = fromOpenai(new OpenAI());\n\nconst response = await client.chat.completions.create({\n  model: 'gpt-4o-mini',\n  response_model: VoiceResponse,\n  messages: [{ role: 'user', content: transcript }],\n  maxRetries: 3\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Real-time Latency Monitoring Wrapper",
+        "description": "Track pipeline latency for voice SLAs",
+        "code": "import time\nfrom contextlib import contextmanager\n\n@contextmanager\ndef latency_tracker(name: str, budget_ms: int):\n    start = time.time()\n    try:\n        yield\n    finally:\n        duration = (time.time() - start) * 1000\n        if duration > budget_ms:\n            raise TimeoutError(f'{name} exceeded {budget_ms}ms: {duration:.0f}ms')\n\n# Usage\nwith latency_tracker('voice_pipeline', 450):\n    response = voice_pipeline(transcript, session_id)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Latency Budget Enforcement",
+        "description": "Wrap Instructor call with Vex latency verification",
+        "code": "from vex import verify\n\n@verify({\n    'latency': {'lt': '500ms'},\n    'output': {'type': 'object', 'required': ['response_text', 'confidence']}\n})\ndef safe_voice_pipeline(transcript: str, session_id: str) -> VoiceResponse:\n    return client.chat.completions.create(\n        model=\"gpt-4o-mini\",\n        response_model=VoiceResponse,\n        messages=messages,\n        max_retries=2  # Reduced due to Vex fallback\n    )",
+        "language": "python"
+      },
+      {
+        "title": "Safety + Coherence Verification",
+        "description": "Multi-check verification for voice safety and context",
+        "code": "from vex import verify\n\n@verify([\n    {'safety': {'hate': 'low', 'violence': 'low', 'sexual': 'low'}},\n    {'latency': {'lt': '400ms'}},\n    {\n        'coherence': {\n            'session_id': session_id,\n            'prev_state': session_state,\n            'min_confidence': 0.7\n        }\n    }\n])\nasync def verified_voice_turn(transcript: str) -> VoiceResponse:\n    return await voice_pipeline(transcript, session_id)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + Instructor Integration",
+        "description": "Vex verification wrapper for TypeScript voice agents",
+        "code": "import { verify } from 'vex-sdk';\n\nconst safeVoiceCall = verify<VoiceResponse>(\n  {\n    latency: { lt: '450ms' },\n    safety: { toxicity: 'low' },\n    schema: {\n      type: 'object',\n      required: ['response_text', 'confidence'],\n      properties: {\n        confidence: { minimum: 0.6 }\n      }\n    }\n  },\n  async (params) => {\n    return client.chat.completions.create({\n      ...params,\n      response_model: VoiceResponse,\n      model: 'gpt-4o-mini'\n    });\n  }\n);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Voice Agents",
+      "description": "Add Vex verification to your voice pipeline in 5 minutes - start with our free tier today."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in DSPy Agents",
+    "description": "How to detect and fix multi-agent coordination failure in DSPy agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "DSPy multi-agent-coordination",
+      "DSPy reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In DSPy, Multi-Agent Coordination Failure occurs when multiple DSPy modules or agents fail to synchronize outputs, leading to cascading errors in complex pipelines. This manifests as mismatched schemas between agent outputs and downstream module expectations, or agents producing uncoordinated responses that violate shared state assumptions. DSPy's optimizable nature exacerbates this, as individual module optimization can create incompatible output distributions across agents.",
+    "howItManifests": [
+      {
+        "scenario": "Sequential agent pipeline where Agent1 generates topics and Agent2 expands them",
+        "symptom": "Agent2 receives partial or malformed topic lists due to Agent1's variable output formatting",
+        "impact": "Downstream summarization module crashes with parsing errors or produces incomplete summaries"
+      },
+      {
+        "scenario": "Parallel researcher agents merging findings into a shared report",
+        "symptom": "Agents produce overlapping or contradictory facts without deduplication logic",
+        "impact": "Final report contains redundant or conflicting information, reducing factual accuracy"
+      },
+      {
+        "scenario": "Debate-style agents where critic and generator fail to reference prior turns",
+        "symptom": "Each agent ignores previous responses, creating disjoint reasoning chains",
+        "impact": "No convergence on optimal solution despite multiple iterations"
+      },
+      {
+        "scenario": "Multi-agent RAG system with retriever, synthesizer, and validator agents",
+        "symptom": "Validator agent receives unsynchronized context chunks from parallel retrievers",
+        "impact": "Fact-checking fails due to incomplete or out-of-order evidence presentation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Output Schema Mismatch Detector",
+        "description": "Monitors forward() calls to validate JSON schema consistency across agent outputs",
+        "code": "import dspy\nfrom typing import Any, Dict\n\ndef detect_schema_mismatch(module: dspy.Module, example: dspy.Example) -> bool:\n    try:\n        output = module.forward(example)\n        # Expected schema for multi-agent coordination\n        expected = {'agents': [{'id': str, 'output': str, 'confidence': float}]}\n        # Simple JSON schema validation\n        agent_outputs = output.get('agents', [])\n        for agent in agent_outputs:\n            if not all(k in agent for k in ['id', 'output', 'confidence']):\n                print(f'Schema mismatch in agent {agent.get('id', 'unknown')}: {agent}')\n                return True\n        return False\n    except Exception as e:\n        print(f'Forward pass failed: {e}')\n        return True",
+        "language": "python"
+      },
+      {
+        "name": "Cross-Agent State Consistency Check",
+        "description": "Verifies shared state references between sequential agent calls",
+        "code": "import dspy\n\nclass StateConsistencyChecker:\n    def __init__(self):\n        self.last_agent_output = None\n    \n    def check(self, module: dspy.Module, example: dspy.Example, state_key: str = 'shared_state') -> bool:\n        output = module.forward(example)\n        current_state = output.get(state_key)\n        \n        if self.last_agent_output:\n            # Check if current agent references previous state\n            if state_key not in output or current_state != self.last_agent_output:\n                print(f'State inconsistency: expected {self.last_agent_output}, got {current_state}')\n                return True\n        \n        self.last_agent_output = current_state\n        return False\n    \nchecker = StateConsistencyChecker()",
+        "language": "python"
+      },
+      {
+        "name": "Agent Response Overlap Detector",
+        "description": "Identifies redundant or contradictory responses in parallel agents",
+        "code": "import dspy\nfrom difflib import SequenceMatcher\n\ndef detect_overlap(agent_outputs: list[str], threshold: float = 0.8) -> bool:\n    \"\"\"Detects excessive overlap between parallel agent outputs\"\"\"\n    for i, out1 in enumerate(agent_outputs):\n        for out2 in agent_outputs[i+1:]:\n            similarity = SequenceMatcher(None, out1, out2).ratio()\n            if similarity > threshold:\n                print(f'High overlap ({similarity:.2f}) between agents')\n                return True\n    return False\n\n# Usage in DSPy module\nclass ParallelAgents(dspy.Module):\n    def forward(self, example):\n        outputs = [agent(example) for agent in self.agents]\n        if detect_overlap([o.output for o in outputs]):\n            raise ValueError('Agent coordination failure: excessive overlap')\n        return dspy.Prediction(output=str(outputs))",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Shared State Signature",
+        "description": "DSPy Signature that enforces consistent state passing between agents",
+        "code": "import dspy\n\nclass CoordinatedAgentSignature(dspy.Signature):\n    \"\"\"Shared state format for multi-agent coordination\"\"\"\n    shared_state = dspy.InputField(desc=\"JSON string of previous agent outputs\")\n    agent_id = dspy.InputField(desc=\"Unique agent identifier\")\n    task = dspy.InputField()\n    output = dspy.OutputField(desc=\"JSON: {'result': str, 'references_prev': bool, 'state_update': dict}\")\n\nclass StateAwareAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = dspy.ChainOfThought(CoordinatedAgentSignature)\n    \n    def forward(self, example):\n        state_str = example.get('shared_state', '{}')\n        pred = self.generate(task=example.task, shared_state=state_str, agent_id=self.agent_id)\n        return dspy.Prediction(output=pred.output, state_update=pred.output)",
+        "language": "python"
+      },
+      {
+        "name": "Output Normalizer Module",
+        "description": "Standardizes agent outputs to prevent schema drift",
+        "code": "import dspy\nimport json\n\nclass OutputNormalizer(dspy.Module):\n    def __init__(self, schema: dict):\n        super().__init__()\n        self.schema = schema\n    \n    def forward(self, example):\n        raw_output = example.output\n        normalized = self._normalize(raw_output)\n        return dspy.Prediction(\n            output=json.dumps(normalized),\n            raw_output=raw_output\n        )\n    \n    def _normalize(self, output: str) -> dict:\n        try:\n            parsed = json.loads(output)\n            return {k: parsed.get(k, self.schema[k]['default']) for k in self.schema}\n        except:\n            return {k: self.schema[k]['default'] for k in self.schema}\n\n# Usage\nnormalizer = OutputNormalizer({\n    'agent_id': {'default': 'unknown'},\n    'result': {'default': ''},\n    'confidence': {'default': 0.0}\n})",
+        "language": "python"
+      },
+      {
+        "name": "Coordinated MultiAgent Optimizer",
+        "description": "Compiles entire multi-agent system with joint optimization",
+        "code": "import dspy\n\nclass CoordinatedMultiAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.agent1 = dspy.ChainOfThought('task -> state1')\n        self.agent2 = dspy.ChainOfThought('task, state1 -> state2')\n        self.validator = dspy.ChainOfThought('task, state1, state2 -> final')\n    \n    def forward(self, example):\n        state1 = self.agent1(task=example.task)\n        state2 = self.agent2(task=example.task, state1=state1.output)\n        final = self.validator(\n            task=example.task,\n            state1=state1.output,\n            state2=state2.output\n        )\n        return dspy.Prediction(output=final.output)\n\n# Joint optimization\noptimizer = dspy.MIPROv2(\n    CoordinatedMultiAgent(), \n    metric=lambda ex, pred, trace: trace.final.score\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex automates detection by wrapping DSPy module forward() calls with vex.verify(), intercepting runtime failures like schema mismatches and state inconsistencies. It captures agent traces across the entire pipeline, identifying coordination failures that manifest as assertion violations or unexpected output distributions. Vex's DSPy integration provides automatic remediation suggestions, including signature adjustments and module rewiring.\n\nFor multi-agent systems, Vex monitors inter-module handoffs, validating shared state consistency and output schemas in real-time. When failures occur, Vex generates DSPy-compatible fixes like normalized output modules or coordinated signatures, then re-optimizes the pipeline. This eliminates manual debugging of complex agent interactions.\n\nIntegration requires pip install dspy vex-sdk, then wrapping modules with @vex.verify decorator. Vex handles both development-time validation and production monitoring.",
+      "code": "import dspy\nimport vex\n\n@vex.verify(\n    assertions={\n        'schema_consistent': 'output.agents[].id exists and is string',\n        'state_synchronized': 'output.shared_state == prev_state',\n        'no_overlap': 'agent_outputs similarity < 0.8'\n    },\n    remediation='suggest_dspy_signature_fix'\n)\nclass VexCoordinatedAgents(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.agents = [Agent1(), Agent2(), Agent3()]\n    \n    def forward(self, example):\n        outputs = []\n        shared_state = {}\n        \n        for agent in self.agents:\n            result = agent(task=example.task, shared_state=shared_state)\n            outputs.append(result)\n            shared_state.update(result.state_update or {})\n        \n        return dspy.Prediction(\n            output=str(outputs),\n            agents=outputs,\n            shared_state=shared_state\n        )\n\n# Vex auto-generates test cases and monitors in production\nprogram = VexCoordinatedAgents()\nvex.monitor(program, dataset=trainset)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today and eliminate multi-agent coordination failures with one line of code."
+    }
+  }
+}

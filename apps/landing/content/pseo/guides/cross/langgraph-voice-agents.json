@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with LangGraph + Vex Guardrails",
+    "description": "Learn how to build voice agents with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph voice agents",
+      "LangGraph guardrails",
+      "voice agents reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Voice Agents built with LangGraph enable real-time conversational AI by orchestrating speech-to-text, LLM reasoning, and text-to-speech in stateful graph workflows. These low-latency pipelines demand sub-second response times while maintaining conversation coherence and safety. Vex provides essential guardrails to prevent infinite loops, state corruption, and unsafe responses that can derail voice interactions.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with LangGraph",
+      "description": "Voice Agents process audio streams through a cyclical LangGraph workflow. Incoming audio is transcribed via STT (e.g., Whisper), passed to an LLM for reasoning and response generation, then converted back to speech via TTS (e.g., ElevenLabs). LangGraph manages conversation state across cycles, handling interruptions, context retention, and parallel processing for features like sentiment analysis.\n\nThe graph typically includes nodes for STT, LLM reasoning, safety checks, TTS synthesis, and conditional edges for human-in-the-loop escalation or conversation ending. Checkpoints persist state between audio chunks, enabling long-running conversations. Parallel branches handle concurrent tasks like transcription and latency monitoring.\n\nLatency budgets (<500ms end-to-end) drive architectural choices, with async nodes and streaming APIs ensuring real-time performance while maintaining coherence across graph cycles.",
+      "diagram": "Live Audio ──→ [STT Node] ──→ [LLM Reasoning] ──→ [Safety Filter]\n                    ↑                     │                       ↓\n              [Checkpoint] ←──── [TTS Node] ←────── [Latency Check]\n                    │                                        ↑\n             [Interrupt Handler] ─────────────────────────────┘\n\nParallel: [Sentiment Analysis] ──→ [Escalation Router]"
+    },
+    "risks": [
+      {
+        "name": "Cyclic execution from unterminated conversations",
+        "description": "Voice agents can loop indefinitely when end conditions fail, consuming resources and violating latency SLAs",
+        "severity": "critical",
+        "mitigation": "Vex monitors cycle counts and conversation duration, forcing termination after N cycles or timeouts"
+      },
+      {
+        "name": "State corruption in parallel STT/LLM branches",
+        "description": "Concurrent audio chunks overwrite shared conversation state, causing incoherent responses",
+        "severity": "critical",
+        "mitigation": "Vex validates state schema consistency before/after parallel merges using checkpoint diffs"
+      },
+      {
+        "name": "Checkpoint failures after LLM schema updates",
+        "description": "New response formats break deserialization of saved conversation state",
+        "severity": "high",
+        "mitigation": "Vex schema validation ensures backward compatibility during graph checkpoint restores"
+      },
+      {
+        "name": "Bypassed safety checks via conditional edges",
+        "description": "Dynamic routing skips content filters, allowing harmful voice responses",
+        "severity": "high",
+        "mitigation": "Vex enforces safety verification at all exit points regardless of routing path"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent Graph Structure",
+        "description": "Core LangGraph workflow with STT → LLM → TTS nodes and conversation state",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\nclass VoiceState(TypedDict):\n    audio_chunk: str\n    transcript: str\n    llm_response: str\n    audio_output: str\n    conversation_history: Annotated[list, 'add']\n    cycle_count: int\n\nasync def stt_node(state: VoiceState) -> VoiceState:\n    # Simulate Whisper STT\n    state['transcript'] = f\"transcribed: {state['audio_chunk']}\"\n    return state\n\nasync def llm_node(state: VoiceState) -> VoiceState:\n    # Simulate LLM reasoning\n    state['llm_response'] = f\"Responding to: {state['transcript']}\"\n    state['conversation_history'].append(state['llm_response'])\n    state['cycle_count'] += 1\n    return state\n\nasync def tts_node(state: VoiceState) -> VoiceState:\n    state['audio_output'] = f\"TTS: {state['llm_response']}\"\n    return state\n\n# Build graph\nworkflow = StateGraph(VoiceState)\nworkflow.add_node('stt', stt_node)\nworkflow.add_node('llm', llm_node)\nworkflow.add_node('tts', tts_node)\nworkflow.set_entry_point('stt')\nworkflow.add_edge('stt', 'llm')\nworkflow.add_edge('llm', 'tts')\nworkflow.add_edge('tts', END)\n\nmemory = SqliteSaver.from_conn_string(':memory:')\napp = workflow.compile(checkpointer=memory)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Audio Processing Loop",
+        "description": "Main event loop handling WebSocket audio streams with sub-second latency",
+        "code": "import asyncio\nimport time\n\nasync def voice_agent_loop(app, websocket):\n    config = {\"configurable\": {\"thread_id\": \"voice_session_1\"}}\n    start_time = time.time()\n    \n    async for message in websocket:\n        if message.type == 'audio':\n            # Latency budget check\n            if time.time() - start_time > 0.5:\n                await websocket.send('TIMEOUT')\n                continue\n            \n            state = {'audio_chunk': message.data, 'cycle_count': 0, 'conversation_history': []}\n            result = await app.ainvoke(state, config)\n            \n            # Stream TTS response\n            await websocket.send(result['audio_output'])\n            start_time = time.time()",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Sentiment Analysis Branch",
+        "description": "Concurrent safety analysis that doesn't block main response path",
+        "code": "async def safety_node(state: VoiceState) -> VoiceState:\n    # Parallel sentiment check\n    sentiment = 'safe' if 'harm' not in state['transcript'].lower() else 'unsafe'\n    state['sentiment_score'] = 0.9 if sentiment == 'safe' else 0.1\n    return state\n\n# Add parallel branch\nworkflow.add_node('safety', safety_node)\nworkflow.add_edge('stt', 'safety')\nworkflow.add_edge('safety', 'llm')  # Parallel execution\n\n# Conditional escalation\nasync def should_escalate(state: VoiceState) -> str:\n    return 'human' if state.get('sentiment_score', 1.0) < 0.3 else 'llm'",
+        "language": "python"
+      },
+      {
+        "title": "Interrupt Handling and State Recovery",
+        "description": "Graceful handling of user barge-in during TTS playback",
+        "code": "async def interrupt_handler(state: VoiceState, interrupt_audio: str) -> VoiceState:\n    state['audio_chunk'] = interrupt_audio  # Replace current audio\n    state['interrupted'] = True\n    return state\n\n# Interrupt edge\nworkflow.add_conditional_edges(\n    'tts',\n    should_interrupt,\n    {'interrupt': 'stt', 'continue': END}\n)\n\ndef should_interrupt(state: VoiceState) -> str:\n    return 'interrupt' if state.get('pending_interrupt') else 'continue'",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex Verification",
+        "description": "Catch cycle limits, latency violations, and safety issues at graph boundaries",
+        "code": "from vex import verify, Guardrail\n\nvoice_guards = [\n    Guardrail('cycle_limit', max_cycles=20),\n    Guardrail('latency_budget', max_duration_ms=500),\n    Guardrail('safety_filter', categories=['hate', 'violence']),\n    Guardrail('coherence_check', min_similarity=0.7)\n]\n\nasync def verified_voice_loop(app, websocket):\n    config = {\"configurable\": {\"thread_id\": \"session_1\"}}\n    \n    async for message in websocket:\n        state = {'audio_chunk': message.data}\n        \n        result = await verify(\n            app.ainvoke,\n            state,\n            config,\n            guards=voice_guards,\n            on_fail='retry'\n        )\n        \n        await websocket.send(result['audio_output'])",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node Within Graph for Continuous Monitoring",
+        "description": "Inline verification at every state transition prevents error propagation",
+        "code": "async def vex_verify_node(state: VoiceState) -> VoiceState:\n    from vex import verify_state\n    \n    verified_state = await verify_state(\n        state,\n        guards=[\n            Guardrail('state_schema', expected_keys=['transcript', 'llm_response']),\n            Guardrail('content_safety', fields=['llm_response']),\n            Guardrail('cycle_limit', current=state['cycle_count'], max=15)\n        ]\n    )\n    return verified_state\n\n# Insert after every major node\nworkflow.add_node('vex_verify', vex_verify_node)\nworkflow.add_edge('stt', 'vex_verify')\nworkflow.add_edge('llm', 'vex_verify')\nworkflow.add_edge('vex_verify', 'tts')\n\napp = workflow.compile(checkpointer=memory)",
+        "language": "python"
+      },
+      {
+        "title": "Latency + Safety Composite Guardrail",
+        "description": "Combined verification catching both performance and content violations",
+        "code": "async def realtime_voice_handler(app, audio_stream):\n    from vex import CompositeGuardrail\n    \n    realtime_guard = CompositeGuardrail(\n        'voice_agent',\n        rules={\n            'latency': lambda ctx: ctx.duration < 500,\n            'safety': lambda ctx: all(score > 0.8 for score in ctx.safety_scores),\n            'coherence': lambda ctx: ctx.conversation_similarity > 0.7,\n            'no_loops': lambda ctx: ctx.cycles < 25\n        },\n        failure_policy='block_and_log'\n    )\n    \n    start = time.time()\n    result = await app.ainvoke(audio_stream)\n    \n    await realtime_guard.verify({\n        'result': result,\n        'duration': time.time() - start,\n        'cycles': result['cycle_count'],\n        'safety_scores': analyze_safety(result['llm_response'])\n    })\n    \n    return result",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Voice Agents",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your voice graphs to eliminate latency violations and safety failures."
+    }
+  }
+}

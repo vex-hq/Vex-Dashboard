@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents workflow automation",
+      "Amazon Bedrock Agents guardrails",
+      "workflow automation reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable powerful workflow automation by combining foundation models with action groups, knowledge bases, and guardrails for multi-step enterprise tasks. Integrating Vex provides critical reliability by verifying agent outputs against action correctness, permissions, and idempotency. This ensures robust, secure automation even in complex scenarios with human-in-the-loop approvals.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Amazon Bedrock Agents",
+      "description": "Bedrock Agents orchestrate multi-step workflows using action groups (Lambda functions) for API integrations, knowledge bases for RAG, and guardrails for policy enforcement. Client applications invoke agents via boto3 bedrock-agent-runtime, handling multi-turn sessions with session state management. Conditional logic routes tasks through approval steps or direct execution, with observability via CloudWatch.\n\nTypical flows start with user input triggering agent invocation, followed by action execution, KB retrieval, and response generation. Human-in-the-loop integrates via step validation APIs. Vex wraps invoke_agent() calls to verify outputs before committing changes.\n\nFailure modes like malformed Lambda responses or state loss disrupt workflows, making post-processing verification essential for production reliability.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Client App    │───▶│ Bedrock Agent    │\n│ (Python/TS)     │    │ + Knowledge Base │\n└──────────┬──────┘    │ + Action Groups  │\n           │            │ (Lambda)         │\n           ▼            └──────────┬──────┘\n┌──────────┴──────────────┐        │\n│   Vex.verify()          │◀───────▼\n│   Post-processing       │    ┌─────────────┐\n│   Action/Perm Check     │    │  APIs/DBs   │\n└─────────────────────────┘    │ (External)  │\n                              └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions fail to return JSON matching agent schema, causing invocation errors or incorrect task execution",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() with Vex verify() to validate response structure and action intent before processing"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies cause incomplete context retrieval, leading to hallucinated or incorrect workflow decisions",
+        "severity": "high",
+        "mitigation": "Verify retrieved context relevance and completeness using Vex semantic matching against expected workflow state"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Built-in guardrails miss business-specific rules like approval thresholds or data residency requirements",
+        "severity": "high",
+        "mitigation": "Layer Vex custom policies on top of Bedrock guardrails for domain-specific permission validation"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "State management failures cause agents to lose workflow context across turns, breaking conditional logic",
+        "severity": "medium",
+        "mitigation": "Vex verifies session state consistency and workflow progression before allowing state mutations"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Bedrock Agent Invocation (Python)",
+        "description": "Core pattern for invoking Bedrock Agents with session state management and streaming responses",
+        "code": "import boto3\nimport json\n\nbedrock = boto3.client('bedrock-agent-runtime', region_name='us-east-1')\n\nagent_id = 'YOUR_AGENT_ID'\nagent_alias_id = 'YOUR_AGENT_ALIAS_ID'\nsession_id = 'unique-session-id'\n\nresponse = bedrock.invoke_agent(\n    agentId=agent_id,\n    agentAliasId=agent_alias_id,\n    sessionId=session_id,\n    inputText='Start workflow: create customer order #123',\n    enableTrace=True\n)\n\n# Stream completion events\nevent_stream = response.get('completion')\nfor event in event_stream:\n    if 'chunk' in event:\n        print(event['chunk']['bytes'].decode())\n    if 'trace' in event:\n        trace = json.loads(event['trace']['bytes'].decode())\n        print(f\"Action: {trace.get('observation', {}).get('actionGroup', 'N/A')}\")",
+        "language": "python"
+      },
+      {
+        "title": "Multi-turn Session Handling (Python)",
+        "description": "Maintain workflow state across multiple agent interactions with human-in-the-loop validation",
+        "code": "def continue_workflow(session_id, user_input, bedrock):\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=agent_alias_id,\n        sessionId=session_id,\n        inputText=user_input,\n        # Preserve prior session state\n        sessionState={\n            'sessionAttributes': {\n                'workflow_step': 'approval_pending',\n                'order_id': '123'\n            }\n        }\n    )\n    \n    # Extract workflow state for verification\n    final_state = None\n    for event in response.get('completion', []):\n        if 'trace' in event:\n            trace = json.loads(event['trace']['bytes'])\n            if 'sessionState' in trace:\n                final_state = trace['sessionState']\n    return final_state\n\n# Usage\nstate = continue_workflow(session_id, 'Approve order #123', bedrock)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Invocation with AWS SDK v3",
+        "description": "Modern TypeScript integration using AWS SDK v3 for Bedrock Agent Runtime",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nconst input = {\n  agentId: 'YOUR_AGENT_ID',\n  agentAliasId: 'YOUR_AGENT_ALIAS_ID',\n  sessionId: 'unique-session-id',\n  inputText: 'Execute workflow: process invoice #456',\n  enableTrace: true\n};\n\nconst command = new InvokeAgentCommand(input);\nconst response = await client.send(command);\n\n// Process streaming events\nfor await (const event of response.completion!) {\n  if (event.chunk?.bytes) {\n    const chunk = new TextDecoder().decode(event.chunk.bytes);\n    console.log('Agent:', chunk);\n  }\n  if (event.trace?.bytes) {\n    const trace = JSON.parse(new TextDecoder().decode(event.trace.bytes));\n    console.log('Action executed:', trace);\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Action Group Lambda Handler (Python)",
+        "description": "Standard Lambda function for Bedrock Agent action groups with idempotency checks",
+        "code": "import json\nimport uuid\n\ndef lambda_handler(event, context):\n    # Parse agent request\n    request_body = json.loads(event['body'])\n    action_group = request_body['actionGroup']\n    api_path = request_body['apiPath']\n    parameters = request_body['parameters']\n    \n    # Idempotency key\n    idempotency_key = parameters.get('requestId', str(uuid.uuid4()))\n    \n    if api_path == '/createOrder':\n        order_id = parameters['orderId']\n        # Verify idempotency (check existing order)\n        \n        return {\n            'requestId': idempotency_key,\n            'actionGroup': action_group,\n            'apiPath': api_path,\n            'completionMessage': f'Order {order_id} created successfully',\n            'trace': [{'type': 'SUCCESS', 'message': 'Order processed'}]\n        }\n    \n    raise ValueError(f'Unknown API path: {api_path}')",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Action Correctness Verification (Python)",
+        "description": "Verify agent actions match expected workflow steps and parameters before execution",
+        "code": "from vex import verify\nimport boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\n# Expected workflow schema\nWORKFLOW_SCHEMA = {\n    'steps': {\n        'create_order': {\n            'required_params': ['orderId', 'customerId'],\n            'allowed_actions': ['POST /orders']\n        }\n    }\n}\n\ndef safe_agent_invoke(session_id, input_text):\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=agent_alias_id,\n        sessionId=session_id,\n        inputText=input_text\n    )\n    \n    # Extract action intent from trace\n    action_intent = extract_action_from_trace(response)\n    \n    # VEX verification\n    result = verify({\n        'action_correctness': {\n            'expected_step': action_intent.get('step'),\n            'parameters': action_intent.get('parameters'),\n            'schema': WORKFLOW_SCHEMA\n        }\n    })\n    \n    if not result.valid:\n        raise ValueError(f'Action verification failed: {result.errors}')\n    \n    return response\n\ndef extract_action_from_trace(response):\n    # Parse trace events for action details\n    pass",
+        "language": "python"
+      },
+      {
+        "title": "Permission Validation with Vex (Python)",
+        "description": "Domain-specific permission checks beyond Bedrock guardrails for workflow approvals",
+        "code": "from vex import verify\n\nPERMISSION_POLICIES = {\n    'order_approval': {\n        'min_amount': 1000,\n        'required_roles': ['approver', 'admin'],\n        'data_residency': 'us-east-1'\n    }\n}\n\ndef verify_workflow_permissions(action_trace, user_context):\n    result = verify({\n        'permissions': {\n            'action': action_trace['action'],\n            'user_roles': user_context['roles'],\n            'amount': action_trace.get('amount', 0),\n            'policies': PERMISSION_POLICIES\n        },\n        'session_state': {\n            'consistent': True,\n            'workflow_progress': action_trace['step']\n        }\n    })\n    \n    if not result.valid:\n        # Trigger human-in-the-loop\n        return {'status': 'approval_needed', 'errors': result.errors}\n    \n    return {'status': 'approved', 'action': action_trace}",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Idempotency & Rollback (TypeScript)",
+        "description": "Verify idempotency and enable rollback capability for workflow transactions",
+        "code": "import { verify } from 'vex-sdk';\n\nconst idempotencyCheck = async (agentResponse: any, txContext: any) => {\n  const result = await verify({\n    idempotency: {\n      requestId: agentResponse.trace.requestId,\n      existingTx: txContext.currentTransaction,\n      operation: agentResponse.actionGroup\n    },\n    rollback_capability: {\n      compensations: txContext.compensationActions,\n      critical: agentResponse.isCritical\n    },\n    workflow_state: {\n      expected_step: txContext.nextStep,\n      actual_step: agentResponse.nextStep\n    }\n  });\n  \n  if (!result.valid) {\n    // Execute rollback\n    await executeRollback(txContext.compensations);\n    throw new Error(`Verification failed: ${JSON.stringify(result.errors)}`);\n  }\n  \n  return result;\n};\n\nconst executeRollback = async (compensations: any[]) => {\n  for (const compensation of compensations) {\n    await compensation.execute();\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Workflow Automation",
+      "description": "Integrate Vex today to eliminate action failures and ensure reliable enterprise workflows - start with our free tier."
+    }
+  }
+}

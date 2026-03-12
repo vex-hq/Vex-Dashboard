@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Instructor Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Instructor multi-agent-coordination",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor, Multi-Agent Coordination Failure occurs when multiple agents extract structured data that must align for coordinated decision-making, but validation failures like retries exhaustion or hallucinated enums cause desynchronization. Agents produce Pydantic models with inconsistent schemas or missing fields, breaking downstream coordination logic. This manifests as cascading failures where one agent's partial output blocks others, leading to stalled workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Agent A extracts user preferences, Agent B extracts inventory—both need 'category' field to match",
+        "symptom": "Structured output validation retries exhausted on Agent B due to Agent A's hallucinated enum",
+        "impact": "Inventory agent stuck in retry loop, blocking order fulfillment workflow"
+      },
+      {
+        "scenario": "Planning agent extracts task hierarchy, execution agent extracts subtasks",
+        "symptom": "Partial extraction missing required fields in nested task objects",
+        "impact": "Execution agent receives incomplete plan, causing orphaned subtasks"
+      },
+      {
+        "scenario": "Two research agents extract facts into shared knowledge graph",
+        "symptom": "Model hallucinating enum values outside schema (confidence: 'unknown')",
+        "impact": "Knowledge graph validation fails, research coordination halts"
+      },
+      {
+        "scenario": "Coordination agent merges outputs from specialist agents",
+        "symptom": "Nested object extraction producing inconsistent depth across agents",
+        "impact": "Pydantic validation fails on merge, entire coordination cycle restarts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's validation retries are exhausted across agent calls",
+        "code": "from instructor import Instructor\nfrom openai import OpenAI\n\nclient = Instructor(client=OpenAI())\n\nclass AgentOutput(BaseModel):\n    category: Literal['electronics', 'clothing', 'books']\n    confidence: float\n\n# Detection wrapper\nclass CoordinationMonitor:\n    def __init__(self):\n        self.retry_counts = defaultdict(int)\n        \n    def chat(self, *args, **kwargs):\n        try:\n            return client.chat.completions.create(*args, **kwargs)\n        except Exception as e:\n            if 'retries exhausted' in str(e):\n                agent_name = kwargs.get('agent_name', 'unknown')\n                self.retry_counts[agent_name] += 1\n                if self.retry_counts[agent_name] > 3:\n                    print(f'🚨 COORDINATION FAILURE: {agent_name} retries exhausted')\n            raise\n\nmonitor = CoordinationMonitor()",
+        "language": "python"
+      },
+      {
+        "name": "Schema Drift Detector",
+        "description": "Identifies hallucinated enum values and missing required fields in agent outputs",
+        "code": "from pydantic import BaseModel, Field, validator\nfrom typing import Literal\n\nfrom instructor import Instructor\n\nclass CoordinatedFact(BaseModel):\n    source: str\n    category: Literal['finance', 'tech', 'health']\n    confidence: float\n    \n    @validator('category')\n    def check_hallucination(cls, v):\n        if v not in ['finance', 'tech', 'health']:\n            raise ValueError(f'Hallucinated enum: {v}')\n        return v\n\n# Usage with detection\ntry:\n    fact = client.messages.create(\n        model='gpt-4o-mini',\n        response_model=CoordinatedFact,\n        messages=[...]\n    )\nexcept ValueError as e:\n    if 'Hallucinated enum' in str(e):\n        print(f'🚨 SCHEMA DRIFT: {e}')\n        raise CoordinationError('Agent hallucinated enum value')",
+        "language": "python"
+      },
+      {
+        "name": "Depth Consistency Check",
+        "description": "Validates nested object depth consistency across multiple agent outputs",
+        "code": "from typing import List, Dict, Any\nfrom pydantic import BaseModel\n\nclass NestedPlan(BaseModel):\n    tasks: List[Dict[str, Any]]\n    \n    @validator('tasks')\n    def check_depth_consistency(cls, tasks):\n        depths = [len(find_nested_depth(task)) for task in tasks]\n        if max(depths) - min(depths) > 1:\n            raise ValueError(f'Inconsistent nesting depth: {depths}')\n        return tasks\n\ndef find_nested_depth(obj: Dict) -> int:\n    if not isinstance(obj, dict):\n        return 0\n    return 1 + max([find_nested_depth(v) for v in obj.values()], default=0)\n\n# Detect coordination failure\nplans = [agent_plan1, agent_plan2]\nfor i, plan in enumerate(plans):\n    try:\n        NestedPlan(**plan)\n    except ValueError as e:\n        print(f'🚨 DEPTH MISMATCH: Agent {i} depth inconsistent: {e}')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Shared Schema Registry",
+        "description": "Centralized Pydantic model registry ensures all agents use identical schemas",
+        "code": "from typing import Literal\nfrom pydantic import BaseModel\n\nfrom instructor import Instructor\nfrom openai import OpenAI\n\n# SHARED SCHEMA - all agents import this\nclass CoordinatedOutput(BaseModel):\n    agent_id: str\n    category: Literal['research', 'planning', 'execution']\n    data: dict\n    dependencies: List[str] = []\n    version: Literal['v1'] = 'v1'\n\nclient = Instructor(client=OpenAI())\n\n# Agent A\nresearch_output = client.messages.create(\n    model='gpt-4o-mini',\n    response_model=CoordinatedOutput,\n    messages=[...],\n    extra_body={'agent_id': 'researcher_1'}\n)\n\n# Agent B uses same schema\nplanning_output = client.messages.create(\n    model='gpt-4o-mini',\n    response_model=CoordinatedOutput,\n    messages=[...],\n    extra_body={'agent_id': 'planner_1', 'dependencies': [research_output.agent_id]}\n)",
+        "language": "python"
+      },
+      {
+        "name": "Retry Backoff with Fallback",
+        "description": "Implements exponential backoff and fallback schemas for resilient coordination",
+        "code": "import time\nfrom functools import wraps\n\nfrom instructor import Instructor\nfrom instructor.retry import backoff\n\nclass CoordinationClient:\n    def __init__(self):\n        self.client = Instructor(client=OpenAI())\n    \n    @backoff(attempts=3, wait=2**3)\n    def safe_extract(self, messages, mode='strict'):\n        if mode == 'strict':\n            return self.client.messages.create(\n                model='gpt-4o-mini',\n                response_model=CoordinatedOutput,\n                messages=messages\n            )\n        else:\n            # FALLBACK: partial model\n            return self.client.messages.create(\n                model='gpt-4o-mini',\n                response_model=PartialOutput,  # less strict\n                messages=messages\n            )\n    \n# Usage\ntry:\n    result = client.safe_extract(messages)\nexcept:\n    result = client.safe_extract(messages, mode='fallback')",
+        "language": "python"
+      },
+      {
+        "name": "Validation Pipeline",
+        "description": "Multi-stage validation ensures coordination before passing between agents",
+        "code": "from typing import Callable, List\nfrom pydantic import ValidationError\n\nclass CoordinationPipeline:\n    def __init__(self):\n        self.validators: List[Callable] = []\n    \n    def add_validator(self, validator: Callable):\n        self.validators.append(validator)\n    \n    def validate(self, data: dict) -> bool:\n        for validator in self.validators:\n            if not validator(data):\n                return False\n        return True\n\n# Pipeline for coordination\npipeline = CoordinationPipeline()\npipeline.add_validator(lambda x: len(x.get('dependencies', [])) <= 5)\npipeline.add_validator(lambda x: x['category'] in ['research', 'planning'])\n\n# Before agent handoff\nif pipeline.validate(agent_output.dict()):\n    next_agent_input = agent_output.data\nelse:\n    raise CoordinationError('Pipeline validation failed')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex wraps Instructor's client.chat.completions.create() calls with automatic failure mode detection specific to multi-agent coordination. It monitors retry exhaustion patterns, schema drift across agents, and nested structure inconsistencies in real-time. When coordination failures are detected, Vex automatically applies the optimal fix pattern (shared schemas, retry backoff, or validation pipelines) and patches the agent's Pydantic models.\n\nVex maintains a coordination state graph tracking dependencies between agent outputs, flagging desynchronization early. It integrates seamlessly with Instructor's patching mechanism, providing zero-boilerplate observability and auto-remediation for production agent swarms. The platform learns failure patterns across deployments and continuously improves coordination reliability.",
+      "code": "from vex import verify\nfrom instructor import Instructor\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Vex monitors Instructor coordination failures\n@verify(\n    failure_modes=[\n        'instructor-retries-exhausted',\n        'pydantic-enum-hallucination',\n        'nested-depth-inconsistency'\n    ],\n    auto_fix=['shared_schema_registry', 'retry_backoff'],\n    coordination=True\n)\nclass CoordinatedAgent:\n    def __init__(self):\n        self.client = Instructor(client=OpenAI())\n    \n    def research(self, query: str) -> CoordinatedOutput:\n        return self.client.messages.create(\n            model='gpt-4o-mini',\n            response_model=CoordinatedOutput,\n            messages=[{'role': 'user', 'content': query}],\n            extra_body={'agent_id': 'researcher'}\n        )\n    \n    def plan(self, research: CoordinatedOutput) -> CoordinatedOutput:\n        return self.client.messages.create(\n            model='gpt-4o-mini',\n            response_model=CoordinatedOutput,\n            messages=[...],\n            extra_body={'dependencies': [research.agent_id]}\n        )\n\n# Vex auto-detects and fixes coordination failures\nagent = CoordinatedAgent()\nresearch = agent.research('find electronics')\nplan = agent.plan(research)  # Vex ensures schema alignment",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today to eliminate multi-agent coordination failures in your Instructor workflows with one line of code."
+    }
+  }
+}

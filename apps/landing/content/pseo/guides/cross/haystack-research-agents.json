@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Haystack + Vex Guardrails",
+    "description": "Learn how to build research agents with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack research agents",
+      "Haystack guardrails",
+      "research agents reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Haystack enables building sophisticated Research Agents that perform multi-step web search, document retrieval, and synthesis for accurate information summarization. Guardrails are essential to mitigate risks like irrelevant retrievals, hallucinations, and unverified claims that can undermine trust in agent outputs. Vex integration provides runtime verification for source accuracy, recency, and bias detection in these pipelines.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Haystack",
+      "description": "Research Agents in Haystack typically follow a multi-stage pipeline: starting with a web search or retriever to gather relevant documents, followed by a reranker to improve relevance, then a generator that synthesizes insights from retrieved context. Custom components handle analysis steps like claim extraction and source verification. The pipeline processes user queries through these composable nodes, producing structured summaries with citations.\n\nKey components include DocumentStore for persistence, Retriever (e.g., BM25 or hybrid), Reranker (e.g., Cohere), and LLM-based Reader/Generator. Agents may loop through refinement steps, verifying recency and bias before final output. This modular design allows precise Vex integration at verification points.\n\nFailure modes often occur at type boundaries between components or when generators stray from context, making runtime checks critical.",
+      "diagram": "User Query\n    |\n    v\n[Retriever] --> [Reranker] --> [Vex Verifier]\n    |                       |\n    v                       v\n[DocumentStore]      [Generator]\n    |                       |\n    +---------- [Synthesis] <+\n                   |\n                   v\n              Final Summary"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever outputs non-standard Document objects expected by downstream reranker",
+        "severity": "high",
+        "mitigation": "Vex schema validation between pipeline nodes"
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "BM25 or embedding retriever fetches outdated or off-topic sources",
+        "severity": "critical",
+        "mitigation": "Vex relevance scoring and source verification"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM fabricates claims not grounded in provided documents",
+        "severity": "critical",
+        "mitigation": "Vex context faithfulness and citation tracing"
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "Agent refinement loops fail without surfacing issues to user",
+        "severity": "medium",
+        "mitigation": "Vex error capture and observability"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Pipeline Setup",
+        "description": "Core pipeline with retriever, reranker, and generator for research synthesis",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.components.builders import PromptBuilder\n\nretrieval = Pipeline()\nretrieval.add_component(\"retriever\", InMemoryEmbeddingRetriever())\nretrieval.add_component(\"prompt_builder\", PromptBuilder(template=\"Answer using context: {{documents}}\\nQuery: {{query}}\"))\nretrieval.add_component(\"generator\", OpenAIGenerator(api_key=\"your-key\"))\nretrieval.connect(\"retriever.documents\", \"prompt_builder.documents\")\nretrieval.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Web Search Integration",
+        "description": "Add Tavily search for real-time web research before retrieval",
+        "code": "from haystack.components.websearch import TavilySearch\n\nresearch_pipe = Pipeline()\nresearch_pipe.add_component(\"websearch\", TavilySearch(api_key=\"tavily-key\"))\nresearch_pipe.add_component(\"retriever\", InMemoryEmbeddingRetriever())\nresearch_pipe.connect(\"websearch.results\", \"retriever.query\")\n\nresult = research_pipe.run({\n    \"websearch\": {\"query\": \"latest AI research breakthroughs\"},\n    \"retriever\": {\"query\": \"latest AI research breakthroughs\"}\n})",
+        "language": "python"
+      },
+      {
+        "title": "Claim Extraction Component",
+        "description": "Custom component to extract verifiable claims from generated text",
+        "code": "from haystack import component\n\n@component\nclass ClaimExtractor:\n    @component.output_types(claims=list[str])\n    def run(self, text: str):\n        # Simple claim extraction logic\n        claims = [s.strip() for s in text.split('.') if len(s) > 20]\n        return {\"claims\": claims}\n\npipe = Pipeline()\npipe.add_component(\"extractor\", ClaimExtractor())\npipe.add_component(\"generator\", OpenAIGenerator())\npipe.connect(\"generator.text\", \"extractor.text\")",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Step Agent Loop",
+        "description": "Iterative refinement with recency and relevance checks",
+        "code": "def research_agent_loop(pipeline, query, max_iterations=3):\n    context = []\n    for i in range(max_iterations):\n        result = pipeline.run({\"query\": query + f' (round {i+1})'})\n        new_docs = result['retriever']['documents']\n        if not new_docs: break\n        context.extend(new_docs)\n    return pipeline.run({\"query\": query, \"documents\": context})",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Source Verifier Component",
+        "description": "Custom Haystack component using Vex for source recency and bias checks",
+        "code": "from haystack import component\nfrom vex import VexClient\n\n@component\nclass VexSourceVerifier:\n    def __init__(self, vex_api_key: str):\n        self.vex = VexClient(api_key=vex_api_key)\n\n    @component.output_types(verified_docs=list, failed_docs=list)\n    def run(self, documents: list):\n        checks = [\n            \"source_verification\",\n            \"recency_checks\",\n            \"bias_detection\"\n        ]\n        results = self.vex.verify({\n            \"input\": [doc.content for doc in documents],\n            \"verifications\": checks\n        })\n        verified = [doc for doc, res in zip(documents, results) if res.passed]\n        return {\n            \"verified_docs\": verified,\n            \"failed_docs\": [doc for doc, res in zip(documents, results) if not res.passed]\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Vex Context Faithfulness Guard",
+        "description": "Verify generator output stays faithful to retrieved context",
+        "code": "from haystack import Pipeline\n\npipe = Pipeline()\npipe.add_component(\"vex_verifier\", VexSourceVerifier(vex_api_key=\"vex-key\"))\npipe.add_component(\"generator\", OpenAIGenerator())\n\npipe.connect(\"retriever.documents\", \"vex_verifier.documents\")\npipe.connect(\"vex_verifier.verified_docs\", \"prompt_builder.documents\")\npipe.connect(\"prompt_builder\", \"generator\")\n\n# Only use verified documents\nresult = pipe.run({\n    \"retriever\": {\"query\": \"research query\"}\n})",
+        "language": "python"
+      },
+      {
+        "title": "Claim Accuracy Pipeline Integration",
+        "description": "Full pipeline with Vex verifying extracted claims against sources",
+        "code": "full_research_pipe = Pipeline()\nfull_research_pipe.add_component(\"retriever\", InMemoryEmbeddingRetriever())\nfull_research_pipe.add_component(\"vex_sources\", VexSourceVerifier(\"vex-key\"))\nfull_research_pipe.add_component(\"extractor\", ClaimExtractor())\nfull_research_pipe.add_component(\"vex_claims\", VexClaimVerifier(\"vex-key\"))\n\nfull_research_pipe.connect(\"retriever.documents\", \"vex_sources.documents\")\nfull_research_pipe.connect(\"vex_sources.verified_docs\", \"extractor.documents\")\nfull_research_pipe.connect(\"extractor.claims\", \"vex_claims.claims\")\n\nverified_result = full_research_pipe.run({\"retriever\": {\"query\": \"AI advancements 2024\"}})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Research Agents",
+      "description": "Integrate Vex today to ensure your research agents deliver verified, trustworthy outputs."
+    }
+  }
+}

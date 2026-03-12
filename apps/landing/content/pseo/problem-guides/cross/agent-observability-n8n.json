@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent observability in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "n8n AI Agents agent-observability",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, observability challenges arise from complex workflow chaining where AI nodes trigger recursive loops, unvalidated outputs cascade errors to action nodes, credentials leak through tool parameters, and memory windows inject outdated context. These issues manifest uniquely in n8n's node-based architecture, making traditional monitoring insufficient as failures propagate silently across workflow edges. Vex provides deep visibility into these agent-specific patterns by hooking into n8n's execution traces.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node receives its own previous output as input, creating infinite loops visible in execution history as repeating node IDs",
+        "impact": "Workflow consumes all quota, triggers rate limits, and generates thousands of identical trace entries"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "HTTP Request nodes receive malformed JSON or empty strings from upstream AI Agent nodes",
+        "impact": "Downstream actions fail silently with 400/500 errors, breaking entire workflow chains"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "AI Agent tool calls log API keys or database credentials in plaintext within execution data",
+        "impact": "Security breach exposure in workflow logs accessible to all workflow editors"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Chat Memory node outputs conversations older than 24h to current AI Agent sessions",
+        "impact": "Agents hallucinate based on obsolete context, producing irrelevant or dangerous responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Loop Detector",
+        "description": "Scans n8n execution traces for repeating node execution patterns indicating infinite loops",
+        "code": "import { N8nExecution } from 'n8n-workflow';\n\nfunction detectRecursiveLoop(executions: N8nExecution[]): boolean {\n  const nodeExecCounts = new Map<string, number>();\n  \n  for (const exec of executions) {\n    for (const node of exec.nodes) {\n      const count = (nodeExecCounts.get(node.id) || 0) + 1;\n      nodeExecCounts.set(node.id, count);\n      \n      // Flag if same node executed >5 times consecutively\n      if (count > 5 && node.data.input === node.data.output) {\n        return true;\n      }\n    }\n  }\n  return false;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Credential Exposure Scanner",
+        "description": "Detects API keys, tokens, and secrets in AI Agent tool call parameters",
+        "code": "const SECRET_PATTERNS = [\n  /(?i)(api[-_]?key|token|secret|password)[\\s:=]+['\"][^'\"]{20,}/,\n  /sk[-_][a-zA-Z0-9]{40,}/,\n  /ak[-_][a-zA-Z0-9]{30,}/\n];\n\nfunction scanCredentialExposure(nodeData: any): string[] {\n  const leaks: string[] = [];\n  \n  function scanObject(obj: any) {\n    if (typeof obj === 'string') {\n      for (const pattern of SECRET_PATTERNS) {\n        const match = obj.match(pattern);\n        if (match) {\n          leaks.push(match[0].replace(/./g, '*'));\n        }\n      }\n    } else if (obj && typeof obj === 'object') {\n      Object.values(obj).forEach(scanObject);\n    }\n  }\n  \n  scanObject(nodeData);\n  return leaks;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Stale Memory Context Detector",
+        "description": "Identifies Memory Window nodes providing context older than workflow TTL",
+        "code": "function detectStaleMemory(memoryNode: any, workflowStart: Date): boolean {\n  const memoryItems = memoryNode.data?.messages || [];\n  const ttlHours = 24;\n  \n  for (const item of memoryItems) {\n    const itemAge = (new Date().getTime() - new Date(item.timestamp).getTime()) / (1000 * 60 * 60);\n    \n    if (itemAge > ttlHours) {\n      console.warn(`Stale memory detected: ${itemAge.toFixed(1)}h old`);\n      return true;\n    }\n  }\n  \n  return false;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Loop Prevention Middleware",
+        "description": "n8n webhook node that breaks recursive execution chains",
+        "code": "// Add as HTTP Request node after AI Agent\nconst isLoop = $input.first()?.json?.executionId === $workflow.context.get('lastExecutionId');\n\nif (isLoop) {\n  return {\n    json: {\n      error: 'Recursive loop detected',\n      blocked: true\n    }\n  };\n}\n\n$workflow.context.set('lastExecutionId', $input.first()?.json?.executionId);\n\nreturn $input.all();",
+        "language": "typescript"
+      },
+      {
+        "name": "Output Validation Gate",
+        "description": "TypeScript validation before action nodes",
+        "code": "// Place before HTTP Request/Action nodes\nconst aiOutput = $input.first()?.json;\n\n// Schema validation for expected AI output\nconst isValid = aiOutput && \n  typeof aiOutput.action === 'string' &&\n  typeof aiOutput.parameters === 'object' &&\n  aiOutput.parameters !== null;\n\nif (!isValid) {\n  throw new Error(`Invalid AI output: ${JSON.stringify(aiOutput)}`);\n}\n\nreturn {\n  json: {\n    validated: true,\n    ...aiOutput\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Tool Parameter Masking",
+        "description": "Sanitizes credentials before logging",
+        "code": "function sanitizeToolParams(params: any): any {\n  const cleanParams = { ...params };\n  \n  // Mask known credential fields\n  const credentialFields = ['apiKey', 'token', 'password', 'secret'];\n  \n  function sanitize(obj: any): any {\n    if (typeof obj === 'string' && credentialFields.some(field => obj.includes(field))) {\n      return '[REDACTED]';\n    }\n    if (Array.isArray(obj)) {\n      return obj.map(sanitize);\n    }\n    if (obj && typeof obj === 'object') {\n      const sanitized: any = {};\n      for (const [key, value] of Object.entries(obj)) {\n        sanitized[key] = sanitize(value);\n      }\n      return sanitized;\n    }\n    return obj;\n  }\n  \n  return sanitize(cleanParams);\n}\n\nreturn {\n  json: sanitize($input.first()?.json)\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after n8n AI Agent nodes, capturing full execution traces including node inputs/outputs, tool calls, and memory state. It automatically detects the four key failure modes using pattern matching against n8n's execution JSON structure, providing real-time alerts and automated remediation workflows. Configuration takes <2 minutes via npm install and single webhook addition.\n\nVex's n8n-specific detectors parse the structured execution data to identify recursive patterns, credential leaks, validation failures, and stale memory without code changes. When issues are detected, Vex can trigger n8n's own workflow rollback, parameter sanitization, or context refresh automatically. The platform maintains full audit trails with PII redaction for compliance.\n\nIntegration uses n8n's native webhook nodes with Vex SDK, providing span-based tracing that maps perfectly to n8n's node execution model for precise failure localization.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  webhookToken: process.env.VEX_TOKEN\n});\n\n// Add as Webhook node after EVERY AI Agent node\nexport default async function vexObserver($input: any) {\n  const executionData = {\n    workflowId: $workflow.id,\n    nodeId: $node.id,\n    aiOutput: $input.first()?.json,\n    executionId: $execution.id,\n    timestamp: new Date().toISOString()\n  };\n  \n  // Auto-detect all 4 failure modes\n  await vex.span('n8n-ai-agent', {\n    data: executionData,\n    detectors: ['recursive-loop', 'credential-leak', 'output-validation', 'stale-memory'],\n    autoRemediate: true\n  });\n  \n  return $input.all();\n}",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one webhook node to get instant AI Agent observability across all your n8n workflows - start free at vex.dev/n8n"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Instructor + Vex Guardrails",
+    "description": "Learn how to build data extraction with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor data extraction",
+      "Instructor guardrails",
+      "data extraction reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies structured data extraction from unstructured documents by patching LLM clients to return validated Pydantic models, enabling schema-guided responses from models like GPT-4. However, LLMs can fail with partial extractions, hallucinated enum values, or inconsistent nested structures, leading to unreliable pipelines. Vex provides essential guardrails through verification, ensuring schema compliance and field accuracy for production-grade data extraction.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Instructor",
+      "description": "The typical architecture begins with document ingestion (PDFs, emails, reports) into a preprocessing layer that chunks text and embeds it for retrieval. Instructor then patches the OpenAI client, enabling schema-guided LLM calls where Pydantic models define the target extraction schema. The LLM generates structured JSON that Instructor validates and retries on failure, returning typed Python objects for downstream processing like database insertion or analytics.\n\nKey components include the Instructor-patched client for extraction, optional vector stores for RAG-enhanced context, and validation loops that handle common LLM inconsistencies. This creates a robust pipeline from raw documents to structured data, but requires verification to catch edge cases like missing required fields or hallucinated values.\n\nProduction deployments often layer caching, async processing, and monitoring to scale extraction across thousands of documents while maintaining data quality.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Raw Documents  │───▶│   Preprocessing  │───▶│ Instructor + LLM │\n│     (PDF/Email)  │    │  (Chunking/RAG)  │    │   (Schema-Guided)│\n└─────────────────┘    └──────────────────┘    └──────┬──────────────┘\n                                                    │\n                                             ┌──────▼──────────────┐\n                                             │   Vex Verification  │\n                                             │ (Schema/Completeness)│\n                                             └──────────┬───────────┘\n                                                        │\n                                                  ┌─────▼───────┐\n                                                  │ Structured │\n                                                  │   Data DB   │\n                                                  └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor's built-in retries fail after max attempts, returning None or partial data when LLM consistently violates schema",
+        "severity": "high",
+        "mitigation": "Vex verifies final output with independent model checks and fallback extraction strategies"
+      },
+      {
+        "name": "Partial extraction missing required fields",
+        "description": "LLM omits critical required fields from Pydantic model, causing validation failure or silent data loss",
+        "severity": "critical",
+        "mitigation": "Vex enforces completeness checks across all required schema fields with field presence assertions"
+      },
+      {
+        "name": "Model hallucinating enum values outside schema",
+        "description": "LLM generates enum values not present in Pydantic schema (e.g., 'purple' for color enum ['red','blue'])",
+        "severity": "medium",
+        "mitigation": "Vex validates enum constraints with exact match verification and correction prompts"
+      },
+      {
+        "name": "Nested object extraction producing inconsistent depth",
+        "description": "LLM creates varying levels of nesting in hierarchical data (addresses, org charts), breaking downstream processing",
+        "severity": "high",
+        "mitigation": "Vex enforces consistent nesting depth and structure through recursive schema validation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Instructor Pydantic Extraction",
+        "description": "Patch OpenAI client and extract simple invoice data using Pydantic model validation",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom openai import OpenAI\nfrom typing import Optional\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    total_amount: float\n    date: str\n    customer: str\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o-mini\",\n    response_model=Invoice,\n    messages=[\n        {\"role\": \"user\", \"content\": \"Extract invoice data: Invoice #INV-1234 dated 2024-10-01 for Acme Corp total $2,500\"}\n    ]\n)\n\nprint(response.model_dump_json(indent=2))",
+        "language": "python"
+      },
+      {
+        "title": "Nested Document Extraction",
+        "description": "Extract hierarchical data with nested Pydantic models for complex documents",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\nfrom typing import List\nfrom openai import OpenAI\n\nclass Address(BaseModel):\n    street: str\n    city: str\n    zip_code: str\n\nclass Employee(BaseModel):\n    name: str\n    role: str\n    address: Address\n\nclass OrgChart(BaseModel):\n    company: str\n    employees: List[Employee]\n\nclient = from_openai(OpenAI())\n\norg_data = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=OrgChart,\n    messages=[{\"role\": \"user\", \"content\": \"Extract org chart: Acme Corp - CEO John Doe at 123 Main St, SF 94105; CTO Jane Smith at 456 Oak Ave, SF 94103\"}]\n)\n\nprint(org_data.model_dump_json(indent=2))",
+        "language": "python"
+      },
+      {
+        "title": "Instructor with TypeScript Zod Schema",
+        "description": "TypeScript equivalent using Zod schemas for structured extraction",
+        "code": "import { Instructor, OpenAI } from 'instructor';\nimport { z } from 'zod';\n\nconst client = new Instructor({\n  client: new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),\n});\n\nconst InvoiceSchema = z.object({\n  invoiceNumber: z.string().describe('Unique invoice ID'),\n  totalAmount: z.number(),\n  date: z.string(),\n  customer: z.string(),\n});\n\ntype Invoice = z.infer<typeof InvoiceSchema>;\n\nconst invoice = await client.chat.completions.create({\n  model: 'gpt-4o-mini',\n  schema: InvoiceSchema,\n  messages: [{\n    role: 'user',\n    content: 'Extract invoice: #INV-5678 on 2024-10-02 for Beta Inc $1,800',\n  }],\n}) as Invoice;\n\nconsole.log(JSON.stringify(invoice, null, 2));",
+        "language": "typescript"
+      },
+      {
+        "title": "Enum-Constrained Extraction",
+        "description": "Extract with strict enum validation to prevent hallucinated values",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom enum import Enum\nfrom openai import OpenAI\n\nclass DocumentType(str, Enum):\n    INVOICE = \"invoice\"\n    RECEIPT = \"receipt\"\n    CONTRACT = \"contract\"\n\nclass Document(BaseModel):\n    doc_type: DocumentType\n    amount: float = Field(..., ge=0)\n    vendor: str\n\nclient = from_openai(OpenAI())\n\ndoc = client.chat.completions.create(\n    model=\"gpt-4o-mini\",\n    response_model=Document,\n    messages=[{\"role\": \"user\", \"content\": \"Extract: This invoice from VendorX for $1500\"}]\n)\n\nprint(f\"Type: {doc.doc_type}, Amount: ${doc.amount}\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Instructor with Vex Schema Verification",
+        "description": "Protect against validation exhaustion by verifying final Pydantic output with Vex",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\nfrom vex import verify, Verifier\nfrom openai import OpenAI\n\nclass Invoice(BaseModel):\n    invoice_number: str\n    total_amount: float\n    date: str\n\n# Vex verifier for schema compliance\ninvoice_verifier = Verifier(\n    checks=[\n        \"schema_compliance\",\n        \"field_accuracy\",\n        \"completeness_validation\"\n    ]\n)\n\nclient = from_openai(OpenAI())\n\n@verify(verifier=invoice_verifier)\ndef extract_invoice(text: str) -> Invoice:\n    return client.chat.completions.create(\n        model=\"gpt-4o-mini\",\n        response_model=Invoice,\n        messages=[{\"role\": \"user\", \"content\": text}]\n    )\n\n# Safe extraction\ninvoice = extract_invoice(\"Invoice #123 total $2500 on 2024-10-01\")\nprint(invoice.model_dump_json())",
+        "language": "python"
+      },
+      {
+        "title": "Vex Nested Structure Consistency Check",
+        "description": "Ensure consistent nesting depth for hierarchical extractions",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\nfrom typing import List\nfrom vex import verify, Verifier\nfrom openai import OpenAI\n\nclass Address(BaseModel):\n    street: str\n    city: str\n\nclass OrgChart(BaseModel):\n    company: str\n    departments: List[dict]  # Dynamic nesting\n\norg_verifier = Verifier(\n    checks=[\n        \"schema_compliance\",\n        \"type_consistency\",\n        \"nested_structure_consistency\"\n    ]\n)\n\nclient = from_openai(OpenAI())\n\n@verify(verifier=org_verifier)\ndef extract_org_chart(text: str) -> OrgChart:\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=OrgChart,\n        messages=[{\"role\": \"user\", \"content\": text}]\n    )\n\norg = extract_org_chart(\"Acme Corp: Engineering (SF), Sales (NYC)\")\nprint(org.model_dump_json(indent=2))",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + Instructor Enum Protection",
+        "description": "Verify enum values and field completeness in TypeScript pipelines",
+        "code": "import { Instructor, OpenAI } from 'instructor';\nimport { z } from 'zod';\nimport { verify, Verifier } from 'vex-sdk';\n\nconst client = new Instructor({\n  client: new OpenAI(),\n});\n\nconst DocumentType = z.enum(['invoice', 'receipt', 'contract']);\n\nconst DocSchema = z.object({\n  docType: DocumentType,\n  amount: z.number().positive(),\n  vendor: z.string(),\n});\n\nconst verifier = new Verifier({\n  checks: ['schema_compliance', 'field_accuracy', 'type_consistency'],\n});\n\nconst extractDocument = verify(\n  async (text: string) => {\n    return await client.chat.completions.create({\n      model: 'gpt-4o-mini',\n      schema: DocSchema,\n      messages: [{ role: 'user', content: text }],\n    }) as z.infer<typeof DocSchema>;\n  },\n  { verifier }\n);\n\nconst doc = await extractDocument('Invoice from VendorY $2200');\nconsole.log(JSON.stringify(doc, null, 2));",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Data Extraction",
+      "description": "Add Vex verification to your Instructor pipelines today for production-grade reliability."
+    }
+  }
+}

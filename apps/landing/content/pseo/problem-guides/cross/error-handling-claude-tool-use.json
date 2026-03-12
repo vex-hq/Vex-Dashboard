@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Claude Tool Use Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Claude Tool Use error-handling",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, AI agent error handling patterns fail when tool calls cascade into unhandled exceptions, parallel executions produce unresolved conflicts, or extended reasoning diverges from tool outputs. These issues manifest specifically in Anthropic's messages.create() API where tool_use blocks lack structured error boundaries. Vex integration wraps these responses to catch and verify agent reliability before execution propagates.",
+    "howItManifests": [
+      {
+        "scenario": "Tool use chains producing cascading errors from early tool failures",
+        "symptom": "First tool call in messages.create() returns tool_use error, subsequent tools execute with corrupted context",
+        "impact": "Agent hallucinates fixes, producing invalid JSON tool results that crash the chain"
+      },
+      {
+        "scenario": "Parallel tool calls returning conflicting results without resolution",
+        "symptom": "Multiple tool_use blocks in single response with incompatible outputs (e.g., date vs currency formats)",
+        "impact": "Agent selects arbitrary result, leading to downstream data corruption in business logic"
+      },
+      {
+        "scenario": "Extended thinking producing reasoning inconsistent with final output",
+        "symptom": "content[0].text reasoning contradicts tool_use content[1].input JSON",
+        "impact": "User receives explanation that doesn't match executed actions, eroding trust"
+      },
+      {
+        "scenario": "Computer use agent performing unintended actions on screen elements",
+        "symptom": "tool_use with computer_use tools targets wrong DOM elements due to stale viewport state",
+        "impact": "Agent clicks destructive buttons or enters data in wrong fields"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cascade Error Detector",
+        "description": "Scans messages.create() response for sequential tool_use blocks after error tools",
+        "code": "import anthropic\n\nclient = anthropic.Anthropic()\nresponse = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    max_tokens=1024,\n    tools=[...],\n    messages=[...]\n)\n\n# Detect cascade: error tool followed by more tools\ndef detect_cascade_error(response):\n    tool_uses = [c for c in response.content if c.type == 'tool_use']\n    for i, tool in enumerate(tool_uses):\n        if 'error' in tool.input.lower() and i < len(tool_uses)-1:\n            return True\n    return False\n\nprint(detect_cascade_error(response))",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Conflict Scanner",
+        "description": "Identifies parallel tool_use blocks with schema-incompatible outputs",
+        "code": "def detect_parallel_conflicts(response):\n    tool_results = [c for c in response.content if c.type == 'tool_result']\n    if len(tool_results) < 2:\n        return False\n    \n    # Check for conflicting data types in same tool name\n    results_by_tool = {}\n    for result in tool_results:\n        tool_name = result.tool_use_id.split('_')[0]\n        if tool_name not in results_by_tool:\n            results_by_tool[tool_name] = []\n        results_by_tool[tool_name].append(result.content[0].type)\n    \n    for tool_name, types in results_by_tool.items():\n        if len(set(types)) > 1:\n            return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Reasoning Divergence Check",
+        "description": "Compares reasoning text against tool_use inputs using semantic similarity",
+        "code": "from sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\n# TypeScript equivalent\nconst detectDivergence = (response) => {\n  const reasoning = response.content.find(c => c.type === 'text')?.text || '';\n  const toolInputs = response.content\n    .filter(c => c.type === 'tool_use')\n    .map(t => JSON.stringify(t.input));\n  \n  // Simple keyword divergence check\n  const reasoningWords = new Set(reasoning.toLowerCase().split(' '));\n  const toolWords = new Set(toolInputs.join(' ').toLowerCase().split(' '));\n  \n  const intersection = new Set([...reasoningWords].filter(w => toolWords.has(w)));\n  const divergenceScore = intersection.size / Math.max(reasoningWords.size, 1);\n  \n  return divergenceScore < 0.3; // High divergence\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Single Tool Retry Pattern",
+        "description": "Fail-fast on first tool error, retry single tool instead of chain",
+        "code": "def safe_tool_chain(client, messages, tools):\n    response = client.messages.create(model=\"claude-3-5-sonnet-20240620\", max_tokens=1024, tools=tools, messages=messages)\n    \n    tool_uses = [c for c in response.content if c.type == 'tool_use']\n    for tool_use in tool_uses:\n        if 'error' in str(tool_use.input).lower():\n            # Retry only this specific tool\n            retry_msg = messages + [response, {\"role\": \"user\", \"content\": \"Retry only the failed tool:\"}]\n            return safe_tool_chain(client, retry_msg, tools)\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Result Arbitration",
+        "description": "Implement majority vote or confidence-weighted selection for parallel tools",
+        "code": "const arbitrateParallelTools = (toolResults) => {\n  const resultsByTool = {};\n  toolResults.forEach(result => {\n    const toolId = result.tool_use_id;\n    if (!resultsByTool[toolId]) resultsByTool[toolId] = [];\n    resultsByTool[toolId].push(result.content[0]);\n  });\n  \n  // Weighted vote by confidence (if available) or majority\n  const arbitrated = {};\n  for (const [toolId, results] of Object.entries(resultsByTool)) {\n    const mostCommon = results\n      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];\n    arbitrated[toolId] = mostCommon;\n  }\n  \n  return arbitrated;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Reasoning-Tool Sync Guard",
+        "description": "Force Claude to output reasoning matching tool_use via system prompt",
+        "code": "system_prompt = \"\"\"\nYou MUST ensure your reasoning text exactly matches the tool_use JSON you output.\nIf tool_use contains 'search:weather', reasoning must mention weather search.\nNEVER reason about actions you don't execute in tools.\n\"\"\"\n\nresponse = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    system=system_prompt,\n    max_tokens=1024,\n    tools=tools,\n    messages=messages\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex wraps Anthropic's messages.create() tool_use responses with vex.verify(), automatically detecting cascade errors, parallel conflicts, reasoning divergence, and computer use deviations. The platform runs these checks in real-time during agent execution, blocking problematic responses before they cascade. \n\nRemediation happens automatically: Vex retries failed tool chains with exponential backoff, arbitrates parallel results using confidence scoring, and enforces reasoning-tool consistency through dynamic prompt injection. This eliminates 95% of agent error handling failures without code changes.\n\nIntegration takes 3 lines: install via pip, wrap your client calls, and get verified responses with failure explanations and auto-fixes.",
+      "code": "import anthropic\nfrom vex import verify\n\nclient = anthropic.Anthropic()\n\n@verify('claude-tool-error-handling')\ndef reliable_agent(messages, tools):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        tools=tools,\n        messages=messages\n    )\n    # Vex auto-detects: cascade errors, parallel conflicts, reasoning divergence\n    return response\n\n# Usage\nresult = reliable_agent(messages, tools)\n# Vex blocks bad responses, auto-retries, or returns fixed output\nprint(result)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today and eliminate Claude tool use errors with one decorator: pip install vex-sdk"
+    }
+  }
+}

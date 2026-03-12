@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Llama Stack Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Llama Stack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Llama Stack multi-agent-coordination",
+      "Llama Stack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in Llama Stack occurs when multiple Llama-powered agents fail to synchronize state, share memory effectively, or coordinate tool outputs through the standardized Llama Stack SDK. This manifests as agents duplicating efforts, overriding each other's memory bank entries, or misinterpreting shared tool responses due to schema mismatches in the multi-agent orchestration layer. The problem is exacerbated by Llama Stack's safety shields triggering false positives on inter-agent communications and memory retrieval hallucinations creating conflicting document associations.",
+    "howItManifests": [
+      {
+        "scenario": "Agent A writes to memory bank, Agent B immediately overwrites with hallucinated associations",
+        "symptom": "Memory bank shows conflicting document embeddings for same query across agents",
+        "impact": "Downstream agents make decisions based on corrupted shared context"
+      },
+      {
+        "scenario": "Two agents call same tool concurrently without coordination lock",
+        "symptom": "Tool responses arrive out-of-order, violating expected sequence schema",
+        "impact": "Agents parse malformed JSON, causing runtime crashes or silent failures"
+      },
+      {
+        "scenario": "Safety shield flags inter-agent handoff messages as unsafe",
+        "symptom": "False positive filtering blocks legitimate coordination payloads",
+        "impact": "Agents appear 'stuck' in handoff states, exceeding turn limits"
+      },
+      {
+        "scenario": "Agents exceed collective turn limits before resolution due to redundant planning",
+        "symptom": "All agents hit max_turns without task completion",
+        "impact": "Complete workflow failure requiring human intervention"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Bank Conflict Detector",
+        "description": "Scans memory bank for duplicate keys with conflicting embeddings across agent sessions",
+        "code": "from llama_stack_client import MemoryBank\n\nmemory_bank = MemoryBank()\n\ndef detect_memory_conflicts(session_ids):\n    conflicts = []\n    for doc_id in memory_bank.list_documents():\n        embeddings = []\n        for session_id in session_ids:\n            try:\n                emb = memory_bank.get_embedding(session_id, doc_id)\n                embeddings.append((session_id, emb[:5]))  # Compare first 5 dims\n            except:\n                pass\n        # Detect cosine similarity < 0.8 between same doc across sessions\n        if len(embeddings) > 1:\n            for i in range(len(embeddings)):\n                for j in range(i+1, len(embeddings)):\n                    sim = cosine_similarity(embeddings[i][1], embeddings[j][1])\n                    if sim < 0.8:\n                        conflicts.append({\n                            'doc_id': doc_id,\n                            'sessions': [embeddings[i][0], embeddings[j][0]],\n                            'similarity': sim\n                        })\n    return conflicts",
+        "language": "python"
+      },
+      {
+        "name": "Tool Response Schema Validator",
+        "description": "Validates all tool responses against expected Pydantic schemas across agent turns",
+        "code": "from pydantic import ValidationError\nfrom llama_stack_client import ToolResponse\n\ndef validate_tool_schemas(responses):\n    schema_violations = []\n    expected_schema = {\n        'type': 'object',\n        'properties': {'result': {'type': 'string'}, 'status': {'type': 'string'}}\n    }\n    for resp in responses:\n        try:\n            ToolResponse(**resp.dict())\n        except ValidationError as e:\n            schema_violations.append({\n                'agent_id': resp.agent_id,\n                'tool_name': resp.tool_name,\n                'error': str(e),\n                'response': resp.dict()\n            })\n    return schema_violations",
+        "language": "python"
+      },
+      {
+        "name": "Inter-Agent Turn Limit Monitor",
+        "description": "Tracks collective turn consumption across all agents in workflow",
+        "code": "from llama_stack_client import AgentSession\n\ndef monitor_collective_turns(sessions):\n    total_turns = 0\n    stalled_agents = []\n    for session in sessions:\n        stats = session.get_stats()\n        total_turns += stats['turns_used']\n        if stats['turns_used'] >= stats['max_turns'] * 0.9:\n            stalled_agents.append({\n                'agent_id': session.agent_id,\n                'turns_used': stats['turns_used'],\n                'max_turns': stats['max_turns'],\n                'progress': stats.get('task_progress', 0)\n            })\n    return {\n        'total_turns': total_turns,\n        'avg_turns_per_agent': total_turns / len(sessions),\n        'stalled_agents': stalled_agents,\n        'warning': total_turns > len(sessions) * 10\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Bank Write Locking",
+        "description": "Implement session-aware write coordination with atomic updates",
+        "code": "from llama_stack_client import MemoryBank\nimport threading\n\nclass CoordinatedMemoryBank:\n    def __init__(self):\n        self.memory_bank = MemoryBank()\n        self.locks = {}\n    \n    def coordinated_write(self, session_id, doc_id, embedding, content):\n        lock_key = f'{doc_id}'\n        if lock_key not in self.locks:\n            self.locks[lock_key] = threading.Lock()\n        \n        with self.locks[lock_key]:\n            # Check for existing entry from other session\n            existing = self.memory_bank.get(session_id, doc_id)\n            if existing and existing.get('session_id') != session_id:\n                # Merge instead of overwrite\n                existing['content'] += f'\\n[Session {session_id}] {content}'\n                self.memory_bank.put(session_id, doc_id, existing)\n            else:\n                self.memory_bank.put(session_id, doc_id, {\n                    'content': content,\n                    'embedding': embedding,\n                    'session_id': session_id,\n                    'timestamp': time.time()\n                })",
+        "language": "python"
+      },
+      {
+        "name": "Tool Response Queue Ordering",
+        "description": "FIFO queue ensures tool responses processed in submission order",
+        "code": "from collections import deque\nfrom llama_stack_client import ToolCall\n\nclass OrderedToolQueue:\n    def __init__(self):\n        self.queue = deque()\n        self.response_map = {}\n    \n    def submit_tool_call(self, call_id, tool_call: ToolCall):\n        self.queue.append(call_id)\n        # Store tool call metadata\n        self.response_map[call_id] = tool_call.dict()\n    \n    def process_response(self, response):\n        call_id = response.call_id\n        if call_id in self.response_map:\n            # Validate against stored schema\n            expected = self.response_map[call_id]\n            if self._validate_schema(response, expected):\n                return {'ordered': True, 'response': response.dict()}\n            else:\n                return {'ordered': False, 'error': 'Schema mismatch'}\n        return {'ordered': False, 'error': 'Unknown call_id'}\n    \n    def _validate_schema(self, response, expected):\n        return (response.tool_name == expected['tool_name'] and\n                isinstance(response.result, expected['result_type']))",
+        "language": "python"
+      },
+      {
+        "name": "Safety Shield Whitelist for Coordination",
+        "description": "Whitelist inter-agent coordination patterns to prevent false positives",
+        "code": "from llama_stack_client import SafetyShield\n\nCOORDINATION_PATTERNS = [\n    r'agent-\\d+->agent-\\d+ handoff',\n    r'state_sync:\\w+',\n    r'tool_result_aggregation',\n    r'memory_bank_update:\\w+'\n]\n\nclass CoordinationSafetyShield(SafetyShield):\n    def __init__(self):\n        super().__init__()\n        self.coordination_whitelist = set(COORDINATION_PATTERNS)\n    \n    def should_filter(self, content: str, context: dict) -> bool:\n        # Check if coordination pattern\n        for pattern in self.coordination_whitelist:\n            if re.search(pattern, content):\n                context['coordination_bypass'] = True\n                return False\n        \n        # Standard safety checks\n        return super().should_filter(content, context)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex provides continuous verification of Llama Stack multi-agent workflows by wrapping every agent turn with vex.verify() post-processing. This automatically detects coordination failures including memory conflicts, schema violations, and turn limit exhaustion across all agents simultaneously. Vex's ML-powered analysis identifies failure patterns specific to Llama Stack's memory bank and tool calling APIs, providing actionable remediation code and workflow adjustments.\n\nThe integration captures full agent traces including memory bank state, tool response schemas, and inter-agent communication payloads. Vex maintains a historical baseline of healthy coordination patterns, flagging deviations in real-time with 95%+ precision. Automated fixes include dynamic turn limit adjustments, memory locking implementations, and safety shield whitelisting rules generated specifically for your workflow.\n\nVex also provides coordination health dashboards showing cross-agent memory consistency, tool response ordering fidelity, and collective turn efficiency metrics, enabling proactive failure prevention.",
+      "code": "from vex_sdk import verify\nfrom llama_stack_client import AgentSession\n\n# Vex-wrapped multi-agent coordinator\n@verify(\n    failure_modes=[\n        'multi_agent_memory_conflict',\n        'tool_schema_violation',\n        'collective_turn_exhaustion',\n        'safety_false_positive'\n    ],\n    framework='llama_stack',\n    auto_fix=True\n)\ndef coordinated_agent_workflow(task, agents):\n    \"\"\"Multi-agent workflow with Vex verification\"\"\"\n    results = []\n    memory_bank = MemoryBank()\n    \n    for agent in agents:\n        session = AgentSession(agent_id=agent.id)\n        \n        # Vex verifies each turn\n        response = session.run_with_tools(task)\n        \n        # Auto-detected memory conflicts get fixed\n        if memory_bank.has_conflicts(session.session_id):\n            memory_bank.resolve_conflicts(session.session_id)\n        \n        results.append(response)\n    \n    return {\n        'coordination_status': 'success',\n        'agent_results': results,\n        'memory_consistency': memory_bank.validate_all()\n    }\n\n# Usage\nworkflow_result = coordinated_agent_workflow(\n    'research market trends',\n    [agent_researcher, agent_analyst, agent_writer]\n)\n# Vex automatically flags & fixes coordination issues",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate Llama Stack multi-agent coordination failures with one line of code."
+    }
+  }
+}

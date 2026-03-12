@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Flowise + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise rag pipeline",
+      "Flowise guardrails",
+      "rag pipeline reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of RAG pipelines through its drag-and-drop interface, combining vector stores, retrieval nodes, and LLM synthesis for document-based Q&A. However, chatflow chains often produce unvalidated outputs, retrieve irrelevant context, or fail silently in custom tools, leading to hallucinations and untrustworthy responses. Vex provides runtime verification to ensure source faithfulness, context relevance, and citation accuracy in these high-risk pipelines.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Flowise",
+      "description": "A typical Flowise RAG pipeline starts with a Chat Input node that triggers a Vector Store Retriever to fetch relevant document chunks from embeddings stored in Pinecone, Weaviate, or similar. Retrieved contexts pass through a Context Assembler or Prompt Template node that formats them with the user query for an LLM node (e.g., OpenAI or Anthropic) to generate a synthesized response. Source attribution is handled via Citation or Document Metadata nodes, while custom Tool nodes may enrich retrieval with external APIs.\n\nThe flow often includes conditional routing for multi-agent handoffs or fallback retrievers, but lacks built-in validation of intermediate outputs like retrieval relevance or LLM faithfulness to sources. This creates risks in sequential chains where context degrades between nodes. Vex integrates as a callback handler to monitor and verify each stage.\n\nKey components include: Vector Store Tool → Retrieval QA Chain → LLM Response → Citation Generator, with potential agentic loops for iterative refinement.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Chat Input    │───▶│ Vector Store     │───▶│ Context + LLM   │\n│   (User Query)  │    │ Retriever        │    │ Synthesis       │\n└─────────────────┘    └──────────────────┘    └─────────────────┘\n                                   │                       │\n                                   ▼                       ▼\n                           ┌──────────────────┐    ┌─────────────────┐\n                           │ Vex Callbacks    │    │ Source Citations│\n                           │ (Relevance Check)│    │ + Attribution   │\n                           └──────────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Chatflow chains producing unvalidated intermediate outputs",
+        "description": "Retrieval nodes output raw document chunks without relevance scoring, passed directly to LLM",
+        "severity": "critical",
+        "mitigation": "Vex relevance checks on retrieved contexts before LLM synthesis"
+      },
+      {
+        "name": "Vector store retrieval returning low-relevance documents",
+        "description": "Semantic search returns semantically distant chunks due to embedding drift or query ambiguity",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity scoring with configurable thresholds"
+      },
+      {
+        "name": "Custom tool nodes failing silently without error propagation",
+        "description": "External API tools or document loaders fail without triggering flow errors",
+        "severity": "high",
+        "mitigation": "Vex tool call monitoring and fallback execution"
+      },
+      {
+        "name": "Multi-agent sequential flow losing context between agent handoffs",
+        "description": "Context truncation or reformatting between agent nodes drops source attribution",
+        "severity": "medium",
+        "mitigation": "Vex context continuity verification across handoffs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Flowise RAG Chatflow Setup",
+        "description": "Configure the core RAG pipeline with vector store retrieval and LLM synthesis",
+        "code": "import { ChatOpenAI } from \"langchain/chat_models/openai\";\nimport { BufferMemory } from \"langchain/memory\";\n\nconst llm = new ChatOpenAI({ modelName: \"gpt-4o-mini\", temperature: 0 });\nconst memory = new BufferMemory();\n\nconst chain = RetrievalQA.fromChainType(llm, retriever, {\n  memory,\n  returnSourceDocuments: true,\n});\n\n// Flowise Chatflow JSON export includes these nodes\n// VectorStoreRetrieverNode -> PromptTemplateNode -> LLMChainNode",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store Integration with Embeddings",
+        "description": "Connect Pinecone or Weaviate vector store for document retrieval",
+        "code": "import { PineconeStore } from \"langchain/vectorstores/pinecone\";\nimport { OpenAIEmbeddings } from \"langchain/embeddings/openai\";\n\nconst embeddings = new OpenAIEmbeddings();\nconst vectorStore = await PineconeStore.fromExistingIndex(embeddings, {\n  pineconeIndex: pineconeIndex,\n  namespace: \"rag-docs\",\n});\n\nconst retriever = vectorStore.asRetriever({ k: 5 });",
+        "language": "typescript"
+      },
+      {
+        "title": "Source Attribution Prompt Template",
+        "description": "Format retrieved contexts with citation tracking for LLM",
+        "code": "const promptTemplate = `Use the following context to answer the question. Cite sources using [source_id].\n\nContext: {context}\n\nQuestion: {question}\nAnswer: `;\n\nconst qaPrompt = ChatPromptTemplate.fromPromptMessages([\n  [\"system\", promptTemplate],\n  [\"human\", \"{question}\"],\n  [\"placeholder\", \"{context}\"],\n]);",
+        "language": "typescript"
+      },
+      {
+        "title": "Citation Generation Node",
+        "description": "Extract and format source citations from LLM output",
+        "code": "function extractCitations(response: string, sources: Document[]) {\n  const citations = [];\n  const citationRegex = /\\[(\\d+)\\]/g;\n  let match;\n  while ((match = citationRegex.exec(response)) !== null) {\n    const sourceId = parseInt(match[1]);\n    if (sources[sourceId]) {\n      citations.push({\n        id: sourceId,\n        content: sources[sourceId].pageContent.slice(0, 200),\n        metadata: sources[sourceId].metadata,\n      });\n    }\n  }\n  return citations;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex Callback Handler to Flowise Config",
+        "description": "Install Vex SDK and register as global callback in Flowise server config",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-rag-pipeline',\n});\n\n// Flowise server config (flowise/config.ts)\nexport const flowiseConfig = {\n  callbacks: [\n    {\n      type: 'afterChainExecute',\n      callback: async (output: any) => {\n        await vex.verify({\n          type: 'rag_retrieval_relevance',\n          input: output.input,\n          retrieved_docs: output.sourceDocuments,\n          threshold: 0.7,\n        });\n      },\n    },\n  ],\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG Relevance Verification Middleware",
+        "description": "Verify retrieved documents meet semantic relevance threshold before LLM",
+        "code": "import { VexRAGVerifier } from '@vex_dev/sdk/rag';\n\nconst ragVerifier = new VexRAGVerifier(vex);\n\n// In Flowise custom node or chain callback\nconst verifyRetrieval = async (query: string, docs: Document[]) => {\n  const results = await ragVerifier.verifyRetrieval({\n    query,\n    documents: docs.map(d => d.pageContent),\n    checks: ['semantic_similarity', 'keyword_overlap'],\n    min_relevance: 0.75,\n  });\n  \n  if (!results.passed) {\n    throw new Error(`Low relevance docs: ${JSON.stringify(results.scores)}`);\n  }\n  \n  return docs.filter((_, i) => results.passed_docs.includes(i));\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Source Faithfulness + Hallucination Guard",
+        "description": "Ensure LLM response stays faithful to provided context with citation validation",
+        "code": "const faithfulnessCheck = async (response: string, context: string[], citations: any[]) => {\n  const result = await vex.verify({\n    type: 'rag_source_faithfulness',\n    response,\n    context: context.join('\\n'),\n    expected_citations: citations,\n    hallucination_threshold: 0.1,\n  });\n  \n  if (!result.passed) {\n    return {\n      response: 'Unable to verify response against sources. Please refine query.',\n      citations: [],\n      vex_score: result.score,\n    };\n  }\n  \n  return { response, citations, vex_score: result.score };\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise RAG Pipeline",
+      "description": "Get started with Vex free tier at vex.dev to protect your production RAG flows today."
+    }
+  }
+}

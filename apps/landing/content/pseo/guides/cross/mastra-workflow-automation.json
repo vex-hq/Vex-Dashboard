@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Mastra + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra workflow automation",
+      "Mastra guardrails",
+      "workflow automation reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Mastra is a powerful TypeScript framework for building sophisticated AI agents with workflows, knowledge bases, and third-party integrations, perfect for workflow automation use cases. Guardrails are essential to prevent common failures like unvalidated step outputs, malformed tool responses, and stale memory context that can derail multi-step executions. Vex provides seamless middleware integration to ensure action correctness, permission validation, idempotency, and rollback capabilities in your Mastra agents.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Mastra",
+      "description": "Mastra workflow automation typically involves a central Agent orchestrating sequential or conditional steps, each potentially calling external APIs, tools, or human approvers. The architecture features a pipeline of NodeSteps connected by transitions with conditional logic, memory stores for context persistence, and integration nodes for third-party services. Agents maintain state across executions, making validation between steps critical to prevent cascading errors.\n\nKey components include the Mastra Client for workflow definition, AgentExecutor for runtime execution, and Tool integrations for API calls. Human-in-the-loop is implemented via approval steps that pause execution until external confirmation. Memory retrieval injects prior context, while output validation ensures data flows correctly between transitions.\n\nThis setup excels for complex automations like order processing or content pipelines but introduces risks around data integrity and state consistency that Vex middleware addresses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Mastra Client │───▶│  Agent Executor  │\n│  (Workflow Def) │    │  (Runtime Engine)│\n└──────────┬──────┘    └──────┬────────────┘\n           │                  │\n           ▼                  ▼\n┌─────────────────┐    ┌──────────────────┐\n│ Workflow Steps  │◄──▶│   Vex Middleware │\n│ (API/Tools/HIL) │    │   (Guardrails)   │\n└──────────┬──────┘    └────────┬─────────┘\n           │                    │\n           ▼                    ▼\n┌─────────────────┐    ┌──────────────────┐\n│   Memory Store  │    │ External APIs    │\n│ (Context/State) │    │   & Services     │\n└─────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra transitions pass unvalidated outputs directly to next steps, causing type errors or logic failures downstream",
+        "severity": "high",
+        "mitigation": "Vex middleware validates schemas and data integrity at each transition point"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "External API tools return unexpected formats that break conditional logic or memory injection",
+        "severity": "critical",
+        "mitigation": "Vex verifies tool response schemas and enforces expected output structures"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Outdated memory entries injected into current workflow steps cause incorrect decisions",
+        "severity": "high",
+        "mitigation": "Vex timestamps and freshness-checks memory before injection"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Concurrent API calls return inconsistent data states during workflow execution",
+        "severity": "medium",
+        "mitigation": "Vex implements idempotency checks and transaction coordination"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Multi-Step Workflow with Vex Middleware",
+        "description": "Create a Mastra workflow with API integration, conditional logic, and human approval, inserting Vex as middleware",
+        "code": "import { createMastra } from 'mastra';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst mastra = createMastra();\n\nconst vexMiddleware = new VexMiddleware({\n  projectId: 'your-vex-project-id',\n  apiKey: process.env.VEX_API_KEY!,\n  rules: {\n    verifyActionCorrectness: true,\n    checkPermissions: true,\n    ensureIdempotency: true\n  }\n});\n\nconst workflow = mastra.workflow('order-processing', {\n  steps: [\n    {\n      id: 'fetch-order',\n      type: 'tool',\n      tool: 'orderApi.fetch',\n      middleware: [vexMiddleware.validateInput()]\n    },\n    {\n      id: 'check-approval',\n      type: 'condition',\n      condition: 'order.value > 1000',\n      middleware: [vexMiddleware.validateTransition()],\n      true: 'request-human-approval',\n      false: 'process-order'\n    }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Add Permission Validation to API Tools",
+        "description": "Wrap Mastra tools with Vex permission checks before external API calls",
+        "code": "import { Tool } from 'mastra';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst orderApiTool = new Tool({\n  name: 'fetchOrder',\n  description: 'Fetch order details',\n  execute: async (orderId: string) => {\n    const vex = new VexMiddleware({ /* config */ });\n    \n    // Permission validation\n    await vex.validatePermission({\n      action: 'api:order:read',\n      resource: orderId,\n      context: { workflowId: 'order-processing' }\n    });\n    \n    const response = await fetch(`/api/orders/${orderId}`);\n    const order = await response.json();\n    \n    // Output validation\n    await vex.validateOutputSchema({\n      schema: {\n        type: 'object',\n        properties: { id: { type: 'string' }, status: { type: 'string' } }\n      },\n      data: order\n    });\n    \n    return order;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Implement Idempotency with Vex State Tracking",
+        "description": "Ensure workflow steps are idempotent using Vex's state management",
+        "code": "import { AgentExecutor } from 'mastra';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst executor = new AgentExecutor(workflow);\n\nconst vex = new VexMiddleware({ /* config */ });\n\nexecutor.onBeforeStep(async (step, context) => {\n  // Check idempotency\n  const idempotencyKey = `step:${step.id}:${context.executionId}`;\n  const existingResult = await vex.getState(idempotencyKey);\n  \n  if (existingResult) {\n    console.log('Step already executed, returning cached result');\n    return existingResult;\n  }\n  \n  // Execute with rollback capability\n  return await vex.withRollback(\n    async () => {\n      const result = await step.execute(context);\n      await vex.setState(idempotencyKey, result);\n      return result;\n    },\n    { maxRetries: 3 }\n  );\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Human-in-the-Loop with Action Verification",
+        "description": "Verify agent-proposed actions before human approval step",
+        "code": "const approvalStep = {\n  id: 'human-approval',\n  type: 'human',\n  prompt: (context) => `Approve this action? ${JSON.stringify(context.proposedAction)}`,\n  middleware: [\n    async (input, context) => {\n      const vex = new VexMiddleware({ /* config */ });\n      \n      // Verify action correctness before human review\n      const isValid = await vex.verifyAction({\n        action: context.proposedAction,\n        context: context.workflowState,\n        rules: ['action_correctness', 'permission_validation']\n      });\n      \n      if (!isValid) {\n        throw new Error('Action verification failed');\n      }\n      \n      return input;\n    }\n  ]\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Global Vex Middleware Pipeline",
+        "description": "Add Vex as global middleware to catch all workflow failures",
+        "code": "import { createMastra } from 'mastra';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst vex = new VexMiddleware({\n  projectId: 'your-project-id',\n  rules: {\n    validateTransitions: true,\n    checkToolOutputs: true,\n    verifyMemoryFreshness: true,\n    ensureIdempotency: true\n  }\n});\n\nconst mastra = createMastra();\nmastra.useGlobalMiddleware([\n  vex.validateWorkflowInput(),\n  vex.validateStepOutputs(),\n  vex.checkMemoryContext(),\n  vex.ensureRollbackSafety()\n]);\n\n// All workflows now automatically protected\nexport const protectedWorkflows = mastra.workflows;",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Validation",
+        "description": "Prevent stale context injection with Vex memory checks",
+        "code": "const memoryMiddleware = async (input: any, context: any) => {\n  const vex = new VexMiddleware({ /* config */ });\n  \n  // Check memory freshness (less than 1hr old)\n  const memoryItems = await context.memoryStore.getRelevant();\n  \n  for (const item of memoryItems) {\n    const isFresh = await vex.validateMemoryFreshness({\n      item,\n      maxAgeMs: 60 * 60 * 1000, // 1 hour\n      context: context.workflowState\n    });\n    \n    if (!isFresh) {\n      console.warn(`Stale memory removed: ${item.id}`);\n      await context.memoryStore.remove(item.id);\n    }\n  }\n  \n  return input;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Rollback Safety Wrapper",
+        "description": "Wrap critical steps with automatic rollback on failure",
+        "code": "const safeStepExecution = async (step: any, context: any) => {\n  const vex = new VexMiddleware({ /* config */ });\n  \n  return vex.withRollback(async () => {\n    // Pre-execution state capture\n    const preState = await context.saveState();\n    \n    try {\n      const result = await step.execute(context);\n      \n      // Post-execution validation\n      await vex.validatePostCondition({\n        stepId: step.id,\n        result,\n        expectedState: preState\n      });\n      \n      return result;\n    } catch (error) {\n      // Automatic rollback\n      await context.restoreState(preState);\n      throw error;\n    }\n  }, {\n    rollbackTimeout: 30000,\n    maxRetries: 2\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Workflow Automation",
+      "description": "Install Vex middleware today to protect your production workflows from data integrity failures and ensure reliable automation."
+    }
+  }
+}

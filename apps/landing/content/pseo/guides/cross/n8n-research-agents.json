@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build research agents with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents research agents",
+      "n8n AI Agents guardrails",
+      "research agents reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "n8n AI Agents enable powerful Research Agents that perform multi-step web searches, data synthesis, and summarization through modular workflow nodes. These agentic workflows excel at gathering and analyzing information but are prone to issues like unvalidated outputs, recursive loops, and stale context injection. Vex provides essential guardrails to verify source accuracy, claim validity, recency, and bias before outputs reach end-users.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with n8n AI Agents",
+      "description": "Research Agents in n8n typically start with a trigger node (manual, webhook, or schedule) that feeds into an AI Agent node configured with research tools like web search, page scraping, and summarization. The AI Agent orchestrates tool calls through a chain of nodes: Search Agent → Analysis Agent → Synthesis Agent, with memory nodes maintaining conversation context across steps. Action nodes (email, database write, Slack) consume the final synthesized output.\n\nCritical failure points occur between AI nodes where unvalidated tool outputs pass directly to downstream agents, and memory windows can inject outdated research context. Credential exposure happens when API keys leak through tool parameters in agent traces. Vex integrates as a verification webhook after each AI Agent node to catch these issues early.\n\nThe workflow follows a linear-but-recursive pattern: Trigger → AI Agent (Search) → Vex Verify → AI Agent (Analyze) → Vex Verify → AI Agent (Synthesize) → Vex Verify → Action.",
+      "diagram": "Trigger\n  ↓\nAI Agent: Search\n  ↓\n[Vex Verify Webhook]\n  ↓\nAI Agent: Analyze\n  ↓\n[Vex Verify Webhook]\n  ↓\nAI Agent: Synthesize\n  ↓\n[Vex Verify Webhook]\n  ↓\nAction (Email/DB/Slack)"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "Research agents calling their own trigger webhooks create infinite loops during iterative web searches",
+        "severity": "critical",
+        "mitigation": "Vex recursion detector blocks self-triggering workflows and enforces max iterations"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unverified search results with hallucinated sources propagate through analysis and synthesis steps",
+        "severity": "high",
+        "mitigation": "Vex source verification and claim accuracy checks after each AI node"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "Research tools logging API keys or session tokens in tool call traces",
+        "severity": "high",
+        "mitigation": "Vex PII redaction scrubs credentials from tool parameters before logging"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated research context from previous workflow runs poisons current analysis",
+        "severity": "medium",
+        "mitigation": "Vex recency checks validate memory context timestamps against query time"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n Research Agent with Web Search Tool",
+        "description": "Basic AI Agent node configured for web research with SerpAPI tool integration",
+        "code": "const agentConfig = {\n  agent: 'research',\n  model: 'gpt-4o',\n  tools: [\n    {\n      type: 'serpapi',\n      name: 'web_search',\n      description: 'Search the web for recent information',\n      parameters: {\n        q: '={{$json.query}}',\n        location: 'United States',\n        num: 10\n      }\n    }\n  ],\n  memory: {\n    type: 'windowBuffer',\n    maxTokens: 4000\n  },\n  outputParser: 'json'\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Step Research Workflow Chain",
+        "description": "Chaining search → analyze → synthesize agents with shared memory context",
+        "code": "// Node: Search Agent\nconst searchAgent = {\n  agent: 'research',\n  tools: [{ type: 'serpapi', name: 'search' }]\n};\n\n// Node: Analyze Agent (receives search results)\nconst analyzeAgent = {\n  systemMessage: 'Analyze these search results for claim accuracy: {{$node[\"Search Agent\"].json}}',\n  tools: [{ type: 'code', name: 'analyze_claims' }]\n};\n\n// Node: Synthesize Agent\nconst synthAgent = {\n  systemMessage: 'Synthesize final report from analysis: {{$node[\"Analyze Agent\"].json}}'\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Webhook Node Configuration",
+        "description": "HTTP Request node calling Vex verification after each AI agent",
+        "code": "const vexWebhook = {\n  method: 'POST',\n  url: 'https://api.vex.dev/v1/verify',\n  headers: {\n    'Authorization': 'Bearer {{ $env.VEX_API_KEY }}',\n    'Content-Type': 'application/json'\n  },\n  body: {\n    sessionId: '={{ $json.sessionId }}',\n    input: '={{ $json.userQuery }}',\n    output: '={{ $json.agentOutput }}',\n    useCase: 'research-agent',\n    checks: ['source_verification', 'claim_accuracy', 'recency', 'bias_detection']\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Dynamic Tool Selection for Research Tasks",
+        "description": "Agent dynamically selects search vs scrape tools based on query type",
+        "code": "const researchTools = [\n  {\n    type: 'serpapi',\n    name: 'web_search',\n    condition: \"query.includes('latest') || query.includes('recent')\"\n  },\n  {\n    type: 'httpRequest',\n    name: 'scrape_page',\n    condition: \"query.includes('specific URL')\",\n    parameters: {\n      url: '={{ $json.targetUrl }}'\n    }\n  }\n];\n\nconst agent = {\n  tools: researchTools.filter(tool => eval(tool.condition))\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex SDK Source Verification Check",
+        "description": "Verify search results contain valid, recent sources before analysis agent",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'n8n-research-agent'\n});\n\nconst result = await vex.verify({\n  sessionId: workflow.data.sessionId,\n  input: workflow.data.query,\n  output: workflow.data.searchResults,\n  checks: {\n    sourceVerification: {\n      requireHttps: true,\n      maxAgeDays: 30,\n      domainsAllowlist: ['.edu', '.gov', '.org']\n    }\n  }\n});\n\nif (!result.pass) {\n  throw new Error(`Source verification failed: ${result.issues}`);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Claim Accuracy + Bias Detection",
+        "description": "Guardrail for analysis agent output before synthesis step",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nconst verification = await vex.verify({\n  sessionId: `research-${Date.now()}`,\n  input: 'Analyze: ' + analysisInput,\n  output: agentAnalysis,\n  checks: {\n    claimAccuracy: {\n      evidenceRequired: true,\n      minConfidence: 0.8\n    },\n    biasDetection: {\n      politicalBias: 'neutral',\n      sensationalism: 'low'\n    }\n  }\n});\n\nworkflow.data.vexScore = verification.score;\nif (verification.score < 0.75) {\n  workflow.data.flagged = true;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Recursion + Recency Guardrail",
+        "description": "Prevent loops and validate research timeliness in webhook node",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst client = new Vex({\n  apiKey: n8n.workflow.staticData.vexKey\n});\n\nconst guardrailResult = await client.verify({\n  sessionId: $input.first().json.sessionId,\n  input: $input.first().json.query,\n  output: $input.first().json.synthesis,\n  checks: {\n    recursionDetection: {\n      maxIterations: 5,\n      selfTriggerBlock: true\n    },\n    recencyCheck: {\n      maxAgeHours: 24,\n      timeSensitive: $input.first().json.query.includes('latest')\n    },\n    piiRedaction: 'strict'\n  }\n});\n\nreturn {\n  verified: guardrailResult.pass,\n  score: guardrailResult.score,\n  issues: guardrailResult.issues\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Research Agents",
+      "description": "Add Vex verification webhooks to your n8n workflows today and eliminate research agent failures."
+    }
+  }
+}

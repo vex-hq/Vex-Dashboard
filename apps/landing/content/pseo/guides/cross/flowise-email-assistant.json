@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Flowise + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise ai email assistant",
+      "Flowise guardrails",
+      "ai email assistant reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Flowise enables rapid development of sophisticated email processing agents through its drag-and-drop interface for LLM chains, RAG pipelines, and multi-agent workflows. However, the high-risk nature of email handling—dealing with PII, confidential data, and automated sending—demands robust guardrails to prevent data leaks, inappropriate content, and erroneous actions. Vex provides runtime verification to catch these failures before they impact users or compliance.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Flowise",
+      "description": "The typical Flowise AI Email Assistant architecture starts with an Email Trigger node that receives incoming messages via IMAP or API webhook. This feeds into an Intent Detection chain using a chat model to classify actions like 'reply', 'forward', 'draft', or 'archive'. Parallel branches handle content extraction, attachment processing via custom tool nodes, and vector store retrieval for email history/context.\n\nA central Agent Executor coordinates downstream workflows: PII detection, draft generation with tone control, recipient validation against a CRM vector store, and approval workflows. Custom nodes integrate with email APIs (SendGrid/Resend) for sending, while sequential agent handoffs manage complex multi-step reasoning like attachment analysis or confidentiality checks.\n\nThe flow culminates in conditional routing based on approval scores, with outputs logged to a database for audit trails. This modular design excels for rapid prototyping but introduces risks in unvalidated chain outputs and silent tool failures.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Email Trigger  │───▶│  Intent Detection │\n│     (IMAP/API)   │    │   (ChatOpenAI)    │\n└─────────────────┘    └──────┬──────────────┤\n                            │              │\n┌─────────────────┐    ┌─────▼──────┐ ┌─────▼──────┐\n│ Attachment Tool │◀───│   Draft    │ │ Recipient  │\n│   (PDF/Image)   │    │Generation  │ │Validation  │\n└─────────────────┘    │(AgentExec) │ │(VectorStore│\n                       └──────┬─────┘ └─────▲──────┘\n                              │             │\n                       ┌───────▼──────┐    │\n                       │ Vex Guardrails│◀───┘\n                       │(PII/Tone/Check)│\n                       └───────┬──────┘\n                               │\n                        ┌──────▼──────┘\n                        │ Send Approval│\n                        │   Workflow   │\n                        └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated Draft Content",
+        "description": "Chatflow chains generate email drafts with PII leakage or inappropriate tone due to hallucinated recipient context",
+        "severity": "critical",
+        "mitigation": "Vex PII scanner and tone classifier on all generated drafts before approval workflow"
+      },
+      {
+        "name": "Low-Relevance Email History",
+        "description": "Vector store retrieves irrelevant past emails, causing contextually wrong replies or forwards",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity scoring on retrieved documents with rejection thresholds"
+      },
+      {
+        "name": "Silent Attachment Processing Failures",
+        "description": "Custom tool nodes fail to extract text from attachments without error propagation to main flow",
+        "severity": "high",
+        "mitigation": "Vex tool call monitoring with timeout enforcement and fallback responses"
+      },
+      {
+        "name": "Context Loss in Approval Handoffs",
+        "description": "Multi-agent sequential flows lose critical context (intent, attachments) between human approval steps",
+        "severity": "medium",
+        "mitigation": "Vex state persistence verification across agent boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Detection Chain with Vex Callback",
+        "description": "Add Vex as a callback handler to the main chatflow execution for runtime verification of intent classification outputs.",
+        "code": "import { Flowise } from 'flowise';\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst chatflow = await Flowise.loadChatflow('email-assistant-flow');\n\nchatflow.setCallbackHandler({\n  async onChainEnd(inputs: any, outputs: any) {\n    if (outputs.intent) {\n      await vex.verify({\n        sessionId: inputs.sessionId,\n        step: 'intent_detection',\n        input: inputs.emailContent,\n        output: outputs.intent,\n        rules: ['intent_validity'],\n        riskProfile: 'high'\n      });\n    }\n  }\n});\n\nconst result = await chatflow.chat({\n  question: incomingEmail,\n  sessionId: userSessionId\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "PII Filtering for Draft Generation",
+        "description": "Intercept generated email drafts and scan for PII before they reach the approval workflow.",
+        "code": "chatflow.on('draft_generated', async (draft: string, metadata: any) => {\n  const verification = await vex.verify({\n    sessionId: metadata.sessionId,\n    step: 'pii_filtering',\n    input: draft,\n    context: {\n      sender: metadata.sender,\n      recipients: metadata.recipients\n    },\n    rules: ['no_pii', 'confidentiality'],\n    overrides: {\n      pii_threshold: 0.8\n    }\n  });\n\n  if (!verification.pass) {\n    throw new Error(`PII detected: ${verification.issues}`);\n  }\n\n  return draft;\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Recipient Validation with Vector Store",
+        "description": "Verify retrieved CRM contacts match email intent and domain policies before draft routing.",
+        "code": "// Custom node callback for vector store retrieval\nconst validateRecipients = async (retrievedDocs: any[], intent: string) => {\n  const check = await vex.verify({\n    sessionId: sessionId,\n    step: 'recipient_validation',\n    input: retrievedDocs.map(doc => doc.metadata.email),\n    context: { intent },\n    rules: ['domain_policy', 'relationship_validity'],\n    metadata: {\n      useCase: 'email_assistant',\n      vectorStore: 'crm_contacts'\n    }\n  });\n\n  return check.pass ? retrievedDocs : [];\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Tone Analysis Before Sending",
+        "description": "Final verification of email tone appropriateness based on recipient relationship and company policy.",
+        "code": "const sendApproval = async (finalDraft: string, recipients: string[]) => {\n  const toneCheck = await vex.verify({\n    sessionId: sessionId,\n    step: 'tone_approval',\n    input: finalDraft,\n    context: {\n      recipients,\n      senderRole: userRole,\n      companyPolicy: 'professional'\n    },\n    rules: ['tone_appropriateness', 'content_accuracy'],\n    riskProfile: 'critical'\n  });\n\n  if (toneCheck.pass) {\n    await sendEmail(finalDraft, recipients);\n  } else {\n    await routeToHumanReview(toneCheck.issues);\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Global Chatflow Callback Handler",
+        "description": "Configure Vex as the primary callback handler in Flowise chatflow config for comprehensive monitoring.",
+        "code": "// flowise.config.ts\nimport { VexCallbackHandler } from '@vex_dev/sdk/flowise';\n\nconst vexHandler = new VexCallbackHandler({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n  rulesets: ['email-pii', 'tone-control', 'recipient-safety'],\n  riskProfile: 'high',\n  sessionKey: 'email_thread_id'\n});\n\nexport default {\n  chatflows: {\n    'email-assistant': {\n      callbacks: [vexHandler],\n      overrideConfig: {\n        temperature: 0.3,\n        maxTokens: 2000\n      }\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Tool Node Error Propagation",
+        "description": "Wrap Flowise custom tool nodes with Vex monitoring to catch silent failures in attachment processing.",
+        "code": "import { ToolNode } from 'flowise';\nimport { Vex } from '@vex_dev/sdk';\n\nclass SafeAttachmentTool extends ToolNode {\n  constructor() {\n    super();\n    this.name = 'safe_attachment_processor';\n  }\n\n  async execute(input: any) {\n    try {\n      const vex = new Vex({ /* config */ });\n      const result = await vex.verify({\n        step: 'attachment_processing',\n        input: input.file,\n        rules: ['file_type_safe', 'extraction_success']\n      });\n\n      if (!result.pass) {\n        throw new Error('Attachment verification failed');\n      }\n\n      return await this.processAttachment(input.file);\n    } catch (error) {\n      await vex.captureError(error, { context: input });\n      throw error;\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Agent Context Preservation",
+        "description": "Ensure context continuity across agent handoffs in sequential email workflows.",
+        "code": "// Agent handoff middleware\nconst contextGuard = async (fromAgent: string, toAgent: string, state: any) => {\n  const continuityCheck = await vex.verify({\n    sessionId: state.sessionId,\n    step: `handoff_${fromAgent}_to_${toAgent}`,\n    input: state,\n    rules: ['context_preservation'],\n    metadata: {\n      emailThreadId: state.threadId,\n      requiredKeys: ['intent', 'recipients', 'attachments']\n    }\n  });\n\n  if (!continuityCheck.pass) {\n    throw new Error('Context lost during agent handoff');\n  }\n\n  return state;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise AI Email Assistant",
+      "description": "Get started with Vex guardrails today - protect your email workflows from PII leaks and compliance violations."
+    }
+  }
+}

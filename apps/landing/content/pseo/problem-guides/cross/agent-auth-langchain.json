@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in LangChain Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "LangChain agent-auth",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangChain agents, AI Agent Authentication and Authorization issues manifest when agents attempt unauthorized tool calls or access restricted data sources without proper credential validation, leading to security breaches. These problems are exacerbated in agent executors where dynamic tool selection bypasses static auth checks, and in RAG chains where retrieval from authenticated vector stores fails silently. Without robust auth patterns, LangChain agents expose sensitive APIs and data to unauthorized access during autonomous operation.",
+    "howItManifests": [
+      {
+        "scenario": "Agent executor calls authenticated API without credentials",
+        "symptom": "401 Unauthorized errors during tool execution",
+        "impact": "Agent fails silently or leaks auth tokens in error messages"
+      },
+      {
+        "scenario": "RAG chain accesses private vector store without auth",
+        "symptom": "Empty retrieval results or access denied exceptions",
+        "impact": "Agent hallucinates answers from missing context"
+      },
+      {
+        "scenario": "Multi-agent workflow with insufficient role-based access",
+        "symptom": "Cross-agent data leaks during shared memory access",
+        "impact": "Sensitive data exposure between agent roles"
+      },
+      {
+        "scenario": "Dynamic tool binding without auth validation",
+        "symptom": "Tools execute with insufficient or wrong credentials",
+        "impact": "Unauthorized API calls and billing overages"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Tool Call Auth Failures",
+        "description": "Detect 401/403 errors in agent tool calls and missing auth headers",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain.tools import Tool\n\n# Wrap agent executor to detect auth failures\ndef detect_auth_failures(executor: AgentExecutor):\n    def wrapped_invoke(input_dict, **kwargs):\n        try:\n            result = executor.invoke(input_dict, **kwargs)\n            return result\n        except Exception as e:\n            if '401' in str(e) or '403' in str(e) or 'Unauthorized' in str(e):\n                print(f'🚨 AUTH FAILURE: {e}')\n                raise Exception(f'AUTH_VIOLATION: {str(e)}')\n            raise\n    executor.invoke = wrapped_invoke\n    return executor",
+        "language": "python"
+      },
+      {
+        "name": "Validate RAG Auth Headers",
+        "description": "Check if retriever requests include proper auth tokens",
+        "code": "from langchain.retrievers import BaseRetriever\n\ndef audit_retriever_auth(retriever: BaseRetriever):\n    original_get_relevant_documents = retriever.get_relevant_documents\n    \n    def wrapped_get_docs(query: str, **kwargs):\n        # Check for auth headers in kwargs\n        headers = kwargs.get('callbacks', [])\n        has_auth = any('Authorization' in str(cb) or 'api_key' in str(cb) for cb in headers)\n        \n        if not has_auth:\n            print('🚨 RAG AUTH WARNING: No auth headers detected')\n        \n        docs = original_get_relevant_documents(query, **kwargs)\n        if not docs:\n            print('🚨 RAG AUTH FAILURE: Empty results - likely auth issue')\n        return docs\n    \n    retriever.get_relevant_documents = wrapped_get_docs\n    return retriever",
+        "language": "python"
+      },
+      {
+        "name": "Trace Agent Permission Escalation",
+        "description": "Detect when agents attempt privileged operations",
+        "code": "from langchain.callbacks import BaseCallbackHandler\n\nclass AuthViolationHandler(BaseCallbackHandler):\n    def on_tool_start(self, serialized, input_str, **kwargs):\n        privileged_tools = ['admin_api', 'delete_user', 'modify_permissions']\n        if any(tool in serialized['name'] for tool in privileged_tools):\n            print(f'🚨 PRIVILEGE ESCALATION: {serialized[\"name\"]}')\n            raise PermissionError('Unauthorized tool access')\n\n# Usage\nagent_executor = AgentExecutor.from_agent_and_tools(\n    agent=agent,\n    tools=tools,\n    callbacks=[AuthViolationHandler()]\n)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Credential Manager for Tools",
+        "description": "Centralize auth token management for all agent tools",
+        "code": "from langchain.tools import BaseTool\nfrom typing import Dict, Any\n\nclass AuthenticatedTool(BaseTool):\n    name: str\n    description: str\n    api_key: str\n    base_url: str\n    \n    def _run(self, query: str) -> str:\n        headers = {'Authorization': f'Bearer {self.api_key}'}\n        response = requests.post(\n            f'{self.base_url}/api',\n            json={'query': query},\n            headers=headers\n        )\n        response.raise_for_status()\n        return response.json()['result']\n\n# Usage\ntools = [AuthenticatedTool(\n    name='secure_api',\n    description='Secure API call',\n    api_key=os.getenv('API_KEY'),\n    base_url='https://api.example.com'\n)]",
+        "language": "python"
+      },
+      {
+        "name": "Role-Based Agent Executor",
+        "description": "Restrict tools based on agent role permissions",
+        "code": "from langchain.agents import AgentExecutor\nfrom typing import List\n\nclass RoleBasedExecutor(AgentExecutor):\n    def __init__(self, role_permissions: Dict[str, List[str]], **kwargs):\n        super().__init__(**kwargs)\n        self.role_permissions = role_permissions\n    \n    def _get_allowed_tools(self, role: str) -> List[str]:\n        return self.role_permissions.get(role, [])\n    \n    def invoke(self, input_dict, role: str = 'user', **kwargs):\n        allowed_tools = self._get_allowed_tools(role)\n        filtered_tools = [t for t in self.tools if t.name in allowed_tools]\n        return super().invoke(input_dict, tools=filtered_tools, **kwargs)\n\n# Usage\nexecutor = RoleBasedExecutor(\n    role_permissions={\n        'user': ['search', 'calculator'],\n        'admin': ['search', 'calculator', 'admin_api']\n    },\n    agent=agent,\n    tools=all_tools\n)",
+        "language": "python"
+      },
+      {
+        "name": "Secure RAG with Authenticated Retriever",
+        "description": "Wrap vector store retriever with auth validation",
+        "code": "from langchain.retrievers import BaseRetriever\nfrom langchain.schema import Document\n\nclass SecureRetriever(BaseRetriever):\n    retriever: BaseRetriever\n    required_scopes: List[str]\n    \n    def _get_relevant_documents(self, query: str, *, run_manager=None, **kwargs):\n        # Validate user has required scopes\n        user_scopes = kwargs.get('user_scopes', [])\n        missing_scopes = [s for s in self.required_scopes if s not in user_scopes]\n        \n        if missing_scopes:\n            raise PermissionError(f'Missing scopes: {missing_scopes}')\n        \n        # Pass auth context to underlying retriever\n        kwargs['auth_context'] = {'scopes': user_scopes}\n        return self.retriever.get_relevant_documents(query, **kwargs)\n\n# Usage\nsecure_rag = SecureRetriever(\n    retriever=vectorstore.as_retriever(),\n    required_scopes=['read:documents']\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex automatically detects authentication failures across LangChain agents by monitoring tool call patterns, HTTP response codes, and permission errors during agent execution. It wraps chain.invoke() and agent_executor.invoke() calls with vex.verify(), injecting auth validation checkpoints without modifying core agent logic. Vex identifies common failure modes like missing API keys, expired tokens, and privilege escalations, providing detailed traces of unauthorized access attempts.\n\nThe platform generates remediation blueprints showing exactly which tools need auth wrappers and which agent roles require permission restrictions. Vex's runtime verification catches issues before they reach production, automatically testing auth flows across different user roles and data scopes. Integration takes minutes and provides continuous monitoring of agent security posture.\n\nVex also validates RAG chain auth by analyzing retrieval metadata and empty result patterns, distinguishing between true empty results and auth failures. This prevents hallucination cascades from unauthorized data access while maintaining agent performance.",
+      "code": "import vex\nfrom langchain.agents import AgentExecutor\n\n# Install: pip install langchain vex-sdk\n\n@vex.verify(\n    guards=[\n        'auth.missing-token',\n        'auth.unauthorized',\n        'auth.privilege-escalation',\n        'rag.auth-failure'\n    ],\n    auto_fix=True\n)\ndef secure_agent_run(agent_executor: AgentExecutor, input_data: dict, user_role: str):\n    \"\"\"Vex automatically wraps and monitors agent execution\"\"\"\n    result = agent_executor.invoke({\n        'input': input_data,\n        'user_role': user_role  # Vex validates role-based permissions\n    })\n    return result\n\n# Usage\nresult = secure_agent_run(agent_executor, {'query': 'delete all users'}, 'user')\n# Vex blocks unauthorized action and suggests fix",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and secure your LangChain agents in minutes: pip install vex-sdk"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Pydantic AI Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Pydantic AI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Pydantic AI hallucination-detection",
+      "Pydantic AI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Pydantic AI agents, hallucinations manifest as structured outputs that pass initial type validation but contain fabricated or inconsistent data, such as invented tool results or nonsensical entity relationships. These issues are particularly insidious because Pydantic's strict typing creates a false sense of reliability, while agent retry logic and nested tool calls can propagate hallucinations deeper into the execution chain. The framework's streaming validation exacerbates this by allowing partially hallucinated responses to commit before full validation fails.",
+    "howItManifests": [
+      {
+        "scenario": "Result validator rejecting valid but unexpected model outputs",
+        "symptom": "Agent returns perfectly typed JSON with fabricated customer IDs that don't exist in the database",
+        "impact": "Downstream systems process ghost records, corrupting analytics and triggering false alerts"
+      },
+      {
+        "scenario": "Tool retry logic masking persistent underlying errors",
+        "symptom": "Database lookup tool hallucinates the same wrong email address across 3 retries before timing out",
+        "impact": "Customer receives transactional emails at burner addresses, violating compliance"
+      },
+      {
+        "scenario": "Dependency injection context not available in nested tool calls",
+        "symptom": "Nested weather API call hallucinates location data outside the injected user timezone context",
+        "impact": "Personalized recommendations show irrelevant weather-based suggestions"
+      },
+      {
+        "scenario": "Streaming structured responses failing mid-generation validation",
+        "symptom": "Partial customer profile streams with correct name but hallucinates SSN mid-generation",
+        "impact": "Frontend displays corrupted PII, violating GDPR and creating compliance nightmares"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Semantic Consistency Check",
+        "description": "Validate that structured outputs maintain internal consistency across related fields using Pydantic validators",
+        "code": "from pydantic_ai import Agent, Result\nfrom pydantic import BaseModel, field_validator\nfrom typing import Any\n\nclass CustomerProfile(BaseModel):\n    customer_id: str\n    email: str\n    orders: list[str]\n    \n    @field_validator('email')\n    @classmethod\n    def check_domain_consistency(cls, v: str, values: dict[str, Any]) -> str:\n        if values.get('customer_id') and '@example.com' not in v:\n            raise ValueError('Customer email must use example.com domain')\n        return v\n    \n    @field_validator('orders')\n    @classmethod\n    def validate_order_count(cls, v: list[str], values: dict[str, Any]) -> list[str]:\n        expected_orders = int(values.get('customer_id', '0')) % 10 + 1\n        if len(v) != expected_orders:\n            raise ValueError(f'Order count {len(v)} doesn't match customer_id pattern')\n        return v\n\nagent = Agent('customer-service', result_model=CustomerProfile)\nresult = agent.run('Get profile for customer 12345')\n",
+        "language": "python"
+      },
+      {
+        "name": "External Fact Verification",
+        "description": "Cross-reference hallucinated entities against external truth sources before committing",
+        "code": "import httpx\nfrom pydantic_ai import Tool\n\n@Tool()\ndef verify_customer_exists(customer_id: str) -> bool:\n    '''Verify customer exists in CRM before processing'''\n    async with httpx.AsyncClient() as client:\n        resp = await client.get(f'https://crm.example.com/customers/{customer_id}')\n        return resp.status_code == 200\n\nclass VerifiedCustomer(BaseModel):\n    customer_id: str\n    verified: bool = Field(default=False)\n    \n    @model_validator(mode='after')\n    def verify_existence(self) -> 'VerifiedCustomer':        \n        if not verify_customer_exists(self.customer_id):\n            raise ValueError(f'Customer {self.customer_id} does not exist')\n        self.verified = True\n        return self\n\nagent = Agent('verified-customer-lookup', result_model=VerifiedCustomer)\n",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Provenance Tracking",
+        "description": "Track tool call lineage to detect hallucinated intermediate results",
+        "code": "from pydantic_ai import Agent, ToolExecution\nfrom typing import Dict, Any, List\n\nclass Provenance(BaseModel):\n    tool_calls: List[Dict[str, Any]]\n    final_output: Dict[str, Any]\n    \n    @model_validator(mode='after')\n    def validate_provenance(self) -> 'Provenance':\n        tool_outputs = [call['output'] for call in self.tool_calls]\n        # Check if final output references uncalled tools\n        final_keys = set(self.final_output.keys())\n        called_tools = {call['tool_name'] for call in self.tool_calls}\n        \n        orphan_keys = final_keys - called_tools\n        if orphan_keys:\n            raise ValueError(f'Hallucinated tools: {orphan_keys}')\n        return self\n\n@pydantic_ai.agent(result_model=Provenance)\ndef tracked_agent(query: str):\n    # Agent implementation with provenance tracking\n    pass\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fallback Truth Anchors",
+        "description": "Implement deterministic fallback values that override hallucinated outputs",
+        "code": "from pydantic_ai import Agent\nfrom pydantic import BaseModel, Field\n\nclass SafeCustomerResponse(BaseModel):\n    customer_id: str\n    email: str = Field(default_factory=lambda: 'unknown@example.com')\n    status: str\n    confidence: float\n    \n    @model_validator(mode='after')\n    def apply_truth_anchors(self) -> 'SafeCustomerResponse':\n        # Hallucination guardrails\n        if self.customer_id.startswith('9'):\n            # Known hallucination pattern\n            self.email = 'suspended@example.com'\n            self.confidence = 0.1\n            self.status = 'suspended'\n        elif self.confidence < 0.7:\n            self.status = 'needs_human_review'\n        return self\n\nagent = Agent(\n    'safe-customer-lookup',\n    result_model=SafeCustomerResponse,\n    max_retries=1  # Prevent retry loops\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Context Propagation",
+        "description": "Ensure dependency injection flows through nested tool calls",
+        "code": "from pydantic_ai import Agent, Context\nfrom contextlib import contextmanager\n\n@contextmanager\ndef customer_context(customer_id: str):\n    ctx = Context.current()\n    ctx.set('customer_id', customer_id)\n    ctx.set('tenant_id', f'tenant_{customer_id[:3]}')\n    yield ctx\n\nclass ContextualTools:\n    \n    @Tool()\n    def get_orders(self, customer_id: str = Context.get('customer_id')) -> list:\n        tenant_id = Context.get('tenant_id')\n        # Tenant-aware order lookup prevents cross-tenant hallucination\n        return db.query_orders(tenant_id, customer_id)\n    \nagent = Agent('contextual-customer-agent')\n\n# Usage ensures context flows through nested calls\nwith customer_context('CUST123'):\n    result = agent.run('Get complete customer profile')\n",
+        "language": "python"
+      },
+      {
+        "name": "Streaming Validation Windows",
+        "description": "Validate streaming chunks incrementally to catch mid-generation hallucinations",
+        "code": "from pydantic_ai import StreamingAgent\nfrom pydantic import BaseModel\nimport asyncio\n\nclass StreamingCustomer(BaseModel):\n    name: str\n    # Partial validation for streaming\n    @model_validator(mode='before')\n    @classmethod\n    def streaming_validator(cls, data):\n        if isinstance(data, dict):\n            if 'ssn' in data and len(data['ssn']) != 9:\n                raise ValueError('Invalid SSN format detected')\n            if data.get('name') in ['John Doe', 'Jane Smith']:  # Known hallucination names\n                data['confidence'] = 0.1\n        return data\n\nstreaming_agent = StreamingAgent('streaming-customer-profile')\n\nasync def safe_stream():\n    async for chunk in streaming_agent.astream('Profile for customer 123'):\n        # Validate each chunk\n        try:\n            validated = StreamingCustomer.model_validate(chunk)\n            yield validated.model_dump()\n        except ValidationError:\n            yield {'status': 'validation_failed', 'chunk': chunk}\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates directly as a result_validator in Pydantic AI agents, automatically detecting hallucinations by cross-referencing outputs against ground truth datasets and semantic consistency rules. It captures failure patterns across deployments, building agent-specific hallucination detectors that evolve with your usage patterns. Vex's remediation engine suggests precise field-level fixes and can auto-apply safe fallbacks, reducing MTTR from hours to seconds.\n\nThe platform maintains a hallucination risk score per agent, alerting teams before issues cascade to production systems. Vex's dependency injection monitoring catches context-loss hallucinations in nested calls, while its streaming validation handles partial output failures gracefully. Integration takes 3 lines of code and immediately surfaces your most critical hallucination patterns.",
+      "code": "from pydantic_ai import Agent\nfrom vex_sdk import Vex\n\n# 3-line Vex integration\nvex = Vex(api_key='vex_123')\n\n@pydantic_ai.agent(result_validator=vex.validate_result)\ndef customer_agent(query: str):\n    '''Automatically detects hallucinations in customer data'''\n    # Your existing agent logic\n    pass\n\n# Vex auto-generates hallucination detectors and fixes\nagent = customer_agent\nresult = agent.run('Get customer profile')\n\n# Vex dashboard shows:\n# - Hallucination rate: 12%\n# - Top pattern: Fake customer IDs starting with '9'\n# - Auto-fix: Replace with 'unknown@example.com'",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today with `pip install vex-sdk` and eliminate hallucinations across your Pydantic AI agents in minutes."
+    }
+  }
+}

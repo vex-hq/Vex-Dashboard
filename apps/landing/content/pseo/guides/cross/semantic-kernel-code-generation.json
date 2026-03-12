@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "semantic-kernel",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Semantic Kernel + Vex Guardrails",
+    "description": "Learn how to build code generation with Semantic Kernel + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Semantic Kernel code generation",
+      "Semantic Kernel guardrails",
+      "code generation reliability",
+      "Vex Semantic Kernel",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with Semantic Kernel enables powerful LLM-driven development workflows, from initial code synthesis to iterative refinement through sandbox execution and testing. However, the high-risk nature of generating and executing code introduces severe risks like credential leakage, unsafe dependencies, and syntax errors that can cascade through plugin chains. Vex integration provides essential guardrails to verify code safety, execution integrity, and data isolation before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Semantic Kernel",
+      "description": "The typical Semantic Kernel code generation architecture starts with a Planner that orchestrates plugins for requirements analysis, code synthesis, sandbox execution, and test validation. The agent iteratively refines code through memory recall of previous iterations while plugins handle specific tasks like syntax checking, security scanning, and unit test generation. Function calling flows through the kernel's invocation pipeline, with results feeding back into the planner for plan adjustment.\n\nKey components include CodeGeneratorPlugin (synthesizes code), SandboxExecutorPlugin (runs code safely), TestValidatorPlugin (generates/runs tests), and MemoryStore (tracks iteration history). The high-risk profile demands verification at each stage to prevent malicious code injection or execution failures.\n\nVex integrates as a result filter, automatically scanning outputs for safety violations before they propagate through the kernel.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Prompt   │───▶│   Kernel Planner  │\n└─────────────────┘    │   + Memory        │\n                       └──────────┬──────────┐\n                                  │          │\n                       ┌──────────▼──────────┼──────────┐\n                       │ CodeGeneratorPlugin │TestGen   │\n                       └──────────┬──────────┼──────────┘\n                                  │          │\n                       ┌──────────▼──────────┼──────────┐\n                       │SandboxExecutorPlugin│Vex Filter│\n                       │     + Vex Guard     │←──────────┘\n                       └─────────────────────┘\n                                 │\n                       ┌─────────▼──────────────┐\n                       │  Refined Code Output   │\n                       └────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Plugin chaining producing cascading errors",
+        "description": "Code generator produces invalid syntax → sandbox fails → test validator receives broken code → planner loops indefinitely",
+        "severity": "critical",
+        "mitigation": "Vex result filtering catches syntax errors immediately after code generation"
+      },
+      {
+        "name": "Planner generating invalid execution plans",
+        "description": "Planner sequences sandbox execution before code validation, causing premature dangerous execution",
+        "severity": "critical",
+        "mitigation": "Vex verifies execution order and preconditions in plan outputs"
+      },
+      {
+        "name": "Memory recall hallucinating past interactions",
+        "description": "Agent recalls non-existent successful test runs, skipping validation on contaminated code",
+        "severity": "high",
+        "mitigation": "Vex validates memory retrievals against execution history"
+      },
+      {
+        "name": "Cross-plugin data contamination",
+        "description": "Test results from previous iteration leak API keys into next code generation cycle",
+        "severity": "critical",
+        "mitigation": "Vex scans all plugin outputs for credential leakage patterns"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Kernel Setup",
+        "description": "Initialize Semantic Kernel with core code generation plugins and planner",
+        "code": "from semantic_kernel import Kernel\nfrom semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion\n\nkernel = Kernel()\n\n# Add LLM service\nkernel.add_chat_service(\n    \"gpt-4\",\n    OpenAIChatCompletion(\n        deployment_name=\"gpt-4\",\n        ai_model_id=\"gpt-4\",\n    ),\n)\n\n# Add code generation plugin\ncode_plugin = kernel.import_plugin_from_prompt_directory(\"plugins/code_gen\")\n\n# Create planner\nplanner = kernel.add_planner(planners.SequentialPlanner())",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Plugin",
+        "description": "Execute generated code in isolated Docker sandbox with timeout protection",
+        "code": "import docker\n\nclass SandboxExecutor:\n    def execute_code(self, code: str, timeout: int = 30) -> dict:\n        client = docker.from_env()\n        \n        # Create temporary container with Python\n        container = client.containers.run(\n            \"python:3.11-slim\",\n            command=f\"timeout {timeout} python -c '{code}'\",\n            detach=True,\n            remove=True,\n            mem_limit=\"256m\",\n            network_disabled=True\n        )\n        \n        result = container.wait()\n        logs = container.logs().decode()\n        \n        return {\n            \"exit_code\": result[\"StatusCode\"],\n            \"output\": logs,\n            \"success\": result[\"StatusCode\"] == 0\n        }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Kernel with Code Planner",
+        "description": "Semantic Kernel TS setup with sequential planning for code generation workflow",
+        "code": "import { Kernel } from '@semantic-kernel/core';\nimport { OpenAIChatCompletion } from '@semantic-kernel/connectors-ai-openai';\n\nconst kernel = Kernel.create({\n  chat: {\n    OpenAIChatCompletion('gpt-4', {\n      apiKey: process.env.OPENAI_API_KEY,\n    }),\n  },\n});\n\n// Import code generation skills\nconst codeSkill = await kernel.importSkillFromDirectory(\"/path/to/code-skills\");\n\n// Create planner\nconst planner = kernel.createSequentialPlanner();\n\nconst plan = await planner.createPlan([\n  `Generate Python function for: ${{user.input}}`,\n  \"Validate syntax\",\n  \"Execute in sandbox\",\n  \"Generate tests\"\n]);",
+        "language": "typescript"
+      },
+      {
+        "title": "Iterative Refinement Loop",
+        "description": "Main agent loop with memory and refinement based on test feedback",
+        "code": "async function runCodeAgent(prompt: string, kernel: Kernel) {\n  let iteration = 0;\n  let memory = [];\n  \n  while (iteration < 5) {\n    const plan = await kernel.planner.createPlan([\n      `Iteration ${iteration}: Generate code for: ${prompt}`,\n      \"Review memory: \" + memory.slice(-3).join('\\n'),\n      \"Execute and test previous code results\"\n    ]);\n    \n    const result = await kernel.runAsync(plan);\n    memory.push(result.value);\n    \n    if (result.value.includes(\"ALL_TESTS_PASSED\")) {\n      return result.value;\n    }\n    \n    iteration++;\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python: Vex Kernel Result Filter",
+        "description": "Add Vex as post-invocation filter to scan all plugin outputs for code safety",
+        "code": "from vex_sdk import VexClient\nfrom semantic_kernel import KernelFunction\n\n# Initialize Vex\nvex = VexClient(api_key=\"vex-your-key\")\n\n# Create Vex filter function\ndef vex_code_safety_filter(\n    function_result: str, \n    function_name: str\n) -> str:\n    \n    # High-risk verifications for code generation\n    checks = [\n        \"code_safety\",\n        \"syntax_validity\",\n        \"no_credential_leakage\",\n        \"execution_sandboxing\",\n        \"dependency_safety\"\n    ]\n    \n    verdict = vex.verify({\n        \"input\": function_result,\n        \"context\": {\"plugin\": function_name},\n        \"policy\": \"code-generation-high-risk\",\n        \"checks\": checks\n    })\n    \n    if not verdict.approved:\n        raise ValueError(f\"Vex blocked unsafe code: {verdict.reason}\")\n    \n    return function_result\n\n# Register filter on kernel\nkernel.register_function_result_filter(vex_code_safety_filter)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript: Vex Async Result Handler",
+        "description": "Integrate Vex verification in async kernel invocation pipeline",
+        "code": "import { VexClient } from 'vex-sdk';\n\nconst vex = new VexClient({ apiKey: 'vex-your-key' });\n\n// Vex verification middleware\nconst vexFilter = async (result: any, context: any): Promise<any> => {\n  const checks = [\n    'code_safety',\n    'syntax_validity',\n    'no_credential_leakage',\n    'execution_sandboxing',\n    'dependency_safety'\n  ];\n  \n  const verdict = await vex.verify({\n    input: result.toString(),\n    context: { plugin: context.pluginName },\n    policy: 'code-generation-high-risk',\n    checks\n  });\n  \n  if (!verdict.approved) {\n    throw new Error(`Vex Safety Block: ${verdict.reason}`);\n  }\n  \n  return result;\n};\n\n// Apply to kernel invocation\nkernel.invocationContext.addPostHandler(vexFilter);",
+        "language": "typescript"
+      },
+      {
+        "title": "Python: Planner Plan Validation",
+        "description": "Verify execution plans contain safe sequencing before kernel execution",
+        "code": "def validate_execution_plan(plan_steps: list) -> bool:\n    vex_plan_check = vex.verify({\n        \"input\": plan_steps,\n        \"context\": {\"type\": \"execution_plan\"},\n        \"policy\": \"semantic-kernel-planner\",\n        \"checks\": [\n            \"safe_execution_order\",\n            \"sandbox_before_execution\",\n            \"validation_before_production\"\n        ]\n    })\n    \n    return vex_plan_check.approved\n\n# Use in planner workflow\nplan = planner.create_plan(user_input)\nif not validate_execution_plan(plan):\n    plan = planner.create_plan(f\"SAFER version: {user_input}\")\n\nresult = await kernel.run_async(plan)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Semantic Kernel Code Generation",
+      "description": "Install Vex with `pip install vex-sdk` and add result filtering to eliminate code generation risks today."
+    }
+  }
+}

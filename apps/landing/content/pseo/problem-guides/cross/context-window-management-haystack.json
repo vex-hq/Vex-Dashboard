@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Haystack Agents",
+    "description": "How to detect and fix context window management for ai agents in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Haystack context-window-management",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack, Context Window Management issues for AI Agents arise when pipelines exceed LLM token limits during RAG flows, causing truncation or failures in components like DocumentStores and Generators. This manifests as silent errors in Pipeline.connect() chains where retrieved documents overwhelm the prompt builder. Agents built with Haystack's Agent framework amplify this when tool calls chain multiple retrievals without token tracking.",
+    "howItManifests": [
+      {
+        "scenario": "RAG Pipeline with InMemoryDocumentStore",
+        "symptom": "Generator receives 200k+ tokens after DocumentRetriever fetches top-50 docs",
+        "impact": "LLM API 400 errors or truncated responses losing critical context"
+      },
+      {
+        "scenario": "Agent with multiple RetrievalTools",
+        "symptom": "Cumulative context from sequential tool calls exceeds 128k token limit",
+        "impact": "Agent loops indefinitely or hallucinates due to incomplete prompt"
+      },
+      {
+        "scenario": "Custom PromptBuilder with dynamic templates",
+        "symptom": "No token counting before pipeline.run() causing overflow",
+        "impact": "Silent truncation in OpenAIChatGenerator output"
+      },
+      {
+        "scenario": "ElasticsearchDocumentStore with dense retrieval",
+        "symptom": "High top_k returns long docs without metadata filtering",
+        "impact": "Pipeline crashes with MemoryError during prompt assembly"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Custom component that measures input tokens before Generator using tiktoken",
+        "code": "from haystack import component\n\nimport tiktoken\n\n@component\nclass TokenOverflowMonitor:\n    @component.output_types(has_overflow=bool, token_count=int)\n    def run(self, documents: list, query: str):\n        encoder = tiktoken.encoding_for_model('gpt-4')\n        context_tokens = sum(len(encoder.encode(doc.content)) for doc in documents)\n        query_tokens = len(encoder.encode(query))\n        total = context_tokens + query_tokens + 2000  # buffer for prompt\n        return {'has_overflow': total > 128000, 'token_count': total}",
+        "language": "python"
+      },
+      {
+        "name": "Pipeline Response Length Check",
+        "description": "Post-generation assertion tracking response completeness",
+        "code": "from haystack import Pipeline\n\nrag_pipeline = Pipeline()\nrag_pipeline.add_component('monitor', TokenOverflowMonitor())\n\n# After adding other components\nresult = rag_pipeline.run({\n    'retriever': {'query': 'test query'},\n    'monitor': {'documents': [], 'query': 'test query'}\n})\n\nassert not result['monitor']['has_overflow'], f\"Token overflow: {result['monitor']['token_count']}\"",
+        "language": "python"
+      },
+      {
+        "name": "Document Length Distribution",
+        "description": "Retriever wrapper logging document token stats",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\nimport numpy as np\n\nclass TokenAwareRetriever(InMemoryEmbeddingRetriever):\n    def run(self, query_embedding, top_k=5):\n        result = super().run(query_embedding=query_embedding, top_k=top_k)\n        docs = result['documents']\n        encoder = tiktoken.encoding_for_model('gpt-4')\n        lengths = [len(encoder.encode(d.content)) for d in docs]\n        print(f\"Doc lengths: mean={np.mean(lengths):.0f}, max={max(lengths)}\")\n        return result",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Top-K Adjuster",
+        "description": "Retriever component that adapts top_k based on avg doc length",
+        "code": "from haystack import component\n\n@component\nclass AdaptiveTopKRetriever:\n    @component.input_types(query=str)\n    @component.output_types(documents=list, top_k=int)\n    def run(self, query: str, documents: list, target_tokens: int = 80000):\n        encoder = tiktoken.encoding_for_model('gpt-4')\n        doc_tokens = [len(encoder.encode(d.content)) for d in documents]\n        avg_doc = np.mean(doc_tokens)\n        adaptive_k = min(20, int(target_tokens / avg_doc))\n        return {\n            'documents': documents[:adaptive_k],\n            'top_k': adaptive_k\n        }",
+        "language": "python"
+      },
+      {
+        "name": "Context Truncation Component",
+        "description": "Ranks and summarizes docs to fit token budget",
+        "code": "from haystack import component\n\n@component\nclass ContextTruncator:\n    def run(self, documents: list, max_tokens: int = 90000):\n        encoder = tiktoken.encoding_for_model('gpt-4')\n        # Score by relevance (mock - use actual embeddings)\n        scored_docs = sorted(documents, key=lambda d: len(d.content), reverse=True)\n        selected = []\n        current_tokens = 0\n        \n        for doc in scored_docs:\n            doc_tokens = len(encoder.encode(doc.content))\n            if current_tokens + doc_tokens < max_tokens:\n                selected.append(doc)\n                current_tokens += doc_tokens\n        return {'documents': selected}",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budget Pipeline",
+        "description": "Full pipeline with enforced token limits",
+        "code": "from haystack import Pipeline\n\npipeline = Pipeline()\npipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever())\npipeline.add_component(\"truncator\", ContextTruncator(max_tokens=90000))\npipeline.add_component(\"generator\", OpenAIChatGenerator())\n\npipeline.connect(\"retriever.documents\", \"truncator.documents\")\npipeline.connect(\"truncator.documents\", \"generator.documents\")",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a Haystack custom component that automatically instruments all pipelines for token overflow detection using real-time tiktoken counting and LLM API response monitoring. It captures Pipeline.run() traces, measures document retrieval token costs, and flags when Generator inputs exceed 90% of model limits across OpenAI, Anthropic, and custom providers. Vex's agent learns failure patterns specific to your DocumentStore and retriever combinations, auto-generating adaptive top_k values and truncation strategies.\n\nRemediation runs synthetic queries against your ElasticsearchDocumentStore or InMemory store, validating fixes before deployment. Vex dashboards show token utilization heatmaps per pipeline branch and automatic PRs with ContextTruncator components. For Haystack Agents, Vex traces multi-tool call sequences to prevent cumulative overflow across retrieval chains.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk.haystack import VexMonitor\n\n# Install: pip install haystack-ai vex-sdk\n\nrag_pipeline = Pipeline()\n\n# Vex auto-instruments token counting\nvex_monitor = VexMonitor(\n    model='gpt-4',\n    max_tokens=128000,\n    failure_threshold=0.9  # Alert at 90%\n)\n\nrag_pipeline.add_component('vex', vex_monitor)\nrag_pipeline.add_component('retriever', InMemoryEmbeddingRetriever())\nrag_pipeline.add_component('generator', OpenAIChatGenerator())\n\n# Vex auto-connects to all document flows\nrag_pipeline.connect('retriever.documents', 'vex.documents')\nrag_pipeline.connect('vex.documents', 'generator.documents')\n\n# Vex runs validation suite\nvex_monitor.validate_pipeline(rag_pipeline, test_queries=['sample query'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex to your Haystack pipeline and eliminate context window failures forever."
+    }
+  }
+}

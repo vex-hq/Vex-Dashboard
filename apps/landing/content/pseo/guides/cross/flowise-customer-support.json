@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Flowise + Vex Guardrails",
+    "description": "Learn how to build customer support with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise customer support",
+      "Flowise guardrails",
+      "customer support reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of customer support agents through its drag-and-drop interface, combining RAG pipelines, CRM integrations, and tool-calling for ticket management and order lookups. However, chatflow chains often produce unvalidated outputs, retrieve irrelevant documents, or lose context during agent handoffs, risking inaccurate responses, PII leaks, and policy violations. Vex provides essential guardrails to verify response accuracy, filter sensitive data, ensure tone consistency, and trigger escalations.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Flowise",
+      "description": "A typical Flowise customer support chatflow starts with a user query routed to a Router Node, which directs to either Knowledge Retrieval (vector store + LLM summarizer) or Tool Calling (CRM API for order lookup/ticket creation). The RAG path embeds the query, retrieves relevant docs from a vector store (Pinecone/Chroma), and generates responses via an LLM chain with conversational memory. Tool paths invoke custom nodes for Salesforce/Zendesk integration, often with sequential agent handoffs for complex resolutions. The final Conditional Router checks for escalation triggers before responding.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Router Node    │\n└─────────────────┘    │                  │\n                       │  ├─▶[RAG Chain]────┼─▶[Vector Store]\n                       │  │   (Embed+LLM)   │  │   Retrieval\n                       │  └─▶[Tool Agent]───┼─▶[CRM Tools]\n                       │        (Order/    │  │ (SF/Zendesk)\n                       │         Ticket)   │  └─▶[Response]\n                       └──────────────────┘\n                                 │\n                        ┌─────────────────┐\n                        │ Vex Guardrails  │\n                        │ (PII/Tone/Policy)│\n                        └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated RAG Outputs",
+        "description": "Vector retrieval returns low-relevance docs, causing hallucinated or inaccurate support responses",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks and fact-verification against retrieved context"
+      },
+      {
+        "name": "PII Exposure in Responses",
+        "description": "LLM chains leak customer phone/email/order numbers in generated replies",
+        "severity": "critical",
+        "mitigation": "Vex PII entity extraction and redaction before response delivery"
+      },
+      {
+        "name": "Context Loss in Agent Handoffs",
+        "description": "Multi-agent flows drop conversation history between ticket creation and escalation",
+        "severity": "high",
+        "mitigation": "Vex state validation ensuring memory persistence across nodes"
+      },
+      {
+        "name": "Tone/Policy Violations",
+        "description": "Responses use unprofessional language or violate support guidelines",
+        "severity": "high",
+        "mitigation": "Vex sentiment analysis and compliance scoring against style guides"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "RAG Chain with Vex Callback",
+        "description": "Add Vex as a post-processing callback to validate retrieved documents and generated responses",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  projectId: 'cs-flowise-support'\n});\n\n// In Flowise Custom Node\nconst chatflowCallback = async (input: any, output: any) => {\n  const verification = await vex.verify({\n    inputs: { query: input.query, docs: output.retrievedDocs },\n    output: output.response,\n    checks: ['semantic_similarity', 'response_accuracy'],\n    threshold: 0.8\n  });\n  \n  if (!verification.passed) {\n    throw new Error(`Validation failed: ${verification.reason}`);\n  }\n  \n  return output;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "PII Filtering for CRM Tools",
+        "description": "Intercept tool outputs from order lookup/ticket creation to redact PII before customer response",
+        "code": "// Custom Tool Node with Vex PII Guard\n\nconst orderLookupTool = async (customerId: string) => {\n  const orderData = await crmAPI.getOrder(customerId);\n  \n  const piiCheck = await vex.verify({\n    inputs: { customerId },\n    output: orderData,\n    checks: ['pii_redaction'],\n    rules: {\n      redact: ['PHONE_NUMBER', 'EMAIL', 'SSN'],\n      replace: '[REDACTED]'\n    }\n  });\n  \n  return {\n    ...orderData,\n    sanitized: piiCheck.output,\n    piiDetected: piiCheck.detections\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Tone Consistency Checker",
+        "description": "Ensure all responses match brand voice before delivery using Vex style guide validation",
+        "code": "const toneGuardrail = async (response: string, conversationHistory: any[]) => {\n  const toneCheck = await vex.verify({\n    inputs: { history: conversationHistory },\n    output: response,\n    checks: ['tone_consistency'],\n    styleGuide: {\n      company: 'support_brand',\n      tone: 'empathetic_professional',\n      avoid: ['sarcasm', 'jargon']\n    }\n  });\n  \n  return toneCheck.passed ? response : vex.suggestFix(toneCheck);\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Escalation Trigger Detection",
+        "description": "Monitor for frustration signals and policy violations to route to human agents",
+        "code": "// Escalation Router Node\nconst escalationCheck = async (message: string, session: any) => {\n  const analysis = await vex.analyze({\n    text: message,\n    context: session.history,\n    checks: ['sentiment', 'escalation_triggers', 'policy_compliance']\n  });\n  \n  return {\n    needsEscalation: analysis.sentiment < -0.3 || analysis.violations.length > 0,\n    reason: analysis.violations.join(', '),\n    confidence: analysis.confidence\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Global Chatflow Callback Handler",
+        "description": "Configure Vex as the primary error handler and validator in Flowise chatflow settings",
+        "code": "// flowise.config.ts\nimport { VexCallbackHandler } from '@vex_dev/sdk/flowise';\n\nconst vexHandler = new VexCallbackHandler({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-customer-support',\n  riskProfile: 'high',\n  defaultChecks: ['pii_redaction', 'response_accuracy', 'tone_consistency'],\n  failureMode: 'block_and_log'\n});\n\n// Add to Flowise chatflow configuration\nexport const chatflowConfig = {\n  callbacks: [vexHandler],\n  nodes: {\n    ragChain: { postProcess: vexHandler.verify },\n    toolAgent: { preExecute: vexHandler.validateInputs }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Vex Node for Flowise Canvas",
+        "description": "Drag-and-drop Vex verification node for inline validation between chain components",
+        "code": "// vex-guard-node.ts (Flowise Custom Node)\nimport { BaseChatModel } from '@langchain/core/language_models/chat_models';\n\nexport class VexGuardNode {\n  async invoke(input: any, vexClient: any) {\n    const result = await vexClient.verify({\n      inputs: input,\n      checks: ['factual_consistency', 'policy_compliance'],\n      contextWindow: input.conversationHistory\n    });\n    \n    return {\n      ...input,\n      verified: result.passed,\n      score: result.score,\n      issues: result.issues\n    };\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Session-Level Risk Monitoring",
+        "description": "Track cumulative risk across entire customer conversations with Vex session analytics",
+        "code": "// Session monitoring middleware\nconst sessionMonitor = {\n  init: (sessionId: string) => {\n    return vex.session.start({\n      sessionId,\n      useCase: 'customer_support',\n      riskProfile: 'high',\n      track: ['pii_exposure', 'escalation_risk', 'accuracy_drift']\n    });\n  },\n  \n  logTurn: async (sessionId: string, turnData: any) => {\n    await vex.session.logTurn(sessionId, {\n      userInput: turnData.query,\n      aiOutput: turnData.response,\n      metadata: { agent: 'support_rag', tools_used: turnData.tools }\n    });\n    \n    const riskScore = await vex.session.riskScore(sessionId);\n    return riskScore > 0.7; // Trigger human review\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Customer Support",
+      "description": "Get started with Vex guardrails in 5 minutes - npm install @vex_dev/sdk and protect your support agents today."
+    }
+  }
+}

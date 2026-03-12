@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Azure AI Agent Service error-handling",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, AI Agent Error Handling Patterns manifest as unhandled failures in tool execution, grounding data retrieval, and thread management that bypass enterprise security controls and lead to unreliable agent responses. Agents often fail to validate tool outputs against Azure Policy compliance, process outdated Bing grounding data without freshness checks, return metadata instead of file content from Azure search, and crash when exceeding thread token limits without fallback mechanisms. These issues expose enterprises to compliance risks, hallucinated responses, and service disruptions in production workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Tool execution results not validated against enterprise policies",
+        "symptom": "Agents execute custom tools that return PII or violate DLP policies without Azure Policy validation",
+        "impact": "Compliance violations, data leakage, audit failures"
+      },
+      {
+        "scenario": "Grounding data from Bing Search containing outdated information",
+        "symptom": "Agents cite stale web results (e.g., 2023 election results in 2025) without freshness validation",
+        "impact": "Hallucinated factual responses, eroded user trust"
+      },
+      {
+        "scenario": "File search returning Azure-specific metadata instead of content",
+        "symptom": "Azure AI Search returns blob metadata/properties instead of document content",
+        "impact": "Incomplete RAG responses, failed knowledge retrieval"
+      },
+      {
+        "scenario": "Agent thread token limits exceeded without graceful degradation",
+        "symptom": "Long-running agent threads hit Azure OpenAI token limits and crash mid-conversation",
+        "impact": "Lost conversation context, poor user experience"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Policy Validation Monitor",
+        "description": "Detects tool calls missing Azure Policy/DLP validation using Azure AI Projects client",
+        "code": "from azure.ai.projects import ProjectsClient\nfrom azure.identity import DefaultAzureCredential\n\nclient = ProjectsClient(credential=DefaultAzureCredential(), subscription_id='your-sub-id')\n\nagents = client.agents.list()\nfor agent in agents:\n    threads = client.threads.list(agent_id=agent.id)\n    for thread in threads:\n        messages = client.messages.list(thread_id=thread.id)\n        for msg in messages:\n            if 'tool_call' in msg.content and 'policy_check' not in msg.content:\n                print(f'🚨 Policy violation in agent {agent.name}: {msg.id}')\n                print(f'Tool call without validation: {msg.content[\"tool_call\"]}')",
+        "language": "python"
+      },
+      {
+        "name": "Bing Grounding Staleness Detector",
+        "description": "Identifies outdated Bing search grounding data by checking result timestamps",
+        "code": "import re\nfrom datetime import datetime, timedelta\n\ndef check_bing_staleness(thread_messages):\n    stale_results = []\n    for msg in thread_messages:\n        if 'bing_search' in msg.content:\n            # Extract dates from Bing results\n            dates = re.findall(r'(\\d{4}-\\d{2}-\\d{2})', msg.content)\n            for date_str in dates:\n                result_date = datetime.fromisoformat(date_str)\n                if datetime.now() - result_date > timedelta(days=90):\n                    stale_results.append({\n                        'message_id': msg.id,\n                        'stale_date': date_str,\n                        'age_days': (datetime.now() - result_date).days\n                    })\n    return stale_results\n\n# Usage\nstale_data = check_bing_staleness(messages)\nfor issue in stale_data:\n    print(f'🚨 Stale Bing data: {issue}')",
+        "language": "python"
+      },
+      {
+        "name": "Token Limit Crash Detector",
+        "description": "Monitors Azure AI Agent threads for token limit exceedance patterns",
+        "code": "from azure.ai.projects import ProjectsClient\n\nclient = ProjectsClient(credential=DefaultAzureCredential())\n\nfailed_threads = []\nfor agent in client.agents.list():\n    for thread in client.threads.list(agent_id=agent.id):\n        messages = list(client.messages.list(thread_id=thread.id))\n        if len(messages) > 50:  # Proxy for token exhaustion\n            last_msgs = messages[-5:]\n            if any('token_limit' in msg.content or 'max_tokens' in msg.content for msg in last_msgs):\n                failed_threads.append({\n                    'agent': agent.name,\n                    'thread': thread.id,\n                    'message_count': len(messages),\n                    'status': 'TOKEN_EXCEEDED'\n                })\nprint('🚨 Token limit failures:', failed_threads)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Azure Policy Middleware",
+        "description": "Intercepts tool calls and validates against Azure Policy before execution",
+        "code": "from azure.ai.projects import ProjectsClient\nfrom azure.mgmt.policyinsights import PolicyInsightsClient\n\ndef policy_validated_tool_call(tool_call, credential):\n    policy_client = PolicyInsightsClient(credential)\n    \n    # Check tool output against DLP policies\n    compliance_check = policy_client.policy_states.list(\n        policy_assignment_name='dlp-agent-tools',\n        resource_id=tool_call.resource_id\n    )\n    \n    if any(state.compliance_state != 'Compliant' for state in compliance_check):\n        return {\n            'error': 'Tool output violates enterprise DLP policy',\n            'policy_violations': [state.policy_definition_reference_id for state in compliance_check]\n        }\n    \n    return tool_call.execute()\n\n# Integrate in agent middleware\nmiddleware = {\n    'type': 'policy_validation',\n    'handler': policy_validated_tool_call\n}",
+        "language": "python"
+      },
+      {
+        "name": "Freshness-Aware Grounding",
+        "description": "Filters Bing search results by recency and adds freshness metadata",
+        "code": "from datetime import datetime, timedelta\n\ndef fresh_grounding_filter(search_results):\n    cutoff_date = datetime.now() - timedelta(days=30)\n    fresh_results = []\n    \n    for result in search_results:\n        # Parse publication date from Bing metadata\n        pub_date = datetime.fromisoformat(result.get('date_published', '1970-01-01'))\n        \n        if pub_date > cutoff_date:\n            result['freshness_score'] = (datetime.now() - pub_date).days\n            fresh_results.append(result)\n        else:\n            print(f'Skipped stale result: {result[\"title\"]} ({pub_date})')\n    \n    return {\n        'results': fresh_results,\n        'freshness_warning': len(search_results) != len(fresh_results)\n    }\n\n# Agent grounding config\nagent_config = {\n    'grounding': {\n        'bing_search': {\n            'freshness_filter': fresh_grounding_filter,\n            'max_age_days': 30\n        }\n    }\n}",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Thread Manager",
+        "description": "Gracefully degrades when approaching Azure OpenAI token limits",
+        "code": "class TokenAwareThreadManager:\n    def __init__(self, max_tokens=128000):\n        self.max_tokens = max_tokens\n        self.current_tokens = 0\n        self.conversation_summary = []\n    \n    def add_message(self, message):\n        msg_tokens = len(message.content) // 4  # Rough token estimate\n        \n        if self.current_tokens + msg_tokens > self.max_tokens * 0.9:\n            # Summarize and reset\n            self.conversation_summary.append(self.summarize_thread())\n            self.current_tokens = 0\n            \n        self.current_tokens += msg_tokens\n        return message\n    \n    def summarize_thread(self):\n        return {\n            'type': 'thread_summary',\n            'tokens_saved': self.current_tokens,\n            'reset': True\n        }\n\n# Usage in Azure AI Agent Service\nthread_manager = TokenAwareThreadManager()\nfor message in incoming_messages:\n    processed = thread_manager.add_message(message)\n    agent.process_message(processed)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates directly into Azure AI Agent Service pipelines as middleware, automatically scanning agent threads, tool calls, and grounding data for the four critical error patterns. Using the Vex SDK (pip install vex-sdk), it monitors Azure AI Projects APIs in real-time, validates tool outputs against Azure Policy, freshness-checks Bing grounding data, transforms file search metadata into content, and enforces token-aware thread management with automatic summarization. Vex provides comprehensive observability dashboards showing error rates, compliance violations, and token utilization across all agents.\n\nThe platform automatically generates remediation code snippets and deploys policy-as-code fixes to Azure Policy assignments. Vex's agent reliability score provides a single metric for agent health, triggering alerts when error patterns exceed thresholds. Integration takes <5 minutes via Azure AI Projects middleware configuration.",
+      "code": "from vex_sdk import VexAgentMonitor\nfrom azure.ai.projects import ProjectsClient\nfrom azure.identity import DefaultAzureCredential\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex_monitor = VexAgentMonitor(\n    azure_tenant_id='your-tenant-id',\n    patterns=['agent-error-handling']\n)\n\nclient = ProjectsClient(credential=DefaultAzureCredential())\n\n@vex_monitor.middleware()\ndef azure_agent_pipeline(agent_request):\n    # Auto-detects all 4 error patterns\n    issues = vex_monitor.scan_agent_request(agent_request)\n    \n    if issues:\n        # Auto-generates fixes\n        fixes = vex_monitor.generate_fixes(issues)\n        vex_monitor.apply_fixes(fixes)\n        \n        print('✅ Vex auto-remediated:', issues)\n    \n    return agent_request\n\n# Deploy to Azure AI Agent Service\nvex_monitor.deploy_to_azure_ai_projects(\n    resource_group='rg-agent-prod',\n    subscription_id='your-sub-id'\n)\n\nprint('🚀 Vex monitoring active for Azure AI Agent Service')\n\n# View reliability dashboard\nprint(vex_monitor.dashboard_url())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AI Agent error handling failures across your Azure AI Agent Service deployment in under 5 minutes."
+    }
+  }
+}

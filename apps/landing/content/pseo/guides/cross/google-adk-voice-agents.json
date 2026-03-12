@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Google ADK + Vex Guardrails",
+    "description": "Learn how to build voice agents with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK voice agents",
+      "Google ADK guardrails",
+      "voice agents reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Google's Agent Development Kit (ADK) enables real-time conversational AI powered by Gemini models, processing speech-to-text, LLM reasoning, and text-to-speech in sub-second pipelines. Guardrails are essential due to high-stakes real-time interactions where latency violations, incoherent responses, or safety failures can erode user trust. Vex provides runtime verification to ensure response appropriateness, latency budgets, conversation coherence, and safety filtering.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Google ADK",
+      "description": "Voice agents follow a real-time pipeline: audio input is transcribed via speech-to-text (e.g., Google Cloud Speech-to-Text), fed into ADK's multi-agent orchestration for Gemini-powered reasoning and tool delegation, then synthesized back to speech using text-to-speech (e.g., Google Cloud TTS). ADK manages agent delegation, session state, and tool calls, but long conversations risk state corruption while multi-agent handoffs can create circular dependencies or format mismatches. Sub-second latency demands optimized model switching and efficient callbacks, where Vex integrates as a before_agent_callback to verify inputs/outputs without blocking the critical path.\n\nThe architecture emphasizes stateless agents with shared session memory, real-time streaming, and fallback mechanisms for latency spikes. Common patterns include root orchestrator agents delegating to specialist sub-agents for tasks like intent classification or tool execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│ Speech-to-Text   │───▶│   ADK Agents    │\n│     Input       │    │   (STT)          │    │  (Gemini LLM)   │\n└─────────────────┘    └──────────────────┘    │  Orchestrator   │\n                                               │  + Sub-agents    │\n                                               │  Vex Callback ───┼───[Verify]\n                                               └─────────────────┘    │\n                                                                    │\n                                               ┌─────────────────┐    │\n                                               │  Text-to-Speech │◀───┘\n                                               │     (TTS)       │\n                                               └─────────────────┘\n                                                      │\n                                                ┌─────────────────┐\n                                                │   Speakers      │\n                                                │    Output       │\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Agents endlessly delegate tasks without resolution, causing infinite loops and latency violations",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation graphs before execution, blocking cycles via graph analysis"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Dynamic model selection (e.g., Gemini 1.5 Pro vs Flash) leads to format mismatches across agents",
+        "severity": "high",
+        "mitigation": "Vex enforces consistent output schemas regardless of model selection"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Shared memory drift causes incoherent context in extended voice interactions",
+        "severity": "high",
+        "mitigation": "Vex validates session state integrity and conversation coherence before agent calls"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "Agents expect different JSON schemas from shared tools, breaking the pipeline",
+        "severity": "medium",
+        "mitigation": "Vex normalizes tool responses to canonical formats before agent consumption"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent Pipeline with ADK",
+        "description": "Core speech-to-text → ADK → text-to-speech pipeline with real-time requirements",
+        "code": "import google.cloud.speech_v1p1beta1 as speech\nfrom google.adk import Agent, Session, before_agent_callback\nimport google.cloud.texttospeech as tts\n\n# STT client\nstt_client = speech.SpeechClient()\n\n# TTS client\ntts_client = tts.TextToSpeechClient()\n\n# ADK Voice Agent\nvoice_agent = Agent(\n    name=\"voice_agent\",\n    model=\"gemini-1.5-flash\",\n    tools=[...],  # Your tools here\n    before_agent_callback=vex_callback  # Vex integration point\n)\n\ndef process_audio(audio_bytes):\n    # Speech-to-Text\n    audio = speech.RecognitionAudio(content=audio_bytes)\n    config = speech.RecognitionConfig(\n        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,\n        sample_rate_hertz=16000,\n        language_code=\"en-US\",\n        enable_automatic_punctuation=True\n    )\n    response = stt_client.recognize(config=config, audio=audio)\n    transcript = response.results[0].alternatives[0].transcript\n    \n    # ADK Agent Reasoning\n    session = Session(user_id=\"voice_user\")\n    agent_response = voice_agent.run(transcript, session=session)\n    \n    # Text-to-Speech\n    synthesis_input = tts.SynthesisInput(text=agent_response.text)\n    voice = tts.VoiceSelectionParams(language_code=\"en-US\", name=\"en-US-Wavenet-D\")\n    audio_config = tts.AudioConfig(audio_encoding=tts.AudioEncoding.MP3)\n    tts_audio = tts_client.synthesize_speech(\n        input=synthesis_input, voice=voice, audio_config=audio_config\n    )\n    return tts_audio.audio_content",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Orchestration Setup",
+        "description": "Root orchestrator delegates to specialist agents with session state management",
+        "code": "from google.adk import Agent, MultiAgentSystem, Session\n\n# Specialist agents\nintent_agent = Agent(name=\"intent\", model=\"gemini-1.5-flash\")\nentity_agent = Agent(name=\"entity\", model=\"gemini-1.5-pro\")\naction_agent = Agent(name=\"action\", model=\"gemini-1.5-flash\")\n\n# Root orchestrator\norchestrator = Agent(\n    name=\"voice_orchestrator\",\n    model=\"gemini-1.5-flash\",\n    agents=[intent_agent, entity_agent, action_agent],\n    delegation_strategy=\"sequential\",\n    before_agent_callback=vex_guardrail_callback\n)\n\n# Multi-agent system\nvoice_system = MultiAgentSystem(agents=[orchestrator])\n\ndef handle_conversation(transcript, session_id):\n    session = Session(session_id=session_id, max_turns=50)\n    response = voice_system.run(transcript, session=session)\n    return response.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Latency Monitoring",
+        "description": "Wrap ADK calls with latency budget enforcement for sub-second voice requirements",
+        "code": "import time\nfrom google.adk import Agent, Session\n\nclass LatencyGuard:\n    def __init__(self, budget_ms=800):\n        self.budget_ms = budget_ms\n    \n    def check_pipeline(self, transcript):\n        start_time = time.time()\n        \n        # STT (mocked as ~150ms)\n        stt_time = 150\n        \n        # ADK Agent (measured)\n        agent_start = time.time()\n        response = voice_agent.run(transcript)\n        agent_time = (time.time() - agent_start) * 1000\n        \n        # TTS (mocked as ~100ms)\n        tts_time = 100\n        \n        total_latency = stt_time + agent_time + tts_time\n        \n        if total_latency > self.budget_ms:\n            raise TimeoutError(f\"Latency violation: {total_latency}ms > {self.budget_ms}ms\")\n        \n        return response\n\nlatency_guard = LatencyGuard(budget_ms=800)\n# Integrate with main pipeline\nresult = latency_guard.check_pipeline(user_transcript)",
+        "language": "python"
+      },
+      {
+        "title": "Session State Management",
+        "description": "Maintain conversation history and prevent state corruption in long sessions",
+        "code": "from google.adk import Session\nfrom typing import Dict, List\n\nclass VoiceSessionManager:\n    def __init__(self):\n        self.sessions: Dict[str, Session] = {}\n    \n    def get_or_create_session(self, user_id: str) -> Session:\n        if user_id not in self.sessions:\n            self.sessions[user_id] = Session(\n                user_id=user_id,\n                context_window=20,\n                max_turns=100,\n                state_validators=[\n                    self.validate_conversation_coherence,\n                    self.validate_no_hallucinations\n                ]\n            )\n        return self.sessions[user_id]\n    \n    def validate_conversation_coherence(self, session: Session) -> bool:\n        # Check for topic drift, repetition patterns\n        recent_turns = session.history[-5:]\n        return len(set([t.intent for t in recent_turns])) > 1\n    \n    def validate_no_hallucinations(self, session: Session) -> bool:\n        # Verify factual consistency\n        return True  # Vex will handle this\n    \n# Usage\nsession_mgr = VoiceSessionManager()\nsession = session_mgr.get_or_create_session(\"user_123\")\nresponse = voice_agent.run(transcript, session=session)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex before_agent_callback Setup",
+        "description": "Add Vex as callback to verify all agent inputs/outputs before execution",
+        "code": "from vex import VexClient\nfrom google.adk import before_agent_callback\n\nvex_client = VexClient(api_key=\"your-vex-api-key\")\n\n@vex_client.guardrail(\n    verifications=[\n        \"response_appropriateness\",\n        \"latency_budget\",\n        \"conversation_coherence\",\n        \"safety_filtering\"\n    ],\n    risk_profile=\"high\",\n    timeout_ms=750\n)\ndef vex_voice_guardrail(ctx):\n    \"\"\"Vex callback for ADK voice agents\"\"\"\n    \n    # Verify input appropriateness\n    if not ctx.input_is_safe(ctx.message):\n        return \"I cannot assist with that request.\"\n    \n    # Check conversation coherence\n    if ctx.session_turn > 20:\n        coherence_score = ctx.verify_coherence(ctx.session_history[-10:])\n        if coherence_score < 0.7:\n            return \"Let me clarify - what specifically would you like help with?\"\n    \n    # Latency budget check\n    if ctx.latency_forecast() > 800:\n        return \"One moment while I process that...\"\n    \n    # Allow agent execution\n    return ctx.PROCEED\n\n# Register with ADK\nvoice_agent = Agent(\n    name=\"voice_agent\",\n    before_agent_callback=vex_voice_guardrail\n)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Cycle Detection",
+        "description": "Prevent circular delegation using Vex graph analysis",
+        "code": "from vex import VexClient\nfrom google.adk import Agent, MultiAgentSystem\n\nvex_client = VexClient(api_key=\"your-vex-api-key\")\n\n@vex_client.guardrail(\n    verifications=[\"agent_delegation_cycles\"],\n    max_depth=5\n)\ndef prevent_agent_cycles(ctx):\n    \"\"\"Detect circular delegation patterns\"\"\"\n    \n    delegation_path = ctx.get_delegation_path()\n    \n    # Vex analyzes for cycles\n    if ctx.has_cycle(delegation_path):\n        return {\n            \"text\": \"I'll handle this directly.\",\n            \"bypass_delegation\": True\n        }\n    \n    # Check delegation depth\n    if len(delegation_path) > 4:\n        return {\n            \"text\": \"Escalating to root orchestrator.\",\n            \"redirect_to\": \"orchestrator\"\n        }\n    \n    return ctx.PROCEED\n\n# Apply to multi-agent system\norchestrator.before_agent_callback = prevent_agent_cycles",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Safety + Latency Guard",
+        "description": "Combined safety filtering and latency enforcement for voice pipeline",
+        "code": "from vex import VexClient\nimport time\n\nvex_client = VexClient(api_key=\"your-vex-api-key\")\n\n@vex_client.guardrail(\n    verifications=[\n        \"safety_filtering\",\n        \"latency_budget:800ms\",\n        \"response_appropriateness\"\n    ]\n)\ndef voice_pipeline_guard(ctx):\n    \"\"\"Critical path guard for sub-second voice agents\"\"\"\n    \n    start_time = time.time()\n    \n    # Safety filtering FIRST\n    safety_score = ctx.safety_check(ctx.message)\n    if safety_score < 0.9:\n        return {\n            \"text\": \"Sorry, I can't help with that.\",\n            \"end_session\": True\n        }\n    \n    # Latency prediction\n    predicted_latency = ctx.latency_predict(\n        input_length=len(ctx.message),\n        agent_count=ctx.active_agents\n    )\n    \n    if predicted_latency > 750:\n        return {\n            \"text\": \"Processing...\",\n            \"use_lightweight_model\": True\n        }\n    \n    # Final appropriateness check\n    if not ctx.is_appropriate_for_voice(ctx.message):\n        return \"Could you rephrase that?\"\n    \n    return ctx.PROCEED\n\n# Install in ADK\nvoice_agent.before_agent_callback = voice_pipeline_guard",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Voice Agents",
+      "description": "Add Vex guardrails today to protect your real-time voice conversations from failure - install with `pip install vex-sdk` and deploy in minutes."
+    }
+  }
+}

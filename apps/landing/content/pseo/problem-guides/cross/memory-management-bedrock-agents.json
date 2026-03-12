@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix ai agent memory management in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Amazon Bedrock Agents memory-management",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Amazon Bedrock Agents, AI Agent Memory Management issues manifest as session state loss between multi-turn invocations, where the agent's memory of prior context fails to persist, leading to repetitive or incoherent responses. This is exacerbated by improper handling of session attributes in action group Lambda functions and incomplete memory retention in knowledge base retrievals. Without robust memory management, agents lose enterprise context, causing degraded performance in long-running conversations.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn conversation without sessionState persistence",
+        "symptom": "Agent repeats questions or forgets user preferences across invocations",
+        "impact": "Poor user experience, increased latency from redundant KB queries"
+      },
+      {
+        "scenario": "Action group Lambda returns malformed sessionAttributes",
+        "symptom": "Session state corruption causing agent to hallucinate prior context",
+        "impact": "Critical enterprise decisions based on incorrect memory state"
+      },
+      {
+        "scenario": "Knowledge base chunking loses conversation context",
+        "symptom": "Retrieved documents lack relevance to ongoing session memory",
+        "impact": "Incomplete answers requiring multiple clarification turns"
+      },
+      {
+        "scenario": "Guardrails clear memory on policy violations",
+        "symptom": "Legitimate conversations reset unexpectedly mid-session",
+        "impact": "User frustration and abandoned enterprise workflows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Session State Drift Detection",
+        "description": "Monitors sessionAttributes consistency across agent invocations",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\nprev_session_state = None\n\ndef detect_memory_drift(response):\n    global prev_session_state\n    \n    current_session = response.get('sessionState', {}).get('sessionAttributes', {})\n    \n    if prev_session_state:\n        # Check for unexpected key removal or value changes\n        missing_keys = set(prev_session_state.keys()) - set(current_session.keys())\n        if missing_keys:\n            print(f'⚠️ MEMORY DRIFT: Missing keys {missing_keys}')\n            return False\n    \n    prev_session_state = current_session.copy()\n    return True\n\n# Usage\nresponse = bedrock_agent.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId='session-123',\n    inputText='User message'\n)\n\ndetect_memory_drift(response)",
+        "language": "python"
+      },
+      {
+        "name": "Context Repetition Monitor",
+        "description": "Detects when agent repeats questions due to memory loss",
+        "code": "def detect_repetition_in_session(trace):\n    messages = trace.get('sessionState', {}).get('dialogAction', {}).get('messages', [])\n    \n    user_inputs = [m['content'][0]['text'] for m in messages if m['role'] == 'user']\n    agent_responses = [m['content'][0]['text'].lower() for m in messages if m['role'] == 'agent']\n    \n    repetition_score = 0\n    for i, resp in enumerate(agent_responses):\n        if 'what is your name' in resp or 'can you tell me' in resp:\n            if i > 2:  # Shouldn't ask basic questions after 3 turns\n                repetition_score += 1\n    \n    return repetition_score < 1\n\n# Check latest agent response\nlatest_response = bedrock_agent.invoke_agent(...)\nif not detect_repetition_in_session(latest_response):\n    print('🚨 Memory loss detected - agent repeating questions')",
+        "language": "python"
+      },
+      {
+        "name": "Session Attribute Validation",
+        "description": "Validates sessionAttributes schema consistency",
+        "code": "import json\n\ndef validate_session_schema(session_attrs):\n    required_keys = {'user_id', 'conversation_id', 'preferences'}\n    schema_errors = []\n    \n    if not isinstance(session_attrs, dict):\n        return False, ['Session attributes must be object']\n    \n    missing = required_keys - set(session_attrs.keys())\n    if missing:\n        schema_errors.append(f'Missing required keys: {missing}')\n    \n    # Check for string corruption\n    for key, value in session_attrs.items():\n        if isinstance(value, str) and len(value) > 10000:\n            schema_errors.append(f'Key {key} exceeds size limit')\n    \n    return len(schema_errors) == 0, schema_errors\n\nresponse = bedrock_agent.invoke_agent(...)\nis_valid, errors = validate_session_schema(response['sessionState']['sessionAttributes'])\nif not is_valid:\n    print('❌ Session schema violations:', errors)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Persistent Session State Handler",
+        "description": "Maintains complete session memory across invocations",
+        "code": "import json\nimport boto3\n\nsession_store = {}\n\nclass BedrockMemoryManager:\n    def __init__(self, session_id):\n        self.session_id = session_id\n        self.memory = session_store.setdefault(session_id, {\n            'user_context': {},\n            'conversation_history': [],\n            'preferences': {}\n        })\n    \n    def enrich_agent_request(self, input_text):\n        return {\n            'agentId': 'YOUR_AGENT_ID',\n            'agentAliasId': 'YOUR_ALIAS_ID',\n            'sessionId': self.session_id,\n            'inputText': input_text,\n            'sessionState': {\n                'sessionAttributes': json.dumps(self.memory),\n                'promptSessionAttributes': self.memory.get('prompt_attributes', {})\n            }\n        }\n    \n    def update_from_response(self, response):\n        # Merge new session state\n        new_attrs = response.get('sessionState', {}).get('sessionAttributes', {})\n        if new_attrs:\n            self.memory.update(json.loads(new_attrs))\n        \n        # Append to history\n        self.memory['conversation_history'].append({\n            'timestamp': '2024-01-01T00:00:00Z',\n            'input': response.get('inputText'),\n            'output': response.get('completion')\n        })\n\n# Usage\nmemory_mgr = BedrockMemoryManager('user-session-123')\nrequest = memory_mgr.enrich_agent_request('What\\'s my account status?')\nresponse = bedrock_agent.invoke_agent(**request)\nmemory_mgr.update_from_response(response)",
+        "language": "python"
+      },
+      {
+        "name": "Action Group Memory Sync Lambda",
+        "description": "Ensures Lambda preserves full session context",
+        "code": "import json\n\ndef lambda_handler(event, context):\n    # Extract preserved session memory\n    session_attrs = json.loads(event['sessionState']['sessionAttributes'])\n    \n    # Your business logic here\n    user_id = session_attrs.get('user_id')\n    account_status = get_account_status(user_id)\n    \n    # Preserve ALL existing memory + new data\n    session_attrs['last_account_status'] = account_status\n    session_attrs['last_updated'] = '2024-01-01T00:00:00Z'\n    \n    return {\n        'sessionState': {\n            'sessionAttributes': json.dumps(session_attrs),\n            'promptSessionAttributes': {\n                'account_context': account_status\n            }\n        },\n        'response': {\n            'messageContent': f'Your account status is {account_status}',\n            'responseType': 'TEXT'\n        },\n        'actionGroupNext': False\n    }\n\ndef get_account_status(user_id):\n    return 'ACTIVE'",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Context Injection",
+        "description": "Injects session memory into KB retrieval",
+        "code": "def create_contextual_kb_query(session_memory, user_query):\n    context_summary = session_memory.get('conversation_summary', '')\n    user_prefs = session_memory.get('preferences', {})\n    \n    enriched_query = f\"\"\"\n    Conversation context: {context_summary}\n    User preferences: {user_prefs}\n    Current question: {user_query}\n    \n    Find documents relevant to this specific context and user needs.\n    \"\"\"\n    \n    return enriched_query\n\n# Usage in agent orchestration\nmemory_mgr = BedrockMemoryManager(session_id)\ncontextual_query = create_contextual_kb_query(memory_mgr.memory, user_input)\n\nkb_response = bedrock_agent_runtime.retrieve_and_generate(\n    input={'text': contextual_query},\n    retrieveAndGenerateConfiguration={...}\n)\n\n# Merge KB results with session memory before agent call\nsession_state = {\n    'sessionAttributes': json.dumps(memory_mgr.memory),\n    'promptSessionAttributes': {\n        'kb_context': kb_response['retrievalResults']\n    }\n}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex provides production-grade observability for Bedrock Agents by wrapping invoke_agent() calls with vex.verify() post-processing. This automatically detects memory drift, session state corruption, and context loss patterns across all agent invocations. Vex's ML-powered detectors identify subtle memory degradation before it impacts production SLAs, while automated remediation workflows inject corrected session state.\n\nThe integration captures full sessionState payloads, traces action group Lambda responses, and validates memory consistency against golden patterns learned from healthy sessions. Vex dashboards provide memory health scores and root-cause analysis linking memory issues to specific action groups or KB configurations.\n\nRemediation runs containment (session restart with preserved context), correction (memory state repair), and prevention (action group schema enforcement) automatically, maintaining enterprise SLA compliance.",
+      "code": "import vex\nimport boto3\n\nbedrock_agent_runtime = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n    detectors=[\n        'bedrock-agent-memory-drift',\n        'session-state-corruption',\n        'context-repetition',\n        'kb-relevance-drop'\n    ],\n    auto_remediate=['memory-corruption'],\n    tags=['bedrock-agent', 'memory-management']\n)\ndef invoke_agent_with_memory_safety(agent_id, alias_id, session_id, input_text):\n    response = bedrock_agent_runtime.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=alias_id,\n        sessionId=session_id,\n        inputText=input_text\n    )\n    \n    # Vex automatically validates:\n    # - sessionAttributes schema\n    # - Memory continuity across turns\n    # - Action group response format\n    # - Context preservation\n    \n    return response\n\n# Production usage\nresult = invoke_agent_with_memory_safety(\n    'PROD-AGENT-123',\n    'TSTALIAS20240101',\n    'user-session-456',\n    'Check my account balance'\n)\n\n# Vex handles:\n# ✅ Memory validation\n# ✅ Auto-remediation\n# ✅ Alerting & dashboards\n# ✅ Schema enforcement",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Bedrock Agents in 3 lines of code to eliminate memory management failures."
+    }
+  }
+}

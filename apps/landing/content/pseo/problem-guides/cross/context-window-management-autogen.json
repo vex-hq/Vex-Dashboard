@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in AutoGen Agents",
+    "description": "How to detect and fix context window management for ai agents in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "AutoGen context-window-management",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, Context Window Management issues for AI agents arise when multi-agent conversations exceed LLM token limits, causing truncated histories, forgotten context, and erratic behavior. Agents in group chats or sequential workflows accumulate verbose exchanges without truncation, leading to failed function calls and degraded performance. This is exacerbated by AutoGen's default lack of built-in token tracking across agent threads.",
+    "howItManifests": [
+      {
+        "scenario": "GroupChat with 5+ agents debating solutions",
+        "symptom": "Last agent receives 'context_length_exceeded' error or garbled prompt",
+        "impact": "Infinite conversation loops as agents repeat themselves"
+      },
+      {
+        "scenario": "Sequential code-review workflow with nested function calls",
+        "symptom": "Later agents produce irrelevant code due to truncated history",
+        "impact": "Code execution producing unsafe outputs"
+      },
+      {
+        "scenario": "Multi-turn debate between Critic and Proposer agents",
+        "symptom": "Token usage spikes to 100k+ without warning",
+        "impact": "Uncontrolled token spending in multi-turn debates"
+      },
+      {
+        "scenario": "Human-in-loop refinement cycles",
+        "symptom": "Agents ignore previous human corrections after 10+ turns",
+        "impact": "Agents agreeing on incorrect conclusions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Usage Monitor",
+        "description": "Tracks conversation token count per agent and alerts on 80% threshold",
+        "code": "from autogen import GroupChat, GroupChatManager\nimport tiktoken\n\nencoding = tiktoken.encoding_for_model('gpt-4')\n\ndef token_monitor(content, sender):\n    tokens = len(encoding.encode(content))\n    if tokens > 25000:  # 80% of 32k context\n        return {'alert': f'High token usage: {tokens}', 'truncate': True}\n    return None\n\n# Register as reply filter\ngroupchat.register_reply([GroupChatManager], reply=token_monitor)",
+        "language": "python"
+      },
+      {
+        "name": "Loop Detector",
+        "description": "Identifies repeated message patterns indicating context overflow loops",
+        "code": "from collections import defaultdict\nmessage_history = defaultdict(list)\n\ndef loop_detector(content, sender):\n    msg_hash = hash(content[:200])\n    history = message_history[sender]\n    if msg_hash in history[-3:]:\n        return {'loop_detected': True, 'reset_context': True}\n    history.append(msg_hash)\n    return None\n\ngroupchat.register_reply([GroupChatManager], reply=loop_detector)",
+        "language": "python"
+      },
+      {
+        "name": "Context Drift Scanner",
+        "description": "Compares agent responses against conversation summary to detect forgotten context",
+        "code": "import re\nconversation_summary = ''\n\ndef drift_scanner(content, sender):\n    global conversation_summary\n    # Update summary every 5 messages\n    if len(conversation_summary) < 1000:\n        conversation_summary += content[:200] + '\\n'\n    \n    # Check if response contradicts summary\n    contradictions = re.findall(r'(no|wrong|incorrect|not|disagree)', content.lower())\n    if len(contradictions) > 3:\n        return {'drift_detected': True, 'score': len(contradictions)}\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncation",
+        "description": "Automatically summarizes and truncates conversation history when approaching limits",
+        "code": "from autogen import register_function\n\nturn_count = 0\ncontext_history = []\n\ndef truncate_context(content, sender):\n    global turn_count, context_history\n    context_history.append(content)\n    turn_count += 1\n    \n    if turn_count > 15 or len(''.join(context_history)) > 20000:\n        # Summarize last 10 exchanges\n        summary = ' '.join(context_history[-10:])[:1500]\n        context_history = [f\"SUMMARY: {summary}\"]\n        turn_count = 1\n    return context_history[-1]\n\nconfig_list.register_reply([UserProxyAgent], reply=truncate_context)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budgeted Replies",
+        "description": "Enforces max tokens per response to prevent runaway conversations",
+        "code": "def token_limited_reply(messages, sender, config):\n    max_tokens = 800\n    prompt = messages[-1]['content']\n    \n    response = llm.generate(\n        prompt, \n        max_tokens=max_tokens,\n        temperature=0.7\n    )\n    \n    if len(encoding.encode(response)) > max_tokens:\n        response = response[:max_tokens//2] + '... [truncated]'\n    \n    return response\n\nagent.register_for_llm(name=\"token_limited\")(token_limited_reply)",
+        "language": "python"
+      },
+      {
+        "name": "Stateful Memory Manager",
+        "description": "Compresses conversation state into key-value store instead of full history",
+        "code": "import json\nfrom collections import deque\n\nclass ContextManager:\n    def __init__(self, max_items=10):\n        self.state = {}\n        self.recent_msgs = deque(maxlen=max_items)\n    \n    def update(self, content, sender):\n        self.recent_msgs.append({'sender': sender, 'content': content})\n        # Extract key facts\n        self.state['last_decision'] = content[-100:]\n        self.state['agent_count'] = len(set(m['sender'] for m in self.recent_msgs))\n    \n    def get_context(self):\n        return json.dumps(self.state) + '\\nRecent: ' + str(list(self.recent_msgs)[-3:])\n\nctx_mgr = ContextManager()\ndef managed_reply(content, sender):\n    ctx_mgr.update(content, sender)\n    return ctx_mgr.get_context()\n\ngroupchat.register_reply([GroupChatManager], reply=managed_reply)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a reply function filter in AutoGen workflows, automatically detecting context overflow patterns across all agent conversations. It monitors token usage in real-time, identifies loop patterns, and flags context drift without requiring manual configuration changes. Vex's agent-specific detectors catch the unique failure modes of AutoGen group chats and sequential workflows.\n\nOnce detected, Vex applies intelligent remediation: dynamic truncation, state compression, or conversation resets while preserving critical decision context. The integration requires only a single pip install and configuration line, working seamlessly with existing AutoGen agents, group chats, and human-in-loop patterns. Vex provides detailed dashboards showing token efficiency gains and failure prevention metrics specific to your AutoGen deployments.\n\nFor production AutoGen systems, Vex eliminates the need for custom monitoring by providing turn-key detection of all four common context window failure modes with automatic fixes that maintain conversation coherence.",
+      "code": "pip install autogen vex-sdk\n\nfrom autogen import GroupChat, GroupChatManager\nfrom vex_sdk import VexAgentMonitor\n\n# Initialize Vex monitor for AutoGen\nvex_monitor = VexAgentMonitor(\n    framework='autogen',\n    detectors=['context_overflow', 'loop_detection', 'token_spend', 'context_drift'],\n    auto_remediate=True\n)\n\n# Single line integration\nconfig_list = {\n    'vex_filter': vex_monitor.as_reply_filter(),\n    'model': 'gpt-4',\n    'api_key': os.getenv('OPENAI_API_KEY')\n}\n\n# Your existing AutoGen workflow works unchanged\ngroupchat = GroupChat(agents=[coder, critic], messages=[], max_round=20)\nmanager = GroupChatManager(groupchat=groupchat, config_list=config_list)\n\nmanager.start()  # Vex automatically protects entire conversation",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AutoGen context window failures in one line of code."
+    }
+  }
+}

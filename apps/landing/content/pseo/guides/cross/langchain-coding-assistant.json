@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with LangChain + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain ai coding assistant",
+      "LangChain guardrails",
+      "ai coding assistant reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with LangChain enables powerful code-aware agents that analyze repositories, generate fixes, and validate through sandbox execution. However, complex chains and agent loops introduce risks like hallucinated code, security vulnerabilities, and credential leaks that can lead to production failures or exploits. Vex provides runtime verification to ensure code correctness, security, and compliance before deployment.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with LangChain",
+      "description": "The architecture centers on a LangChain agent equipped with tools for repository analysis, code generation, sandbox execution, and test validation. User queries trigger a ReAct agent that retrieves relevant repo context via RAG, generates code fixes using a code-specialized LLM, executes in a sandbox, runs tests, and iterates until validation passes. Long conversations maintain state with memory buffers while tools handle git operations, AST parsing, and security scanning.\n\nKey components include a vector store for repo embeddings, custom tools for sandbox exec and test running, and output parsers ensuring structured responses. The agent loop continues until convergence on working, secure code. Context management prevents token overflow in extended debugging sessions.\n\nVerification occurs at critical gates: post-generation for syntax/security, post-execution for test passes, and final output for compliance.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   LangChain      │\n│  (bug report)   │    │   ReAct Agent    │\n└─────────────────┘    │ + Memory Buffer  │\n                       └────────┬─────────┘\n                                │\n                ┌───────────────▼───────────────┐\n                │  RAG Retrieval + Tools:       │\n                │  • Repo Embeddings            │\n                │  • Git Analysis               │\n                │  • Sandbox Exec               │\n                │  • Test Runner                │\n                └────────┬──────────────────────┘\n                         │\n                ┌────────▼────────┐   ┌──────────┐\n                │   Code Gen      │──▶│ Vex      │\n                │  + Validation   │   │ Verify   │\n                └────────────────┘   └──────────┘\n                                │\n                       ┌────────▼────────┐\n                       │  Verified       │\n                       │  Code Output    │\n                       └────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Hallucinated Incorrect Code",
+        "description": "Agent generates syntactically invalid or logically wrong code due to RAG failures or LLM drift",
+        "severity": "critical",
+        "mitigation": "Wrap chain.invoke() with vex.verify() using code_execution and test validators"
+      },
+      {
+        "name": "Security Vulnerabilities",
+        "description": "Generated code contains injection flaws, unsafe deserialization, or command execution risks",
+        "severity": "critical",
+        "mitigation": "Vex security scanner analyzes AST for OWASP Top 10 patterns and sandbox execution"
+      },
+      {
+        "name": "Credential Leakage",
+        "description": "Agent accidentally includes API keys, passwords, or secrets from repo context in outputs",
+        "severity": "high",
+        "mitigation": "Vex credential detector scans all outputs against known patterns and repo secrets"
+      },
+      {
+        "name": "Infinite Tool Call Loops",
+        "description": "Agent gets stuck repeatedly calling sandbox/test tools without convergence",
+        "severity": "medium",
+        "mitigation": "Vex monitors execution traces and enforces max iterations with early termination"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Repository Context RAG Chain",
+        "description": "Embed repo files and retrieve relevant context for the agent using LangChain's document loaders",
+        "code": "from langchain_community.document_loaders import DirectoryLoader\nfrom langchain.text_splitter import RecursiveCharacterTextSplitter\nfrom langchain_openai import OpenAIEmbeddings\nfrom langchain_community.vectorstores import FAISS\n\n# Load entire repo\nloader = DirectoryLoader('./repo', glob=\"**/*.py\", loader_cls=TextLoader)\ndocs = loader.load()\n\n# Split and embed\nsplitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)\nsplits = splitter.split_documents(docs)\nvectorstore = FAISS.from_documents(splits, OpenAIEmbeddings())\nretriever = vectorstore.as_retriever(search_kwargs={'k': 8})",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Tool",
+        "description": "Custom LangChain tool that executes generated code in isolated Docker sandbox",
+        "code": "from langchain.tools import BaseTool\nfrom subprocess import run, PIPE\nimport docker\n\nclass SandboxExecutor(BaseTool):\n    name = 'sandbox_execute'\n    description = 'Execute Python code in secure sandbox. Input: code string'\n    \n    def _run(self, code: str) -> str:\n        client = docker.from_env()\n        container = client.containers.run(\n            'python:3.11-slim',\n            command=f'python -c \"{code}\"',\n            mem_limit='256m',\n            detach=True,\n            remove=True\n        )\n        result = container.wait()\n        logs = container.logs().decode()\n        return f'Exit: {result}, Output: {logs}'",
+        "language": "python"
+      },
+      {
+        "title": "Agent with Code Tools",
+        "description": "ReAct agent combining RAG, sandbox execution, and test validation tools",
+        "code": "from langchain.agents import create_react_agent, AgentExecutor\nfrom langchain_openai import ChatOpenAI\nfrom langchain import hub\n\nllm = ChatOpenAI(model='gpt-4', temperature=0)\n\ntools = [rag_retriever_tool, sandbox_executor, test_runner]\n\nprompt = hub.pull('hwchase17/react')\nagent = create_react_agent(llm, tools, prompt)\nagent_executor = AgentExecutor(agent=agent, tools=tools, max_iterations=10, verbose=True)\n\nresult = agent_executor.invoke({\n    'input': 'Fix bug in main.py: users report 500 errors on login'\n})",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Executor",
+        "description": "LangChain.js equivalent with async tool execution for Node.js environments",
+        "code": "import { ChatOpenAI } from '@langchain/openai';\nimport { createReactAgent } from '@langchain/core/agents';\nimport { pull } from 'langchain/hub';\nimport { AgentExecutor } from 'langchain/agents';\n\nconst llm = new ChatOpenAI({ model: 'gpt-4o', temperature: 0 });\nconst tools = [ragTool, sandboxTool, testTool];\n\nconst prompt = await pull('hwchase17/react');\nconst agent = await createReactAgent({ llm, tools, prompt });\nconst executor = new AgentExecutor({ agent, tools, maxIterations: 10 });\n\nconst result = await executor.invoke({\n  input: 'Debug failing unit test in auth.test.ts'\n});\nconsole.log(result.output);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Code Generation Output",
+        "description": "Wrap agent final output with Vex to validate syntax, security, and test execution",
+        "code": "import vex\n\nagent_result = agent_executor.invoke({'input': user_query})\n\nverified = vex.verify(\n    agent_result['output'],\n    suite=[\n        vex.code_execution(),\n        vex.security_scan(owasp_top_10=True),\n        vex.credential_detector(),\n        vex.test_runner(pytest=True)\n    ],\n    timeout='30s'\n)\n\nif verified.passed:\n    return verified.output\nelse:\n    return f'Failed verification: {verified.errors}'",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Tool Call Loops",
+        "description": "Monitor agent execution traces for infinite loops and excessive iterations",
+        "code": "import vex\n\nwith vex.span('agent_execution') as span:\n    result = agent_executor.invoke({\n        'input': query,\n        'chat_history': memory.chat_memory.messages\n    })\n    \n    # Vex auto-detects loops from trace patterns\n    if not span.passed:\n        raise Exception(f'Agent loop detected: {span.errors}')\n\n# Extract verified output\nverified_code = span.data['verified_output']",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification",
+        "description": "Integrate Vex SDK in Node.js to verify agent outputs with security suite",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nconst agentResult = await executor.invoke({ input: userQuery });\n\nconst verified = await vex.verify(agentResult.output, {\n  suite: [\n    'code_execution',\n    'security_scan',\n    'credential_detector',\n    'dependency_scan',\n    'license_compliance'\n  ],\n  timeout: '30s'\n});\n\nif (verified.passed) {\n  return verified.output;\n} else {\n  throw new Error(`Verification failed: ${JSON.stringify(verified.errors)}`);\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your chains to eliminate code risks."
+    }
+  }
+}

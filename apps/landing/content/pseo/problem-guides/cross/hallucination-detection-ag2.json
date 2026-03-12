@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in AG2 Agents",
+    "description": "How to detect and fix ai agent hallucination detection in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "AG2 hallucination-detection",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, AI agent hallucinations manifest as agents generating fabricated facts, spiraling into off-topic conversations, or reaching false consensus in group chats due to its enhanced multi-agent conversation patterns. These issues are amplified by AG2's speaker selection mechanisms and lack of built-in fact-checking, leading agents to confidently propagate errors across group discussions. Vex integration via message hooks provides real-time detection of these hallucinations specific to AG2's conversation flows.",
+    "howItManifests": [
+      {
+        "scenario": "Agent conversation spiraling off-topic",
+        "symptom": "Agents reference non-existent previous messages or invent conversation history",
+        "impact": "Complete derailment of task objectives, infinite loops in group chat"
+      },
+      {
+        "scenario": "Group chat consensus on incorrect facts",
+        "symptom": "Multiple agents cite same fabricated statistic or event that never occurred",
+        "impact": "False information becomes 'group truth', propagates to downstream decisions"
+      },
+      {
+        "scenario": "Code execution agents producing harmful outputs",
+        "symptom": "Agents generate dangerous code (rm -rf, pip install malware) justified by hallucinated requirements",
+        "impact": "System compromise, data loss, security vulnerabilities"
+      },
+      {
+        "scenario": "Speaker selection bias in multi-agent groups",
+        "symptom": "Hallucinating agents dominate speaker selection, suppressing correct agents",
+        "impact": "Wrong agents control conversation flow, error reinforcement"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Fact Reference Drift Detection",
+        "description": "Detects when agents reference conversation history that doesn't exist using AG2's message tracking",
+        "code": "from ag2 import GroupChat, Agent\ndef detect_fact_drift(messages):\n    referenced_ids = set()\n    for msg in messages:\n        if 'refers_to' in msg.content:\n            ref_id = extract_message_id(msg.content)\n            referenced_ids.add(ref_id)\n    \n    existing_ids = {msg.id for msg in messages}\n    drift_score = len(referenced_ids - existing_ids) / len(messages)\n    return drift_score > 0.3\n\n# Usage in AG2 group chat\ngroupchat.messages = detect_fact_drift(groupchat.messages)",
+        "language": "python"
+      },
+      {
+        "name": "Consensus Hallucination Monitor",
+        "description": "Identifies when 3+ AG2 agents repeat identical false claims using semantic similarity",
+        "code": "from ag2.core import get_group_messages\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\ndef detect_consensus_hallucination(groupchat):\n    recent_msgs = get_group_messages(groupchat, last_n=20)\n    embeddings = model.encode([msg.content for msg in recent_msgs])\n    \n    # Find repeated claim clusters\n    from sklearn.cluster import DBSCAN\n    clustering = DBSCAN(eps=0.5, min_samples=3).fit(embeddings)\n    hallucination_clusters = sum(1 for label in set(clustering.labels_) if clustering.labels_.tolist().count(label) >= 3)\n    \n    return hallucination_clusters > 0",
+        "language": "python"
+      },
+      {
+        "name": "Code Safety Pre-Execution Scan",
+        "description": "Scans AG2 code agent outputs for dangerous patterns before execution",
+        "code": "import re\nfrom ag2 import CodeExecutor\n\nDANGEROUS_PATTERNS = [\n    r'rm\\s+-rf',\n    r'pip\\s+install\\s+[^\\s]*(malware|virus|exploit)',\n    r'del\\s+/f\\s+/q',\n    r'format\\s+c:'\n]\n\ndef scan_code_safety(message):\n    if message.role != 'code_agent':\n        return True\n    \n    code = message.content\n    for pattern in DANGEROUS_PATTERNS:\n        if re.search(pattern, code, re.IGNORECASE):\n            return False\n    return True\n\n# Hook into AG2 code execution\nexecutor.register_pre_execute_hook(scan_code_safety)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Conversation History Grounding",
+        "description": "Forces AG2 agents to requote exact message IDs before referencing history",
+        "code": "from ag2 import register_message_hook\n\n@register_message_hook\nasync def ground_conversation_history(message):\n    if 'remember when' in message.content.lower() or 'as you said' in message.content.lower():\n        # Force agent to requote exact message\n        grounded_prompt = f\"\"\"Before continuing, QUOTE THE EXACT MESSAGE ID you are referencing:\n{message.content}\n\nOnly proceed after confirming the message exists in our history.\"\"\"\n        return await message.agent.generate_reply(grounded_prompt)\n    return message",
+        "language": "python"
+      },
+      {
+        "name": "Fact-Check Speaker Selection",
+        "description": "Modifies AG2 speaker selection to prioritize agents with verifiable claims",
+        "code": "from ag2.groupchat import GroupChatManager\n\nclass FactCheckSelector(GroupChatManager):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.verified_claims = {}\n    \n    def select_speaker(self, last_speaker, selector):\n        scores = {}\n        for agent in self.agents:\n            recent_claims = self.get_recent_claims(agent)\n            verification_rate = self.verify_claims(recent_claims)\n            scores[agent] = verification_rate\n        \n        return max(scores, key=scores.get)\n\n# Replace default selector\ngroupchat.selector = FactCheckSelector()",
+        "language": "python"
+      },
+      {
+        "name": "Sandbox Code Execution Wrapper",
+        "description": "Wraps all AG2 code execution in isolated Docker containers",
+        "code": "from ag2 import CodeExecutor\nimport docker\n\nclass SafeCodeExecutor(CodeExecutor):\n    def __init__(self):\n        self.client = docker.from_env()\n    \n    async def execute_code(self, code):\n        container = self.client.containers.run(\n            'python:3.11-slim',\n            command=f'python -c \"{code}\"',\n            detach=True,\n            remove=True,\n            mem_limit='256m',\n            network_disabled=True\n        )\n        result = container.wait()\n        logs = container.logs().decode()\n        return {'status': result, 'output': logs}\n\n# Register safe executor\ngroupchat.code_executor = SafeCodeExecutor()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates directly into AG2 via message hooks, automatically scanning every agent message for hallucination patterns specific to AG2's multi-agent flows. It detects conversation drift, false consensus formation, and dangerous code generation in real-time, providing remediation prompts that keep agents grounded.\n\nVex's AG2-specific detectors analyze speaker selection bias and group dynamics, automatically injecting fact-checking agents when hallucinations are detected. The platform maintains conversation provenance, ensuring all claims trace back to verifiable sources.\n\nWith one-line integration, Vex transforms AG2 group chats from hallucination-prone discussions into reliable multi-agent systems, automatically enforcing truthfulness at scale.",
+      "code": "from ag2 import GroupChat, register_message_hook\nfrom vex_sdk import VexAgentMonitor\n\n# Install: pip install ag2 vex-sdk\n\nvex_monitor = VexAgentMonitor(\n    detectors=[\n        'conversation_drift',\n        'consensus_hallucination',\n        'code_safety',\n        'speaker_bias'\n    ],\n    remediation=True\n)\n\n@register_message_hook\nasync def vex_hallucination_guard(message):\n    verdict = await vex_monitor.scan(message)\n    \n    if verdict.score < 0.8:\n        # Auto-remediate\n        fix_prompt = vex_monitor.get_remediation_prompt(verdict)\n        corrected = await message.agent.aask(fix_prompt)\n        return corrected\n    \n    return message\n\n# Apply to AG2 group chat\ngroupchat.register_hook(vex_hallucination_guard)\nprint('🛡️ Vex Hallucination Guard active on AG2 group chat')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install ag2 vex-sdk` and activate hallucination protection in one line."
+    }
+  }
+}

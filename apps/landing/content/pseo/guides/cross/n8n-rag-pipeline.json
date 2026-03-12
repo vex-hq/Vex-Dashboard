@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents rag pipeline",
+      "n8n AI Agents guardrails",
+      "rag pipeline reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with n8n AI Agents enables powerful document retrieval, vector search, and LLM synthesis workflows directly in an open-source automation platform. However, complex agent chains and unvalidated AI outputs introduce risks like hallucinations, stale context injection, and unfaithful citations. Vex provides essential guardrails to verify source faithfulness, context relevance, and citation accuracy before outputs reach end-users.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with n8n AI Agents",
+      "description": "A typical n8n RAG pipeline starts with a trigger node (e.g., webhook or schedule) that receives user queries. This feeds into a vector store retriever node using embeddings from sources like Pinecone or Weaviate to fetch relevant document chunks. Retrieved contexts are assembled and passed to an AI Agent node configured with an LLM like OpenAI GPT-4, which synthesizes responses with source attribution. The agent output flows through action nodes for formatting or external API calls, often with memory nodes maintaining conversation history.\n\nn8n's native AI Agent nodes support tool calling for dynamic retrieval and multi-step reasoning, but lack built-in validation. This creates failure points where stale memory, unvalidated tool outputs, or recursive loops degrade reliability. Vex integrates as a webhook node post-agent to enforce verification.\n\nThe workflow emphasizes modularity: separate nodes for embedding, retrieval, synthesis, and output, enabling easy Vex insertion without disrupting data flow.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Webhook       │───▶│ Vector Retriever  │───▶│ AI Agent (LLM)   │\n│   Trigger       │    │ (Pinecone/DB)     │    │ + Tools          │\n└─────────────────┘    └──────────────────┘    └──────────┬───────┘\n                                                         │\n                                                  ┌───────▼───────┐\n                                                  │    Vex        │\n                                                  │  Webhook      │\n                                                  │ (Guardrails)  │\n                                                  └───────────────┘\n                                                         │\n                                                  ┌───────▼───────┐\n                                                  │  Final Output │\n                                                  │   + Citations │\n                                                  └────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "n8n AI Agent nodes can trigger sub-workflows that loop back, causing infinite execution and escalating costs.",
+        "severity": "critical",
+        "mitigation": "Insert Vex webhook to detect recursion patterns in agent traces and halt execution."
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unverified LLM responses with hallucinations pass directly to database writes or API calls.",
+        "severity": "critical",
+        "mitigation": "Vex verifies source faithfulness and hallucination risk before action nodes execute."
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI Agents may expose API keys or secrets in tool call parameters when generating dynamic URLs.",
+        "severity": "high",
+        "mitigation": "Vex scans tool call payloads for PII/credentials and redacts before logging or execution."
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "n8n memory nodes append outdated retrievals, poisoning LLM context with irrelevant data.",
+        "severity": "high",
+        "mitigation": "Vex evaluates context relevance scores and prunes stale chunks before synthesis."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Vector Store Retrieval Node Setup",
+        "description": "Configure Pinecone vector retriever to fetch top-5 document chunks with metadata.",
+        "code": "const pineconeNode = {\n  name: 'Pinecone Retriever',\n  type: 'n8n-nodes-base.pinecone',\n  parameters: {\n    operation: 'query',\n    indexName: 'rag-docs',\n    queryEmbedding: '={{ $json.query }}',\n    topK: 5,\n    includeMetadata: true,\n    namespace: 'production'\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "AI Agent Node with RAG Tools",
+        "description": "Create AI Agent with custom retrieval tool and citation formatting instructions.",
+        "code": "const aiAgentNode = {\n  name: 'RAG Synthesizer',\n  type: 'n8n-nodes-langchain.agent',\n  parameters: {\n    agent: 'openai-functions',\n    model: 'gpt-4',\n    tools: ['retrievalTool'],\n    systemPrompt: `You are a RAG assistant. Always cite sources using [source_id] format.\nVerify all facts against provided context. Never hallucinate.`\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Assembly with Source Attribution",
+        "description": "Merge retrieved chunks with source metadata for LLM input.",
+        "code": "const contextItems = $input.all();\nconst assembledContext = contextItems.map(item => {\n  return `SOURCE [${item.json.metadata.source_id}]:\n${item.json.text}\\n---`;\n}).join('\\n');\n\nreturn {\n  context: assembledContext,\n  query: $json.query,\n  sources: contextItems.map(i => i.json.metadata)\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Citation Extraction from LLM Output",
+        "description": "Parse [source_id] citations from agent response for verification.",
+        "code": "const response = $json.response;\nconst citationRegex = /\\[(\\d+)\\]/g;\nconst citations = [];\nlet match;\n\nwhile ((match = citationRegex.exec(response)) !== null) {\n  citations.push(parseInt(match[1]));\n}\n\nreturn {\n  response,\n  extractedCitations: citations,\n  sourceCount: citations.length\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Webhook Node Setup",
+        "description": "Add Vex as HTTP Request node after AI Agent to validate outputs.",
+        "code": "const vexWebhookNode = {\n  name: 'Vex Guardrails',\n  type: 'n8n-nodes-base.httpRequest',\n  parameters: {\n    method: 'POST',\n    url: 'https://api.vex.dev/v1/verify',\n    headers: {\n      Authorization: 'Bearer {{ $secrets.vex_api_key }}',\n      'Content-Type': 'application/json'\n    },\n    body: {\n      input: '={{ $json.response }}',\n      context: '={{ $json.context }}',\n      sources: '={{ $json.sources }}',\n      checks: ['source_faithfulness', 'hallucination', 'context_relevance', 'citation_accuracy']\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex SDK Client-Side Verification",
+        "description": "Use Vex TypeScript SDK for programmatic verification in Code nodes.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nconst result = await vex.verify({\n  input: $json.response,\n  context: $json.context,\n  framework: 'n8n-rag',\n  checks: {\n    sourceFaithfulness: { threshold: 0.9 },\n    hallucination: { threshold: 0.1 },\n    contextRelevance: { threshold: 0.8 },\n    citationAccuracy: { threshold: 0.95 }\n  }\n});\n\nif (!result.pass) {\n  throw new Error(`Vex failed: ${JSON.stringify(result.issues)}`);\n}\n\nreturn { verified: true, score: result.score };",
+        "language": "typescript"
+      },
+      {
+        "title": "Handle Vex Failure with Fallback",
+        "description": "Implement fallback response when Vex detects verification failures.",
+        "code": "const vexResult = $json;\n\nif (!vexResult.verified) {\n  return {\n    response: \"I'm sorry, I cannot provide an accurate response with the available sources. Please try rephrasing your query or contact support.\",\n    status: 'blocked',\n    issues: vexResult.issues,\n    score: vexResult.score\n  };\n}\n\n// Pass verified response downstream\nreturn {\n  response: $json.original_response,\n  citations: $json.citations,\n  verified: true\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents RAG Pipeline",
+      "description": "Add Vex guardrails today to eliminate hallucinations and ensure citation accuracy in production."
+    }
+  }
+}

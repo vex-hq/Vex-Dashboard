@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "OpenAI Agents SDK tool-loop-detection",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, tool loops manifest as infinite cycles where agents repeatedly invoke the same tools or handoff between specialized agents without progressing toward task completion. This occurs due to the SDK's flexible agent handoff patterns and lack of built-in loop prevention in the `Runner` execution flow. The problem is exacerbated in multi-agent workflows where `handoff_to` calls create unintended feedback loops between agents with overlapping toolsets.",
+    "howItManifests": [
+      {
+        "scenario": "Agent handoff loops between specialized agents",
+        "symptom": "Runner logs show repeated `handoff_to` calls between AgentA and AgentB with identical tool outputs",
+        "impact": "Infinite execution consuming API credits without task completion"
+      },
+      {
+        "scenario": "Researcher agent repeatedly calls web_search tool",
+        "symptom": "Same search query executed >5 times in `Runner` trace with identical results",
+        "impact": "Stuck in tool loop, API rate limits hit, no final answer produced"
+      },
+      {
+        "scenario": "Guardrail agent hands back to main agent after validation",
+        "symptom": "`validate_output()` always returns handoff_to(main_agent), creating ping-pong loop",
+        "impact": "Guardrail bypassed via repetitive handoffs, security vulnerabilities exposed"
+      },
+      {
+        "scenario": "Multi-tool agent cycles between calculator and data_fetcher",
+        "symptom": "Tool call sequence repeats: `calculate() → fetch_data() → calculate()` endlessly",
+        "impact": "Compute waste, timeout errors in production deployments"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Runner Trace Loop Detector",
+        "description": "Parse OpenAI Agents SDK Runner traces to detect repeated tool calls or handoffs exceeding threshold",
+        "code": "from openai_agents import Runner\nfrom collections import defaultdict, Counter\n\ndef detect_tool_loops(runner_trace):\n    tool_calls = []\n    handoffs = []\n    \n    for step in runner_trace.steps:\n        if hasattr(step, 'tool_calls'):\n            tool_calls.extend([tc.name for tc in step.tool_calls])\n        if hasattr(step, 'handoff_to'):\n            handoffs.append(step.handoff_to.agent_id)\n    \n    tool_counter = Counter(tool_calls[-10:])\n    handoff_counter = Counter(handoffs[-10:])\n    \n    loops = []\n    for tool, count in tool_counter.items():\n        if count >= 5:\n            loops.append({'type': 'tool_loop', 'tool': tool, 'count': count})\n    \n    for agent_id, count in handoff_counter.items():\n        if count >= 3:\n            loops.append({'type': 'handoff_loop', 'agent_id': agent_id, 'count': count})\n    \n    return loops",
+        "language": "python"
+      },
+      {
+        "name": "Live Execution Monitor",
+        "description": "Monkey-patch Runner.step() to track tool call frequency during execution",
+        "code": "import functools\nfrom openai_agents import Runner\n\nclass LoopDetector:\n    def __init__(self):\n        self.tool_history = []\n        self.handoff_history = []\n        self.max_calls = 5\n    \n    def monitor_step(self, step):\n        if hasattr(step, 'tool_calls'):\n            for tc in step.tool_calls:\n                self.tool_history.append(tc.name)\n                if self.tool_history[-self.max_calls:] == self.tool_history[-2*self.max_calls:-self.max_calls]:\n                    raise Exception(f'Tool loop detected: {tc.name} called {len(self.tool_history[-self.max_calls:])} times consecutively')\n        \n        if hasattr(step, 'handoff_to'):\n            self.handoff_history.append(step.handoff_to.agent_id)\n            recent_handoffs = self.handoff_history[-3:]\n            if len(set(recent_handoffs)) < 2:\n                raise Exception(f'Handoff loop detected between: {set(recent_handoffs)}')\n\n# Usage\nloop_detector = LoopDetector()\noriginal_step = Runner.step\nRunner.step = functools.partial(loop_detector.monitor_step, original_step)",
+        "language": "python"
+      },
+      {
+        "name": "State Pattern Matcher",
+        "description": "Detect loops by matching repeating patterns in agent state transitions",
+        "code": "from openai_agents import Runner\nimport re\n\ndef detect_state_loops(runner):\n    state_history = []\n    for i, step in enumerate(runner.trace):\n        state_str = f\"{step.agent_id}:{step.current_tool or 'none'}\"\n        state_history.append(state_str)\n    \n    # Look for repeating patterns of length 3+\n    for length in range(3, min(10, len(state_history)//2 + 1)):\n        for i in range(len(state_history) - 2*length):\n            pattern = state_history[i:i+length]\n            if state_history[i+length:i+2*length] == pattern:\n                return {\n                    'loop_detected': True,\n                    'pattern': pattern,\n                    'start_index': i,\n                    'length': length\n                }\n    return {'loop_detected': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Tool Calls Per Agent",
+        "description": "Configure agents with tool call limits using SDK's built-in constraints",
+        "code": "from openai_agents import Agent, Runner\n\n# Create agent with tool call limits\nresearcher = Agent(\n    name=\"Researcher\",\n    instructions=\"...\",\n    tools=[web_search, calculator],\n    max_tool_calls={\"web_search\": 3, \"calculator\": 5},\n    max_iterations=10\n)\n\n# Runner with global safeguards\nrunner = Runner(\n    agents=[researcher, validator],\n    max_steps=50,\n    loop_detection_window=10\n)\n\nresult = runner.run('query')",
+        "language": "python"
+      },
+      {
+        "name": "Handoff Blacklist",
+        "description": "Prevent immediate reverse handoffs between agents",
+        "code": "from openai_agents import Agent\n\nclass LoopSafeAgent(Agent):\n    def __init__(self, *args, recent_handoffs=None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.recent_handoffs = recent_handoffs or []\n    \n    def handoff_to(self, target_agent):\n        # Prevent immediate handoff back to previous agent\n        if (self.recent_handoffs and \n            target_agent.agent_id in self.recent_handoffs[-2:]):\n            return self.final_output(\"Cannot handoff back immediately to avoid loops\")\n        \n        self.recent_handoffs.append(self.agent_id)\n        return super().handoff_to(target_agent)\n\n# Usage\nmain_agent = LoopSafeAgent(name=\"Main\", ...)\nvalidator = LoopSafeAgent(name=\"Validator\", recent_handoffs=[])",
+        "language": "python"
+      },
+      {
+        "name": "Progressive Tool Escalation",
+        "description": "Force agent progression by disabling repeated tools after N calls",
+        "code": "from openai_agents import Agent\n\nclass ProgressiveAgent(Agent):\n    def __init__(self, *args, tool_usage_limits=None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.tool_usage = Counter()\n        self.tool_limits = tool_usage_limits or {}\n    \n    def available_tools(self):\n        available = super().available_tools()\n        filtered = []\n        for tool in available:\n            usage = self.tool_usage[tool.name]\n            limit = self.tool_limits.get(tool.name, 3)\n            if usage < limit:\n                filtered.append(tool)\n        return filtered\n    \n    def after_tool_call(self, tool_name):\n        self.tool_usage[tool_name] += 1\n\nmath_agent = ProgressiveAgent(\n    tool_usage_limits={\"calculator\": 2, \"web_search\": 3}\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade loop detection as an output guardrail that integrates seamlessly with OpenAI Agents SDK. By adding VexGuardrail to each agent's output pipeline, you automatically detect tool loops, handoff cycles, and state repetition patterns without modifying core agent logic. Vex maintains execution state across multi-agent handoffs and triggers automatic remediation including tool disabling, forced termination, or escalated handoff to a supervisor agent.\n\nThe guardrail analyzes Runner traces in real-time using pattern matching and frequency analysis, providing detailed diagnostics including loop length, repeating sequences, and cost impact. Vex's adaptive thresholds learn from your specific agent topologies, reducing false positives while catching subtle loops that static detection misses. Integration requires only 3 lines of code per agent.",
+      "code": "pip install openai-agents vex-sdk\n\nfrom openai_agents import Agent, Runner\nfrom vex_sdk import VexGuardrail\n\n# Add Vex guardrail to each agent\nresearcher = Agent(\n    name=\"Researcher\",\n    tools=[web_search],\n    output_guardrails=[\n        VexGuardrail(\n            detector=\"tool_loop\",\n            max_tool_calls=5,\n            max_handoffs=3,\n            remediation=\"terminate_with_summary\"\n        )\n    ]\n)\n\nvalidator = Agent(\n    name=\"Validator\",\n    output_guardrails=[\n        VexGuardrail(detector=\"handoff_loop\", window_size=10)\n    ]\n)\n\n# Production runner with Vex\nrunner = Runner(agents=[researcher, validator], enable_vex_tracing=True)\nresult = runner.run(user_query)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of VexGuardrail to eliminate tool loops across your entire OpenAI Agents SDK deployment."
+    }
+  }
+}

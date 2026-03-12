@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with LangGraph + Vex Guardrails",
+    "description": "Learn how to build customer support with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph customer support",
+      "LangGraph guardrails",
+      "customer support reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with LangGraph enables complex, stateful workflows combining RAG, CRM integrations, and tool-calling for ticket management and order lookups. However, cyclical graphs and parallel branches introduce risks like infinite loops, state corruption, and policy violations that can damage customer trust. Vex provides runtime verification to ensure response accuracy, PII filtering, tone consistency, and compliance in high-risk customer interactions.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with LangGraph",
+      "description": "The typical LangGraph customer support agent orchestrates a stateful workflow with nodes for intent classification, knowledge base retrieval (RAG), CRM lookups, and tool execution. The graph maintains conversation state across cycles, using conditional edges for escalation and human-in-the-loop approvals. Parallel branches handle simultaneous ticket creation and order status checks, merging results into a final response.\n\nCore components include a central State model tracking messages, customer context, and action history. Retrieval nodes query vector stores for KB articles, while tool nodes integrate with CRM APIs like Salesforce or Zendesk. Checkpointers persist state for long-running conversations, but schema evolution and merge conflicts create failure points.\n\nHuman-in-the-loop breakpoints pause at escalation triggers, but conditional edges can bypass them. The agent culminates in a response node that synthesizes all gathered context while filtering PII and maintaining brand tone.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Intent Router   │\n└─────────────────┘    └──────┬───────────────┘\n                            │      │      │\n                   ┌────────▼──────┐ ┌────▼─────┐ ┌──────────▼─────────┐\n                   │   RAG/KB     │ │ ToolCall │ │ CRM Lookup (CRM)   │\n                   │ Retrieval    │ │ (Tickets)│ │ (Orders/Salesforce)│\n                   └──────┬───────┘ └────┬─────┘ └──────┬───────────────┘\n                          │              │              │\n                          └──────┬───────┼──────┬───────┘\n                                 │      │      │\n                    ┌────────────▼────────────▼─────────────┐\n                    │        State Merge & Verify           │\n                    │           (Vex Guardrails)            │\n                    └────────────┬──────────────────────────┘\n                                 │\n                    ┌────────────▼─────────────┐\n                    │  Response Generation     │ ───▶ Customer\n                    │ (Tone/PII/Policy Check)  │\n                    └──────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Unterminated loops in escalation or clarification cycles overwhelm resources and frustrate customers",
+        "severity": "critical",
+        "mitigation": "Vex monitors state transition depth and conversation cycles, forcing termination after N iterations"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "CRM lookup and RAG retrieval return conflicting customer data, causing incorrect ticket creation",
+        "severity": "critical",
+        "mitigation": "Vex validates merged state schema and data consistency before response generation"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "New PII fields or CRM data structures break resumed conversations mid-customer interaction",
+        "severity": "high",
+        "mitigation": "Vex schema validation ensures backward compatibility during state hydration"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "High-value ticket escalations skip approval when routing logic changes dynamically",
+        "severity": "high",
+        "mitigation": "Vex enforces mandatory breakpoints for escalation triggers regardless of graph routing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Core LangGraph State and Nodes",
+        "description": "Define the customer support state schema and core nodes for retrieval, tools, and response generation",
+        "code": "from typing import TypedDict, Annotated, Sequence\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.memory import MemorySaver\n\nclass CustomerState(TypedDict):\n    messages: Annotated[Sequence[str], 'add']\n    customer_id: str\n    intent: str\n    kb_results: list\n    crm_data: dict\n    ticket_created: bool\n    needs_escalation: bool\n\n# RAG Node\ndef retrieve_kb(state: CustomerState) -> CustomerState:\n    # Vector store query logic\n    state['kb_results'] = ['FAQ: Return policy...', 'Article: Order tracking...']\n    return state\n\n# CRM Tool Node\ndef crm_lookup(state: CustomerState) -> CustomerState:\n    # Mock CRM API call\n    state['crm_data'] = {'order_status': 'shipped', 'last_contact': '2024-01-15'}\n    return state\n\n# Response Node\ndef generate_response(state: CustomerState) -> CustomerState:\n    response = f\"Based on your order {state['customer_id']}, it's shipped. \" \\\n               f\"KB: {state['kb_results'][0]}\"\n    state['messages'] += (response,)\n    return state",
+        "language": "python"
+      },
+      {
+        "title": "Graph Construction with Conditional Routing",
+        "description": "Build the cyclical workflow with parallel execution and escalation triggers",
+        "code": "def route_intent(state: CustomerState) -> str:\n    if 'refund' in state['messages'][-1]:\n        return 'refund_path'\n    if state['crm_data'].get('tier') == 'vip':\n        return 'escalation'\n    return 'standard_support'\n\ndef should_escalate(state: CustomerState) -> str:\n    return 'human_review' if state['needs_escalation'] else 'generate_response'\n\n# Build graph\nworkflow = StateGraph(CustomerState)\nworkflow.add_node('retrieve', retrieve_kb)\nworkflow.add_node('crm', crm_lookup)\nworkflow.add_node('generate_response', generate_response)\n\nworkflow.set_entry_point('retrieve')\nworkflow.add_conditional_edges('retrieve', route_intent, {\n    'refund_path': 'crm',\n    'escalation': 'human_review',\n    'standard_support': ['retrieve', 'crm']  # Parallel\n})\nworkflow.add_conditional_edges('crm', should_escalate, {\n    'human_review': 'human_review',\n    'generate_response': 'generate_response'\n})\nworkflow.add_edge('generate_response', END)\n\ncheckpointer = MemorySaver()\napp = workflow.compile(checkpointer=checkpointer)",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Branch Execution",
+        "description": "Execute RAG and CRM lookup concurrently using LangGraph's parallel routing",
+        "code": "def parallel_research(state: CustomerState):\n    return {\n        'retrieve': state,\n        'crm': {**state, 'customer_id': state['customer_id']}\n    }\n\n# Add parallel execution to graph\nworkflow.add_conditional_edges(\n    'retrieve',\n    lambda s: 'parallel' if s['intent'] == 'order_status' else 'single',\n    {\n        'parallel': 'research',\n        'single': 'crm'\n    }\n)\nworkflow.add_node('research', parallel_research)\n\n# Merge results from parallel branches\n@workflow.mapper('research')\ndef merge_research(state, config):\n    kb_config = config.updated({\"thread_ts\": config.get('thread_ts')}, node='retrieve')\n    crm_config = config.updated({\"thread_ts\": config.get('thread_ts')}, node='crm')\n    \n    kb_state = app.get_state(kb_config).values\n    crm_state = app.get_state(crm_config).values\n    \n    return {\n        **state,\n        'kb_results': kb_state['kb_results'],\n        'crm_data': crm_state['crm_data']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Invoke with Thread Persistence",
+        "description": "Run the compiled graph with persistent conversation threads for multi-turn support",
+        "code": "config = {\"configurable\": {\"thread_id\": \"customer_123\"}}\n\n# First interaction\ninput_state = {\n    'messages': ['Customer: Where is my order #ORD567?'],\n    'customer_id': 'CUST123',\n    'intent': 'order_status'\n}\nresult1 = app.invoke(input_state, config)\n\n# Continue conversation\ninput_state2 = {\n    'messages': result1['messages'] + ['Customer: Can I get a refund?'],\n    'needs_escalation': True\n}\nresult2 = app.invoke(input_state2, config)\n\nprint(result2['messages'][-1])  # Final verified response",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with vex.verify()",
+        "description": "Simple integration - verify final state before returning to customer",
+        "code": "from vex import verify, GuardrailConfig\n\ncustomer_guardrails = GuardrailConfig(\n    risk_profile='high',\n    verifications=[\n        'response_accuracy',\n        'pii_filtering',\n        'tone_consistency',\n        'policy_compliance',\n        'escalation_triggers'\n    ]\n)\n\ndef safe_invoke(input_state, config):\n    raw_result = app.invoke(input_state, config)\n    \n    verified = verify(\n        raw_result,\n        guardrails=customer_guardrails,\n        context={'customer_tier': 'vip', 'domain': 'support'}\n    )\n    \n    if verified.status == 'approved':\n        return verified.output\n    else:\n        return {'messages': ['Escalating to human agent for review.']}",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node for State Validation",
+        "description": "Add Vex as a dedicated graph node after parallel branch merging",
+        "code": "from vex import verify\n\ndef vex_guardrails(state: CustomerState) -> CustomerState:\n    verification_result = verify(\n        state,\n        guardrails=[\n            {\n                'name': 'customer_support_suite',\n                'verifications': ['response_accuracy', 'pii_filtering', 'tone_consistency']\n            }\n        ],\n        context={'intent': state['intent'], 'customer_id': state['customer_id']}\n    )\n    \n    if verification_result.status == 'blocked':\n        state['needs_escalation'] = True\n        state['messages'] += ('[VEX] Flagged for review: ' + verification_result.reason,)\n    \n    return state\n\n# Insert Vex node after research merge\nworkflow.add_node('vex_guardrails', vex_guardrails)\nworkflow.add_edge('research', 'vex_guardrails')\nworkflow.add_conditional_edges('vex_guardrails', should_escalate, {\n    'human_review': 'human_review',\n    'generate_response': 'generate_response'\n})",
+        "language": "python"
+      },
+      {
+        "title": "Cycle Detection and Max Iterations",
+        "description": "Prevent infinite loops with Vex monitoring conversation cycles",
+        "code": "from vex import Monitor\n\ncycle_monitor = Monitor(\n    name='support_cycle_detector',\n    max_cycles=5,\n    max_iterations=15,\n    alert_on_violation=True\n)\n\nclass VexMonitoredGraph:\n    def __init__(self, app):\n        self.app = app\n        self.monitor = cycle_monitor\n    \n    def invoke(self, input_state, config):\n        self.monitor.start_session(config['configurable']['thread_id'])\n        \n        try:\n            result = self.app.invoke(input_state, config)\n            self.monitor.record_state(result)\n            \n            if self.monitor.check_limits():\n                return result\n            else:\n                return {'messages': ['Max conversation length reached. Escalating.'],\n                       'needs_escalation': True}\n        finally:\n            self.monitor.end_session()\n\nmonitored_app = VexMonitoredGraph(app)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Customer Support",
+      "description": "Add Vex guardrails today to protect customer trust and prevent costly compliance failures - pip install vex-sdk"
+    }
+  }
+}

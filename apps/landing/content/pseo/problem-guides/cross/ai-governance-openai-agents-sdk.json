@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix responsible ai governance for agents in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "OpenAI Agents SDK ai-governance",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, Responsible AI Governance failures manifest as uncontrolled agent handoffs, unvalidated tool outputs, and guardrail bypasses that allow harmful actions to propagate through multi-agent workflows. These issues arise from the SDK's flexible Runner.execute() patterns and Agent handoff mechanisms, where tracing gaps hide cascading failures and prompt injections exploit the input_pipeline. Without systematic governance, agents can enter infinite loops or execute unsafe tools, undermining production reliability.",
+    "howItManifests": [
+      {
+        "scenario": "Agent handoff loops between specialized agents",
+        "symptom": "Runner.execute() calls repeat between agents without termination conditions",
+        "impact": "Infinite loops consume API quotas and generate thousands of dollars in unexpected costs"
+      },
+      {
+        "scenario": "Guardrail bypasses via prompt injection",
+        "symptom": "Injected instructions in input_pipeline() override agent instructions",
+        "impact": "Agents execute unauthorized actions like data exfiltration or harmful content generation"
+      },
+      {
+        "scenario": "Tool output not validated before agent consumption",
+        "symptom": "Raw tool responses passed directly to next Agent without schema validation",
+        "impact": "Malformed data causes agent reasoning failures and produces unreliable outputs"
+      },
+      {
+        "scenario": "Tracing gaps in multi-agent handoff chains",
+        "symptom": "No spans created for Agent.handoff() calls in Runner execution",
+        "impact": "Debugging failures impossible; compliance audits show incomplete audit trails"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Handoff Loop Detector",
+        "description": "Scans Runner execution traces for repeated agent handoff patterns exceeding threshold",
+        "code": "from openai_agents import Runner, Agent\nfrom vex_sdk import VexGuardrail\n\ndef detect_handoff_loops(runner_traces):\n    loop_patterns = []\n    for trace in runner_traces:\n        handoffs = [step for step in trace.steps if 'handoff' in step.get('type', '')]\n        if len(handoffs) > 5 and len(set(h[0] for h in handoffs)) < 3:\n            loop_patterns.append({\n                'agent_loop': [h[0] for h in handoffs[-3:]],\n                'duration': trace.duration,\n                'cost': trace.total_cost\n            })\n    return loop_patterns",
+        "language": "python"
+      },
+      {
+        "name": "Prompt Injection Scanner",
+        "description": "Analyzes input_pipeline payloads for jailbreak patterns and injection markers",
+        "code": "import re\nfrom openai_agents import Runner\n\ndef detect_prompt_injection(inputs):\n    injection_patterns = [\n        r'ignore.*previous.*instructions',\n        r'you are.*new.*role',\n        r'forget.*system',\n        r'override.*guardrails'\n    ]\n    violations = []\n    for inp in inputs:\n        for pattern in injection_patterns:\n            if re.search(pattern, inp['content'], re.IGNORECASE):\n                violations.append({\n                    'input_id': inp['id'],\n                    'pattern': pattern,\n                    'timestamp': inp['timestamp']\n                })\n    return violations",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Checks tool responses against expected JSON schemas before agent consumption",
+        "code": "from openai_agents import ToolCallResult\nimport json\n\ndef validate_tool_output(tool_result: ToolCallResult, schema):\n    try:\n        parsed = json.loads(tool_result.content)\n        # Validate against expected schema structure\n        required_fields = schema.get('required', [])\n        missing = [f for f in required_fields if f not in parsed]\n        if missing:\n            return {'valid': False, 'errors': f'Missing fields: {missing}'}\n        return {'valid': True}\n    except json.JSONDecodeError:\n        return {'valid': False, 'errors': 'Invalid JSON format'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Handoff Circuit Breaker",
+        "description": "Intercepts Runner.execute() with max_handoffs limit and emergency termination",
+        "code": "from openai_agents import Runner, Agent\nfrom vex_sdk import VexGuardrail\n\nclass SafeRunner(Runner):\n    def __init__(self, *args, max_handoffs=5, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_handoffs = max_handoffs\n        self.handoff_count = 0\n    \n    def execute(self, *args, **kwargs):\n        if self.handoff_count >= self.max_handoffs:\n            return {'error': 'Handoff limit exceeded', 'status': 'circuit_breaker'}\n        result = super().execute(*args, **kwargs)\n        self.handoff_count += result.get('handoffs', 0)\n        return result",
+        "language": "python"
+      },
+      {
+        "name": "Injection-Resistant Input Pipeline",
+        "description": "Sanitizes input_pipeline() with Vex guardrails before agent processing",
+        "code": "from openai_agents import Agent\nfrom vex_sdk import VexGuardrail\n\nvex_guardrail = VexGuardrail(policy='no_jailbreaks')\n\ndef safe_input_pipeline(user_input):\n    # Vex sanitizes input\n    cleaned_input = vex_guardrail.validate(user_input)\n    if not cleaned_input.valid:\n        return {'error': 'Input rejected by guardrails'}\n    \n    agent = Agent(\n        name='assistant',\n        instructions='You are helpful. Follow these instructions exactly.',\n        input_pipeline=lambda x: cleaned_input.content\n    )\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Validated Tool Chain",
+        "description": "Wraps tool calls with schema validation before returning to agent",
+        "code": "from openai_agents import Tool, ToolCallResult\nfrom vex_sdk import VexSchemaValidator\n\nvalidator = VexSchemaValidator({\n    'type': 'object',\n    'properties': {'data': {'type': 'array'}}\n})\n\ndef safe_tool_call(tool: Tool):\n    def validated_call(*args, **kwargs):\n        raw_result = tool(*args, **kwargs)\n        validation = validator.validate(raw_result)\n        if not validation.valid:\n            return ToolCallResult(\n                content='{\"error\": \"Invalid tool output format\"}',\n                tool_id=tool.id\n            )\n        return ToolCallResult(content=str(raw_result), tool_id=tool.id)\n    return validated_call",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex provides production-grade guardrails that automatically detect and block all four failure modes in OpenAI Agents SDK workflows. By integrating as an output guardrail on each Agent, Vex intercepts Runner.execute() outputs, validates tool responses, sanitizes handoff payloads, and traces every interaction with full audit compliance. The SDK integration requires one line of code per agent and automatically handles prompt injection detection, loop prevention, schema validation, and distributed tracing across multi-agent chains.\n\nVex's policy engine runs 50+ Responsible AI checks including PII detection, toxicity scoring, jailbreak pattern matching, and cost anomaly detection. When violations occur, Vex provides auto-remediation with fallback responses and detailed violation reports for compliance. The platform maintains 100% uptime with sub-50ms latency, ensuring governance doesn't impact agent performance.\n\nIntegration with OpenAI Agents SDK tracing automatically correlates Vex guardrail decisions with agent spans, providing end-to-end observability into governance failures and remediations.",
+      "code": "from openai_agents import Runner, Agent\nfrom vex_sdk import VexAgentGuardrail\n\n# Install: pip install openai-agents vex-sdk\n\n# Initialize Vex guardrail for Responsible AI\nvex_guard = VexAgentGuardrail(\n    policies=['no_jailbreaks', 'no_pii', 'no_toxicity'],\n    max_handoffs=5,\n    trace=True\n)\n\n# Protect each agent with Vex\nresearcher = Agent(\n    name='researcher',\n    model='gpt-4o',\n    guardrail=vex_guard  # Single line integration\n)\n\ncoordinator = Agent(\n    name='coordinator',\n    model='gpt-4o',\n    handoffs=[researcher],\n    guardrail=vex_guard\n)\n\n# Production runner with automatic governance\nrunner = Runner(agents=[coordinator])\nresult = runner.execute('Analyze market trends')\n\n# Vex automatically blocks violations and logs traces\nprint(result.vex_report)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk` and one line of code to govern all your OpenAI Agents SDK workflows today."
+    }
+  }
+}

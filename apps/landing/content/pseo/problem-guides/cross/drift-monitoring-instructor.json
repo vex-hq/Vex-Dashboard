@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Instructor Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Instructor drift-monitoring",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Instructor manifests as subtle degradations in structured output quality, where Pydantic validation passes but the extracted data becomes unreliable over time due to model updates or prompt erosion. Common symptoms include missing optional fields, hallucinated enum values slipping through loose validation, inconsistent nested structures, and retry exhaustion from stricter schemas. This drift is insidious because Instructor's patching of client.chat.completions.create() creates a false sense of reliability, masking underlying agent degradation.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor's mode='retry' exhausts max_retries (default=3) but still returns partial/invalid Pydantic models",
+        "impact": "Downstream systems receive incomplete data, causing cascading failures in agent workflows"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Pydantic models validate successfully but optional fields remain None despite being extractable",
+        "impact": "Business logic makes incorrect decisions based on missing context (e.g., empty user preferences)"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "Instructor accepts invalid enum values like 'purple' for ColorEnum(['red', 'green', 'blue']) due to partial_matches=True",
+        "impact": "Data integrity violations propagate to databases and analytics"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Deeply nested Pydantic models return inconsistent structures (sometimes missing levels)",
+        "impact": "JSON serialization fails or produces malformed API responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's retry mechanism exhausts max_retries, indicating model degradation",
+        "code": "from instructor import Instructor\nfrom openai import OpenAI\n\nclient = Instructor(OpenAI())\n\nclass User(BaseModel):\n    name: str\n    email: str\n\nresponse = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=User,\n    messages=[{'role': 'user', 'content': 'Extract user info'}],\n    max_retries=3\n)\n\n# Detection: Check if retries were exhausted\nprint(f'Retries used: {getattr(response, \"_instructor_retries_used\", 0)}')\nif getattr(response, \"_instructor_retries_used\", 0) >= 3:\n    print('🚨 DRIFT DETECTED: Retry exhaustion')",
+        "language": "python"
+      },
+      {
+        "name": "Field Completeness Check",
+        "description": "Monitors optional field population rates across agent runs",
+        "code": "from pydantic import BaseModel\nfrom typing import Optional\n\nclass AgentResponse(BaseModel):\n    required_field: str\n    optional_context: Optional[str] = None\n    preferences: Optional[list] = None\n\nresponses = [AgentResponse(**data) for data in batch_results]\n\n# Calculate completeness metrics\nmissing_optional = sum(1 for r in responses if r.optional_context is None)\ncompleteness_rate = 1 - (missing_optional / len(responses))\n\nprint(f'Optional field completeness: {completeness_rate:.2%}')\nif completeness_rate < 0.85:\n    print('🚨 DRIFT DETECTED: Field population degradation')",
+        "language": "python"
+      },
+      {
+        "name": "Enum Value Drift Detector",
+        "description": "Tracks hallucinated enum values bypassing Instructor validation",
+        "code": "from enum import Enum\nfrom pydantic import BaseModel, validator\n\nclass StatusEnum(str, Enum):\n    active = 'active'\n    inactive = 'inactive'\n    pending = 'pending'\n\nclass Task(BaseModel):\n    status: StatusEnum\n\n# Track enum distribution\nstatus_counts = {}\nfor task in tasks:\n    status_counts[task.status] = status_counts.get(task.status, 0) + 1\n\n# Detect new/unknown enum values\ntotal = sum(status_counts.values())\nunknown_ratio = sum(count for status, count in status_counts.items() \n                   if status not in StatusEnum) / total\n\nif unknown_ratio > 0.05:\n    print('🚨 DRIFT DETECTED: Enum hallucination')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Strict Validation Mode",
+        "description": "Enable strict mode and custom validators to catch drift early",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel, field_validator\nfrom typing import Any\n\nclass StrictUser(BaseModel):\n    name: str\n    email: str\n    preferences: list[str] | None = None\n\n    @field_validator('preferences')\n    @classmethod\n    def validate_preferences(cls, v: Any) -> Any:\n        if v is None or len(v) == 0:\n            raise ValueError('Preferences cannot be empty')\n        return v\n\nclient = Instructor(OpenAI(), mode='json_schema')\n\n# Strict extraction with validation\nuser = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=StrictUser,\n    max_retries=1,  # Fail fast\n    temperature=0.1\n)",
+        "language": "python"
+      },
+      {
+        "name": "Nested Structure Enforcement",
+        "description": "Use explicit nested models with required fields to prevent depth inconsistency",
+        "code": "from pydantic import BaseModel\nfrom typing import List\n\nclass Address(BaseModel):\n    street: str\n    city: str\n\nclass UserProfile(BaseModel):\n    name: str\n    addresses: List[Address]  # Always require structure\n\n    @field_validator('addresses')\n    @classmethod\n    def ensure_addresses(cls, v):\n        if not v or len(v) == 0:\n            return [Address(street='N/A', city='Unknown')]\n        return v\n\nprofile = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=UserProfile,\n    response_model_kwargs={'addresses': {'min_length': 1}}\n)",
+        "language": "python"
+      },
+      {
+        "name": "Enum Strict Matching",
+        "description": "Disable partial enum matching and add fallback validation",
+        "code": "from enum import Enum\nfrom pydantic import BaseModel, field_validator\n\nclass Priority(str, Enum):\n    low = 'low'\n    medium = 'medium'\n    high = 'high'\n\nclass Task(BaseModel):\n    priority: Priority\n\n    @field_validator('priority', mode='before')\n    @classmethod\n    def strict_enum(cls, v):\n        if v not in Priority.__members__:\n            raise ValueError(f'Invalid priority: {v}. Must be one of {[e.value for e in Priority]}')\n        return v\n\n# Use with strict Instructor mode\ntask = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=Task,\n    mode='json_schema',\n    partial=False\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex provides production-grade observability for Instructor agents by wrapping client.chat.completions.create() calls with automatic drift detection. It monitors key metrics like retry exhaustion rates, field completeness, enum validity, and nested structure consistency across all agent runs. Vex's ML-powered anomaly detection identifies drift patterns before they impact production SLAs.\n\nIntegration requires wrapping your Instructor client with vex.verify(), which automatically instruments all structured extraction calls. Vex captures Pydantic validation metadata, tracks field population rates, and alerts on statistical deviations from baseline agent behavior. Remediation workflows can automatically adjust temperature, switch models, or tighten validation schemas.\n\nThe platform provides rich dashboards showing drift trends over time, correlated with model versions, prompt changes, and traffic patterns. Teams can set SLOs like '95% field completeness' and receive instant alerts when breached.",
+      "code": "from vex import verify\nfrom instructor import Instructor\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Install: pip install instructor vex-sdk\n\nclass AgentTask(BaseModel):\n    id: str\n    status: str\n    priority: str\n\n# Wrap Instructor client with Vex\nclient = Instructor(OpenAI())\nverified_client = verify(client)\n\n@verified_client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=AgentTask,\n    max_retries=2,\n    # Vex auto-instruments:\n    # ✅ Retry exhaustion\n    # ✅ Field completeness\n    # ✅ Enum validation\n    # ✅ Nested structure drift\n)\ndef extract_task(prompt: str) -> AgentTask:\n    '''Vex monitors ALL extraction calls automatically'''\n    pass\n\n# Production usage\nresult = extract_task('Extract task details from email')\n\n# Vex dashboard shows:\n# - 92% field completeness (↓3%)\n# - 2.1% retry exhaustion (↑1.8%)\n# - Enum drift detected\nprint('✅ Vex monitoring active')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with `pip install vex-sdk` and wrap your Instructor client in 2 lines of code."
+    }
+  }
+}

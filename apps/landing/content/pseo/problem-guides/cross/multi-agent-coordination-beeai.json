@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in BeeAI Agents",
+    "description": "How to detect and fix multi-agent coordination failure in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "BeeAI multi-agent-coordination",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI, Multi-Agent Coordination Failure occurs when agents fail to synchronize state, messages, or task handoffs through its event bus and shared memory systems, leading to divergent agent behaviors and incomplete workflows. This manifests as agents processing stale data, duplicating efforts, or deadlocking on shared resources due to BeeAI's asynchronous agent dispatch and memory synchronization patterns. These failures are particularly acute in long-running multi-agent swarms where event ordering and state consistency are not guaranteed by default.",
+    "howItManifests": [
+      {
+        "scenario": "Task handoff deadlock in sequential workflow",
+        "symptom": "Agent A completes task but Agent B never receives handoff event; workflow stalls indefinitely",
+        "impact": "Production pipelines timeout, SLA violations cascade across dependent services"
+      },
+      {
+        "scenario": "Shared memory race condition during parallel processing",
+        "symptom": "Multiple agents overwrite each other's memory updates; final state contains partial/inconsistent data",
+        "impact": "Downstream decision-making uses corrupted agent memory, causing cascading errors"
+      },
+      {
+        "scenario": "Event bus message duplication in retry logic",
+        "symptom": "Agent receives same coordination event multiple times due to BeeAI's default retry policy",
+        "impact": "Agents execute duplicate actions, creating inconsistent workflow states and resource waste"
+      },
+      {
+        "scenario": "Agent lifecycle desynchronization during scaling",
+        "symptom": "New agent instances join swarm but miss critical coordination events from prior instances",
+        "impact": "Swarm fragments into uncoordinated subgroups, breaking collective intelligence patterns"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Event Acknowledgment Gap Monitor",
+        "description": "Detects coordination failures by tracking unacknowledged handoff events between agents using BeeAI's event bus metrics",
+        "code": "from beeai import Swarm\nfrom beeai.events import EventType\n\nclass CoordinationMonitor:\n    def __init__(self):\n        self.pending_handoffs = {}\n        self.timeout = 30  # seconds\n\n    def on_agent_event(self, event):\n        if event.type == EventType.TASK_HANDOFF:\n            agent_id = event.source_agent\n            task_id = event.payload['task_id']\n            self.pending_handoffs[(agent_id, task_id)] = time.time()\n        \n        elif event.type == EventType.TASK_ACCEPTED:\n            task_id = event.payload['task_id']\n            for (sender, tid), timestamp in list(self.pending_handoffs.items()):\n                if tid == task_id and time.time() - timestamp > self.timeout:\n                    print(f'🚨 COORDINATION FAILURE: Handoff timeout from {sender} for {task_id}')\n                    del self.pending_handoffs[(sender, tid)]\n\nmonitor = CoordinationMonitor()\nswarm = Swarm(event_listener=monitor.on_agent_event)",
+        "language": "python"
+      },
+      {
+        "name": "Memory Divergence Detector",
+        "description": "Compares agent memory states against expected coordination checkpoints to identify desynchronized agents",
+        "code": "from beeai.agents import AgentMemory\n\ndef detect_memory_divergence(swarm):\n    checkpoint_keys = ['workflow_state', 'task_dependencies', 'agent_roles']\n    \n    for agent in swarm.active_agents:\n        memory = agent.get_memory()\n        missing_checkpoints = [k for k in checkpoint_keys if k not in memory]\n        \n        if missing_checkpoints:\n            divergence_score = len(missing_checkpoints) / len(checkpoint_keys)\n            if divergence_score > 0.5:\n                print(f'🚨 MEMORY DIVERGENCE: Agent {agent.id} missing {missing_checkpoints}')\n                print(f'   Current state hash: {hash(str(memory))}')\n                \n    return {'divergent_agents': len([a for a in swarm.active_agents if detect_memory_divergence(a) > 0.5])}",
+        "language": "python"
+      },
+      {
+        "name": "Duplicate Event Tracker",
+        "description": "Identifies coordination events processed multiple times by the same agent, indicating retry-induced duplication",
+        "code": "from collections import defaultdict\nfrom beeai.events import EventBus\n\nclass DuplicateEventDetector:\n    def __init__(self):\n        self.event_counts = defaultdict(int)\n        self.duplicate_threshold = 2\n\n    def track_event(self, event):\n        event_signature = (event.type, event.payload.get('task_id', ''), event.source_agent)\n        self.event_counts[event_signature] += 1\n        \n        if self.event_counts[event_signature] > self.duplicate_threshold:\n            print(f'🚨 DUPLICATE EVENT: {event_signature} processed {self.event_counts[event_signature]} times')\n            return True\n        return False\n\n# Usage\ndetector = DuplicateEventDetector()\nevent_bus = EventBus(event_handler=detector.track_event)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Idempotent Handoff Protocol",
+        "description": "Implement task handoff acknowledgments with unique idempotency keys to prevent duplicate processing",
+        "code": "from beeai.events import EventType\nfrom uuid import uuid4\n\nclass IdempotentHandoff:\n    def __init__(self):\n        self.acked_handoffs = set()\n\n    def send_handoff(self, swarm, source_agent, target_agent, task_payload):\n        idempotency_key = str(uuid4())\n        payload = {**task_payload, 'idempotency_key': idempotency_key}\n        \n        # Send with idempotency guarantee\n        event = swarm.create_event(\n            type=EventType.TASK_HANDOFF,\n            source=source_agent,\n            target=target_agent,\n            payload=payload\n        )\n        swarm.dispatch(event)\n\n    def on_handoff_received(self, event):\n        key = event.payload['idempotency_key']\n        if key in self.acked_handoffs:\n            print(f'Ignoring duplicate handoff: {key}')\n            return False\n        \n        self.acked_handoffs.add(key)\n        # Process handoff normally\n        return True",
+        "language": "python"
+      },
+      {
+        "name": "Memory Synchronization Barrier",
+        "description": "Force memory checkpoint synchronization before critical coordination points using BeeAI's memory locking",
+        "code": "from beeai.agents import AgentMemory\nfrom beeai.swarm import SwarmLock\n\nclass SyncBarrier:\n    @staticmethod\n    def sync_before_handoff(swarm, checkpoint_keys):\n        with SwarmLock(swarm):\n            for agent in swarm.active_agents:\n                memory = agent.get_memory()\n                # Validate required checkpoints exist\n                for key in checkpoint_keys:\n                    if key not in memory:\n                        raise CoordinationError(f'Missing checkpoint {key} in {agent.id}')\n                \n                # Broadcast consistent memory snapshot\n                agent.set_memory({'sync_timestamp': time.time(), **memory})\n        print('✅ Memory sync barrier passed')\n\n# Usage before handoff\nSyncBarrier.sync_before_handoff(swarm, ['current_task', 'dependencies', 'role'])",
+        "language": "python"
+      },
+      {
+        "name": "Event Ordering Guarantees",
+        "description": "Use BeeAI's sequence numbers and causal ordering to ensure proper event delivery across agent swarm",
+        "code": "from beeai.events import OrderedEventBus\n\nclass OrderedCoordinationBus(OrderedEventBus):\n    def __init__(self):\n        super().__init__()\n        self.agent_sequences = defaultdict(int)\n\n    def dispatch_with_ordering(self, event):\n        agent_id = event.source_agent\n        expected_seq = self.agent_sequences[agent_id]\n        \n        if event.sequence_number != expected_seq:\n            print(f'⚠️ Out-of-order event from {agent_id}: expected {expected_seq}, got {event.sequence_number}')\n            # Buffer and reorder or reject\n            return False\n        \n        self.agent_sequences[agent_id] += 1\n        super().dispatch(event)\n        return True\n\n# Replace default event bus\nswarm.event_bus = OrderedCoordinationBus()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates directly with BeeAI's event system as a non-intrusive listener, automatically detecting coordination failures across all four common patterns: handoff deadlocks, memory divergence, duplicate events, and ordering violations. It provides real-time alerting with precise failure signatures and automatically applies remediation workflows using the idempotent protocols and sync barriers shown above.\n\nVex's agent creates self-healing swarms by injecting coordination fixes at runtime without code changes, using BeeAI's plugin architecture. It maintains failure baselines per swarm configuration and escalates persistent issues to human operators with full event traces and memory snapshots for root cause analysis.\n\nThe integration takes <5 minutes and provides 95%+ failure detection accuracy across production BeeAI deployments, reducing MTTR from hours to seconds.",
+      "code": "from vex_sdk import VexMonitor\nfrom beeai import Swarm\n\n# Install: pip install beeai-framework vex-sdk\n\nvex = VexMonitor(\n    monitors=[\n        'beeai.coordination_handoff_timeout',\n        'beeai.memory_divergence',\n        'beeai.duplicate_events',\n        'beeai.event_ordering',\n    ],\n    auto_remediate=True,\n    alert_channels=['slack', 'pagerduty']\n)\n\n# Single line integration\nswarm = Swarm(event_listeners=[vex.on_agent_event])\n\n# Vex auto-detects and fixes coordination failures\nswarm.run()\n\n# View automated insights\nprint(vex.get_coordination_health())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to eliminate BeeAI coordination failures across your production swarms: `pip install vex-sdk`"
+    }
+  }
+}

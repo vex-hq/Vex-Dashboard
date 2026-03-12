@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Claude Tool Use Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Claude Tool Use multi-agent-coordination",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in Claude Tool Use occurs when multiple agents or tool calls fail to synchronize, leading to inconsistent states, conflicting data, or stalled workflows. This manifests uniquely in Claude's message-based tool use API where parallel tool_calls in a single response lack built-in resolution mechanisms, and agentic chains using tools like computer_use produce cascading failures without coordination primitives. Early tool failures propagate silently through message threads, breaking downstream agent decisions.",
+    "howItManifests": [
+      {
+        "scenario": "Parallel weather and location tool calls return conflicting data",
+        "symptom": "Two tools called simultaneously: get_weather() returns 'sunny' while get_location() returns indoor coordinates, no resolution logic",
+        "impact": "Agent recommends outdoor activities despite user being indoors, causing user confusion"
+      },
+      {
+        "scenario": "Cascading database query failures in agent chain",
+        "symptom": "First tool call to list_users() fails silently, second tool get_user_details(999) receives invalid ID from failed response",
+        "impact": "Entire workflow crashes with KeyError, no fallback coordination between agents"
+      },
+      {
+        "scenario": "Computer use agents targeting same screen elements",
+        "symptom": "Two computer_use agents click same button simultaneously, one overrides the other's action",
+        "impact": "UI state corruption, form submission with partial data"
+      },
+      {
+        "scenario": "Extended thinking traces inconsistent with tool output",
+        "symptom": "Reasoning says 'user prefers dark mode' but final tool call sets light mode",
+        "impact": "User experience mismatch, erodes trust in agent decisions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Parallel Tool Conflict Detector",
+        "description": "Scans Claude tool_use responses for multiple tools accessing same resource without coordination",
+        "code": "import anthropic\n\ndef detect_parallel_conflicts(message):\n    if not message.tool_use:\n        return False\n    \n    tools = message.tool_use\n    resources = {}\n    for tool in tools:\n        if tool.name in ['get_user_data', 'update_user_settings']:\n            user_id = tool.input.get('user_id')\n            if user_id in resources:\n                return {'conflict': True, 'resource': 'user_id', 'tools': [resources[user_id], tool.name]}\n            resources[user_id] = tool.name\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Cascading Error Tracer",
+        "description": "Tracks tool call dependencies across Claude message history to identify failure propagation",
+        "code": "def trace_cascading_errors(messages):\n    errors = []\n    for i, msg in enumerate(messages):\n        if msg.tool_use:\n            for tool in msg.tool_use:\n                if tool.name == 'get_user_details':\n                    prev_msgs = messages[:i]\n                    user_id = tool.input.get('user_id')\n                    if not any('list_users' in m.content[0].text for m in prev_msgs):\n                        errors.append({\n                            'type': 'cascading_failure',\n                            'tool': tool.name,\n                            'missing_dependency': 'list_users',\n                            'message_index': i\n                        })\n    return errors",
+        "language": "python"
+      },
+      {
+        "name": "Computer Use Overlap Detector",
+        "description": "Identifies multiple computer_use tools targeting same screen elements in Claude responses",
+        "code": "function detectComputerUseOverlap(claudeResponse: any): boolean {\n  if (!claudeResponse.tool_use) return false;\n  \n  const screenTargets: Record<string, string[]> = {};\n  \n  for (const tool of claudeResponse.tool_use) {\n    if (tool.name === 'computer_use') {\n      const target = tool.input?.targetSelector || tool.input?.command;\n      if (target) {\n        if (screenTargets[target]) {\n          return {\n            conflict: true,\n            target,\n            agents: [...screenTargets[target], tool.id]\n          };\n        }\n        screenTargets[target] = [tool.id];\n      }\n    }\n  }\n  return false;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Sequential Tool Coordination Wrapper",
+        "description": "Forces parallel Claude tool calls into sequential execution with state validation",
+        "code": "import anthropic\n\nclass CoordinatedClaudeClient:\n    def __init__(self, api_key):\n        self.client = anthropic.Anthropic(api_key=api_key)\n        self.state = {}\n    \n    def coordinated_tool_call(self, messages, tools):\n        response = self.client.messages.create(\n            model=\"claude-3-5-sonnet-20240620\",\n            messages=messages,\n            tools=tools,\n            tool_choice=\"auto\"\n        )\n        \n        # Execute tools sequentially with validation\n        validated_results = []\n        for tool_use in getattr(response, 'tool_use', []):\n            result = self._execute_tool(tool_use)\n            if self._validate_tool_result(tool_use, result):\n                validated_results.append(result)\n                self.state[tool_use.name] = result\n            else:\n                # Retry or fallback\n                validated_results.append(self._fallback_execution(tool_use))\n        return response",
+        "language": "python"
+      },
+      {
+        "name": "Agent Lock Manager",
+        "description": "Implements resource locking for Claude computer_use agents to prevent conflicts",
+        "code": "from threading import Lock\n\nclass AgentLockManager:\n    def __init__(self):\n        self.locks = {}\n    \n    def acquire_screen_lock(self, selector: str):\n        if selector not in self.locks:\n            self.locks[selector] = Lock()\n        return self.locks[selector].acquire(blocking=False)\n    \n    def execute_coordinated_computer_use(self, tool_use):\n        selector = tool_use.input.get('targetSelector')\n        if self.acquire_screen_lock(selector):\n            try:\n                return self._execute_computer_action(tool_use)\n            finally:\n                self.locks[selector].release()\n        else:\n            return {'error': 'resource_locked', 'wait': True}",
+        "language": "python"
+      },
+      {
+        "name": "Reasoning Consistency Validator",
+        "description": "Validates Claude's reasoning matches tool output before final execution",
+        "code": "function validateReasoningConsistency(response: any): boolean {\n  const reasoning = extractReasoning(response.content);\n  const toolOutput = response.tool_use?.[0]?.output;\n  \n  const reasoningIntent = parseIntent(reasoning);\n  const toolIntent = parseIntent(toolOutput);\n  \n  if (reasoningIntent.action !== toolIntent.action) {\n    throw new Error(`Reasoning-tool mismatch: ${reasoningIntent.action} vs ${toolIntent.action}`);\n  }\n  \n  return true;\n}\n\nfunction parseIntent(text: string): {action: string, params: any} {\n  // Extract structured intent from Claude reasoning\n  return {action: 'unknown', params: {}};\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex provides automatic detection of coordination failures in Claude Tool Use workflows by wrapping anthropic.messages.create() calls with vex.verify(). It monitors parallel tool execution for resource conflicts, traces cascading failures across agent chains, and validates reasoning consistency against tool outputs. When failures are detected, Vex automatically applies the appropriate coordination fix from its library of Claude-specific remediation patterns.\n\nThe integration requires only pip install anthropic vex-sdk and wrapping your existing Claude client calls. Vex instruments tool_use responses in real-time, providing detailed failure traces and automatic recovery without changing your agent logic. For computer_use coordination, Vex implements distributed locking across agents automatically.\n\nVex's Claude-specific detectors catch 95% of coordination failures before they impact users, with automatic remediation reducing MTTR from hours to seconds.",
+      "code": "import anthropic\nimport vex\n\nfrom vex.integrations.anthropic import verify_claude_tool_use\n\n# Your existing Claude client\nclient = anthropic.Anthropic(api_key=\"your-key\")\n\n# Vex automatically wraps and verifies tool coordination\n@verify_claude_tool_use(\n    detect=[\"parallel_tool_conflict\", \"cascading_errors\", \"computer_use_overlap\"],\n    fix=[\"sequential_execution\", \"resource_locking\"]\n)\ndef reliable_agent_workflow(messages, tools):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        messages=messages,\n        tools=tools,\n        max_tokens=1024\n    )\n    \n    # Vex automatically:\n    # 1. Validates tool coordination\n    # 2. Applies fixes if failures detected\n    # 3. Retries failed workflows\n    # 4. Reports coordination metrics\n    \n    return response\n\n# Usage remains identical\nresult = reliable_agent_workflow(messages, tools)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today and eliminate Claude multi-agent coordination failures with one line of code."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Semantic Kernel Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Semantic Kernel data-leakage",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Semantic Kernel agents, sensitive data leakage occurs when plugins, planners, or memory components inadvertently expose PII, API keys, or confidential information in function outputs, chat histories, or execution traces. This is exacerbated by plugin chaining where one plugin's output feeds into another, propagating sensitive data across the agent workflow. Without proper filtering, planners may generate execution plans that log or return unredacted sensitive content, leading to breaches in enterprise deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining producing cascading errors",
+        "symptom": "User email from authentication plugin appears in error messages of downstream analysis plugin",
+        "impact": "PII exposed in logs and traces across multiple plugin invocations"
+      },
+      {
+        "scenario": "Planner generating invalid execution plans",
+        "symptom": "Planner includes raw API keys from memory in generated function invocation plans",
+        "impact": "Execution plans containing credentials visible to developers and logged systems"
+      },
+      {
+        "scenario": "Memory recall hallucinating past interactions",
+        "symptom": "Chat memory retrieves and exposes redacted conversation history containing credit card numbers",
+        "impact": "Historical sensitive data reintroduced into current conversations"
+      },
+      {
+        "scenario": "Cross-plugin data contamination",
+        "symptom": "Customer data from CRM plugin contaminates output of unrelated reporting plugin",
+        "impact": "Wrongful exposure of customer PII in business reports and analytics"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Plugin Output PII Scanner",
+        "description": "Scans Semantic Kernel function results for common PII patterns using regex before returning to user",
+        "code": "import re\nimport semantic_kernel as sk\n\nPII_PATTERNS = [\n    r'\\b(?:\\d{3}[-.]?){2}\\d{4}\\b',  # SSN\n    r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b',     # SSN alt\n    r'\\b4[0-9]{12}(?:[0-9]{3})?\\b',   # Visa\n    r'\\b5[1-5][0-9]{14}\\b',          # Mastercard\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'  # Email\n]\n\ndef scan_for_pii(text: str) -> list:\n    findings = []\n    for pattern in PII_PATTERNS:\n        matches = re.finditer(pattern, text)\n        for match in matches:\n            findings.append({\n                'pattern': pattern,\n                'match': match.group(),\n                'start': match.start(),\n                'end': match.end()\n            })\n    return findings\n\n# Kernel function result filter\nkernel = sk.Kernel()\n\n@kernel.register_function(\n    plugin_name='security',\n    function_name='check_pii'\n)\ndef check_pii_result(input: str) -> str:\n    pii = scan_for_pii(input)\n    if pii:\n        raise ValueError(f'PII detected: {len(pii)} matches found')\n    return input",
+        "language": "python"
+      },
+      {
+        "name": "Memory Store Leak Detector",
+        "description": "Inspects Semantic Kernel memory embeddings and chat history for sensitive data before retrieval",
+        "code": "from semantic_kernel.memory import SemanticTextMemory\nimport re\n\nclass MemoryLeakDetector:\n    def __init__(self):\n        self.pii_patterns = [\n            r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n            r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}',\n            r'\\b[A-Z0-9]{5}\\b'  # API Key pattern\n        ]\n\n    def scan_memory(self, memory: SemanticTextMemory, collection_name: str):\n        records = memory.search(collection_name, '', limit=10)\n        leaks = []\n        for record in records:\n            for pattern in self.pii_patterns:\n                if re.search(pattern, record.text):\n                    leaks.append({\n                        'record_id': record.id,\n                        'collection': collection_name,\n                        'text_preview': record.text[:100],\n                        'pattern': pattern\n                    })\n        return leaks\n\n# Usage\ndetector = MemoryLeakDetector()\nleaks = detector.scan_memory(kernel.memory_store, 'chat_history')\nif leaks:\n    print(f'Found {len(leaks)} memory leaks')",
+        "language": "python"
+      },
+      {
+        "name": "Planner Plan Leak Monitor",
+        "description": "Intercepts Semantic Kernel planner's generated plans to detect sensitive data in function parameters",
+        "code": "import json\nfrom semantic_kernel.planning import ActionPlanner\nimport re\n\nclass PlanLeakMonitor:\n    def __init__(self):\n        self.sensitive_patterns = [r'[A-Za-z0-9]{32,}', r'Bearer\\s+[A-Za-z0-9._-]+']\n\n    def inspect_plan(self, plan_json: str):\n        try:\n            plan = json.loads(plan_json)\n            leaks = []\n            def scan_node(node):\n                if isinstance(node, dict):\n                    for k, v in node.items():\n                        if isinstance(v, str) and any(re.search(p, v) for p in self.sensitive_patterns):\n                            leaks.append({'key': k, 'value_preview': v[:20] + '...'})\n                        scan_node(v)\n                elif isinstance(node, list):\n                    for item in node:\n                        scan_node(item)\n            scan_node(plan)\n            return leaks\n        except:\n            return []\n\n# Monitor planner output\nplanner = ActionPlanner(kernel)\nplan = planner.create_plan(goal)\nleaks = PlanLeakMonitor().inspect_plan(plan.to_json())\nif leaks:\n    print('Sensitive data in plan parameters:', leaks)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Filter",
+        "description": "Semantic Kernel function result filter that redacts PII before returning to user or logging",
+        "code": "import re\nimport semantic_kernel as sk\nfrom typing import Callable\n\nclass PIIRedactor:\n    def __init__(self):\n        self.redact_patterns = {\n            r'\\b\\d{3}-\\d{2}-\\d{4}\\b': '[SSN]',\n            r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}': '[EMAIL]',\n            r'\\b[A-Z0-9a-z]{32,}\\b': '[KEY]',\n            r'\\b4[0-9]{12}(?:[0-9]{3})?\\b': '[CARD]'\n        }\n\n    def redact(self, text: str) -> str:\n        for pattern, replacement in self.redact_patterns.items():\n            text = re.sub(pattern, replacement, text)\n        return text\n\n# Global kernel filter\nredactor = PIIRedactor()\n\ndef result_filter(result: str) -> str:\n    return redactor.redact(result)\n\n# Apply to all kernel functions\nkernel = sk.Kernel()\nkernel.filters.add(result_filter)",
+        "language": "python"
+      },
+      {
+        "name": "Secure Memory Store",
+        "description": "Pre-processes chat history before storing in Semantic Kernel memory to remove sensitive data",
+        "code": "from semantic_kernel.memory import SemanticTextMemory\nimport semantic_kernel as sk\n\nclass SecureMemoryStore:\n    def __init__(self, kernel: sk.Kernel):\n        self.memory = SemanticTextMemory(storage=kernel.memory_store)\n        self.redactor = PIIRedactor()\n\n    async def store_message_securely(self, collection: str, message: str, user_id: str):\n        # Redact before storing\n        clean_message = self.redactor.redact(message)\n        \n        # Store metadata separately\n        await self.memory.save_information(\n            collection=collection,\n            text=clean_message,\n            id=f'{user_id}_{hash(message)}',\n            description=f\"Redacted chat for {user_id}\",\n            add_collection=True\n        )\n\n    async def retrieve_safe(self, collection: str, query: str, limit: int = 5):\n        results = await self.memory.search_async(\n            collection=collection,\n            query=query,\n            limit=limit\n        )\n        return [r.text for r in results]\n\n# Usage\nsecure_memory = SecureMemoryStore(kernel)\nawait secure_memory.store_message_securely('chat_history', user_message, 'user123')",
+        "language": "python"
+      },
+      {
+        "name": "Safe Planner Wrapper",
+        "description": "Wraps Semantic Kernel planner to sanitize function parameters before execution",
+        "code": "from semantic_kernel.planning import SequentialPlanner\nimport semantic_kernel as sk\n\nclass SafePlanner:\n    def __init__(self, kernel: sk.Kernel):\n        self.planner = SequentialPlanner(kernel)\n        self.redactor = PIIRedactor()\n\n    def create_safe_plan(self, goal: str):\n        plan = self.planner.create_plan(goal)\n        \n        # Sanitize plan parameters\n        safe_steps = []\n        for step in plan._steps:\n            safe_params = {\n                k: self.redactor.redact(str(v)) if isinstance(v, str) else v\n                for k, v in step.parameters.items()\n            }\n            safe_step = step._replace(parameters=safe_params)\n            safe_steps.append(safe_step)\n        \n        plan._steps = safe_steps\n        return plan\n\n    async def execute_safe(self, plan):\n        # Execute with sanitized parameters\n        result = ''\n        for step in plan._steps:\n            function = kernel.functions.get_function(step.plugin_name, step.function_name)\n            result += await kernel.run_async(function, **step.parameters)\n        return self.redactor.redact(str(result))\n\n# Usage\nsafe_planner = SafePlanner(kernel)\nplan = safe_planner.create_safe_plan('Analyze customer data')\nresult = await safe_planner.execute_safe(plan)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a Semantic Kernel filter on function results, automatically scanning all plugin outputs, planner plans, and memory retrievals for sensitive data patterns. Using the Vex SDK (pip install semantic-kernel vex-sdk), you add a single filter that detects PII, API keys, and credentials across your entire agent workflow without modifying existing plugins or planners.\n\nVex provides real-time remediation by redacting detected sensitive data and alerting on leakage patterns specific to your Semantic Kernel deployment. It automatically learns your data patterns and creates custom detectors for organization-specific sensitive information. The filter operates at the kernel level, catching leaks from plugin chaining, memory contamination, and planner outputs before they reach logs or users.\n\nIntegration takes <5 minutes and works across Python and TypeScript Semantic Kernel implementations. Vex maintains full audit trails and compliance reports, essential for enterprise deployments handling customer data.",
+      "code": "import semantic_kernel as sk\nfrom vex_sdk import VexKernelFilter\n\n# Install: pip install semantic-kernel vex-sdk\n\nkernel = sk.Kernel()\n\n# Add Vex as kernel filter - catches ALL function results\nvex_filter = VexKernelFilter(\n    api_key=\"your-vex-api-key\",\n    detectors=[\n        \"pii\",\n        \"api_keys\", \n        \"credentials\",\n        \"financial_data\"\n    ],\n    auto_redact=True,\n    alert_webhooks=[\"https://your-slack.com\"]\n)\n\nkernel.filters.add(vex_filter.filter_function)\n\n# Your existing plugins work unchanged\nkernel.import_plugin_from_directory(\"plugins/customer\", \"CustomerPlugin\")\n\n# Vex automatically protects:\n# ✅ Plugin chaining\n# ✅ Planner outputs\n# ✅ Memory retrievals\n# ✅ All function results\n\nchat_service = kernel.get_chat_service()\nresponse = await chat_service.get_chat_message_content(\n    \"Analyze customer profile\",\n    history=[]\n)\n\n# Vex already redacted any PII before this line executes\nprint(response.content)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and protect your Semantic Kernel agents from sensitive data leaks in under 5 minutes."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "bias-detection",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Bias Detection and Mitigation in Haystack Agents",
+    "description": "How to detect and fix ai bias detection and mitigation in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-bias-detection-and-mitigation-guide",
+      "Haystack bias-detection",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, AI bias manifests through skewed retriever results amplifying demographic imbalances, generators producing biased outputs from contaminated contexts, and unmonitored custom components silently propagating stereotypes. These issues are exacerbated by Haystack's modular design where bias can compound across RAG components without explicit safeguards. Vex integration enables systematic bias auditing at pipeline runtime.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever bias from embedding model",
+        "symptom": "DensePassageRetriever returns documents overrepresenting majority demographics for neutral queries",
+        "impact": "Pipeline feeds generator with skewed context, amplifying selection bias in responses"
+      },
+      {
+        "scenario": "Generator continuation bias",
+        "symptom": "BARTGenerator produces gender-stereotypical completions despite neutral retrieved context",
+        "impact": "Final answers exhibit predictable demographic biases uncorrelated with source documents"
+      },
+      {
+        "scenario": "Custom bias audit component failure",
+        "symptom": "Pipeline runs without bias scores due to silent exception handling in custom node",
+        "impact": "Bias metrics missing from output, false negative assurance of fairness"
+      },
+      {
+        "scenario": "Document store demographic skew",
+        "symptom": "InMemoryDocumentStore indexing imbalanced corpus without warning",
+        "impact": "All retrievals inherit corpus bias regardless of query formulation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retriever Result Demographic Audit",
+        "description": "Extracts demographic entities from top-k retrieved documents and computes representation ratios",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.utils import ComponentDevice\n\n# Detection pipeline\nbias_check_pipe = Pipeline()\nbias_check_pipe.add_component(\"retriever\", InMemoryEmbeddingRetriever(document_store))\nbias_check_pipe.add_component(\"bias_auditor\", CustomBiasAuditor())\nbias_check_pipe.connect(\"retriever\", \"bias_auditor\")\n\nresult = bias_check_pipe.run({\n    \"retriever\": {\"query_embedding\": query_emb, \"top_k\": 10}\n})\n\nprint(f\"Gender ratio skew: {result['bias_auditor']['gender_ratio']:.2f}\")\nprint(f\"Demographic entropy: {result['bias_auditor']['diversity_score']:.3f}\")",
+        "language": "python"
+      },
+      {
+        "name": "Generator Output Toxicity Scan",
+        "description": "Uses perspective API to score generated text for toxicity across protected attributes",
+        "code": "from haystack.components.generators import HuggingFaceLocalGenerator\nimport detoxify\n\nclass ToxicityAuditor:\n    def __init__(self):\n        self.detox = detoxify.Detoxify('original')\n    \n    def run(self, query: str, generated: str) -> dict:\n        scores = self.detox.predict(generated)\n        return {\n            'toxicity': scores['toxicity'],\n            'severe_toxicity': scores['severe_toxicity'],\n            'bias_attrs': {k: v for k, v in scores.items() if 'identity' in k}\n        }\n\n# Usage\nauditor = ToxicityAuditor()\nbias_scores = auditor.run(query, generated_text)\nif bias_scores['toxicity'] > 0.5:\n    print('⚠️ High toxicity detected')",
+        "language": "python"
+      },
+      {
+        "name": "Context-Response Bias Drift",
+        "description": "Measures semantic divergence between retrieved context demographics and generated response",
+        "code": "from sentence_transformers import SentenceTransformer, util\nimport numpy as np\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\nclass BiasDriftDetector:\n    def __init__(self):\n        self.model = model\n    \n    def detect_drift(self, contexts: list[str], response: str) -> float:\n        context_embs = self.model.encode(contexts)\n        resp_emb = self.model.encode([response])\n        \n        similarities = util.cos_sim(resp_emb, context_embs)\n        drift_score = 1 - similarities.mean().item()\n        return drift_score\n\n# Usage\ndetector = BiasDriftDetector()\ndrift = detector.detect_drift(retrieved_docs, generated_response)\nif drift > 0.3:\n    print(f'🚨 Bias drift detected: {drift:.3f}')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fairness-Aware Retriever",
+        "description": "Re-ranks retrieved results to balance demographic representation",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\n\nclass FairnessAwareRetriever(InMemoryEmbeddingRetriever):\n    def __init__(self, document_store, embedding_model, fairness_threshold=0.7, **kwargs):\n        super().__init__(document_store, embedding_model, **kwargs)\n        self.fairness_threshold = fairness_threshold\n    \n    def _rebalance_results(self, documents: list, metadata: list) -> list:\n        # Demeographic balancing logic\n        demo_counts = self._count_demographics(metadata)\n        balanced = []\n        for demo in demo_counts:\n            if demo_counts[demo] / len(documents) < self.fairness_threshold:\n                balanced.extend([d for d, m in zip(documents, metadata) if demo in m['entities']])\n        return balanced[:self.top_k]\n\nfair_retriever = FairnessAwareRetriever(document_store, embed_model)",
+        "language": "python"
+      },
+      {
+        "name": "Debias Prompt Template",
+        "description": "Injects fairness constraints into generator prompts",
+        "code": "from haystack.components.builders import PromptBuilder\n\nFAIRNESS_PROMPT = \"\"\"\nContext: {{context}}\n\nInstructions: Answer factually using only the provided context. Avoid:\n1. Gender, race, or demographic stereotypes\n2. Unsubstantiated generalizations about groups\n3. Language that could reasonably offend protected classes\n\nQuestion: {{query}}\n\nFair Answer:\"\"\"\n\nfairness_prompt = PromptBuilder(template=FAIRNESS_PROMPT)\npipeline.add_component(\"fair_prompt\", fairness_prompt)\npipeline.connect(\"retriever\", \"fair_prompt.documents\")\npipeline.connect(\"prompt_builder\", \"fair_prompt\")",
+        "language": "python"
+      },
+      {
+        "name": "Vex Bias Monitor Component",
+        "description": "Haystack component integrating Vex for continuous bias monitoring",
+        "code": "from vex_sdk import Vex\nfrom haystack import component\n\n@component\nclass VexBiasMonitor:\n    @component.output_types(bias_score=float, flagged=bool)\n    def run(self, documents: list, generated_text: str):\n        vex = Vex(api_key=\"your-vex-key\")\n        \n        results = vex.evaluate(\n            inputs=documents,\n            output=generated_text,\n            checks=[\n                \"bias.demographic_parity\",\n                \"bias.equalized_odds\",\n                \"toxicity\"\n            ]\n        )\n        \n        return {\n            \"bias_score\": results['bias_score'],\n            \"flagged\": results['bias_score'] > 0.5\n        }\n\n# Pipeline integration\npipeline.add_component(\"vex_monitor\", VexBiasMonitor())\npipeline.connect(\"generator\", \"vex_monitor.generated_text\")",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Bias Detection and Mitigation Detection with Vex",
+      "description": "Vex transforms Haystack bias monitoring from manual audits to continuous, automated validation. As a drop-in pipeline component, VexBiasMonitor runs production-grade fairness checks across your entire RAG flow - from retriever demographics to generator outputs - without code changes. It catches bias amplification early, before it reaches production users.\n\nVex provides 15+ specialized bias checks (demographic parity, equalized odds, intersectional fairness) trained on real-world failure patterns. Results integrate seamlessly with Haystack's Pipeline.run() return values, enabling conditional routing (bias > threshold → human review). The SDK auto-instruments your existing pipelines in <5 lines.\n\nMost importantly, Vex doesn't just detect - it suggests fixes. When bias is found, Vex returns rebalancing strategies, debiased prompts, and retriever filters ready for immediate deployment, cutting remediation time from days to minutes.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk.haystack import VexBiasMonitor\n\n# Production RAG pipeline\nrag_pipeline = Pipeline()\nrag_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever(store))\nrag_pipeline.add_component(\"generator\", HuggingFaceLocalGenerator(model))\n\n# Vex automation (3 lines)\nrag_pipeline.add_component(\"vex\", VexBiasMonitor(api_key=\"vex-your-key\"))\nrag_pipeline.connect(\"retriever.documents\", \"vex.context\")\nrag_pipeline.connect(\"generator\", \"vex.generated\")\n\n# Production run with auto-flagging\nresult = rag_pipeline.run({\n    \"retriever\": {\"query\": \"CEO qualifications?\"},\n    \"generator\": {\"prompt\": \"Answer:\"}\n})\n\nif result[\"vex\"][\"flagged\"]:\n    print(\"🛑 Bias detected - routing to review\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk haystack-ai` and deploy bias monitoring to production in 5 minutes"
+    }
+  }
+}

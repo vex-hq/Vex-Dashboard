@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Haystack + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack workflow automation",
+      "Haystack guardrails",
+      "workflow automation reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Workflow Automation with Haystack enables multi-step agentic pipelines that integrate APIs, apply conditional logic, and incorporate human approvals for robust task execution. Guardrails are essential to prevent costly errors like incorrect API calls, permission violations, or failed rollbacks in production environments. Vex integration provides runtime verification to ensure action correctness and system reliability.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Haystack",
+      "description": "Haystack pipelines for workflow automation typically start with a Router component that directs tasks based on input type or conditions. Retrievers fetch relevant context or API data, followed by Generator or Agent nodes that execute actions like API calls or computations. Conditional branches handle logic flows, with human-in-the-loop nodes pausing for approvals. Finally, output formatters ensure consistent responses.\n\nThis modular architecture supports complex multi-step execution but introduces failure points at component handoffs and external integrations. Vex components are inserted at critical junctions to verify intermediate states and action outcomes.\n\nKey components include: TaskRouter for conditional routing, APICaller for external integrations, ApprovalGate for human review, and RollbackHandler for error recovery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Input    │───▶│   Task Router    │───▶│ API Retriever   │\n└─────────────────┘    └──────────┬─────────┘    └─────────────────┘\n                                 │                │\n                    ┌────────────▼─────────────┐  │\n                    │     Vex Verifier 1       │  │\n                    └──────────┬───────────────┘  │\n                               │                 │\n                    ┌──────────▼──────────┐    │\n                    │   API Caller +      │◀───┘\n                    │   Vex Verifier 2    │\n                    └──────────┬──────────┘\n                               │\n                    ┌──────────▼──────────┐\n                    │ Approval Gate +     │\n                    │ Vex Verifier 3      │\n                    └──────────┬──────────┘\n                               │\n                          ┌────▼────┐\n                          │Output   │\n                          └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever returns dict but generator expects list, causing silent failures downstream",
+        "severity": "high",
+        "mitigation": "Vex schema validation between components"
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "API workflow pulls wrong context, leading to incorrect actions",
+        "severity": "critical",
+        "mitigation": "Vex semantic relevance scoring"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "Agent fabricates API parameters not grounded in retrieved data",
+        "severity": "high",
+        "mitigation": "Vex context faithfulness checks"
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "API caller exceptions not propagated, workflow continues with stale state",
+        "severity": "critical",
+        "mitigation": "Vex error boundary wrapping"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Workflow Pipeline Setup",
+        "description": "Core Haystack pipeline with router, retriever, and API caller for task automation",
+        "code": "from haystack import Pipeline, component\n\n@component\nclass TaskRouter:\n    @component.output_types(next_step=str)\n    def run(self, task: str):\n        return next_step='api_call' if 'transfer' in task else 'approval'\n\n@component\nclass APICaller:\n    @component.output_types(result=dict)\n    def run(self, params: dict):\n        # Simulate API call\n        return result={'status': 'success', 'data': params}\n\np = Pipeline()\np.add_component('router', TaskRouter())\np.add_component('api_caller', APICaller())\np.connect('router.next_step', 'api_caller')\n\nresult = p.run({'task': 'transfer funds'})",
+        "language": "python"
+      },
+      {
+        "title": "Conditional Logic Branching",
+        "description": "Router with approval path for high-risk actions",
+        "code": "from haystack import Pipeline\n\n@component\nclass ApprovalGate:\n    @component.output_types(approved=bool)\n    def run(self, amount: float):\n        return approved=amount < 1000\n\np = Pipeline()\np.add_component('approval', ApprovalGate())\n\n# Conditional connection\np.connect_condition(\n    'router.next_step',\n    'approval',\n    condition=lambda x: x == 'approval',\n    outputs={'approved': 'approved'}\n)\n\nresult = p.run({'amount': 500.0})",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Integration",
+        "description": "Pause pipeline for manual approval with resume capability",
+        "code": "from haystack import component\n\n@component\nclass HumanApproval:\n    @component.output_types(approved=bool, ticket_id=str)\n    def run(self, request: dict):\n        ticket_id = f\"TICKET-{hash(str(request))}\"\n        print(f\"Pending approval: {ticket_id}\")\n        # In production: integrate with approval system\n        return approved=False, ticket_id=ticket_id\n\n@component\nclass ResumeFromTicket:\n    @component.output_types(approved=bool)\n    def run(self, ticket_id: str, decision: str):\n        return approved=decision == 'approve'",
+        "language": "python"
+      },
+      {
+        "title": "Error Handling and Rollback",
+        "description": "Implement idempotent operations with rollback capability",
+        "code": "from haystack import component\n\n@component\nclass IdempotentAPICaller:\n    @component.output_types(success=bool, rollback_needed=bool)\n    def run(self, operation_id: str, params: dict):\n        # Check idempotency key\n        if self.check_idempotency(operation_id):\n            return success=True, rollback_needed=False\n        \n        try:\n            # Execute API call\n            result = self.safe_api_call(params)\n            self.record_operation(operation_id, result)\n            return success=True, rollback_needed=False\n        except Exception:\n            return success=False, rollback_needed=True\n\n    def check_idempotency(self, op_id): ...\n    def safe_api_call(self, params): ...",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Schema Validator Component",
+        "description": "Validate component outputs match expected schemas before routing",
+        "code": "from haystack import component\n\nfrom vex import Verifier\nfrom vex.schema import SchemaValidator\n\n@component\nclass VexSchemaGuard:\n    def __init__(self):\n        self.verifier = Verifier(project_id=\"your-project\")\n        self.validator = SchemaValidator({\n            'api_params': {'type': 'object', 'properties': {'url': {'type': 'string'}}},\n            'retriever_docs': {'type': 'array', 'items': {'type': 'object'}}\n        })\n\n    @component.output_types(validated_data=dict, validation_passed=bool)\n    def run(self, data: dict, expected_type: str):\n        result = self.validator.validate(data, expected_type)\n        \n        verdict = self.verifier.verify(\n            check='schema_validation',\n            inputs={'data': data, 'type': expected_type},\n            output=result\n        )\n        \n        return validated_data=result.validated, validation_passed=verdict.passed",
+        "language": "python"
+      },
+      {
+        "title": "Vex Action Correctness Verifier",
+        "description": "Verify API calls match workflow intent and permissions",
+        "code": "from haystack import component\nfrom vex import Verifier\n\n@component\nclass VexActionVerifier:\n    def __init__(self):\n        self.verifier = Verifier(project_id=\"your-project\")\n\n    @component.output_types(action_verified=bool, risk_score=float)\n    def run(self, intended_action: str, proposed_api_call: dict, user_permissions: list):\n        check_result = self.verifier.verify(\n            check='action_correctness',\n            inputs={\n                'intent': intended_action,\n                'api_call': proposed_api_call,\n                'permissions': user_permissions\n            },\n            conditions={\n                'method': 'POST' if 'transfer' in intended_action else 'GET',\n                'permission_required': ['write:funds']\n            }\n        )\n        \n        return {\n            'action_verified': check_result.passed,\n            'risk_score': check_result.score\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Vex Rollback and Idempotency Guard",
+        "description": "Ensure operations are idempotent and provide rollback verification",
+        "code": "from haystack import component\nfrom vex import Verifier\n\n@component\nclass VexRollbackGuard:\n    def __init__(self):\n        self.verifier = Verifier(project_id=\"your-project\")\n\n    @component.output_types(safe_to_proceed=bool, idempotency_key=str)\n    def run(self, operation_id: str, params: dict, pre_state: dict):\n        idempotency_check = self.verifier.verify(\n            check='idempotency',\n            inputs={'operation_id': operation_id, 'params': params},\n            cache_ttl='1h'\n        )\n        \n        rollback_plan = self.generate_rollback(pre_state, params)\n        rollback_verified = self.verifier.verify(\n            check='rollback_plan_valid',\n            inputs={'plan': rollback_plan}\n        )\n        \n        return {\n            'safe_to_proceed': idempotency_check.passed and rollback_verified.passed,\n            'idempotency_key': idempotency_check.idempotency_key\n        }",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Workflow Automation",
+      "description": "Add Vex components to your Haystack pipelines today and eliminate workflow failures with production-grade verification."
+    }
+  }
+}

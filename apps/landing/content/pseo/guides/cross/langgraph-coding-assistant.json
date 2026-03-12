@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with LangGraph + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph ai coding assistant",
+      "LangGraph guardrails",
+      "ai coding assistant reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with LangGraph enables sophisticated, stateful workflows where agents analyze codebases, generate fixes, execute in sandboxes, and iterate through debugging cycles. However, the complexity of cyclical graphs and parallel state management introduces risks like infinite loops, state corruption, and security vulnerabilities in generated code. Vex provides essential guardrails to verify code correctness, security, and compliance at critical checkpoints.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with LangGraph",
+      "description": "The AI Coding Assistant is structured as a LangGraph workflow with nodes for repository analysis, code generation, sandbox execution, test validation, and iterative debugging. State is maintained across cycles, with parallel branches for security scanning and license checks that merge back into the main flow. Human-in-the-loop approval gates ensure fixes are reviewed before deployment.\n\nKey nodes include: RepoAnalyzer (loads context), CodeGenerator (LLM-powered fixes), SandboxExecutor (safe execution), TestValidator (pytest runner), and SecurityScanner (vulnerability checks). Conditional edges handle iteration until tests pass or max cycles are reached.\n\nCheckpoints persist state across sessions, enabling long-running debugging sessions with human intervention.",
+      "diagram": "┌─────────────┐    ┌──────────────┐    ┌──────────────┐\n│ RepoAnalyzer│───▶│ CodeGenerator │───▶│ SandboxExec  │\n└─────────────┘    └──────────────┘    └──────────────┘\n       │                    │                    │\n       │              ┌─────▼──────┐             │\n       └─────────────▶│SecurityScan│◀────────────┘\n                      └────────────┘\n                             │\n                       ┌─────▼──────┐\n                       │ TestRunner │◀──┐\n                       └────────────┘   │\n                             │         │\n                       ┌─────▼──────┐   │\n                       │ HumanReview│◀──┘\n                       └────────────┘\n                             │\n                       ┌─────▼──────┐\n                       │   Deploy   │\n                       └────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Debugging loops without proper termination conditions can trap the agent in endless code-fix cycles",
+        "severity": "critical",
+        "mitigation": "Add Vex verification with cycle limits and convergence checks before state transitions"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Security scan and test runner producing incompatible state updates during merge",
+        "severity": "high",
+        "mitigation": "Use Vex to validate state schema consistency before checkpoint writes"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "Evolving code generation schemas break persisted checkpoints from previous sessions",
+        "severity": "medium",
+        "mitigation": "Vex schema validation ensures backward compatibility during state hydration"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "Dynamic routing skips critical human review when tests falsely pass",
+        "severity": "high",
+        "mitigation": "Vex enforces mandatory verification gates regardless of conditional logic"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic LangGraph Coding Assistant Workflow",
+        "description": "Core graph structure with repo analysis, code generation, and test execution nodes",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\nclass CodeState(TypedDict):\n    repo_path: str\n    bug_description: str\n    generated_code: str\n    test_results: dict\n    cycle_count: Annotated[int, \"add\"]\n\n    def repo_analyzer(state: CodeState) -> CodeState:\n        # Load repo context and identify bug\n        return {\"generated_code\": \"\", \"cycle_count\": 0}\n\n    def code_generator(state: CodeState) -> CodeState:\n        # LLM generates fix\n        return {\"generated_code\": \"def fix_bug(x): return x * 2\"}\n\n    def test_runner(state: CodeState) -> CodeState:\n        # Execute pytest\n        return {\"test_results\": {\"passed\": False}}\n\ngraph = StateGraph(CodeState)\ngraph.add_node(\"analyze\", repo_analyzer)\ngraph.add_node(\"generate\", code_generator)\ngraph.add_node(\"test\", test_runner)\ngraph.set_entry_point(\"analyze\")\ngraph.add_edge(\"analyze\", \"generate\")\ngraph.add_conditional_edges(\"test\", lambda s: \"generate\" if not s[\"test_results\"][\"passed\"] else END)\ncheckpointer = SqliteSaver.from_conn_string(\":memory:\")\napp = graph.compile(checkpointer=checkpointer)",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Node",
+        "description": "Secure execution environment for generated code with resource limits",
+        "code": "import subprocess\nimport tempfile\nimport os\nfrom pathlib import Path\n\ndef sandbox_executor(state: CodeState) -> CodeState:\n    with tempfile.TemporaryDirectory() as tmpdir:\n        code_path = Path(tmpdir) / \"fix.py\"\n        code_path.write_text(state[\"generated_code\"])\n        \n        result = subprocess.run([\n            \"docker\", \"run\", \"--rm\", \"-v\", f\"{tmpdir}:/app\", \n            \"python:3.11-slim\", \n            \"python\", \"/app/fix.py\"\n        ], capture_output=True, timeout=30)\n        \n    return {\"execution_result\": result.stdout.decode() if result.returncode == 0 else result.stderr.decode()}\n\n# Add to graph\ngraph.add_node(\"sandbox\", sandbox_executor)\ngraph.add_edge(\"generate\", \"sandbox\")",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Security and Test Validation",
+        "description": "Fan-out to security scanning and testing with state merge",
+        "code": "from langgraph.prebuilt import ToolNode, tools_condition\n\ndef security_scanner(state: CodeState) -> CodeState:\n    # Bandit security scan\n    result = subprocess.run([\"bandit\", \"-r\", state[\"repo_path\"]], capture_output=True)\n    return {\"security_issues\": result.stdout.decode()}\n\ndef merge_results(state: CodeState) -> str:\n    if state.get(\"security_issues\") or not state[\"test_results\"][\"passed\"]:\n        return \"retry\"\n    return \"approve\"\n\n# Parallel execution\ngraph.add_node(\"security\", security_scanner)\ngraph.add_node(\"validate\", test_runner)\ngraph.add_edge(\"sandbox\", [\"security\", \"validate\"])\ngraph.add_conditional_edges(\"validate\", merge_results, {\"retry\": \"generate\", \"approve\": END})",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Review Node",
+        "description": "Conditional human approval with configurable breakpoints",
+        "code": "def human_review(state: CodeState) -> CodeState:\n    if state[\"cycle_count\"] > 3 or state.get(\"security_issues\"):\n        print(f\"HUMAN REVIEW NEEDED: Cycle {state['cycle_count']}\")\n        print(f\"Generated code: {state['generated_code'][:200]}...\")\n        approval = input(\"Approve? (y/n): \").lower() == 'y'\n        return {\"human_approved\": approval}\n    return {\"human_approved\": True}\n\ngraph.add_node(\"review\", human_review)\ngraph.add_conditional_edges(\n    \"sandbox\",\n    lambda s: \"review\" if s.get(\"cycle_count\", 0) % 2 == 0 else \"generate\",\n    {\"review\": \"generate\", END: END}\n)\n\n# Invoke with checkpoint\nconfig = {\"configurable\": {\"thread_id\": \"coding-session-1\"}}\nresult = app.invoke({\"repo_path\": \"/path/to/buggy/repo\", \"bug_description\": \"Fix division by zero\"}, config)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex Verification",
+        "description": "Global verification of final outputs ensuring code safety and correctness",
+        "code": "import vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Risk profile for coding assistant\npolicy = {\n    \"risk_profile\": \"medium\",\n    \"verifications\": [\"code_correctness\", \"security_vulnerability_scanning\", \"no_credential_leakage\", \"dependency_safety\", \"license_compliance\"]\n}\n\ndef verified_invoke(inputs: dict, config: dict):\n    result = app.invoke(inputs, config)\n    \n    # Verify final generated code\n    verification = vex_client.verify(\n        result[\"generated_code\"],\n        policy,\n        context={\n            \"repo_path\": inputs[\"repo_path\"],\n            \"language\": \"python\",\n            \"use_case\": \"ai-coding-assistant\"\n        }\n    )\n    \n    if not verification.passed:\n        raise ValueError(f\"Vex verification failed: {verification.issues}\")\n    \n    return result\n\n# Usage\nresult = verified_invoke({\"repo_path\": \"/app\", \"bug_description\": \"fix auth bug\"}, config)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node for Security Scanning",
+        "description": "Replace custom security scanner with Vex-powered verification node",
+        "code": "import vex\n\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\ndef vex_security_node(state: CodeState) -> CodeState:\n    verification = vex_client.verify(\n        state[\"generated_code\"],\n        {\n            \"risk_profile\": \"medium\",\n            \"verifications\": [\"security_vulnerability_scanning\", \"no_credential_leakage\", \"dependency_safety\"]\n        },\n        context={\"codebase_language\": \"python\", \"sandboxed\": True}\n    )\n    \n    state[\"vex_security_report\"] = {\n        \"passed\": verification.passed,\n        \"issues\": verification.issues,\n        \"score\": verification.score\n    }\n    \n    return state\n\n# Replace security scanner\ngraph.add_node(\"vex_security\", vex_security_node)\ngraph.add_edge(\"sandbox\", \"vex_security\")",
+        "language": "python"
+      },
+      {
+        "title": "State Schema Validation Before Checkpoints",
+        "description": "Prevent corruption by validating state before persistence",
+        "code": "def vex_state_validator(state: CodeState) -> CodeState:\n    # Schema validation\n    schema_check = vex_client.verify_schema(\n        state,\n        expected_schema={\n            \"type\": \"CodeState\",\n            \"properties\": {\n                \"generated_code\": {\"type\": \"string\", \"maxLength\": 10000},\n                \"test_results\": {\"type\": \"object\"},\n                \"cycle_count\": {\"type\": \"integer\", \"maximum\": 10}\n            }\n        }\n    )\n    \n    if not schema_check.passed:\n        raise ValueError(f\"State schema invalid: {schema_check.errors}\")\n    \n    # Content validation\n    code_check = vex_client.verify(\n        state[\"generated_code\"],\n        {\"verifications\": [\"code_correctness\", \"license_compliance\"]}\n    )\n    \n    state[\"state_validated\"] = code_check.passed\n    return state\n\n# Add before checkpoint edges\ngraph.add_node(\"validate_state\", vex_state_validator)\ngraph.add_edge(\"vex_security\", \"validate_state\")\ngraph.add_conditional_edges(\n    \"validate_state\",\n    lambda s: END if s[\"state_validated\"] else \"generate\"\n)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your coding agents from security risks and infinite loops."
+    }
+  }
+}

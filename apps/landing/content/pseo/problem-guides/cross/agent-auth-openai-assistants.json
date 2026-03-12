@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in OpenAI Assistants API Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "OpenAI Assistants API agent-auth",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, AI Agent Authentication and Authorization problems manifest when agents access tools, files, or threads without proper identity verification, leading to unauthorized code execution, data leaks, or privilege escalation. The managed runtime's sandboxing assumes correct API key scoping and thread isolation, but lacks built-in identity propagation to function calls or file searches. This creates silent failures where agents impersonate users or escalate privileges across sessions.",
+    "howItManifests": [
+      {
+        "scenario": "Function calling without user context validation",
+        "symptom": "Agent invokes external APIs with assistant's API key instead of user's authenticated identity",
+        "impact": "Data leakage across user tenants; billing fraud via unauthorized API consumption"
+      },
+      {
+        "scenario": "File search accessing unowned documents",
+        "symptom": "Thread retrieves files uploaded by different users without ownership checks",
+        "impact": "Cross-tenant data exposure; GDPR/privacy violations"
+      },
+      {
+        "scenario": "Code interpreter running with elevated permissions",
+        "symptom": "Sandbox executes system-level operations despite scoped API keys",
+        "impact": "Sandbox escape; persistent malware deployment in shared environments"
+      },
+      {
+        "scenario": "Thread context hijacking via run completion",
+        "symptom": "Previous user session state poisons new conversations without auth reset",
+        "impact": "Session fixation attacks; conversation history leakage"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Ownership Validation",
+        "description": "Detects when assistant runs access threads not owned by the authenticating user",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef detect_thread_ownership_violation(thread_id: str, user_id: str):\n    thread = client.beta.threads.retrieve(thread_id)\n    # Check if thread metadata contains matching user_id\n    thread_metadata = thread.metadata or {}\n    owner_id = thread_metadata.get('user_id')\n    if not owner_id or owner_id != user_id:\n        raise ValueError(f'Unauthorized thread access: expected {user_id}, got {owner_id}')\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Identity Propagation Check",
+        "description": "Verifies function arguments include required user context before execution",
+        "code": "def validate_function_auth(schema: dict, arguments: dict, user_context: dict):\n    required_auth_fields = ['user_id', 'tenant_id']\n    for field in required_auth_fields:\n        if field not in arguments or arguments[field] != user_context.get(field):\n            raise PermissionError(f'Missing or invalid {field} in function arguments')\n    # Validate against schema\n    import jsonschema\n    jsonschema.validate(arguments, schema)\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "File Search Permission Audit",
+        "description": "Checks file access patterns against user permissions during retrieval",
+        "code": "async function auditFileSearchPermissions(client: OpenAI, vectorStoreId: string, userId: string) {\n  const files = await client.beta.vectorStores.files.list(vectorStoreId);\n  for (const file of files.data) {\n    const fileMetadata = file.metadata || {};\n    if (fileMetadata.owner !== userId) {\n      console.warn(`Unauthorized file access: ${file.id} owned by ${fileMetadata.owner}`);\n      throw new Error('File permission violation detected');\n    }\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "User Context Injection Middleware",
+        "description": "Automatically injects authenticated user identity into all assistant runs",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef create_authenticated_run(thread_id: str, assistant_id: str, user_id: str):\n    run = client.beta.threads.runs.create(\n        thread_id=thread_id,\n        assistant_id=assistant_id,\n        extra_body={\n            'metadata': {'user_id': user_id, 'timestamp': str(int(time.time()))}\n        }\n    )\n    return run",
+        "language": "python"
+      },
+      {
+        "name": "Scoped Tool Authorization",
+        "description": "Wraps function tools with per-user permission checks",
+        "code": "def authorized_tool_call(tool_name: str, arguments: dict, user_context: dict):\n    permissions = load_user_permissions(user_context['user_id'])\n    if tool_name not in permissions['allowed_tools']:\n        raise PermissionError(f'User {user_context[\"user_id\"]} not authorized for {tool_name}')\n    \n    # Execute authorized tool\n    result = execute_tool(tool_name, arguments)\n    audit_log(tool_name, user_context, 'success')\n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Thread Isolation Guard",
+        "description": "Creates fresh threads per user session with ownership enforcement",
+        "code": "async function createIsolatedThread(client: OpenAI, assistantId: string, userId: string) {\n  const thread = await client.beta.threads.create({\n    metadata: {\n      user_id: userId,\n      created_at: new Date().toISOString(),\n      session_id: crypto.randomUUID()\n    }\n  });\n  \n  // Verify ownership immediately\n  const retrieved = await client.beta.threads.retrieve(thread.id);\n  if (retrieved.metadata?.user_id !== userId) {\n    throw new Error('Thread ownership verification failed');\n  }\n  return thread;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI Assistants run completion events, automatically auditing every agent interaction for authentication violations. It validates thread ownership, function call arguments, file access patterns, and identity propagation using the same detection patterns shown above. When violations are detected, Vex can automatically remediate by terminating unauthorized runs, creating isolated threads, or injecting missing user context.\n\nThe platform maintains a baseline of normal authentication behavior per assistant and user tenant, using statistical anomaly detection to catch sophisticated bypass attempts. Remediation workflows support both blocking (fail-fast) and async correction modes, with full audit trails for compliance reporting. Integration takes <5 minutes via the vex-sdk.",
+      "code": "from vex_sdk import VexClient\nfrom openai import OpenAI\n\nvex = VexClient(api_key='vex-your-key')\nopenai_client = OpenAI()\n\ndef handle_run_completed(run: dict, user_context: dict):\n    # Vex automatic auth verification\n    verification = vex.verify_agent_auth(\n        run_data=run,\n        user_context=user_context,\n        checks=[\n            'thread_ownership',\n            'function_arg_auth',\n            'file_access_permissions'\n        ]\n    )\n    \n    if not verification.passed:\n        # Auto-remediate\n        openai_client.beta.threads.runs.cancel(run['thread_id'], run['id'])\n        vex.log_violation(verification.issues)\n        return {'status': 'blocked', 'issues': verification.issues}\n    \n    return {'status': 'approved'}\n\n# Register webhook\nvex.register_webhook(\n    event='run.completed',\n    handler=handle_run_completed,\n    openai_client=openai_client\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to automatically secure all your OpenAI Assistants against auth failures: pip install vex-sdk"
+    }
+  }
+}

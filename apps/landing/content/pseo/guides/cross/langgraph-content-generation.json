@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "content-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Content Generation with LangGraph + Vex Guardrails",
+    "description": "Learn how to build content generation with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph content generation",
+      "LangGraph guardrails",
+      "content generation reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building content generation workflows with LangGraph enables sophisticated LLM-powered pipelines for creating articles, posts, and marketing copy with multi-step refinement. However, complex graph cycles, state merges, and schema evolution introduce risks like infinite loops, factual inaccuracies, and brand voice drift. Vex provides essential guardrails to verify brand consistency, factual accuracy, and editorial compliance at critical checkpoints.",
+    "architectureOverview": {
+      "heading": "Content Generation Architecture with LangGraph",
+      "description": "A typical LangGraph content generation workflow starts with a 'Researcher' node that gathers facts and SEO keywords via web search and LLM summarization. Parallel 'Writer' and 'Brand Voice Generator' nodes then produce draft content and style guidelines. These merge into an 'Editor' node for fact-checking and tone alignment, followed by a 'Fact-Checker' that validates claims against sources. A human-in-the-loop 'Reviewer' node handles edge cases, with conditional edges routing back to rewrite if quality thresholds fail.\n\nThe graph maintains persistent state with checkpoints containing draft text, source citations, SEO scores, and brand compliance metrics. Cyclical edges enable iterative refinement until all verification criteria pass. This architecture handles complex content like blog posts with embedded research, multimedia suggestions, and A/B headline variants.\n\nVex integrates at merge points, pre-human-review, and final output to catch brand drift, factual errors, and SEO violations before deployment.",
+      "diagram": "┌─────────────┐    ┌──────────────┐    ┌─────────────┐\n│   Researcher │───▶│   Writer     │───▶│   Editor    │\n│  (facts/SEO) │    │ (draft text) │    │ (merge+refine)│\n└─────────────┘    └──────────────┘    └──────┬──────┐\n                                            │      │\n┌─────────────┐    ┌──────────────────────┐    ▼      ▼\n│Brand Voice  │───▶│     Vex Verify       │  ┌─────────────┐\n│ Generator   │    │ (brand/tone/SEO)     │  │ Fact-Checker │\n└─────────────┘    └──────────────────────┘  │ (validate)  │\n                                             └─────────────┘\n                                                           │\n                                                   ┌─────────▼─────────┐\n                                                   │ Human Reviewer    │\n                                                   │ (conditional)     │\n                                                   └───────────────────┘\n                                                                 │\n                                                         ┌─────────▼─────────┐\n                                                         │  Final Output     │\n                                                         │   (publish-ready) │\n                                                         └───────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Researcher-Writer-Editor loops without convergence criteria cause endless rewrites when LLM outputs consistently fail brand voice checks",
+        "severity": "critical",
+        "mitigation": "Add Vex verification with max_iterations counter and convergence scoring before cycle edges"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Brand Voice Generator and Writer produce incompatible tone instructions, corrupting merged state with contradictory style directives",
+        "severity": "high",
+        "mitigation": "Use Vex to validate merge compatibility and resolve conflicts with priority-weighted reconciliation"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "Adding SEO compliance fields breaks loading of historical checkpoints, losing draft progress during iterative content refinement",
+        "severity": "medium",
+        "mitigation": "Implement Vex schema validation and backward-compatible state migration at checkpoint boundaries"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "High-confidence fact-checks skip human review, publishing unverified content that violates editorial guidelines",
+        "severity": "high",
+        "mitigation": "Vex enforces mandatory human breakpoints for medium+ risk content regardless of automated confidence scores"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Content Generation Graph",
+        "description": "Core LangGraph workflow with researcher, writer, and basic state management for content creation",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.graph.message import add_messages\n\nclass ContentState(TypedDict):\n    topic: str\n    research: str\n    draft: str\n    sources: list[str]\n    \ndef researcher(state: ContentState) -> ContentState:\n    return {'research': f'Research on {state[\"topic\"]}: key facts...', 'sources': ['source1.com']}\n\ndef writer(state: ContentState) -> ContentState:\n    return {'draft': f'Draft on {state[\"topic\"]} using {state[\"research\"][:100]}...'}\n\nworkflow = StateGraph(ContentState)\nworkflow.add_node('researcher', researcher)\nworkflow.add_node('writer', writer)\nworkflow.set_entry_point('researcher')\nworkflow.add_edge('researcher', 'writer')\nworkflow.add_edge('writer', END)\n\napp = workflow.compile()\nresult = app.invoke({'topic': 'AI content generation'})",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Brand Voice + Content Generation",
+        "description": "Fan-out to generate content and brand guidelines simultaneously, then merge results",
+        "code": "from langgraph.prebuilt import ToolNode, tools_condition\nfrom langgraph.graph import StateGraph\n\nclass ContentState(TypedDict):\n    topic: str\n    draft: str\n    brand_voice: str\n    merged_content: str\n\nasync def brand_voice_gen(state: ContentState) -> ContentState:\n    return {'brand_voice': 'Professional, approachable tone with tech-forward language'}\n\nasync def content_writer(state: ContentState) -> ContentState:\n    return {'draft': f'Article draft with {state[\"topic\"]} in brand voice'}\n\nworkflow = StateGraph(ContentState)\nworkflow.add_node('brand_voice', brand_voice_gen)\nworkflow.add_node('writer', content_writer)\n\nworkflow.set_entry_point('brand_voice')\nworkflow.add_edge('brand_voice', 'writer')\n\n# Merge logic\nasync def merge_branches(state: ContentState) -> ContentState:\n    return {\n        'merged_content': f'{state[\"draft\"]}\\nStyle: {state[\"brand_voice\"]}'\n    }\n\nworkflow.add_node('merge', merge_branches)\nworkflow.add_edge('writer', 'merge')\nworkflow.add_edge('merge', END)\n\napp = workflow.compile()",
+        "language": "python"
+      },
+      {
+        "title": "Fact-Checking with External Validation",
+        "description": "Add fact-checking node that validates claims against external sources before final output",
+        "code": "import re\n\nclass ContentState(TypedDict):\n    draft: str\n    facts: list[str]\n    verified: bool\n    citations: dict\n\nasync def extract_and_check_facts(state: ContentState) -> ContentState:\n    # Extract factual claims\n    facts = re.findall(r'(\\w+ (is|are|was|will be) \\w+)', state['draft'])\n    \n    verified_facts = []\n    citations = {}\n    \n    for fact in facts[:3]:  # Limit for demo\n        # Mock external validation\n        verified = fact[0] in ['AI is powerful', 'Python is popular']\n        verified_facts.append((fact[0], verified))\n        if verified:\n            citations[fact[0]] = f'https://source-for-{fact[0].lower().replace(\" \", \"-\")}.com'\n    \n    return {\n        'facts': verified_facts,\n        'verified': all(v for _, v in verified_facts),\n        'citations': citations\n    }\n\n# Add to existing workflow\nworkflow.add_node('fact_check', extract_and_check_facts)\nworkflow.add_conditional_edges(\n    'merge',\n    lambda state: 'fact_check' if not state.get('verified', False) else END,\n    {'fact_check': 'fact_check', END: END}\n)\nworkflow.add_edge('fact_check', END)",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop with Breakpoints",
+        "description": "Implement conditional human review for content failing automated quality thresholds",
+        "code": "from langgraph.checkpoint.memory import MemorySaver\n\nclass ContentState(TypedDict):\n    draft: str\n    quality_score: float\n    needs_human_review: bool\n    human_feedback: str\n\nasync def quality_assessment(state: ContentState) -> ContentState:\n    # Mock LLM quality scoring\n    score = len(state['draft']) / 1000.0  # Simplified\n    needs_review = score < 0.7\n    \n    return {\n        'quality_score': score,\n        'needs_human_review': needs_review\n    }\n\ndef should_review(state: ContentState):\n    return 'human_review' if state['needs_human_review'] else END\n\nasync def human_review(state: ContentState):\n    print(f\"🚨 HUMAN REVIEW NEEDED: Score {state['quality_score']:.2f}\")\n    print(f\"Draft: {state['draft'][:200]}...\")\n    return {'human_feedback': 'Approved with minor edits'}\n\n# Checkpointing for HITL\ncheckpointer = MemorySaver()\n\nworkflow.add_node('quality_check', quality_assessment)\nworkflow.add_node('human_review', human_review)\n\nworkflow.add_conditional_edges('merge', should_review)\nworkflow.add_edge('quality_check', 'human_review')\nworkflow.add_edge('human_review', END)\n\napp = workflow.compile(checkpointer=checkpointer)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex.verify()",
+        "description": "Simplest integration - verify final output against all content quality criteria",
+        "code": "import vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define verification criteria for content generation\ncontent_checks = {\n    \"brand_consistency\": {\n        \"type\": \"semantic_similarity\",\n        \"reference\": \"Our brand voice: professional, innovative, customer-focused\",\n        \"threshold\": 0.85\n    },\n    \"factual_accuracy\": {\n        \"type\": \"fact_check\",\n        \"sources\": result['citations']\n    },\n    \"seo_compliance\": {\n        \"type\": \"keyword_density\",\n        \"target_keywords\": [\"AI\", \"content\", \"generation\"],\n        \"min_density\": 0.02\n    },\n    \"tone_adherence\": {\n        \"type\": \"sentiment_analysis\",\n        \"target_sentiment\": \"professional\"\n    }\n}\n\n# Verify final graph output\ntry:\n    verified_result = vex_client.verify(\n        input=result['merged_content'],\n        checks=content_checks,\n        context={\n            \"topic\": result['topic'],\n            \"brand_guidelines\": result['brand_voice']\n        }\n    )\n    \n    if verified_result['passed']:\n        print(\"✅ Content ready for publishing\")\n    else:\n        print(\"❌ Verification failed:\", verified_result['failures'])\n        \nexcept vex.VerificationError as e:\n    print(\"Verification blocked execution:\", e.errors)",
+        "language": "python"
+      },
+      {
+        "title": "Vex as Graph Verification Node",
+        "description": "Add Vex as an explicit node in the workflow for intermediate verification",
+        "code": "import vex\nfrom typing import Any\n\nasync def vex_content_verifier(state: ContentState) -> ContentState:\n    \"\"\"Vex verification node for content quality\"\"\"\n    \n    checks = {\n        \"brand_consistency\": {\n            \"type\": \"llm_rubric\",\n            \"rubric\": \"Does this match our professional, innovative brand voice?\",\n            \"threshold\": \"PASS\"\n        },\n        \"originality\": {\n            \"type\": \"plagiarism_check\",\n            \"min_originality\": 90\n        },\n        \"tone_adherence\": {\n            \"type\": \"sentiment_analysis\",\n            \"target\": \"confident_professional\"\n        }\n    }\n    \n    result = vex_client.verify(\n        input=state['merged_content'],\n        checks=checks\n    )\n    \n    state['vex_scores'] = result['scores']\n    state['verification_passed'] = result['passed']\n    \n    if not result['passed']:\n        state['needs_revision'] = True\n        print(\"🔍 Vex flagged issues:\", result['failures'])\n    \n    return state\n\n# Add to workflow\nworkflow.add_node('vex_verify', vex_content_verifier)\n\n# Route through verification\nworkflow.add_edge('merge', 'vex_verify')\nworkflow.add_conditional_edges(\n    'vex_verify',\n    lambda state: 'human_review' if not state['verification_passed'] else END\n)",
+        "language": "python"
+      },
+      {
+        "title": "Merge State Validation with Vex",
+        "description": "Prevent state corruption by validating parallel branch merges before proceeding",
+        "code": "async def vex_merge_validator(state: ContentState) -> ContentState:\n    \"\"\"Validate merged state consistency before editor node\"\"\"\n    \n    merge_checks = {\n        \"tone_compatibility\": {\n            \"type\": \"semantic_similarity\",\n            \"texts\": [state['draft'], state['brand_voice']],\n            \"threshold\": 0.75,\n            \"description\": \"Draft must align with brand voice\"\n        },\n        \"content_completeness\": {\n            \"type\": \"llm_rubric\",\n            \"rubric\": \"Is this content complete with research, structure, and citations?\",\n            \"threshold\": \"PASS\"\n        },\n        \"no_conflicts\": {\n            \"type\": \"conflict_detection\",\n            \"fields\": ['facts', 'brand_voice'],\n            \"max_conflicts\": 0\n        }\n    }\n    \n    validation = vex_client.verify(\n        input=state,\n        checks=merge_checks,\n        context={'stage': 'pre-editor-merge'}\n    )\n    \n    if not validation['passed']:\n        raise ValueError(f\"Merge validation failed: {validation['failures']}\")\n    \n    state['merge_validated'] = True\n    state['validation_scores'] = validation['scores']\n    \n    return state\n\n# Replace simple merge with validated merge\nworkflow.add_node('validated_merge', vex_merge_validator)\nworkflow.add_edge('writer', 'validated_merge')  # From parallel branches\nworkflow.add_edge('brand_voice', 'validated_merge')\nworkflow.add_edge('validated_merge', 'editor')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Content Generation",
+      "description": "Integrate Vex today to eliminate content quality risks and ensure brand-compliant, fact-checked output at every workflow checkpoint."
+    }
+  }
+}

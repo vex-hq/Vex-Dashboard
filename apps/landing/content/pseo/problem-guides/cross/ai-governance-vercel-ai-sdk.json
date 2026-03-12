@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix responsible ai governance for agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "Vercel AI SDK ai-governance",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in Vercel AI SDK manifests as unreliable agent behaviors like partial hallucinations in streaming responses, unvalidated tool calls, inconsistent structured outputs across LLM providers, and timeouts in edge functions during complex reasoning chains. These issues erode user trust and lead to production failures in AI-powered UIs built with React Server Components. Without governance, agents can propagate errors from streaming tokens or external tools directly to users.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming agent responses with partial hallucinations",
+        "symptom": "Incomplete sentences or factual errors appear mid-stream before correction",
+        "impact": "Users see convincing but wrong information, damaging credibility"
+      },
+      {
+        "scenario": "Tool call results not validated before display",
+        "symptom": "Raw API errors or malicious tool outputs rendered directly to UI",
+        "impact": "Security vulnerabilities and poor UX from unfiltered external data"
+      },
+      {
+        "scenario": "Inconsistent structured output across providers",
+        "symptom": "Agent fails parsing when switching from OpenAI to Anthropic",
+        "impact": "Broken deployments and forced provider lock-in"
+      },
+      {
+        "scenario": "Edge function timeouts on complex agent tasks",
+        "symptom": "Long reasoning chains exceed Vercel edge runtime limits",
+        "impact": "Dropped requests and degraded user experience"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Hallucination Monitor",
+        "description": "Detects hallucinated content in streaming responses by tracking token confidence drift",
+        "code": "import { streamText } from 'ai';\nimport { z } from 'zod';\n\nconst detectHallucinations = async (stream) => {\n  let confidenceDrift = 0;\n  let tokenCount = 0;\n  \n  for await (const chunk of stream) {\n    const tokens = chunk.toString().split(/\\s+/);\n    tokenCount += tokens.length;\n    \n    // Flag if >30% tokens appear low-confidence (repetitive/short)\n    const lowConfTokens = tokens.filter(t => t.length < 3 || /[^a-zA-Z]/.test(t)).length;\n    confidenceDrift += lowConfTokens / tokenCount;\n    \n    if (confidenceDrift > 0.3) {\n      console.warn('🚨 Hallucination detected:', { confidenceDrift, tokenCount });\n    }\n  }\n};\n\n// Usage\nconst result = await streamText({\n  model: openai('gpt-4o'),\n  stream: true,\n});\n\ndetectHallucinations(result.textStream);",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Validator",
+        "description": "Intercepts tool calls to validate schemas and sanitize outputs before UI render",
+        "code": "import { generateText } from 'ai';\nimport { z } from 'zod';\n\nconst toolCallSchema = z.object({\n  name: z.string(),\n  args: z.record(z.any()),\n  result: z.union([z.string(), z.number(), z.boolean()]),\n});\n\nconst validateToolCall = (toolCall: any) => {\n  const result = toolCallSchema.safeParse(toolCall);\n  if (!result.success) {\n    console.error('❌ Invalid tool call:', result.error);\n    return { valid: false, sanitized: null };\n  }\n  return { valid: true, sanitized: result.data };\n};\n\nconst { text } = await generateText({\n  model: openai('gpt-4o'),\n  tools: {\n    calculator: {\n      description: 'Calculate math',\n      parameters: z.object({ expr: z.string() }),\n      execute: async ({ expr }) => {\n        const result = validateToolCall({ name: 'calculator', args: { expr }, result: eval(expr) });\n        if (!result.valid) throw new Error('Tool validation failed');\n        return result.sanitized.result;\n      },\n    },\n  },\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Provider Consistency Checker",
+        "description": "Tests structured output parsing across multiple providers to catch schema drift",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst agentSchema = z.object({\n  action: z.enum(['search', 'calculate', 'respond']),\n  query: z.string().min(1),\n});\n\nconst testProviders = async () => {\n  const providers = [\n    { model: openai('gpt-4o'), name: 'OpenAI' },\n    { model: anthropic('claude-3-5-sonnet-20240620'), name: 'Anthropic' },\n  ];\n  \n  for (const { model, name } of providers) {\n    try {\n      const { object } = await generateObject({\n        model,\n        schema: agentSchema,\n        prompt: 'Plan next action: research Vercel AI SDK',\n      });\n      console.log(`${name}: ✅ PASS`, object);\n    } catch (error) {\n      console.error(`${name}: ❌ FAIL`, error.message);\n    }\n  }\n};\n\ntestProviders();",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Confidence-Gated Streaming",
+        "description": "Buffers low-confidence tokens and only streams validated content",
+        "code": "import { streamText } from 'ai';\n\nconst safeStreamText = async ({ model, prompt }) => {\n  const stream = await streamText({ model, prompt });\n  \n  return new ReadableStream({\n    async start(controller) {\n      let buffer = '';\n      let confidence = 1.0;\n      \n      for await (const chunk of stream.textStream) {\n        buffer += chunk;\n        \n        // Simple confidence scoring\n        const sentences = buffer.split(/[.!?]+/).filter(s => s.trim());\n        confidence = sentences.length > 0 ? sentences[sentences.length - 1].length / 100 : 1;\n        \n        if (confidence > 0.5 || buffer.length > 200) {\n          controller.enqueue(new TextEncoder().encode(buffer));\n          buffer = '';\n        }\n      }\n      \n      if (buffer) controller.enqueue(new TextEncoder().encode(buffer));\n      controller.close();\n    },\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Validated Tool Wrapper",
+        "description": "Sanitizes and schemas all tool outputs before agent consumption",
+        "code": "import { generateText } from 'ai';\nimport { z } from 'zod';\n\nconst safeToolExecutor = (tool) => async (...args) => {\n  try {\n    const rawResult = await tool(...args);\n    \n    // Sanitize output\n    const safeResult = z.union([z.string().max(1000), z.number(), z.boolean()])\n      .safeParse(rawResult);\n      \n    if (!safeResult.success) {\n      throw new Error('Tool output validation failed');\n    }\n    \n    return safeResult.data;\n  } catch (error) {\n    console.error('Tool error:', error);\n    return 'Tool execution failed - please try again';\n  }\n};\n\nconst { text } = await generateText({\n  model: openai('gpt-4o'),\n  tools: {\n    weather: {\n      parameters: z.object({ city: z.string() }),\n      execute: safeToolExecutor(async ({ city }) => {\n        // Real weather API call\n        return `Weather in ${city}: 72°F, sunny`;\n      }),\n    },\n  },\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Edge-Optimized Agent Chunking",
+        "description": "Breaks complex agent tasks into timeout-safe chunks for Vercel Edge",
+        "code": "import { streamText } from 'ai';\n\nconst edgeSafeAgent = async (prompt: string) => {\n  const MAX_TOKENS = 2000;\n  let remainingPrompt = prompt;\n  let fullResponse = '';\n  \n  while (remainingPrompt) {\n    const { text } = await streamText({\n      model: openai('gpt-4o'),\n      maxTokens: MAX_TOKENS,\n      prompt: `Continue from: ${remainingPrompt}\\nPrevious: ${fullResponse.slice(-500)}`,\n    });\n    \n    fullResponse += text;\n    remainingPrompt = text.includes('[CONTINUE]') ? remainingPrompt : '';\n    \n    // Yield partial results for streaming UI\n    if (remainingPrompt) {\n      // Stream chunk to client\n      console.log('Chunk:', text);\n    }\n  }\n  \n  return fullResponse;\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex middleware automatically wraps Vercel AI SDK's generateText and streamText calls, injecting real-time governance checks for hallucinations, tool validation, schema consistency, and timeout protection. It runs invisible semantic analysis on streaming tokens, flags anomalous tool outputs, normalizes structured responses across providers, and auto-chunks long-running agent tasks to stay within edge limits. With zero-config setup via npm install ai @vex_dev/sdk, Vex provides production-grade observability dashboards showing governance metrics like hallucination rates and tool failure patterns.\n\nThe middleware captures 100% of agent interactions without performance overhead, using lightweight token-level analysis optimized for Vercel Edge. Teams get instant alerts on governance violations and one-click remediation templates. Vex also auto-generates provider-agnostic schemas from observed outputs, eliminating manual Zod maintenance across OpenAI, Anthropic, and others.",
+      "code": "import { generateText, streamText } from 'ai';\nimport { Vex } from '@vex_dev/sdk';\n\n// Initialize Vex middleware (one-time setup)\nconst vex = new Vex({\n  projectId: 'your-vex-project-id',\n  autoObserve: true, // Auto-wraps all AI SDK calls\n});\n\n// Your existing Vercel AI SDK code - Vex handles governance automatically\nconst { text } = await generateText({\n  model: openai('gpt-4o'),\n  prompt: 'Agent: research Vercel AI SDK best practices',\n  tools: {\n    search: { /* your tools */ },\n  },\n});\n\n// Streaming example - Vex buffers hallucinations\nconst result = await streamText({\n  model: anthropic('claude-3-5-sonnet-20240620'),\n  prompt: 'Complex multi-step reasoning task',\n});\n\n// Vex dashboard shows:\n// ✅ 98% hallucination-free streams\n// ✅ 100% tool validation pass rate\n// ✅ Cross-provider schema consistency\n// 🚨 2/100 requests needed chunking",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware now with npm install ai @vex_dev/sdk to get instant Responsible AI governance across all your Vercel AI SDK agents."
+    }
+  }
+}

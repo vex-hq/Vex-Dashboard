@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with LangGraph + Vex Guardrails",
+    "description": "Learn how to build code generation with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph code generation",
+      "LangGraph guardrails",
+      "code generation reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "LangGraph enables building sophisticated code generation agents with stateful, cyclical workflows that generate, test, and refine code iteratively. However, the high-risk nature of executing LLM-generated code introduces severe risks like credential leakage, unsafe dependencies, and infinite loops from cyclic graph failures. Vex provides essential verification layers to ensure code safety, syntax validity, and sandboxed execution before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with LangGraph",
+      "description": "The typical LangGraph code generation workflow starts with a planner node that analyzes requirements and invokes an LLM to generate initial code. This feeds into parallel branches: one for syntax validation and static analysis, another for sandboxed execution with test suite validation. Results merge back into a reviewer node that decides on refinement iterations or final approval, using persistent checkpoints for human-in-the-loop oversight.\n\nState is managed via LangGraph's Checkpoint system, tracking code versions, test results, and execution traces across cycles. Conditional edges handle iteration logic based on test coverage, error rates, and safety scores. The graph supports human breakpoints for manual review of risky code patterns.\n\nVex integrates at critical junctions: wrapping generated code execution, validating merged state from parallel branches, and checkpoint verification to prevent deserialization failures from schema drift.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Prompt   │───▶│  Code Planner    │\n└─────────────────┘    │   (LLM Generate) │\n                       └────────┬──────────┘\n                                │\n                ┌───────────────▼───────────────┐\n                │           Parallel           │\n    ┌───────────▼──────────┐ ┌────────▼────────┐│\n    │ Syntax Validator     │ │ Sandbox Executor ││\n    │   (Vex Safety)       │ │   (Vex Sandbox)  ││\n    └───────────┬──────────┘ └────────┬────────┘│\n                │                     │         │\n                └──────────────┬──────┘         │\n                              │                │\n                       ┌──────▼──────┐         │\n                       │ Test Merger │◀────────┘\n                       │(State Check)│\n                       └──────┬──────┘\n                              │\n                       ┌──────▼──────┐\n                       │ Code Reviewer│──────┐\n                       │  (Iterate?)  │      │\n                       └──────┬──────┘      │\n                              │             │\n                         ┌────▼────┐   ┌─────▼────┐\n                         │Approve │   │ Refine    │\n                         └────────┘   └──────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "LLM-generated iteration logic can create infinite loops when test failures trigger endless refinement cycles without convergence criteria.",
+        "severity": "critical",
+        "mitigation": "Vex monitors state transition depth and enforces max iterations with automatic termination."
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Syntax validator and sandbox executor produce incompatible code versions that corrupt shared state during merge.",
+        "severity": "high",
+        "mitigation": "Vex validates state schema consistency before checkpoint persistence."
+      },
+      {
+        "name": "Generated code credential leakage",
+        "description": "LLM hallucinates API keys, database credentials, or secrets in generated code snippets.",
+        "severity": "critical",
+        "mitigation": "Vex scans for credential patterns and blocks execution of unsafe code."
+      },
+      {
+        "name": "Unsafe dependency injection",
+        "description": "Generated code imports malicious packages or executes system commands via pip install.",
+        "severity": "high",
+        "mitigation": "Vex sandbox enforces dependency allowlists and blocks dynamic imports."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic LangGraph Code Generation Graph",
+        "description": "Core workflow with planner, validator, executor, and reviewer nodes using TypedDict state.",
+        "code": "from typing import TypedDict, Annotated\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\nimport vex\n\nclass CodeState(TypedDict):\n    requirement: str\n    code: str\n    syntax_valid: bool\n    test_passed: bool\n    iteration: Annotated[int, vex.add]\n    safety_score: float\n\nasync def planner(state: CodeState) -> CodeState:\n    # LLM generates initial code\n    code = \"def hello(): print('Hello World')\"  # Replace with LLM call\n    return {\"code\": code, \"iteration\": 0}\n\ndef validator(state: CodeState) -> CodeState:\n    try:\n        compile(state['code'], '<string>', 'exec')\n        return {'syntax_valid': True}\n    except:\n        return {'syntax_valid': False}\n\nasync def executor(state: CodeState) -> CodeState:\n    if not state.get('syntax_valid', False):\n        return state\n    # Sandbox execution\n    result = await vex.sandbox.execute(state['code'])\n    return {'test_passed': result.passed, 'safety_score': result.safety_score}\n\ndef reviewer(state: CodeState) -> str:\n    if state.get('test_passed', False) and state['safety_score'] > 0.9:\n        return END\n    if state['iteration'] > 5:\n        return END\n    return 'planner'\n\n# Build graph\nworkflow = StateGraph(CodeState)\nworkflow.add_node('planner', planner)\nworkflow.add_node('validator', validator)\nworkflow.add_node('executor', executor)\nworkflow.add_node('reviewer', reviewer)\n\nworkflow.set_entry_point('planner')\nworkflow.add_edge('planner', 'validator')\nworkflow.add_edge('validator', 'executor')\nworkflow.add_conditional_edges('reviewer', reviewer)\n\nmemory = SqliteSaver.from_conn_string(':memory:')\napp = workflow.compile(checkpointer=memory)",
+        "language": "python"
+      },
+      {
+        "title": "Vex-Wrapped Graph Invocation",
+        "description": "Wrap graph.invoke() with vex.verify() to catch state corruption and infinite loops.",
+        "code": "async def safe_invoke(app, input_state: CodeState, config=None):\n    max_iterations = 10\n    \n    @vex.verify(\n        risks=['cycle_detection'],\n        max_iterations=max_iterations,\n        state_schema=CodeState\n    )\n    async def verified_run():\n        result = await app.ainvoke(input_state, config)\n        return result\n    \n    return await verified_run()\n\n# Usage\nresult = await safe_invoke(\n    app,\n    {'requirement': 'Write fibonacci function with tests'}\n)",
+        "language": "python"
+      },
+      {
+        "title": "Code Safety Validator Node",
+        "description": "Dedicated Vex node for credential scanning and dependency validation.",
+        "code": "async def vex_safety_node(state: CodeState) -> CodeState:\n    verification = await vex.verify_code(\n        code=state['code'],\n        checks=[\n            'no_credentials',\n            'no_system_calls',\n            'dependency_safety',\n            'syntax_validity'\n        ],\n        sandbox=True,\n        timeout=30\n    )\n    \n    return {\n        'safety_score': verification.score,\n        'safety_passed': verification.passed,\n        'issues': verification.issues\n    }\n\n# Add to graph\nworkflow.add_node('vex_safety', vex_safety_node)\nworkflow.add_edge('planner', 'vex_safety')\nworkflow.add_conditional_edges(\n    'vex_safety',\n    lambda state: 'executor' if state['safety_passed'] else END\n)",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop Breakpoint",
+        "description": "Implement safe human review with Vex checkpoint validation.",
+        "code": "from langgraph.prebuilt import create_react_agent\n\nasync def human_review_node(state: CodeState) -> CodeState:\n    if state['safety_score'] < 0.8:\n        # Persist for human review\n        checkpoint = await vex.validate_checkpoint(state)\n        if not checkpoint.valid:\n            raise ValueError('Checkpoint schema corrupted')\n        \n        # Human approval workflow\n        approval = await vex.human_review(\n            code=state['code'],\n            issues=state.get('issues', []),\n            context=state['requirement']\n        )\n        \n        if not approval.approved:\n            return {'approved': False}\n    \n    return {'approved': True}\n\nworkflow.add_node('human_review', human_review_node)\nworkflow.add_conditional_edges(\n    'executor',\n    lambda s: 'human_review' if s['safety_score'] < 0.8 else 'reviewer'\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Sandbox Execution Node",
+        "description": "Replace raw exec() with Vex sandbox for safe code execution.",
+        "code": "async def vex_sandbox_executor(state: CodeState) -> CodeState:\n    sandbox_result = await vex.sandbox.run(\n        code=state['code'],\n        inputs={'test_data': 'sample_input'},\n        timeout=10,\n        memory_limit='256MB',\n        allowed_packages=['numpy', 'pandas'],  # Dependency safety\n        network=False  # No external calls\n    )\n    \n    return {\n        'execution_passed': sandbox_result.passed,\n        'test_results': sandbox_result.stdout,\n        'errors': sandbox_result.stderr,\n        'safety_score': sandbox_result.safety\n    }\n\n# Integration\nworkflow.add_node('sandbox_exec', vex_sandbox_executor)\nworkflow.add_edge('vex_safety', 'sandbox_exec')",
+        "language": "python"
+      },
+      {
+        "title": "State Merge Validator",
+        "description": "Prevent corruption when parallel validation branches converge.",
+        "code": "async def vex_state_merger(state: CodeState) -> CodeState:\n    merged_state = await vex.verify_state_merge(\n        current_state=state,\n        expected_schema=CodeState,\n        changes=['syntax_valid', 'execution_passed'],\n        max_drift=0.1\n    )\n    \n    if not merged_state.valid:\n        raise ValueError(f'State corruption detected: {merged_state.errors}')\n    \n    return {\n        **state,\n        'merged_at': 'timestamp',\n        'drift_score': merged_state.drift\n    }\n\n# Add after parallel edges\nworkflow.add_node('state_merge', vex_state_merger)",
+        "language": "python"
+      },
+      {
+        "title": "Credential Scanner Middleware",
+        "description": "Pre-execution scan blocks credential leakage automatically.",
+        "code": "from vex.scanners import CredentialScanner\n\nscanner = CredentialScanner(patterns=['API_KEY', 'PASSWORD', 'SECRET'])\n\nasync def credential_guard(state: CodeState) -> CodeState:\n    issues = scanner.scan(state['code'])\n    \n    if issues:\n        await vex.log_violation(\n            code=state['code'],\n            issues=issues,\n            context=state['requirement']\n        )\n        return {'blocked': True, 'issues': issues}\n    \n    return {'code_cleared': True}\n\n# Wrap planner output\nworkflow.add_edge('planner', 'credential_guard')\nworkflow.add_conditional_edges(\n    'credential_guard',\n    lambda s: END if s.get('blocked') else 'vex_safety'\n)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Code Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your first graph to eliminate code generation risks."
+    }
+  }
+}

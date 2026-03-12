@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "azure-ai-agents",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Azure AI Agent Service + Vex Guardrails",
+    "description": "Learn how to build data extraction with Azure AI Agent Service + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Azure AI Agent Service data extraction",
+      "Azure AI Agent Service guardrails",
+      "data extraction reliability",
+      "Vex Azure AI Agent Service",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Azure AI Agent Service enables robust data extraction from unstructured documents using schema-guided LLM calls with built-in Azure OpenAI integration and enterprise grounding. Vex guardrails are essential to ensure schema compliance, field accuracy, and completeness while mitigating common failures like unvalidated tool results and token limit exceedances. This guide shows how to integrate Vex as middleware for reliable enterprise-grade extraction.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Azure AI Agent Service",
+      "description": "The architecture begins with document ingestion via Azure Blob Storage or File Search, followed by Azure AI Agent Service orchestration. Agents use schema-guided prompts with Azure OpenAI models (GPT-4o) to extract structured data, leveraging built-in grounding from Bing Search and enterprise RAG connectors. Tool calls handle file retrieval and validation, with results flowing through agent threads to produce JSON outputs matching predefined Pydantic schemas.\n\nProcessing occurs within agent threads that maintain conversation state, with automatic retries and fallback mechanisms. Outputs are validated against enterprise policies before storage in Cosmos DB or return to calling applications. Vex integrates as middleware in the agent execution pipeline to add verification layers without disrupting native Azure controls.\n\nKey components include the AgentProject client for thread management, schema enforcement via structured outputs, and grounding data sources filtered by enterprise permissions.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Documents      │───▶│ Azure AI Agent   │───▶│   Structured     │\n│ (Blob/FileSearch)│    │ Service + Vex    │    │   JSON Output    │\n└─────────────────┘    │ (Middleware)     │    └─────────────────┘\n                       │ - Schema Guide   │           │\n                       │ - Tool Calls     │           ▼\n                       │ - Grounding      │    ┌─────────────────┐\n                       └──────────────────┘    │ Enterprise DB   │\n                                               │   (CosmosDB)     │\n                                               └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Tool execution results not validated against enterprise policies",
+        "description": "Agents execute file search and grounding tools without checking extracted data against compliance rules like PII redaction or format validation",
+        "severity": "high",
+        "mitigation": "Vex policy enforcement middleware validates all tool outputs before agent processing"
+      },
+      {
+        "name": "Grounding data from Bing Search containing outdated information",
+        "description": "Freshness_date validation fails, causing agents to use stale web data for document context",
+        "severity": "medium",
+        "mitigation": "Vex temporal validation gates reject grounding data older than configurable threshold"
+      },
+      {
+        "name": "File search returning Azure-specific metadata instead of content",
+        "description": "RAG tools return blob metadata/properties instead of document text content",
+        "severity": "high",
+        "mitigation": "Vex content extraction guard ensures only relevant document text reaches LLM"
+      },
+      {
+        "name": "Agent thread token limits exceeded without graceful degradation",
+        "description": "Long documents cause thread token overflow, leading to hallucinated or truncated extractions",
+        "severity": "critical",
+        "mitigation": "Vex token budget monitoring with automatic summarization fallbacks"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Schema-Guided Extraction Agent",
+        "description": "Create agent project with Pydantic schema for invoice extraction using Azure OpenAI",
+        "code": "from azure.ai.projects import AgentProject\nfrom pydantic import BaseModel, Field\n\nclass InvoiceSchema(BaseModel):\n    invoice_number: str = Field(..., description=\"Invoice ID\")\n    total_amount: float = Field(..., description=\"Total USD amount\")\n    date: str = Field(..., description=\"Invoice date YYYY-MM-DD\")\n\nproject = AgentProject.from_config(\"azure_config.json\")\nagent = project.agents.create(\n    name=\"invoice_extractor\",\n    instructions=\"Extract invoice data using the provided schema\",\n    model=\"gpt-4o\",\n    output_type=InvoiceSchema\n)\n\nthread = project.threads.create()\nresult = agent.run(\n    thread,\n    \"Extract from: \" + document_text\n)\n\nprint(result.output)",
+        "language": "python"
+      },
+      {
+        "title": "File Search Tool Integration",
+        "description": "Configure file search tool with enterprise connectors for document retrieval",
+        "code": "from azure.ai.projects import FileSearchTool\n\nfile_search = FileSearchTool(\n    name=\"enterprise_docs\",\n    connection_id=\"doc-indexer-connection\",\n    query_type=\"semantic\",\n    fields_mapping={\"content\": \"content_field\"}\n)\n\nagent = project.agents.create(\n    name=\"doc_extractor\",\n    tools=[file_search],\n    instructions=\"Search docs then extract using schema\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Client Setup",
+        "description": "Initialize Azure AI Projects client for schema extraction in Node.js",
+        "code": "import { AgentProjectsClient } from '@azure/ai-projects';\nimport { InvoiceSchema } from './schemas';\n\nconst client = new AgentProjectsClient('project-api-key');\nconst project = await client.getProject('extraction-project');\n\nconst thread = await project.createThread();\nconst result = await project.runAgent({\n  agentName: 'invoice-extractor',\n  threadId: thread.id,\n  input: 'Extract invoice data from document text',\n  outputSchema: InvoiceSchema,\n  model: 'gpt-4o'\n});\n\nconsole.log(result.output);",
+        "language": "typescript"
+      },
+      {
+        "title": "Structured Output Validation",
+        "description": "Runtime schema validation for extraction completeness",
+        "code": "import { z } from 'zod';\n\nconst InvoiceSchema = z.object({\n  invoice_number: z.string().min(1),\n  total_amount: z.number().positive(),\n  date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/)\n});\n\nfunction validateExtraction(result: any) {\n  const parsed = InvoiceSchema.safeParse(result.output);\n  if (!parsed.success) {\n    throw new Error(`Schema violation: ${parsed.error.message}`);\n  }\n  return parsed.data;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware Pipeline Setup",
+        "description": "Wrap Azure agent execution with comprehensive Vex verification layers",
+        "code": "from vex import Pipeline, Guardrail\nfrom azure.ai.projects import AgentProject\n\npipeline = Pipeline([\n    Guardrail.schema_compliance(),\n    Guardrail.field_accuracy(min_confidence=0.9),\n    Guardrail.completeness_check(),\n    Guardrail.type_consistency(),\n    Guardrail.token_budget(max_tokens=128000)\n])\n\n@ vex.middleware\ndef guarded_agent_run(agent: AgentProject.Agent, input_text: str):\n    thread = agent.project.threads.create()\n    raw_result = agent.run(thread, input_text)\n    verified = pipeline.run(raw_result)\n    return verified",
+        "language": "python"
+      },
+      {
+        "title": "Policy Enforcement for Tool Results",
+        "description": "Validate file search and grounding outputs before LLM processing",
+        "code": "from vex import PolicyGuard\n\npolicy_guard = PolicyGuard([\n    \"no_pii_exposure\",\n    \"content_type:document\",\n    \"freshness:24h\",\n    \"azure_metadata_filtered\"\n])\n\ndef safe_tool_call(tool_name: str, params: dict):\n    raw_result = azure_agent.call_tool(tool_name, params)\n    verified_result = policy_guard.enforce(raw_result)\n    return verified_result.content",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Middleware",
+        "description": "Type-safe Vex integration for Node.js Azure agent workflows",
+        "code": "import { VexPipeline } from 'vex-sdk';\nimport { AgentProjectsClient } from '@azure/ai-projects';\n\nconst vex = new VexPipeline({\n  guards: ['schema-compliance', 'field-accuracy', 'completeness', 'type-consistency'],\n  riskProfile: 'medium',\n  tokenLimit: 128000\n});\n\nconst azureClient = new AgentProjectsClient('key');\n\nexport async function secureExtraction(input: string) {\n  const rawResult = await azureClient.runAgent({ /* config */ });\n  const verified = await vex.verify(rawResult, {\n    schema: InvoiceSchema,\n    useCase: 'data-extraction'\n  });\n  return verified.output;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Azure AI Agent Service Data Extraction",
+      "description": "Install Vex today with `pip install azure-ai-projects vex-sdk` and deploy production-ready guardrails in minutes."
+    }
+  }
+}

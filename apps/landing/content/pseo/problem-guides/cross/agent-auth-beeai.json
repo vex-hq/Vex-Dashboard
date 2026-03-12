@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in BeeAI Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "BeeAI agent-auth",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI, AI Agent Authentication and Authorization issues manifest when agents access tools or memory without proper credential scoping, leading to unauthorized data access across sessions. BeeAI's event-driven architecture and Granite model integration exacerbate this, as agent events lack built-in auth validation, allowing privilege escalation through tool injection or memory tampering. Without explicit auth guards in BeeAI's AgentRunner and ToolRegistry, agents can inadvertently bypass organizational boundaries.",
+    "howItManifests": [
+      {
+        "scenario": "Tool access without tenant isolation",
+        "symptom": "Agent calls `customer_data_tool()` returning data for wrong tenant_id",
+        "impact": "Cross-tenant data leakage exposing PII across organizations"
+      },
+      {
+        "scenario": "Memory state carrying stale auth tokens",
+        "symptom": "Agent session resumption uses expired JWT from previous user",
+        "impact": "Impersonation attacks via persistent memory state"
+      },
+      {
+        "scenario": "Granite model tool-calling without auth context",
+        "symptom": "Unstructured tool args bypass BeeAI's `validate_tool_input()`",
+        "impact": "Arbitrary API calls to internal services without RBAC"
+      },
+      {
+        "scenario": "Event listener privilege escalation",
+        "symptom": "Vex listener receives full agent memory dump without filtering",
+        "impact": "Observability tools become unauthorized data exfiltration channels"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tenant Context Leak Detector",
+        "description": "Scans BeeAI agent events for tenant_id mismatches in tool calls vs session context",
+        "code": "from beeai import AgentRunner\nfrom vex_sdk import VexDetector\n\nclass TenantLeakDetector(VexDetector):\n    def on_tool_call(self, event):\n        tool_tenant = event.get('args', {}).get('tenant_id')\n        session_tenant = event.session.context.get('tenant_id')\n        if tool_tenant != session_tenant:\n            self.flag_violation(\n                'TENANT_LEAK',\n                f'Tool called with tenant {tool_tenant} but session is {session_tenant}',\n                event\n            )",
+        "language": "python"
+      },
+      {
+        "name": "Auth Token Expiration Monitor",
+        "description": "Validates JWT expiration in BeeAI agent memory state during session resume",
+        "code": "import jwt\nfrom beeai.events import MemoryStateEvent\n\nclass TokenExpirationDetector:\n    def on_memory_load(self, event: MemoryStateEvent):\n        auth_state = event.state.get('auth', {})\n        token = auth_state.get('jwt_token')\n        if token:\n            try:\n                payload = jwt.decode(token, options={'verify_signature': False})\n                if payload['exp'] < int(time.time()):\n                    raise ValueError('Expired token in memory')\n            except:\n                print(f'🚨 Invalid/expired auth token in BeeAI memory: {event.session_id}')",
+        "language": "python"
+      },
+      {
+        "name": "Unscoped Tool Argument Scanner",
+        "description": "Detects BeeAI tool calls missing required auth context parameters",
+        "code": "from beeai.tools import ToolCallEvent\n\nSECURE_ARGS = {'tenant_id', 'user_id', 'org_id'}\n\nclass UnscopedToolDetector:\n    def on_tool_invocation(self, event: ToolCallEvent):\n        missing_auth = SECURE_ARGS - set(event.args.keys())\n        if missing_auth:\n            print(f'🚨 Tool {event.tool_name} missing auth params: {missing_auth}')\n            event.block_execution(reason=f'Missing auth context: {missing_auth}')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "BeeAI AuthMiddleware Implementation",
+        "description": "Centralized auth validation wrapper for all BeeAI agent events and tools",
+        "code": "from beeai import AgentRunner\nfrom functools import wraps\n\nclass AuthMiddleware:\n    def __init__(self, verifier):\n        self.verifier = verifier\n    \n    def require_auth(self, fn):\n        @wraps(fn)\n        def wrapped(event):\n            context = event.session.context\n            if not self.verifier.validate_tenant(context.get('tenant_id'), context.get('user_id')):\n                raise PermissionError('Unauthorized tenant access')\n            return fn(event)\n        return wrapped\n    \n# Usage\nagent = AgentRunner()\nagent.add_middleware(AuthMiddleware(jwt_verifier), events=['tool_call', 'memory_load'])",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Registry with RBAC",
+        "description": "BeeAI ToolRegistry with automatic auth parameter injection and validation",
+        "code": "from beeai import ToolRegistry\n\nclass SecureToolRegistry(ToolRegistry):\n    REQUIRED_SCOPES = {'tenant_id', 'user_id'}\n    \n    def register_secure_tool(self, name, fn, required_scopes=None):\n        if required_scopes is None:\n            required_scopes = self.REQUIRED_SCOPES\n        \n        @wraps(fn)\n        def secure_tool_call(args):\n            # Auto-inject session context\n            args['tenant_id'] = args.get('tenant_id', self.current_session.context['tenant_id'])\n            args['user_id'] = args.get('user_id', self.current_session.context['user_id'])\n            \n            # Validate scopes\n            missing = required_scopes - set(args.keys())\n            if missing:\n                raise ValueError(f'Missing auth scopes: {missing}')\n            return fn(args)\n        \n        self.register_tool(name, secure_tool_call)",
+        "language": "python"
+      },
+      {
+        "name": "Session-Scoped Memory Encryption",
+        "description": "Encrypt BeeAI agent memory with tenant-specific keys to prevent auth leakage",
+        "code": "from cryptography.fernet import Fernet\nimport json\nfrom beeai import MemoryStore\n\nclass SecureMemoryStore(MemoryStore):\n    def __init__(self):\n        self.tenant_keys = {}\n    \n    def _get_tenant_key(self, tenant_id):\n        if tenant_id not in self.tenant_keys:\n            self.tenant_keys[tenant_id] = Fernet.generate_key()\n        return self.tenant_keys[tenant_id]\n    \n    def save(self, session_id, state):\n        tenant_id = state['context']['tenant_id']\n        fernet = Fernet(self._get_tenant_key(tenant_id))\n        encrypted = fernet.encrypt(json.dumps(state).encode())\n        super().save(session_id, encrypted)\n    \n    def load(self, session_id):\n        raw = super().load(session_id)\n        # Decrypt only with matching tenant session context\n        tenant_id = self.current_session.context['tenant_id']\n        fernet = Fernet(self._get_tenant_key(tenant_id))\n        return json.loads(fernet.decrypt(raw).decode())",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly with BeeAI's event system as a zero-config listener, automatically detecting auth violations across tool calls, memory operations, and Granite model outputs. It captures every AgentRunner event and applies the TenantLeakDetector, TokenExpirationMonitor, and UnscopedToolScanner in real-time, providing instant violation alerts with full event context and automatic remediation workflows.\n\nVex's BeeAI integration eliminates manual auth auditing by maintaining a baseline of secure session patterns and flagging deviations. When auth violations occur, Vex can automatically inject secure context parameters, block risky tool calls, or trigger session quarantine - all without modifying core agent logic. The `pip install vex-sdk` workflow provides immediate observability into your BeeAI deployment's auth posture.\n\nProduction teams use Vex to enforce Zero Trust for AI agents, ensuring every tool call carries proper tenant context and no stale credentials persist across sessions. Vex's ML-powered anomaly detection learns your org's auth patterns and proactively prevents breaches before they cascade through BeeAI's memory and tool layers.",
+      "code": "from vex_sdk import VexAgent\nfrom beeai import AgentRunner\n\n# Install: pip install beeai-framework vex-sdk\n\nvex = VexAgent(api_key=\"your-vex-key\")\n\n# Auto-register all BeeAI auth detectors\n@vex.register_detector('beeai-auth')\ndef beeai_auth_guard(agent_event):\n    if agent_event.type == 'tool_call':\n        # Enforce tenant isolation\n        tool_tenant = agent_event.args.get('tenant_id')\n        if tool_tenant != agent_event.session.context.get('tenant_id'):\n            return vex.block('TENANT_LEAK', auto_fix=True)\n    \n    if agent_event.type == 'memory_load':\n        # Validate JWT expiration\n        auth_state = agent_event.state.get('auth')\n        if auth_state and 'exp' in auth_state:\n            if auth_state['exp'] < time.time():\n                return vex.block('EXPIRED_TOKEN', auto_remediate=True)\n    \n# Zero-config integration\nagent_runner = AgentRunner()\nagent_runner.add_event_listener(vex.listener())\n\nprint('✅ Vex BeeAI Auth Guard active - all violations auto-remediated')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds to automatically secure your BeeAI agents: `pip install vex-sdk`"
+    }
+  }
+}

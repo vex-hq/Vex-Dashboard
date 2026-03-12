@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in Llama Stack Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in Llama Stack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "Llama Stack rag-retrieval-quality",
+      "Llama Stack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Llama Stack agents, RAG Retrieval Quality Optimization issues manifest as poor chunk relevance, embedding drift, and metadata mismatches during memory bank retrievals, leading to hallucinated document associations and suboptimal context injection. These problems are exacerbated by Llama Stack's standardized memory and tool interfaces, where retrieval failures cascade into agentic loops exceeding turn limits without resolution. Vex integration via post-processing wrappers provides a robust layer for detecting and mitigating these retrieval quality degradations in real-time.",
+    "howItManifests": [
+      {
+        "scenario": "Memory bank retrieval returns irrelevant chunks due to embedding model drift",
+        "symptom": "Agent responses reference non-existent document sections or hallucinate facts",
+        "impact": "Increased agentic loop iterations and safety shield false positives on fabricated content"
+      },
+      {
+        "scenario": "Chunk truncation during indexing loses critical context boundaries",
+        "symptom": "Retrieved passages end mid-sentence with incomplete semantic meaning",
+        "impact": "Tool calls fail schema validation due to malformed context interpretation"
+      },
+      {
+        "scenario": "Metadata filtering excludes relevant documents with mismatched tags",
+        "symptom": "Agent claims 'no relevant information found' despite comprehensive corpus",
+        "impact": "Turn limits exceeded as agent loops searching empty retrieval results"
+      },
+      {
+        "scenario": "Hybrid search weighting imbalance favors keyword over semantic matching",
+        "symptom": "Top-k results dominated by superficial term matches ignoring intent",
+        "impact": "Poor reasoning quality triggers safety filtering on incoherent responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Score Monitoring",
+        "description": "Calculates cosine similarity between query embedding and top-k retrieved chunks using Llama Stack's memory bank metrics",
+        "code": "from llama_stack_client import LlamaStack\nfrom llama_stack_client.models import MemoryQuery\n\ndef detect_retrieval_relevance(stack_client: LlamaStack, query: str, min_relevance: float = 0.7) -> dict:\n    memory_query = MemoryQuery(query=query, top_k=5, with_scores=True)\n    results = stack_client.memory.retrieve(memory_query)\n    \n    relevance_scores = [result.score for result in results.chunks]\n    avg_relevance = sum(relevance_scores) / len(relevance_scores)\n    \n    return {\n        'healthy': avg_relevance >= min_relevance,\n        'avg_relevance': avg_relevance,\n        'threshold': min_relevance,\n        'chunks': len(results.chunks)\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Chunk Boundary Integrity Check",
+        "description": "Validates retrieved chunks maintain semantic completeness by checking sentence boundaries and truncation patterns",
+        "code": "import re\nfrom typing import List\n\ndef detect_chunk_truncation(retrieved_chunks: List[str]) -> List[dict]:\n    truncation_issues = []\n    truncation_patterns = [r'\\n\\s*$', r'\\.\\s*$', r'[,;]\\s*$']\n    \n    for i, chunk in enumerate(retrieved_chunks):\n        is_truncated = any(re.search(pattern, chunk.strip()) for pattern in truncation_patterns)\n        char_count = len(chunk)\n        \n        if is_truncated or char_count < 50:\n            truncation_issues.append({\n                'chunk_index': i,\n                'is_truncated': is_truncated,\n                'length': char_count,\n                'content_preview': chunk[:100] + '...'\n            })\n    \n    return truncation_issues",
+        "language": "python"
+      },
+      {
+        "name": "Metadata Coverage Analysis",
+        "description": "Evaluates if retrieval respects document metadata filters and returns expected document diversity",
+        "code": "from collections import Counter\n\ndef analyze_metadata_coverage(retrieval_results) -> dict:\n    doc_sources = [chunk.metadata.get('source', 'unknown') for chunk in retrieval_results.chunks]\n    source_diversity = len(set(doc_sources))\n    \n    source_distribution = Counter(doc_sources)\n    dominant_source_ratio = source_distribution.most_common(1)[0][1] / len(doc_sources)\n    \n    return {\n        'source_diversity': source_diversity,\n        'total_docs': len(doc_sources),\n        'dominant_source_ratio': dominant_source_ratio,\n        'healthy': dominant_source_ratio < 0.8 and source_diversity >= 2\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Embedding Re-ranking",
+        "description": "Implements MMR (Maximal Marginal Relevance) re-ranking on Llama Stack memory retrievals to balance relevance and diversity",
+        "code": "from sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\ndef mmr_rerank(query_embedding: np.ndarray, chunk_embeddings: np.ndarray, chunks: list, lambda_param: float = 0.7, k: int = 5) -> list:\n    scores = cosine_similarity(query_embedding.reshape(1, -1), chunk_embeddings)[0]\n    selected = []\n    \n    for _ in range(k):\n        mmr_scores = []\n        for i in range(len(chunks)):\n            if i in selected:\n                continue\n            similarity_to_query = scores[i]\n            similarity_to_selected = max([\n                cosine_similarity(chunk_embeddings[i].reshape(1, -1), chunk_embeddings[s].reshape(1, -1))[0][0]\n                for s in selected\n            ]) if selected else 0\n            \n            mmr = lambda_param * similarity_to_query - (1 - lambda_param) * similarity_to_selected\n            mmr_scores.append((mmr, i))\n        \n        best_idx = max(mmr_scores)[1]\n        selected.append(best_idx)\n    \n    return [chunks[i] for i in selected]",
+        "language": "python"
+      },
+      {
+        "name": "Adaptive Chunking Strategy",
+        "description": "Configures Llama Stack memory indexer with semantic-aware chunking respecting sentence boundaries",
+        "code": "from llama_stack_client import LlamaStack\nfrom llama_stack_client.models import IndexingConfig\n\ndef configure_optimal_chunking(stack_client: LlamaStack):\n    chunking_config = IndexingConfig(\n        chunk_size=512,\n        chunk_overlap=64,\n        split_by='sentence',\n        separators=['\\n\\n', '\\n', '. ', ' ', ''],\n        keep_separator=True,\n        min_chunk_length=100\n    )\n    \n    stack_client.memory.configure_indexer(chunking_config)\n    print('✅ Adaptive chunking configured with semantic boundaries')\n    \n    return chunking_config",
+        "language": "python"
+      },
+      {
+        "name": "Hybrid Search Weight Optimization",
+        "description": "Tunes Llama Stack hybrid search parameters for balanced keyword + semantic retrieval",
+        "code": "from llama_stack_client.models import RetrievalConfig\n\ndef optimize_hybrid_search(stack_client: LlamaStack):\n    hybrid_config = RetrievalConfig(\n        hybrid_alpha=0.6,  # 60% semantic, 40% keyword\n        rerank=True,\n        rerank_top_n=20,\n        metadata_filter=None,\n        min_score_threshold=0.5\n    )\n    \n    stack_client.memory.update_retrieval_config(hybrid_config)\n    return {\n        'semantic_weight': hybrid_config.hybrid_alpha,\n        'keyword_weight': 1 - hybrid_config.hybrid_alpha,\n        'expected_improvement': '25-40% relevance boost'\n    }",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex automates RAG retrieval quality monitoring by wrapping Llama Stack agent turns with comprehensive post-processing verification. It continuously evaluates retrieval relevance scores, chunk integrity, and metadata coverage against configurable thresholds, automatically triggering remediation workflows when quality degrades. The platform maintains historical baselines of healthy retrieval patterns, enabling anomaly detection and proactive optimization before user-facing issues emerge.\n\nIntegration requires minimal code changes - simply wrap your Llama Stack agent execution with vex.verify(). Vex captures memory bank retrieval traces, computes quality metrics in real-time, and provides actionable remediation recommendations including optimal chunking parameters and hybrid search weights. Failed verifications trigger automatic fallback to cached high-quality retrievals or synthetic context generation.\n\nVex's ML-powered analysis identifies embedding drift patterns across deployments, recommending model updates or re-indexing schedules. This closed-loop optimization ensures Llama Stack agents maintain >90% retrieval quality under varying query distributions and corpus evolution.",
+      "code": "import vex\nfrom llama_stack_client import LlamaStack\n\n@vex.verify(\n    checks=[\n        'rag_retrieval_relevance',\n        'chunk_boundary_integrity',\n        'metadata_diversity',\n        'response_factual_consistency'\n    ],\n    remediation='auto_rag_optimize',\n    alert_on_failure=True\n)\ndef llama_stack_agent_with_rag_monitoring(stack_client: LlamaStack, user_query: str):\n    # Standard Llama Stack agent execution\n    memory_results = stack_client.memory.retrieve(MemoryQuery(query=user_query, top_k=5))\n    \n    agent_response = stack_client.agent.run(\n        query=user_query,\n        context=memory_results.chunks,\n        max_turns=5\n    )\n    \n    return {\n        'response': agent_response.content,\n        'retrieval_stats': {\n            'chunk_count': len(memory_results.chunks),\n            'avg_relevance': sum([c.score for c in memory_results.chunks]) / len(memory_results.chunks)\n        }\n    }\n\n# Usage\nstack = LlamaStack.from_config('your-config.yaml')\nresult = llama_stack_agent_with_rag_monitoring(stack, \"What are our Q3 sales figures?\")\n\n# Vex automatically detects: ❌ Low relevance (0.42), chunk truncation, single-source dominance\n# Triggers: Hybrid search reweighting, chunking reconfiguration, alert to engineering",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Llama Stack agents in 3 lines of code to eliminate RAG retrieval quality issues permanently."
+    }
+  }
+}

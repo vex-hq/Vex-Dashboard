@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "azure-ai-agents",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Azure AI Agent Service + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Azure AI Agent Service + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Azure AI Agent Service workflow automation",
+      "Azure AI Agent Service guardrails",
+      "workflow automation reliability",
+      "Vex Azure AI Agent Service",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Azure AI Agent Service enables powerful workflow automation by combining Azure OpenAI models with enterprise-grade grounding, tool calling, and security controls for multi-step task execution. Integrating Vex as middleware ensures reliability by validating actions against enterprise policies, preventing token exhaustion, and enforcing idempotency in complex workflows. Guardrails are essential to mitigate risks like unvalidated tool outputs and outdated grounding data that can derail enterprise automation.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Azure AI Agent Service",
+      "description": "Azure AI Agent Service orchestrates multi-step workflows using agent threads that maintain conversation state across API calls, conditional branching, and human-in-the-loop approvals. Each step involves tool execution (APIs, file search, Bing grounding), state management via thread tokens, and enterprise policy enforcement through Azure RBAC. The pipeline processes user requests through an agent executor that handles reasoning, action selection, and observation cycles until task completion or escalation.\n\nTypical workflows include order processing (API calls + approval), document analysis (file search + grounding), or IT automation (conditional remediation). Vex integrates as middleware between the Azure agent executor and tool handlers to validate outputs, enforce idempotency, and provide rollback mechanisms before committing state changes.\n\nHuman-in-the-loop occurs via Azure approval workflows, with Vex ensuring actions are auditable and reversible before escalation.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│ Azure Agent Thread│\n│                 │    │  (State Mgmt)     │\n└─────────────────┘    └────────┬──────────┘\n                               │\n                    ┌──────────▼──────────┐\n                    │   Vex Middleware    │\n                    │ (Validation/Guard-  │\n                    │   rails/Rollback)   │\n                    └──────────┬──────────┘\n                               │\n                    ┌──────────▼──────────┐\n                    │ Tool Execution      │──▶┌──────────────────┐\n                    │ - API Calls         │   │ Human Approval   │\n                    │ - Bing Grounding    │   │ (Optional)       │\n                    │ - File Search       │   └──────────────────┘\n                    └──────────────────────┘\n"
+    },
+    "risks": [
+      {
+        "name": "Tool execution results not validated against enterprise policies",
+        "description": "Agents execute API calls without checking data sensitivity or compliance rules",
+        "severity": "critical",
+        "mitigation": "Vex policy validator scans tool outputs against enterprise PII/DLP rules before state commit"
+      },
+      {
+        "name": "Grounding data from Bing Search containing outdated information",
+        "description": "Bing returns stale enterprise data leading to incorrect workflow decisions",
+        "severity": "high",
+        "mitigation": "Vex freshness checker validates grounding data against internal knowledge cutoff dates"
+      },
+      {
+        "name": "File search returning Azure-specific metadata instead of content",
+        "description": "RAG returns storage metadata instead of document content, breaking analysis",
+        "severity": "medium",
+        "mitigation": "Vex content extractor strips metadata and validates semantic relevance"
+      },
+      {
+        "name": "Agent thread token limits exceeded without graceful degradation",
+        "description": "Long-running threads hit context limits causing workflow failure",
+        "severity": "high",
+        "mitigation": "Vex token monitor summarizes thread state and triggers checkpoint/rollback"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Azure AI Agent Thread with Tool Calling",
+        "description": "Initialize agent thread and execute workflow steps with API integration",
+        "code": "from azure.ai.projects import AgentClient\nfrom vex_sdk import VexClient\n\nclient = AgentClient(credential=DefaultAzureCredential(), endpoint=\"https://your-project.openai.azure.com/\")\nvex = VexClient(api_key=\"vex-api-key\")\n\nthread = client.beta.threads.create()\n\n# Add workflow instructions\nclient.beta.threads.messages.create(\n    thread_id=thread.id,\n    role=\"user\",\n    content=\"Process order #12345: validate inventory, check approval, call shipping API\"\n)\n\n# Execute with Vex middleware\nrun = client.beta.threads.runs.create(\n    thread_id=thread.id,\n    assistant_id=\"your-agent-id\",\n    tool_resources={\n        \"code_interpreter\": {},\n        \"retrieval\": {\n            \"file_ids\": [\"file-id\"],\n            \"vector_store_ids\": [\"vs-id\"]\n        }\n    }\n)\n\n# Vex validation before tool execution\nif run.status == \"requires_action\":\n    validated_tools = vex.validate_tools(run.required_action.submit_tool_outputs.tool_calls)\n    client.beta.threads.runs.submit_tool_outputs(\n        thread_id=thread.id,\n        run_id=run.id,\n        tool_outputs=validated_tools\n    )",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Executor with Conditional Logic",
+        "description": "Handle branching workflows with human-in-the-loop using Azure SDK",
+        "code": "import { AgentClient } from '@azure/ai-projects';\nimport { VexClient } from 'vex-sdk-ts';\n\nconst client = new AgentClient('https://your-project.openai.azure.com/', credential);\nconst vex = new VexClient({ apiKey: 'vex-api-key' });\n\nasync function executeWorkflow(threadId: string, step: number) {\n  const run = await client.beta.threads.runs.create(threadId, {\n    assistant_id: 'agent-id',\n    instructions: `Execute workflow step ${step}: check conditions and branch appropriately`\n  });\n\n  while (run.status === 'in_progress' || run.status === 'requires_action') {\n    await new Promise(r => setTimeout(r, 1000));\n    const updatedRun = await client.beta.threads.runs.retrieve(threadId, run.id);\n    \n    if (updatedRun.status === 'requires_action') {\n      const validated = await vex.validateAction(\n        updatedRun.required_action.submit_tool_outputs.tool_calls\n      );\n      await client.beta.threads.runs.submitToolOutputs(threadId, run.id, validated);\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Python Human-in-the-Loop Approval Handler",
+        "description": "Implement approval workflow with Vex permission validation",
+        "code": "from azure.ai.projects import AgentClient\nimport asyncio\n\nasync def handle_approval_workflow(thread_id: str, approval_required: bool):\n    client = AgentClient(credential=DefaultAzureCredential())\n    \n    if approval_required:\n        # Pause for human review\n        message = client.beta.threads.messages.list(thread_id)\n        print(f\"Approval needed for: {message.data[0].content[0].text.value}\")\n        \n        # Vex permission check\n        approval = input(\"Approve? (y/n): \")\n        if approval.lower() == 'y':\n            client.beta.threads.messages.create(\n                thread_id=thread_id,\n                role=\"user\",\n                content=\"Approved - continue workflow\"\n            )\n        else:\n            # Vex rollback\n            vex.rollback_thread(thread_id)\n            return False\n    \n    run = client.beta.threads.runs.create(thread_id, assistant_id=\"agent-id\")\n    return True",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Idempotency Check Middleware",
+        "description": "Prevent duplicate API calls in retry scenarios",
+        "code": "import { AgentClient } from '@azure/ai-projects';\nimport { VexClient } from 'vex-sdk-ts';\n\nconst vex = new VexClient({ apiKey: 'vex-api-key' });\n\ninterface ToolCall { tool_call_id: string; function: { name: string; arguments: string } }\n\nasync function idempotentToolExecution(\n  client: AgentClient,\n  threadId: string,\n  runId: string,\n  toolCalls: ToolCall[]\n): Promise<any> {\n  const validatedCalls = [];\n  \n  for (const toolCall of toolCalls) {\n    // Check idempotency key\n    const idempotent = await vex.checkIdempotency(\n      toolCall.function.name,\n      JSON.parse(toolCall.function.arguments)\n    );\n    \n    if (idempotent.isSafe) {\n      validatedCalls.push(toolCall);\n    } else {\n      console.log(`Skipping duplicate: ${toolCall.tool_call_id}`);\n    }\n  }\n  \n  return client.beta.threads.runs.submitToolOutputs(threadId, runId, {\n    tool_outputs: validatedCalls.map(call => ({\n      tool_call_id: call.tool_call_id,\n      output: 'IDEMPOTENT_SKIP'\n    }))\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Policy Validation Middleware (Python)",
+        "description": "Intercept tool calls and validate against enterprise policies before execution",
+        "code": "from vex_sdk import VexClient\nfrom azure.ai.projects.types import RunObject\n\nvex = VexClient(api_key=\"your-vex-key\")\n\ndef vex_policy_middleware(run: RunObject) -> RunObject:\n    if run.status == \"requires_action\":\n        tool_calls = run.required_action.submit_tool_outputs.tool_calls\n        \n        validated_tools = []\n        for tool in tool_calls:\n            # Validate against enterprise policies\n            validation = vex.validate_tool(\n                tool.function.name,\n                tool.function.arguments,\n                policies={\n                    \"pii_detection\": \"block\",\n                    \"data_classification\": \"confidential\"\n                }\n            )\n            \n            if validation.approved:\n                validated_tools.append({\n                    \"tool_call_id\": tool.id,\n                    \"output\": tool.function.arguments  # Execute\n                })\n            else:\n                validated_tools.append({\n                    \"tool_call_id\": tool.id,\n                    \"output\": f\"BLOCKED: {validation.reason}\"\n                })\n        \n        run.required_action.submit_tool_outputs.tool_outputs = validated_tools\n    \n    return run",
+        "language": "python"
+      },
+      {
+        "title": "Token Limit Monitor (TypeScript)",
+        "description": "Graceful degradation when approaching thread token limits",
+        "code": "import { VexClient } from 'vex-sdk-ts';\n\nconst vex = new VexClient({ apiKey: 'vex-api-key' });\n\nasync function monitorThreadTokens(\n  client: any,\n  threadId: string,\n  tokenLimit: number = 128000\n): Promise<boolean> {\n  const thread = await client.beta.threads.retrieve(threadId);\n  const usage = await vex.analyzeThreadUsage(thread);\n  \n  if (usage.total_tokens > tokenLimit * 0.8) {\n    // Trigger summarization and checkpoint\n    await vex.summarizeThread(threadId, {\n      max_tokens: 4000,\n      preserve: ['key_decisions', 'pending_actions']\n    });\n    \n    // Notify and offer rollback\n    console.warn('Token limit approaching - thread summarized');\n    return false;\n  }\n  \n  return true;\n}\n\n// Usage in run loop\nwhile (run.status === 'in_progress') {\n  if (!(await monitorThreadTokens(client, threadId))) {\n    break;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Grounding Data Freshness Validator (Python)",
+        "description": "Ensure Bing search and file grounding data is current",
+        "code": "from vex_sdk import VexClient\nimport json\n\nfrom typing import Dict, Any\n\nvex = VexClient(api_key=\"your-vex-key\")\n\ndef validate_grounding_data(tool_output: Dict[str, Any]) -> Dict[str, Any]:\n    if tool_output.get('tool_name') == 'bing_search':\n        # Extract search results\n        results = json.loads(tool_output['content'])\n        \n        fresh_results = []\n        for result in results:\n            freshness = vex.validate_freshness(\n                result['url'],\n                result.get('publish_date'),\n                cutoff_days=7  # Enterprise policy\n            )\n            \n            if freshness.is_fresh:\n                fresh_results.append(result)\n            else:\n                print(f\"Stale data rejected: {result['title']}\")\n        \n        tool_output['content'] = json.dumps(fresh_results)\n    \n    return tool_output",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Azure AI Agent Service Workflow Automation",
+      "description": "Add Vex middleware today to eliminate workflow failures and ensure enterprise compliance - start with our free 14-day trial."
+    }
+  }
+}

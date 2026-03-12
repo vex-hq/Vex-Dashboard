@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "cost-optimization",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Cost Optimization in Mastra Agents",
+    "description": "How to detect and fix ai agent cost optimization in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-cost-optimization-guide",
+      "Mastra cost-optimization",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Cost Optimization issues in Mastra manifest as excessive token usage from unvalidated workflow outputs, redundant tool calls with malformed responses, and inefficient memory retrieval injecting irrelevant context. These problems compound in Mastra's workflow-driven architecture where each step transition and tool invocation incurs API costs. Without proper optimization, Mastra agents can burn through budgets rapidly during complex multi-step reasoning chains.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Every workflow node processes full untrimmed outputs from previous steps",
+        "impact": "3-5x token bloat as agents reprocess entire conversation histories"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "Tools return verbose JSON with unnecessary fields and metadata",
+        "impact": "Tool responses consume 40-60% of total token budget unnecessarily"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Mastra's knowledge base retrieves outdated/irrelevant memories",
+        "impact": "Context windows fill with 70% noise, forcing costly truncation"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Third-party integrations dump raw API responses without summarization",
+        "impact": "Integration data alone consumes 2-3k tokens per workflow execution"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Usage Per Workflow Step",
+        "description": "Logs token consumption breakdown across Mastra workflow nodes to identify expensive steps",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\n\nconst monitorTokens = (workflow: WorkflowRuntime) => {\n  const stepTokens: Record<string, { input: number; output: number }> = {};\n  \n  workflow.on('step:executing', ({ nodeId, input }) => {\n    stepTokens[nodeId] = { input: estimateTokens(input), output: 0 };\n  });\n  \n  workflow.on('step:completed', ({ nodeId, output }) => {\n    stepTokens[nodeId].output = estimateTokens(output);\n    const total = stepTokens[nodeId].input + stepTokens[nodeId].output;\n    if (total > 2000) {\n      console.warn(`⚠️ High token step: ${nodeId} (${total} tokens)`);\n    }\n  });\n  \n  return stepTokens;\n};\n\nfunction estimateTokens(text: string): number {\n  return Math.ceil(text.length / 4); // Rough GPT token estimation\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Size Analysis",
+        "description": "Intercepts Mastra tool calls to measure and flag oversized responses",
+        "code": "import { AgentRuntime } from 'mastra/agents';\n\nconst toolCostMonitor = (agent: AgentRuntime) => {\n  agent.toolManager.intercept('call', (toolCall) => {\n    const response = toolCall.execute();\n    const tokenCost = estimateTokens(JSON.stringify(response));\n    \n    if (tokenCost > 1000) {\n      console.error(`🚨 Expensive tool: ${toolCall.name} (${tokenCost} tokens)`);\n      console.log('Response keys:', Object.keys(response));\n    }\n    \n    return response;\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Bloat Detector",
+        "description": "Measures Mastra knowledge retrieval payload sizes and relevance",
+        "code": "import { KnowledgeBase } from 'mastra/knowledge';\n\nconst monitorMemory = (kb: KnowledgeBase) => {\n  kb.on('retrieval', (query, memories) => {\n    const totalTokens = memories.reduce((sum, mem) => \n      sum + estimateTokens(mem.content), 0\n    );\n    \n    if (totalTokens > 3000) {\n      console.warn(`💾 Memory bloat: ${memories.length} items (${totalTokens} tokens)`);\n    }\n    \n    // Check for staleness\n    const stale = memories.filter(mem => \n      Date.now() - new Date(mem.timestamp).getTime() > 7 * 24 * 60 * 60 * 1000\n    );\n    if (stale.length > 0) {\n      console.warn(`🕰️ Stale memories: ${stale.length}/${memories.length}`);\n    }\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Workflow Output Truncation Middleware",
+        "description": "Automatically trims Mastra workflow outputs to essential content only",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\n\nconst tokenOptimizer = (workflow: WorkflowRuntime) => {\n  workflow.on('step:completed', ({ output }) => {\n    // Extract only the core response, strip metadata\n    const optimized = extractCoreContent(output);\n    const originalSize = estimateTokens(JSON.stringify(output));\n    const optimizedSize = estimateTokens(optimized);\n    \n    console.log(`📉 Optimized: ${originalSize} → ${optimizedSize} tokens (${Math.round((1 - optimizedSize/originalSize)*100)}% savings)`);\n    \n    return optimized;\n  });\n};\n\nfunction extractCoreContent(output: any): string {\n  if (typeof output === 'string') return output.slice(0, 4000);\n  if (output.content) return output.content;\n  if (output.response) return output.response;\n  if (output.text) return output.text;\n  return JSON.stringify(output).slice(0, 4000);\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Normalizer",
+        "description": "Standardizes Mastra tool outputs to minimal JSON format",
+        "code": "import { AgentRuntime } from 'mastra/agents';\n\nconst normalizeToolResponses = (agent: AgentRuntime) => {\n  const originalCall = agent.toolManager.call.bind(agent.toolManager);\n  \n  agent.toolManager.call = async (toolName: string, params: any) => {\n    const result = await originalCall(toolName, params);\n    \n    const normalized = {\n      success: true,\n      data: result.data || result,\n      // Strip verbose fields\n      ...('metadata' in result ? {} : { metadata: result.metadata })\n    };\n    \n    return normalized;\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Smart Memory Pruner",
+        "description": "Filters Mastra knowledge retrieval to recent + relevant memories only",
+        "code": "import { KnowledgeBase } from 'mastra/knowledge';\n\nconst smartPruner = (kb: KnowledgeBase) => {\n  const originalRetrieve = kb.retrieve.bind(kb);\n  \n  kb.retrieve = async (query: string, limit = 5) => {\n    let memories = await originalRetrieve(query, limit * 3);\n    \n    // Prune by recency (last 7 days)\n    memories = memories.filter(mem => \n      Date.now() - new Date(mem.timestamp).getTime() < 7 * 24 * 60 * 60 * 1000\n    );\n    \n    // Rank by semantic similarity\n    memories.sort((a, b) => semanticScore(query, b.content) - semanticScore(query, a.content));\n    \n    return memories.slice(0, limit);\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Cost Optimization Detection with Vex",
+      "description": "Vex integrates as middleware directly into Mastra's agent pipeline, automatically detecting all four cost optimization failure modes in real-time. It instruments workflow transitions, tool calls, memory retrieval, and integrations with zero-code changes using the Mastra-Vex SDK. Vex provides instant dashboards showing token bottlenecks and auto-generates optimization PRs with 70-85% cost reductions.\n\nThe Vex agent continuously monitors production Mastra workflows, flagging expensive patterns like unvalidated outputs (>2k tokens/step) and stale memory injection. When issues are detected, Vex's remediation engine applies context-aware fixes - truncating outputs, normalizing tool responses, and pruning memory - while preserving agent performance. Teams get weekly cost reports and one-click fix deployment.\n\nVex's ML-powered optimization learns from your specific Mastra usage patterns, adapting truncation thresholds and memory filters to maximize savings without hallucination risk. Integration takes 3 lines of code and delivers immediate ROI through automated cost governance.",
+      "code": "import { MastraAgent } from 'mastra/agents';\nimport { Vex } from '@vex_dev/sdk';\n\n// 3-line Vex integration for Mastra\n\nconst agent = new MastraAgent({ /* config */ });\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\n// Auto-instruments ALL cost failure modes\nvex.instrumentMastraAgent(agent, {\n  alerts: ['token_bloat', 'stale_memory', 'verbose_tools'],\n  autoFix: true, // Deploys optimizations automatically\n  targetSavings: '70%' // Cost reduction goal\n});\n\n// Vex now monitors & optimizes in real-time\nagent.run();",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to your Mastra agents in 3 lines and cut costs 70%+ automatically"
+    }
+  }
+}

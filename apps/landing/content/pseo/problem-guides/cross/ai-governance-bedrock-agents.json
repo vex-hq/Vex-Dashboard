@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix responsible ai governance for agents in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "Amazon Bedrock Agents ai-governance",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in Amazon Bedrock Agents manifests as failures in guardrails, action group responses, knowledge base retrieval, and session state management that lead to policy violations, hallucinations, and unsafe outputs. Agents can bypass domain-specific guardrails, return malformed Lambda responses containing harmful content, miss critical documents due to poor chunking, and lose conversation context across turns. These issues are amplified in enterprise deployments where compliance and safety are paramount.",
+    "howItManifests": [
+      {
+        "scenario": "Action group Lambda functions returning malformed responses",
+        "symptom": "Lambda returns JSON with missing required fields or harmful content that bypasses Bedrock guardrails",
+        "impact": "Agent executes unsafe actions or exposes PII/ sensitive data in responses"
+      },
+      {
+        "scenario": "Knowledge base retrieval missing relevant documents due to chunking",
+        "symptom": "RAG fails to retrieve policy documents containing governance rules",
+        "impact": "Agent hallucinates governance responses or provides outdated/ incorrect compliance guidance"
+      },
+      {
+        "scenario": "Agent guardrails not catching domain-specific policy violations",
+        "symptom": "Bedrock guardrails miss industry-specific violations (HIPAA, FINRA, etc.)",
+        "impact": "Regulatory non-compliance and potential legal exposure"
+      },
+      {
+        "scenario": "Session state loss between multi-turn agent invocations",
+        "symptom": "Agent forgets user consent, context, or prior governance decisions",
+        "impact": "Inconsistent policy enforcement and privacy violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Lambda Response Schema + Content Validator",
+        "description": "Detects malformed action group responses and harmful content using Pydantic + policy checks",
+        "code": "import json\nimport boto3\nfrom pydantic import BaseModel, validator\nfrom typing import Any\n\nclass ActionGroupResponse(BaseModel):\n    actionGroup: str\n    apiPath: str\n    httpStatusCode: int\n    responseBody: dict\n\n    @validator('responseBody')\n    def check_content_safety(cls, v):\n        if 'pii' in str(v).lower() or 'delete' in str(v).lower():\n            raise ValueError('Potential PII exposure or destructive action detected')\n        return v\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef validate_lambda_response(response: dict) -> bool:\n    try:\n        ActionGroupResponse(**response)\n        return True\n    except Exception as e:\n        print(f\"Lambda validation failed: {e}\")\n        return False\n\n# Usage with invoke_agent\nresponse = bedrock.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId='session-123',\n    inputText='Execute risky action'\n)\n\ncompletion = response['completion']\nif not validate_lambda_response(completion):\n    raise ValueError('Unsafe Lambda response detected')",
+        "language": "python"
+      },
+      {
+        "name": "Guardrail Violation Scanner",
+        "description": "Scans agent completions for domain-specific policy violations missed by Bedrock guardrails",
+        "code": "import re\nimport boto3\n\nHIPAA_PATTERNS = [\n    r'\\b(SSN|social\\s*security)\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'medical\\s*record',\n    r'patient\\s*(id|number)'\n]\n\nFINRA_PATTERNS = [\n    r'investment\\s*advice',\n    r'\\b(buy|sell)\\s*(stock|share)\\b',\n    r'financial\\s*recommendation'\n]\n\ndef scan_policy_violations(text: str) -> list[str]:\n    violations = []\n    for pattern in HIPAA_PATTERNS + FINRA_PATTERNS:\n        if re.search(pattern, text, re.IGNORECASE):\n            violations.append(f\"Policy violation: {pattern}\")\n    return violations\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\nresponse = bedrock.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId='session-123',\n    inputText='Show me patient SSN'\n)\n\nviolations = scan_policy_violations(response['completion'])\nif violations:\n    raise ValueError(f\"Guardrail violations: {violations}\")",
+        "language": "python"
+      },
+      {
+        "name": "Session State Consistency Checker",
+        "description": "Verifies session state preservation across multi-turn conversations",
+        "code": "import boto3\nimport json\n\nclass SessionStateTracker:\n    def __init__(self):\n        self.session_states = {}\n\n    def check_consistency(self, session_id: str, current_state: dict):\n        if session_id not in self.session_states:\n            self.session_states[session_id] = current_state\n            return True\n        \n        prev_state = self.session_states[session_id]\n        \n        # Check critical governance state\n        for key in ['user_consent_given', 'pii_context', 'compliance_mode']:\n            if prev_state.get(key) != current_state.get(key):\n                raise ValueError(f'Session state inconsistency: {key} changed')\n        \n        self.session_states[session_id] = current_state\n        return True\n\ntracker = SessionStateTracker()\nbedrock = boto3.client('bedrock-agent-runtime')\n\n# Multi-turn conversation\nsession_id = 'session-123'\n\nresponse1 = bedrock.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId=session_id,\n    inputText='I consent to data processing'\n)\n\nstate1 = {'user_consent_given': True}\ntracker.check_consistency(session_id, state1)\n\nresponse2 = bedrock.invoke_agent(\n    agentId='YOUR_AGENT_ID',\n    agentAliasId='YOUR_ALIAS_ID',\n    sessionId=session_id,\n    inputText='Process my medical data'\n)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Safe Lambda Response Wrapper",
+        "description": "Wraps action group Lambda functions with governance validation",
+        "code": "import json\nimport boto3\nfrom botocore.exceptions import ClientError\n\nPOISON_PHRASES = ['delete_all', 'expose_pii', 'bypass_security']\n\nclass SafeActionGroup:\n    def __init__(self, lambda_client):\n        self.lambda_client = lambda_client\n\n    def invoke_safe(self, function_name: str, payload: dict) -> dict:\n        # Pre-validation\n        if any(phrase in str(payload).lower() for phrase in POISON_PHRASES):\n            return {\n                'actionGroup': 'SAFE_ACTION',\n                'apiPath': '/error',\n                'httpStatusCode': 403,\n                'responseBody': {'error': 'Governance violation detected'}\n            }\n        \n        try:\n            response = self.lambda_client.invoke(\n                FunctionName=function_name,\n                Payload=json.dumps(payload)\n            )\n            result = json.loads(response['Payload'].read())\n            \n            # Post-validation\n            if result.get('success'):\n                return result\n            else:\n                return {\n                    'actionGroup': 'SAFE_ACTION',\n                    'apiPath': '/rejected',\n                    'httpStatusCode': 400,\n                    'responseBody': {'error': 'Action rejected by governance'}\n                }\n        except ClientError as e:\n            return {\n                'actionGroup': 'SAFE_ACTION',\n                'apiPath': '/error',\n                'httpStatusCode': 500,\n                'responseBody': {'error': str(e)}\n            }\n\nlambda_client = boto3.client('lambda')\nsafe_action = SafeActionGroup(lambda_client)\n\n# Use in action group Lambda\ndef lambda_handler(event, context):\n    return safe_action.invoke_safe('YourActionFunction', event)",
+        "language": "python"
+      },
+      {
+        "name": "Enhanced Knowledge Base Chunking",
+        "description": "Improves RAG retrieval for governance documents with semantic chunking",
+        "code": "import boto3\nfrom typing import List\n\nclass GovernanceRAG:\n    def __init__(self):\n        self.bedrock_kb = boto3.client('bedrock-agent-runtime')\n\n    def retrieve_governance_docs(self, query: str, kb_id: str) -> List[dict]:\n        response = self.bedrock_kb.retrieve_and_generate(\n            input={'text': query},\n            retrieveAndGenerateConfiguration={\n                'type': 'KNOWLEDGE_BASE',\n                'knowledgeBaseConfiguration': {\n                    'knowledgeBaseId': kb_id,\n                    'modelArn': 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',\n                    'retrievalConfiguration': {\n                        'vectorSearchConfiguration': {\n                            'numberOfResults': 10,\n                            'overrideSearchType': 'HYBRID'\n                        }\n                    }\n                }\n            }\n        )\n        \n        # Filter for governance-relevant results\n        governance_docs = [\n            cit for cit in response['citations']\n            if any(term in cit['content']['text'].lower() \n                   for term in ['policy', 'compliance', 'regulation', 'governance'])\n        ]\n        \n        return governance_docs\n\nrag = GovernanceRAG()\ndocs = rag.retrieve_governance_docs('HIPAA compliance rules', 'YOUR_KB_ID')\nif not docs:\n    raise ValueError('No governance documents retrieved - check chunking strategy')",
+        "language": "python"
+      },
+      {
+        "name": "Persistent Session State Manager",
+        "description": "Implements durable session state with DynamoDB for multi-turn governance",
+        "code": "import boto3\nimport json\nimport uuid\nfrom datetime import datetime\n\nclass GovernanceSessionManager:\n    def __init__(self, table_name: str = 'AgentSessions'):\n        self.dynamodb = boto3.resource('dynamodb')\n        self.table = self.dynamodb.Table(table_name)\n\n    def get_session_state(self, session_id: str) -> dict:\n        try:\n            response = self.table.get_item(Key={'sessionId': session_id})\n            if 'Item' in response:\n                return response['Item']['state']\n        except:\n            pass\n        return {'user_consent_given': False, 'compliance_mode': 'strict'}\n\n    def update_session_state(self, session_id: str, state: dict):\n        self.table.put_item(\n            Item={\n                'sessionId': session_id,\n                'state': state,\n                'lastUpdated': datetime.utcnow().isoformat(),\n                'version': str(uuid.uuid4())\n            }\n        )\n\nsession_mgr = GovernanceSessionManager()\n\n# Before agent invocation\ndef invoke_with_governance(session_id: str, input_text: str):\n    state = session_mgr.get_session_state(session_id)\n    \n    if not state.get('user_consent_given'):\n        return {'error': 'User consent required'}\n    \n    bedrock = boto3.client('bedrock-agent-runtime')\n    response = bedrock.invoke_agent(\n        agentId='YOUR_AGENT_ID',\n        agentAliasId='YOUR_ALIAS_ID',\n        sessionId=session_id,\n        inputText=input_text\n    )\n    \n    # Update state post-conversation\n    state['last_interaction'] = datetime.utcnow().isoformat()\n    session_mgr.update_session_state(session_id, state)\n    \n    return response",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex provides continuous, automated monitoring of Amazon Bedrock Agents by wrapping invoke_agent() calls with vex.verify() post-processing that catches all four failure modes in real-time. The platform automatically detects malformed Lambda responses, guardrail bypasses, knowledge base retrieval failures, and session state inconsistencies using pre-trained governance models and custom policy checkers. \n\nRemediation is automatic - Vex can block unsafe responses, rewrite compliant outputs, or route to human review based on severity. Integration takes minutes with pip install boto3 vex-sdk, and provides enterprise-grade observability dashboards showing governance compliance metrics across all agents. \n\nVex maintains persistent session context across invocations and enforces domain-specific policies (HIPAA, FINRA, SOC2) that Bedrock's native guardrails miss, ensuring enterprise-grade responsible AI governance at scale.",
+      "code": "import boto3\nfrom vex_sdk import verify\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\n@verify(\n    checks=[\n        'bedrock_lambda_response',\n        'guardrail_violation', \n        'session_state_drift',\n        'knowledge_base_retrieval'\n    ],\n    policies=['HIPAA', 'enterprise_governance'],\n    auto_remediate=True\n)\ndef safe_agent_invoke(agent_id: str, alias_id: str, session_id: str, input_text: str):\n    '''Vex-wrapped Bedrock agent invocation'''\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId=alias_id,\n        sessionId=session_id,\n        inputText=input_text\n    )\n    return response\n\n# Production usage\ntry:\n    result = safe_agent_invoke(\n        agent_id='YOUR_AGENT_ID',\n        alias_id='YOUR_ALIAS_ID',\n        session_id='session-123',\n        input_text='Process medical records'\n    )\n    print(result['completion'])\nexcept Exception as e:\n    print(f'Vex blocked unsafe response: {e}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install boto3 vex-sdk` and wrap your Bedrock agents in 3 lines of code for enterprise-grade governance."
+    }
+  }
+}

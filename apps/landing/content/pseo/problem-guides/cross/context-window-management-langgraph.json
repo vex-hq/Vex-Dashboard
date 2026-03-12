@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in LangGraph Agents",
+    "description": "How to detect and fix context window management for ai agents in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "LangGraph context-window-management",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, Context Window Management failures manifest as token overflow during cyclic state updates, where persistent message history accumulates across graph iterations without truncation. This is exacerbated by LangGraph's checkpointing system, which serializes full state including verbose chat histories, leading to OOM errors or API token limit violations. Parallel agent branches often exacerbate the issue by duplicating context payloads during state merges.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic human-in-the-loop approval workflows",
+        "symptom": "State size grows 2-5x per cycle as full conversation history persists",
+        "impact": "OpenAI API 4096/128k token limit exceeded after 3-5 iterations"
+      },
+      {
+        "scenario": "Multi-agent collaboration graphs with shared state",
+        "symptom": "Parallel branches append conflicting message lists to shared StateGraph",
+        "impact": "Token usage spikes 10x during SEND/RECEIVE state aggregation"
+      },
+      {
+        "scenario": "Long-running research agents with tool calls",
+        "symptom": "Checkpoint payloads exceed 1MB after 20+ tool interactions",
+        "impact": "Checkpoint deserialization fails with MemoryError"
+      },
+      {
+        "scenario": "Conditional branching with persistent memory",
+        "symptom": "Stale context from abandoned branches contaminates active paths",
+        "impact": "Agent hallucinations increase 40% due to context pollution"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Budget Monitor",
+        "description": "Intercepts graph state before LLM nodes to measure serialized token count",
+        "code": "from langgraph.graph import StateGraph\nfrom langgraph.checkpoint.sqlite import SqliteSaver\nfrom tiktoken import get_encoding\n\nencoding = get_encoding('cl100k_base')\n\ndef token_monitor(state):\n    messages = state.get('messages', [])\n    token_count = sum(len(encoding.encode(str(msg))) for msg in messages)\n    if token_count > 120000:\n        raise ValueError(f\"Context window exceeded: {token_count} tokens\")\n    return state\n\n# Add as pre-LLM node\ngraph.add_node(\"token_check\", token_monitor)",
+        "language": "python"
+      },
+      {
+        "name": "State Size Profiler",
+        "description": "Tracks checkpoint growth across graph invocations with memory profiling",
+        "code": "import psutil\nimport json\nfrom langgraph.checkpoint.memory import MemorySaver\n\nclass StateProfiler(MemorySaver):\n    def __init__(self):\n        self.state_sizes = []\n        super().__init__()\n    \n    def put(self, config, snapshot):\n        size_bytes = len(json.dumps(snapshot).encode())\n        self.state_sizes.append(size_bytes)\n        if size_bytes > 10**6:  # 1MB threshold\n            print(f\"⚠️  State size alert: {size_bytes/10**6:.1f}MB\")\n        return super().put(config, snapshot)\n\ncheckpointer = StateProfiler()",
+        "language": "python"
+      },
+      {
+        "name": "Cycle Context Auditor",
+        "description": "Detects context accumulation during cyclic graph execution",
+        "code": "from langgraph.graph.state import StateGraph\nfrom collections import defaultdict\n\nclass ContextAuditor:\n    def __init__(self):\n        self.cycle_counts = defaultdict(int)\n    \n    def audit_state(self, state, config):\n        thread_id = config.get('configurable', {}).get('thread_id')\n        msg_len = len(state.get('messages', []))\n        self.cycle_counts[thread_id] = msg_len\n        \n        if msg_len > 50:  # Alert after 50 messages\n            growth_rate = msg_len / max(1, self.cycle_counts[thread_id] - 10)\n            if growth_rate > 1.2:\n                print(f\"🚨 Context growing {growth_rate:.1f}x per cycle\")\n        \n        return state\n\nauditor = ContextAuditor()\ngraph.add_node('audit', auditor.audit_state)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Message Pruner",
+        "description": "Trims conversation history to recent K exchanges before LLM calls",
+        "code": "from langchain_core.messages import AIMessage, HumanMessage\nfrom typing import List, TypedDict\n\nclass AgentState(TypedDict):\n    messages: List\n\nMAX_MESSAGES = 20\n\ndef prune_context(state: AgentState) -> AgentState:\n    messages = state['messages']\n    if len(messages) > MAX_MESSAGES:\n        # Keep last N exchanges (human+ai pairs)\n        recent = messages[-MAX_MESSAGES:]\n        # Ensure we end with HumanMessage for context\n        if recent[-1].type != 'human':\n            recent = recent[:-1]\n        state['messages'] = recent\n    return state\n\ngraph.add_node('prune', prune_context)",
+        "language": "python"
+      },
+      {
+        "name": "Summary Compression Node",
+        "description": "Condenses long histories into summaries using a lightweight LLM",
+        "code": "from langgraph.prebuilt import ToolNode\nfrom langchain_openai import ChatOpenAI\n\nsummarizer = ChatOpenAI(model='gpt-4o-mini', temperature=0)\n\ndef compress_history(state):\n    messages = state['messages']\n    if len(messages) > 15:\n        context = messages[-10:]  # Last 10 for summary\n        summary_prompt = \"\"\"Summarize this conversation in 3 sentences, focusing on:\n        1. Current task\n        2. Key decisions made\n        3. Pending actions\\n\\n{\"summary\": \"...\"}\"\"\"\n        \n        summary = summarizer.invoke([(\"human\", summary_prompt + str(context))])\n        state['messages'] = [AIMessage(content=summary.content)] + messages[-3:]\n    return state\n\ngraph.add_node('compress', compress_history)",
+        "language": "python"
+      },
+      {
+        "name": "Branch-Aware State Merger",
+        "description": "Merges parallel branch states without context duplication",
+        "code": "def merge_parallel_states(state1, state2):\n    # De-duplicate messages by content hash\n    from hashlib import md5\n    msg_hashes = {}\n    \n    merged_messages = []\n    for msg in state1['messages'] + state2['messages']:\n        msg_hash = md5(str(msg.content).encode()).hexdigest()\n        if msg_hash not in msg_hashes:\n            msg_hashes[msg_hash] = True\n            merged_messages.append(msg)\n    \n    # Prioritize most recent timestamp\n    merged_messages.sort(key=lambda m: getattr(m, 'timestamp', 0), reverse=True)\n    return {'messages': merged_messages[-15:]}  # Last 15 only\n\n# Use in conditional edge\nrouter = create_router(merge_parallel_states)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automatically instruments LangGraph workflows to detect context window violations in real-time by wrapping graph.invoke() calls and monitoring state evolution across cycles. It establishes baselines for healthy token budgets per graph configuration and alerts when growth rates exceed 20% per iteration. Vex's context-aware remediation automatically injects pruning nodes and compression logic without modifying core agent logic.\n\nThe platform tracks cross-thread state pollution in multi-tenant deployments and provides circuit-breaker protection against OOM failures. Integration requires one line of wrapper code, with Vex handling schema evolution, parallel branch reconciliation, and optimal truncation points based on LLM context requirements. Remediation reports include before/after token savings and hallucination risk reduction metrics.",
+      "code": "from vex import verify\nfrom langgraph.graph import StateGraph\n\n# Automatic instrumentation\n@verify(problem='context_window_overflow')\ndef run_agent(input_data):\n    config = {'configurable': {'thread_id': 'agent-1'}}\n    result = graph.invoke(input_data, config)\n    return result\n\n# Or as graph node\nclass VexContextGuard:\n    def __init__(self):\n        self.client = verify.connect()\n    \n    def __call__(self, state):\n        self.client.check_context_window(state)\n        return state\n\ngraph.add_node('vex_guard', VexContextGuard())\n\n# Vex auto-fixes on detection\n# pip install langgraph vex-sdk",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add vex.verify() to your LangGraph agents and eliminate context window failures forever."
+    }
+  }
+}

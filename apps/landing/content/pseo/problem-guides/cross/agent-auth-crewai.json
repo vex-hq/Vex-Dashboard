@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in CrewAI Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "CrewAI agent-auth",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, AI Agent Authentication and Authorization issues manifest when agents attempt to access external tools, APIs, or shared resources without proper credentials or permissions, leading to failed task executions and security vulnerabilities. This problem is exacerbated in multi-agent crews where delegation between agents can propagate unauthorized access attempts across the workflow. Without robust auth mechanisms, agents may hallucinate credentials or bypass checks, compromising the entire orchestration.",
+    "howItManifests": [
+      {
+        "scenario": "Agent calls external API without auth token",
+        "symptom": "HTTP 401/403 errors in tool outputs passed between agents",
+        "impact": "Task chain breaks, crew returns incomplete results"
+      },
+      {
+        "scenario": "Delegated agent lacks permission for upstream tool",
+        "symptom": "Permission denied exceptions during agent handoffs",
+        "impact": "Delegation loops as agents retry unauthorized actions"
+      },
+      {
+        "scenario": "Shared memory access without role-based authorization",
+        "symptom": "Agents overwrite each other's context with invalid data",
+        "impact": "Task drift and inconsistent output quality across roles"
+      },
+      {
+        "scenario": "Tool hallucination includes fake auth headers",
+        "symptom": "Malformed requests with hallucinated API keys/tokens",
+        "impact": "Security exposure and rate limiting from invalid auth attempts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Auth Error Pattern Detection",
+        "description": "Scans agent task outputs for common authentication failure patterns including 401/403 status codes and permission denied messages",
+        "code": "import re\n\ndef detect_auth_errors(task_output):\n    auth_error_patterns = [\n        r'401.*Unauthorized',\n        r'403.*Forbidden',\n        r'permission.*denied',\n        r'invalid.*token',\n        r'authentication.*failed'\n    ]\n    for pattern in auth_error_patterns:\n        if re.search(pattern, str(task_output), re.IGNORECASE):\n            return True\n    return False\n\n# Usage in CrewAI task callback\ndef auth_check_callback(task, output):\n    if detect_auth_errors(output):\n        raise ValueError('Authentication failure detected')"
+      },
+      {
+        "name": "Credential Hallucination Scanner",
+        "description": "Detects when agents generate fake API keys, tokens, or credentials in their tool calls",
+        "code": "import re\n\ndef scan_credential_hallucinations(tool_call):\n    # Common credential patterns\n    patterns = [\n        r'api_key[:\\s]*[a-zA-Z0-9]{32,}',\n        r'bearer[:\\s]*[a-zA-Z0-9_-]{20,}',\n        r'token[:\\s]*[a-zA-Z0-9._-]{30,}',\n        r'Bearer\\s+[A-Za-z0-9._~+-]+'\n    ]\n    for pattern in patterns:\n        matches = re.findall(pattern, str(tool_call), re.IGNORECASE)\n        if matches:\n            return {'hallucinated': True, 'matches': matches}\n    return {'hallucinated': False}"
+      },
+      {
+        "name": "Permission Escalation Monitor",
+        "description": "Tracks when agents attempt actions beyond their defined role permissions",
+        "code": "class RolePermissionChecker:\n    def __init__(self):\n        self.role_permissions = {\n            'researcher': ['search', 'read'],\n            'writer': ['write', 'summarize'],\n            'manager': ['delegate', 'review']\n        }\n    \n    def check_permission(self, agent_role, action):\n        allowed = self.role_permissions.get(agent_role, [])\n        if action not in allowed:\n            return False, f'Permission denied: {agent_role} cannot perform {action}'\n        return True, 'Allowed'"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Secure Credential Manager",
+        "description": "Centralized credential injection preventing agent hallucination of auth tokens",
+        "code": "from crewai import Agent, Task\n\nimport os\nfrom dotenv import load_dotenv\n\nclass SecureCrew:\n    def __init__(self):\n        load_dotenv()\n        self.credentials = {\n            'openai_api_key': os.getenv('OPENAI_API_KEY'),\n            'serpapi_key': os.getenv('SERPAPI_KEY'),\n            'github_token': os.getenv('GITHUB_TOKEN')\n        }\n    \n    def create_authenticated_agent(self, role, tools):\n        return Agent(\n            role=role,\n            goal=f'{role.title()} tasks with secure auth',\n            tools=tools,\n            context=self.credentials,  # Secure credential injection\n            verbose=True\n        )"
+      },
+      {
+        "name": "RBAC Task Wrapper",
+        "description": "Role-Based Access Control wrapper for CrewAI tasks",
+        "code": "from crewai import Task\n\nfrom typing import Dict, List\n\nclass AuthenticatedTask(Task):\n    def __init__(self, **kwargs):\n        self.required_permissions = kwargs.pop('permissions', [])\n        self.agent_role = kwargs.pop('agent_role', 'default')\n        super().__init__(**kwargs)\n    \n    def execute_with_auth(self, permissions_check):\n        if not permissions_check.check_permission(self.agent_role, self.required_permissions):\n            raise PermissionError('Insufficient permissions for task')\n        return self._execute()\n\n# Usage\ntask = AuthenticatedTask(\n    description='Research market trends',\n    agent_role='researcher',\n    permissions=['search'],\n    expected_output='Market analysis report'\n)"
+      },
+      {
+        "name": "Token Refresh Middleware",
+        "description": "Automatic token refresh and validation for long-running CrewAI processes",
+        "code": "import time\nfrom crewai_tools import tool\n\nclass AuthMiddleware:\n    def __init__(self, token_provider):\n        self.token_provider = token_provider\n        self.last_refresh = 0\n        self.token = None\n    \n    def get_valid_token(self):\n        if time.time() - self.last_refresh > 3600:  # 1 hour\n            self.token = self.token_provider.refresh()\n            self.last_refresh = time.time()\n        return self.token\n    \n@tool('secure_api_call')\ndef secure_api_call(url: str, method: str = 'GET'):\n    middleware = AuthMiddleware(lambda: os.getenv('API_TOKEN'))\n    headers = {'Authorization': f'Bearer {middleware.get_valid_token()}'}\n    # Make authenticated API call\n    return requests.request(method, url, headers=headers)"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback in CrewAI task execution, automatically detecting authentication failures, credential hallucinations, and permission violations across your entire agent crew. It monitors tool calls, API responses, and agent handoffs in real-time, providing detailed failure traces and automated remediation suggestions. With Vex's pattern recognition, you catch auth issues before they cascade through your multi-agent workflow.\n\nThe Vex SDK wraps CrewAI agents and tasks with zero-config monitoring, capturing auth-related symptoms from the common failure modes like delegation loops and task drift. It provides rich observability including auth error rates, token validity timelines, and permission violation heatmaps across crew roles. Remediation is automated through Vex's policy engine which can inject valid credentials, retry failed auth flows, or quarantine problematic agents.\n\nIntegration takes minutes - just pip install vex-sdk and add the callback decorator to your CrewAI processes. Vex handles the complexity of multi-agent auth monitoring while maintaining your crew's performance and security posture.",
+      "code": "from crewai import Crew, Process, Agent, Task\nfrom vex_sdk import VexMonitor\n\n# Install: pip install crewai vex-sdk\n\nvex = VexMonitor(\n    project_id='your-vex-project',\n    monitor_auth_failures=True,\n    monitor_credential_hallucinations=True\n)\n\n@vex.task_callback\n@vex.agent_callback\ndef crewai_auth_monitor(task, agent, output):\n    '''Vex automatically detects auth issues'''\n    pass\n\n# Secure CrewAI setup with Vex\nresearcher = Agent(\n    role='Researcher',\n    goal='Secure research with proper auth',\n    callbacks=[crewai_auth_monitor],\n    verbose=True\n)\n\ncrew = Crew(\n    agents=[researcher],\n    tasks=[research_task],\n    process=Process.sequential,\n    callbacks=[vex.crew_callback]\n)\n\nresult = crew.kickoff()  # Vex monitors entire execution",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to automatically catch and fix AI agent authentication issues in your CrewAI workflows."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents agentic rag",
+      "Amazon Bedrock Agents guardrails",
+      "agentic rag reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable powerful Agentic RAG systems that autonomously plan queries, retrieve from multiple knowledge bases, and synthesize attributed responses for enterprise use cases. However, these multi-step agents are prone to failures like malformed action responses, poor chunking leading to missed retrievals, and undetected policy violations. Vex provides runtime verification to ensure source faithfulness, hallucination detection, and cross-source consistency, making your agents production-ready.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Amazon Bedrock Agents",
+      "description": "The architecture centers on a Bedrock Agent configured with multiple knowledge bases (e.g., OpenSearch, Pinecone) and action groups via Lambda functions. The agent receives user queries, plans retrieval steps using an orchestration model like Claude 3, invokes knowledge base retrievals, executes custom actions for multi-source synthesis, and generates final responses with citations. Guardrails filter inputs/outputs, while session state maintains multi-turn context.\n\nTypical flow: 1) User query → Agent planning → 2) Parallel KB retrievals → 3) Lambda action group for ranking/synthesis → 4) Final response with source attribution. This enables complex RAG but introduces risks in planning accuracy and response fidelity.\n\nVex wraps the `invoke_agent()` API to verify outputs against verification needs like citation accuracy and hallucination before delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Bedrock Agent    │\n└─────────────────┘    │ - Planner Model   │\n                       │ - Knowledge Bases │\n                       │ - Action Groups   │──┐\n                       │ - Guardrails      │  │\n                       └──────────────────┘  │\n                         ▲        ▲          │\n                         │        │          │\n                    ┌────┴──┐ ┌──┴────┐      │\n                    │Lambda │ │  KBs   │      │\n                    │Actions│ │(OS/Pine)│◀────┘\n                    └──────┘ └────────┘\n                              │\n                         ┌────┴──┐\n                         │ Vex   │\n                         │Verify │\n                         └──────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups return invalid JSON or missing required fields, causing agent parsing failures",
+        "severity": "critical",
+        "mitigation": "Wrap invoke_agent() with Vex verify() to validate action response schemas before agent processing"
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies in KBs fail to surface semantically relevant documents during agent-planned queries",
+        "severity": "high",
+        "mitigation": "Vex source faithfulness checks ensure retrieved documents actually contain query-relevant content"
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Bedrock guardrails miss enterprise-specific policies like PII disclosure or brand guideline violations",
+        "severity": "high",
+        "mitigation": "Custom Vex policies detect domain-specific violations beyond generic guardrails"
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Context loss in multi-turn conversations leads to inconsistent query planning and repeated retrievals",
+        "severity": "medium",
+        "mitigation": "Vex verifies cross-turn consistency and maintains session state validation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Bedrock Agent Client",
+        "description": "Set up boto3 client and agent configuration for Agentic RAG workflow",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime', region_name='us-east-1')\n\nAGENT_ID = 'YOUR_AGENT_ID'\nAGENT_ALIAS_ID = 'YOUR_AGENT_ALIAS_ID'\n\nsession_state = {\n    'promptSessionState': {\n        'trace': {'default': True}\n    }\n}\n\nprint('Bedrock Agent client initialized for Agentic RAG')",
+        "language": "python"
+      },
+      {
+        "title": "Invoke Agent with Multi-turn Context",
+        "description": "Send query to agent and handle streaming response with session state preservation",
+        "code": "def invoke_bedrock_agent(query: str, session_id: str = None):\n    response = bedrock_agent.invoke_agent(\n        agentId=AGENT_ID,\n        agentAliasId=AGENT_ALIAS_ID,\n        sessionId=session_id or 'default-session',\n        inputText=query,\n        sessionState=session_state,\n        enableTrace=True\n    )\n    \n    full_response = ''\n    for event in response['completion']:\n        if 'chunk' in event:\n            full_response += event['chunk']['bytes'].decode()\n    return full_response",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Bedrock Agent Invocation",
+        "description": "Node.js client for invoking Bedrock Agents with proper TypeScript typing",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nconst input: InvokeAgentCommandInput = {\n  agentId: 'YOUR_AGENT_ID',\n  agentAliasId: 'YOUR_AGENT_ALIAS_ID',\n  sessionId: 'rag-session-123',\n  inputText: 'Find Q3 financials across all sources',\n  sessionState: {\n    promptSessionState: { trace: { default: true } }\n  }\n};\n\nconst command = new InvokeAgentCommand(input);\nconst response = await client.send(command);",
+        "language": "typescript"
+      },
+      {
+        "title": "Extract Citations from Agent Response",
+        "description": "Parse agent response for source attribution and citation verification",
+        "code": "def extract_citations(agent_response: str):\n    citations = []\n    import re\n    for match in re.finditer(r'\\[(\\d+)\\]', agent_response):\n        citation_id = int(match.group(1))\n        # Map to actual KB sources\n        source = f'kb_source_{citation_id}'\n        citations.append({\n            'id': citation_id,\n            'source': source,\n            'verified': False  # Vex will verify\n       '])\n    return citations",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap invoke_agent() with Vex Verification",
+        "description": "Add Vex verify() post-processing for source faithfulness and hallucination detection",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        'source_faithfulness',\n        'hallucination_detection',\n        'citation_verification'\n    ],\n    risk_profile='high'\n)\ndef safe_agent_invoke(query: str, session_id: str):\n    raw_response = invoke_bedrock_agent(query, session_id)\n    citations = extract_citations(raw_response)\n    \n    verified = verify.run(\n        response=raw_response,\n        sources=citations,\n        session_id=session_id\n    )\n    \n    if verified:\n        return raw_response\n    else:\n        return 'Verification failed - Response blocked'",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification Middleware",
+        "description": "Async wrapper for Bedrock Agent responses with Vex verification pipeline",
+        "code": "import { verify } from 'vex-sdk';\n\nconst safeAgentInvoke = verify.middleware({\n  checks: ['sourceFaithfulness', 'hallucinationDetection', 'citationVerification'],\n  riskProfile: 'high',\n  customPolicies: ['financial_pii_guardrail']\n}, async (query: string, sessionId: string) => {\n  const rawResponse = await invokeBedrockAgent(query, sessionId);\n  const citations = extractCitations(rawResponse);\n  \n  const result = await verify.run({\n    response: rawResponse,\n    sources: citations,\n    sessionId,\n    context: { agentId: AGENT_ID }\n  });\n  \n  return result.passed ? rawResponse : 'Blocked: Verification failed';\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-turn Session State Verification",
+        "description": "Verify cross-turn consistency and query planning accuracy with Vex",
+        "code": "from vex import SessionVerifier\n\nsession_verifier = SessionVerifier(\n    checks=['cross_turn_consistency', 'query_planning_accuracy'],\n    max_turns=10\n)\n\ndef verified_multi_turn(query: str, session_id: str):\n    response = safe_agent_invoke(query, session_id)\n    \n    # Verify session continuity\n    continuity_score = session_verifier.verify(\n        current_query=query,\n        current_response=response,\n        session_id=session_id\n    )\n    \n    if continuity_score < 0.8:\n        return 'Session context loss detected - restarting conversation'\n    \n    return response",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Agentic RAG",
+      "description": "Install Vex SDK today and wrap your invoke_agent() calls to eliminate hallucination and faithfulness risks in production."
+    }
+  }
+}

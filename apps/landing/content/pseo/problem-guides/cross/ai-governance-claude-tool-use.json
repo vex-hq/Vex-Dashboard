@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in Claude Tool Use Agents",
+    "description": "How to detect and fix responsible ai governance for agents in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "Claude Tool Use ai-governance",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in Claude Tool Use manifests as uncontrolled tool call chains that amplify early errors, parallel tool conflicts without arbitration, reasoning drifts in extended thinking traces, and hazardous screen interactions in computer use agents. These failures expose Claude's native tool use APIs to governance gaps where tool_use blocks in messages.create() produce unverified actions, conflicting results, or misaligned reasoning without built-in safeguards. Vex integration wraps these critical calls to enforce governance at the agent boundary.",
+    "howItManifests": [
+      {
+        "scenario": "Tool use chains producing cascading errors from early tool failures",
+        "symptom": "First tool call in messages.create() returns partial data, subsequent tools use malformed inputs producing 4xx errors",
+        "impact": "Agent loops indefinitely retrying failed chains, exhausting API quotas and producing garbage outputs"
+      },
+      {
+        "scenario": "Parallel tool calls returning conflicting results without resolution",
+        "symptom": "Multiple tool_use blocks in single response return divergent data (price API: $99, inventory API: out_of_stock)",
+        "impact": "Agent selects incorrect action path, creates orders for unavailable items"
+      },
+      {
+        "scenario": "Extended thinking producing reasoning inconsistent with final output",
+        "symptom": "content[0].text shows 'User lacks permissions', but tool_use calls admin endpoints anyway",
+        "impact": "Security violations from reasoning-output divergence"
+      },
+      {
+        "scenario": "Computer use agent performing unintended actions on screen elements",
+        "symptom": "computer_use tool targets wrong DOM element (clicks 'Delete All' instead of 'Cancel')",
+        "impact": "Irreversible data loss from visual misrecognition"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cascading Tool Failure Detector",
+        "description": "Scans messages.create() responses for sequential tool_use blocks where first call status_code >= 400",
+        "code": "import anthropic\n\ndef detect_cascading_failure(response):\n    if not response.stop_reason == 'tool_use':\n        return False\n    \n    tools = response.content\n    for i, block in enumerate(tools):\n        if hasattr(block, 'type') and block.type == 'tool_use':\n            tool_result = client.messages.create(\n                model='claude-3-5-sonnet-20240620',\n                messages=[{'role': 'assistant', 'content': [{'type': 'tool_result', 'tool_use_id': block.id, 'content': tool_result}]}],\n                tools=[block.tools[0]]\n            )\n            if tool_result.content[0].type == 'tool_result' and tool_result.content[0].is_error:\n                # Check if subsequent tools exist\n                return i < len(tools) - 1\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Parallel Tool Conflict Scanner",
+        "description": "Detects multiple tool_use blocks in single response with semantic conflicts in tool names/results",
+        "code": "def detect_parallel_conflicts(response):\n    tool_uses = [c for c in response.content if c.type == 'tool_use']\n    if len(tool_uses) < 2:\n        return False\n    \n    tool_names = [tu.name for tu in tool_uses]\n    conflict_pairs = [\n        ('price', 'inventory'),\n        ('auth', 'permissions'),\n        ('user', 'admin')\n    ]\n    \n    for pair in conflict_pairs:\n        if pair[0] in tool_names and pair[1] in tool_names:\n            return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Reasoning-Action Drift Monitor",
+        "description": "Compares reasoning in content[0].text against tool_use actions performed",
+        "code": "import re\n\ndef detect_reasoning_drift(response):\n    if len(response.content) < 2:\n        return False\n    \n    reasoning = response.content[0].text.lower()\n    tool_actions = [c.name for c in response.content[1:] if c.type == 'tool_use']\n    \n    safety_indicators = ['no permission', 'insufficient access', 'not authorized', 'blocked']\n    risky_actions = ['admin', 'delete', 'modify_user']\n    \n    has_safety_reasoning = any(indicator in reasoning for indicator in safety_indicators)\n    has_risky_action = any(action in tool_actions for action in risky_actions)\n    \n    return has_safety_reasoning and has_risky_action",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Sequential Tool Validation Guard",
+        "description": "Intercepts messages.create() and validates each tool_use result before permitting next call",
+        "code": "import anthropic\nfrom vex import verify\n\nclient = anthropic.Anthropic()\n\n@verify(governance='agent_tool_chains')\ndef safe_tool_chain(messages, max_tools=3):\n    response = client.messages.create(\n        model='claude-3-5-sonnet-20240620',\n        messages=messages,\n        tools=tools,\n        tool_choice='auto',\n        max_tokens=1024\n    )\n    \n    tool_count = sum(1 for c in response.content if c.type == 'tool_use')\n    if tool_count > max_tools:\n        raise ValueError('Excessive parallel tools')\n    \n    return response\n\n# Usage\nresult = safe_tool_chain(messages)",
+        "language": "python"
+      },
+      {
+        "name": "Tool Result Arbitration Layer",
+        "description": "Resolves conflicts from parallel tool_use by majority vote or priority ordering",
+        "code": "def arbitrate_tool_results(tools):\n    results = {}\n    for tool_result in tools:\n        tool_name = tool_result.tool_use_id.split('_')[0]\n        results[tool_name] = tool_result.content[0].content[0].text\n    \n    # Priority resolution for conflicts\n    priority = {'inventory': 1, 'price': 2, 'auth': 3}\n    resolved = {}\n    for tool, result in results.items():\n        if tool not in resolved or priority.get(tool, 99) < priority.get(list(resolved.keys())[0], 99):\n            resolved[tool] = result\n    \n    return list(resolved.values())",
+        "language": "python"
+      },
+      {
+        "name": "Computer Use Safety Wrapper",
+        "description": "Pre-validates computer_use tool targets against allow/block lists",
+        "code": "SAFE_ELEMENTS = ['button#cancel', 'button.close', 'input.search']\nBLOCKED_ELEMENTS = ['button#delete-all', 'button.confirm-destroy']\n\ndef safe_computer_use(response):\n    for content in response.content:\n        if content.type == 'tool_use' and content.name == 'computer_use':\n            selector = content.input.get('selector', '')\n            if any(blocked in selector for blocked in BLOCKED_ELEMENTS):\n                return {'type': 'text', 'text': 'Blocked dangerous element interaction'}\n            if not any(safe in selector for safe in SAFE_ELEMENTS):\n                return {'type': 'text', 'text': 'Unrecognized safe element, aborting'}\n    return response",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex automates Responsible AI Governance by wrapping Anthropic's messages.create() tool_use responses with vex.verify(), providing production-grade detection of cascading failures, parallel conflicts, reasoning drift, and unsafe computer interactions. The platform maintains stateful governance policies that learn from tool call patterns across deployments, automatically blocking hazardous chains before they cascade. Integration requires only pip install anthropic vex-sdk and a single decorator, with full observability into governance decisions via Vex dashboard.\n\nVex's agent governance engine specifically monitors Claude's tool_use response structure, validating stop_reasons, content block sequences, and tool result integrity in real-time. When governance violations occur, Vex can rewrite tool calls, inject arbitration logic, or fail-safe to human review - all without modifying core agent logic. This creates defensible AI operations with audit trails for every governance intervention.\n\nThe automation eliminates manual detection scripting by treating governance as infrastructure, with policies that adapt to new tool patterns and evolving risk profiles across Claude model versions.",
+      "code": "import anthropic\nimport vex\n\nfrom vex.policies import AgentGovernance\n\nclient = anthropic.Anthropic()\n\n# Vex governance policy for Claude tool use\npolicy = AgentGovernance(\n    max_parallel_tools=2,\n    block_cascading_failures=True,\n    validate_reasoning_alignment=True,\n    computer_use_safelist=['button#cancel', 'input.search']\n)\n\n@vex.verify(policy)\ndef claude_agent(messages, tools):\n    '''Vex-wrapped Claude tool use with governance'''\n    response = client.messages.create(\n        model='claude-3-5-sonnet-20240620',\n        messages=messages,\n        tools=tools,\n        tool_choice='auto',\n        max_tokens=4096\n    )\n    return response\n\n# Production usage\ntry:\n    result = claude_agent(messages, tools)\n    print('✅ Governance passed:', result.id)\nexcept vex.Violation as e:\n    print('🚫 Blocked:', e.reason, e.evidence)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with pip install vex-sdk and wrap your Claude agents in 3 lines of code for instant governance."
+    }
+  }
+}

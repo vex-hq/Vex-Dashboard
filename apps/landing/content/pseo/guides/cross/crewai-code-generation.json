@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with CrewAI + Vex Guardrails",
+    "description": "Learn how to build code generation with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI code generation",
+      "CrewAI guardrails",
+      "code generation reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "CrewAI enables multi-agent collaboration for complex tasks like code generation, where agents handle planning, writing, testing, and refining code iteratively. Guardrails are essential to prevent agent delegation loops, hallucinated outputs, task drift, and inconsistent code quality that can lead to unsafe or invalid code. Vex integration ensures reliable, secure code generation by verifying safety, syntax, and execution at each step.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with CrewAI",
+      "description": "In a CrewAI code generation workflow, a Planner Agent decomposes the user request into subtasks and delegates to specialized agents: Coder Agent generates initial code, Tester Agent executes it in a sandbox and generates test cases, Reviewer Agent validates syntax/safety and suggests refinements, and Coordinator Agent orchestrates iterations until success criteria are met. Each agent uses tools for code execution, linting, and dependency management, with outputs passed sequentially through the crew.\n\nThe architecture relies on CrewAI's task delegation and memory sharing, but lacks built-in safeguards against infinite loops or malicious code generation. Vex callbacks intercept agent outputs to enforce verification before delegation proceeds.\n\nThis setup supports iterative refinement: failed tests trigger re-delegation to Coder/Reviewer, with human-in-loop approval for high-risk changes.",
+      "diagram": "User Request\n    |\n[Planner Agent] --> Task Decomposition\n    |\n+--[Coder Agent] --> Generate Code --> [Vex Verify: Syntax/Safety]\n|   |\n|   +--[Sandbox Executor] --> Run Tests\n|\n+--[Tester Agent] --> Test Results --> [Vex Verify: Execution]\n    |\n[Reviewer Agent] --> Refinements --> [Coordinator] --> Iterate/Complete"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "Planner endlessly re-delegates between Coder and Tester due to vague success criteria",
+        "severity": "critical",
+        "mitigation": "Vex task callback enforces max iterations and delegation graph validation"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "Agents fabricate sandbox execution results or fake test passes",
+        "severity": "high",
+        "mitigation": "Vex verifies tool outputs against actual execution traces and schemas"
+      },
+      {
+        "name": "Malicious code generation",
+        "description": "Coder agent generates credential-stealing or sandbox-escape code",
+        "severity": "critical",
+        "mitigation": "Vex scans for safety violations, dependency risks, and credential patterns"
+      },
+      {
+        "name": "Task drift in refinement",
+        "description": "Reviewer reinterprets objectives, generating unrelated code during iterations",
+        "severity": "high",
+        "mitigation": "Vex enforces objective alignment and semantic similarity checks"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic CrewAI Code Generation Crew",
+        "description": "Set up core agents and tasks for code generation workflow without guardrails",
+        "code": "from crewai import Agent, Task, Crew\nfrom langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model=\"gpt-4o\")\n\ncoder = Agent(\n    role='Senior Python Developer',\n    goal='Write clean, efficient Python code that passes all tests',\n    backstory='10+ years experience in production codebases',\n    llm=llm,\n    verbose=True\n)\n\ntester = Agent(\n    role='QA Engineer',\n    goal='Validate code functionality and generate comprehensive tests',\n    llm=llm,\n    verbose=True\n)\n\ntask1 = Task(\n    description='Write a Python function that calculates fibonacci numbers efficiently',\n    agent=coder\n)\n\ntask2 = Task(\n    description='Test the fibonacci function with edge cases and performance benchmarks',\n    agent=tester,\n    context=[task1]\n)\n\ncrew = Crew(agents=[coder, tester], tasks=[task1, task2])\nresult = crew.kickoff()",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Code Execution Tool",
+        "description": "Custom tool for safe code execution with timeout and dependency controls",
+        "code": "from crewai_tools import BaseTool\nfrom subprocess import run, PIPE\nimport tempfile\nimport os\n\nclass SandboxExecutor(BaseTool):\n    name: str = \"sandbox_executor\"\n    description: str = \"Executes Python code in isolated sandbox with timeout\"\n    \n    def _run(self, code: str, timeout: int = 30) -> str:\n        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n            f.write(code)\n            temp_file = f.name\n        try:\n            result = run(['python', temp_file], capture_output=True, text=True, timeout=timeout)\n            os.unlink(temp_file)\n            return f\"STDOUT: {result.stdout}\\nSTDERR: {result.stderr}\\nEXIT: {result.returncode}\"\n        except Exception as e:\n            os.unlink(temp_file)\n            return f\"ERROR: {str(e)}\"\n\n# Usage in agent\ntester_tools = [SandboxExecutor()]\ntester = Agent(..., tools=tester_tools)",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Refinement Coordinator",
+        "description": "Coordinator agent manages refinement loops with convergence criteria",
+        "code": "coordinator = Agent(\n    role='Project Coordinator',\n    goal='Ensure code meets all requirements through iterative refinement',\n    backstory='Expert in agile development and code review processes',\n    llm=llm,\n    verbose=True\n)\n\nrefine_task = Task(\n    description=\"\"\"Review test results from {test_results}. If failing:\n    1. Identify specific failures\n    2. Delegate fixes to appropriate agents\n    3. Track iteration count (max 5)\n    If passing: approve final code.\"\"\",\n    agent=coordinator,\n    context=[task1, task2],\n    max_iterations=5\n)\n\ncrew = Crew(agents=[coder, tester, coordinator], tasks=[task1, task2, refine_task])",
+        "language": "python"
+      },
+      {
+        "title": "Code Safety Pre-Commit Hook",
+        "description": "Basic linting and safety checks before agent delegation",
+        "code": "import ast\nimport re\n\ndef validate_code_safety(code: str) -> dict:\n    issues = []\n    \n    # Check for dangerous imports\n    dangerous_imports = ['os.system', 'subprocess.call', 'exec', 'eval']\n    for dangerous in dangerous_imports:\n        if dangerous in code:\n            issues.append(f\"Dangerous pattern: {dangerous}\")\n    \n    # Syntax validation\n    try:\n        ast.parse(code)\n    except SyntaxError as e:\n        issues.append(f\"Syntax error: {e}\")\n    \n    # Credential patterns\n    cred_patterns = [r'api[_-]?key', r'password', r'secret']\n    for pattern in cred_patterns:\n        if re.search(pattern, code, re.IGNORECASE):\n            issues.append(f\"Potential credential leakage: {pattern}\")\n    \n    return {\"safe\": len(issues) == 0, \"issues\": issues}\n\n# Usage\nsafety_check = validate_code_safety(generated_code)\nif not safety_check['safe']:\n    raise ValueError(f\"Code rejected: {safety_check['issues']}\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Task Callback for Agent Outputs",
+        "description": "Add Vex verification as callback on every task completion to catch failures early",
+        "code": "from vex_sdk import VexClient\nfrom crewai import Task\n\nvex = VexClient(api_key=\"your-vex-api-key\")\n\ndef vex_task_callback(task, result):\n    # Verify code safety and syntax\n    verification = vex.verify({\n        \"input\": task.description,\n        \"output\": result.raw,\n        \"policy\": \"code-generation-high-risk\",\n        \"checks\": [\"code_safety\", \"syntax_validity\", \"no_credential_leakage\"]\n    })\n    \n    if not verification.passed:\n        raise ValueError(f\"Vex blocked unsafe output: {verification.issues}\")\n    return result\n\n# Apply to all tasks\ntask1.callback = vex_task_callback\ntask2.callback = vex_task_callback\nrefine_task.callback = vex_task_callback",
+        "language": "python"
+      },
+      {
+        "title": "Vex Sandbox Execution Guardrail",
+        "description": "Wrap sandbox execution with Vex dependency and execution safety checks",
+        "code": "class VexSandboxExecutor(SandboxExecutor):\n    def _run(self, code: str, timeout: int = 30) -> str:\n        # Pre-execution Vex check\n        deps_check = vex.verify({\n            \"input\": code,\n            \"policy\": \"dependency-safety\",\n            \"checks\": [\"dependency_safety\", \"execution_sandboxing\"]\n        })\n        \n        if not deps_check.passed:\n            return f\"VEX BLOCKED: {deps_check.issues}\"\n        \n        # Execute only if safe\n        result = super()._run(code, timeout)\n        \n        # Post-execution verification\n        exec_check = vex.verify({\n            \"input\": result,\n            \"policy\": \"execution-safety\",\n            \"checks\": [\"execution_sandboxing\"]\n        })\n        \n        return result if exec_check.passed else f\"VEX POST-EXEC BLOCK: {exec_check.issues}\"\n\n# Replace standard executor\ntester_tools = [VexSandboxExecutor()]\ntester = Agent(..., tools=tester_tools)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Crew Loop Detector",
+        "description": "Prevent delegation loops with Vex state tracking across crew execution",
+        "code": "from vex_sdk import VexClient\n\nvex = VexClient(api_key=\"your-vex-api-key\")\ncrew_state = {\"iterations\": 0, \"delegations\": set()}\n\ndef vex_crew_guardrail(crew):\n    # Track delegation patterns\n    current_state = {\n        \"crew_id\": id(crew),\n        \"iteration\": crew_state[\"iterations\"],\n        \"recent_delegations\": list(crew_state[\"delegations\"][-5:]),\n        \"task_objectives\": [t.description for t in crew.tasks]\n    }\n    \n    loop_check = vex.verify({\n        \"input\": current_state,\n        \"policy\": \"crewai-loop-prevention\",\n        \"checks\": [\"delegation_loops\", \"task_drift\", \"iteration_limit\"]\n    })\n    \n    if not loop_check.passed:\n        raise RuntimeError(f\"Crew loop detected: {loop_check.issues}\")\n    \n    crew_state[\"iterations\"] += 1\n    crew_state[\"delegations\"].add(f\"{crew.active_agent.role}->{len(crew.tasks)}\")\n\n# Hook into crew execution\ncrew = Crew(..., guardrail=vex_crew_guardrail)\nresult = crew.kickoff()",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI Code Generation",
+      "description": "Install Vex with `pip install vex-sdk` and add task callbacks today to eliminate code generation risks."
+    }
+  }
+}

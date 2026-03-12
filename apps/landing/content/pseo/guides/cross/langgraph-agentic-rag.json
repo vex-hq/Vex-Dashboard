@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with LangGraph + Vex Guardrails",
+    "description": "Learn how to build agentic rag with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph agentic rag",
+      "LangGraph guardrails",
+      "agentic rag reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Agentic RAG with LangGraph enables sophisticated multi-step retrieval agents that plan queries, fetch from diverse sources, and synthesize attributed responses using stateful graph workflows. These complex, cyclical agents excel at handling dynamic reasoning but introduce risks like infinite loops, state corruption, and hallucinated attributions. Vex provides runtime verification to ensure source faithfulness, query accuracy, and consistency in high-stakes deployments.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with LangGraph",
+      "description": "A typical LangGraph Agentic RAG agent is structured as a stateful graph with nodes for query planning, multi-source retrieval, reranking, synthesis, and citation generation. The agent maintains a shared state schema including messages, retrieved chunks, planned queries, and attribution metadata. Edges use conditional routing to decide between parallel retrieval branches, human review, or final synthesis based on confidence scores and state conditions.\n\nThe workflow begins with a planner node that decomposes user queries into sub-queries using an LLM. Parallel retriever nodes then query vector stores, web search, and knowledge bases simultaneously. A grader node assesses chunk relevance and source consistency before passing to a synthesizer that generates cited responses. Checkpoints persist state across interruptions, enabling human-in-the-loop interventions at configurable breakpoints.\n\nThis cyclical design allows agents to self-correct by re-planning poor queries or merging conflicting retrievals, but requires robust state management and verification to prevent cascading errors.",
+      "diagram": "┌─────────────┐    ┌──────────────┐\n│   User      │───▶│  Planner     │\n│   Query     │    │ (Decompose)  │\n└─────────────┘    └──────┬───────┘\n                        │\n                ┌───────▼───────┐\n                │ Parallel     │◄────┐\n                │ Retrieval    │     │\n                │ (Vector/DB/  │     │\n                │  Web)        │     │\n                └──────┬───────┘     │\n                       │            │\n                ┌──────▼───────┐    │\n                │   Grader     │    │\n                │ (Relevance/  │    │\n                │ Consistency) │    │\n                └──────┬───────┘    │\n                       │            │\n                ┌──────▼───────┐    │\n                │ Synthesizer  │────┘\n                │ (Cite+Answer)│\n                └──────┬───────┘\n                       │\n                ┌──────▼───────┐\n                │Checkpoint/   │\n                │ Human Loop   │\n                └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic query re-planning loops",
+        "description": "Agent endlessly re-plans queries due to low confidence scores without termination conditions",
+        "severity": "critical",
+        "mitigation": "Vex monitors state transition counts and verifies planning logic terminates"
+      },
+      {
+        "name": "Cross-source attribution hallucination",
+        "description": "Synthesis node fabricates citations mixing chunks from unrelated sources",
+        "severity": "high",
+        "mitigation": "Vex verifies citation traceability to actual retrieved chunks"
+      },
+      {
+        "name": "Parallel branch state conflicts",
+        "description": "Merging retrievals from vector DB vs web search overwrites attribution metadata",
+        "severity": "high",
+        "mitigation": "Vex schema validation ensures consistent state updates across branches"
+      },
+      {
+        "name": "Bypassed human review breakpoints",
+        "description": "Conditional edges skip human-in-loop nodes during high-confidence paths",
+        "severity": "medium",
+        "mitigation": "Vex enforces breakpoint execution regardless of routing decisions"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Core State Schema with Attribution",
+        "description": "Define typed state including planned queries, chunk metadata, and citation tracking",
+        "code": "from typing import Annotated, Sequence\nfrom langgraph.graph import StateGraph, END\nfrom typing_extensions import TypedDict\n\nclass AgentState(TypedDict):\n    messages: Annotated[Sequence[str], 'add']\n    planned_queries: list[str]\n    retrieved_chunks: list[dict]  # {'content': str, 'source': str, 'score': float}\n    citations: list[dict]  # {'chunk_id': int, 'source': str}\n    confidence: float\n\n    def update_citations(self, new_cites: list[dict]) -> 'AgentState':\n        self['citations'].extend(new_cites)\n        return self",
+        "language": "python"
+      },
+      {
+        "title": "Query Planner Node",
+        "description": "LLM-powered node that decomposes user query into parallel sub-queries",
+        "code": "from langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model='gpt-4o', temperature=0)\n\ndef planner_node(state: AgentState) -> AgentState:\n    prompt = f\"\"\"Decompose into 2-3 specific retrieval queries:\nCurrent question: {state['messages'][-1]}\nOutput ONLY JSON array of queries.\"\"\"\n    \n    response = llm.invoke(prompt)\n    queries = response.content.strip('[]').split(',')\n    \n    return {\n        'planned_queries': [q.strip('\"') for q in queries],\n        'messages': state['messages'] + [f'Planned: {queries}']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Retrieval Branches",
+        "description": "Fan-out to multiple retrievers with source attribution",
+        "code": "from langgraph.prebuilt import ToolNode\nfrom typing import Dict, Any\n\ndef vector_retriever(state: AgentState) -> Dict[str, Any]:\n    # Mock vector store retrieval\n    chunks = [\n        {'content': 'Vector store result 1', 'source': 'wiki', 'score': 0.92},\n        {'content': 'Vector store result 2', 'source': 'wiki', 'score': 0.87}\n    ]\n    return {'retrieved_chunks': state['retrieved_chunks'] + chunks}\n\ndef web_retriever(state: AgentState) -> Dict[str, Any]:\n    # Mock web search\n    chunks = [\n        {'content': 'Web result about topic', 'source': 'google', 'score': 0.78}\n    ]\n    return {'retrieved_chunks': state['retrieved_chunks'] + chunks}",
+        "language": "python"
+      },
+      {
+        "title": "Synthesis with Citations",
+        "description": "Generate final answer with verifiable source attribution",
+        "code": "def synthesizer_node(state: AgentState) -> AgentState:\n    chunks_text = '\\n'.join([c['content'] for c in state['retrieved_chunks']])\n    sources = list(set(c['source'] for c in state['retrieved_chunks']))\n    \n    prompt = f\"\"\"Synthesize answer using ONLY these chunks:\n{schunks_text}\n\nSources: {sources}\n\nAnswer question: {state['messages'][0]}\nFormat: Answer:\\n\\nSources: [1], [2] etc\"\"\"\n    \n    response = llm.invoke(prompt)\n    citations = [{'chunk_id': i, 'source': c['source']} \n                for i, c in enumerate(state['retrieved_chunks'])]\n    \n    return {\n        'messages': state['messages'] + [response.content],\n        'citations': citations,\n        'confidence': sum(c['score'] for c in state['retrieved_chunks'])/len(state['retrieved_chunks'])\n    }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex Verification",
+        "description": "Catch infinite loops and state corruption at workflow boundaries",
+        "code": "import vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key='your-vex-key')\n\n# Your compiled LangGraph\nrag_graph = StateGraph(AgentState)\n# ... add nodes and edges ...\ngraph = rag_graph.compile(checkpointer=memory)\n\n# Wrap invocation\n@vex.verify(\n    guards=[\n        'no-infinite-loops',\n        'state-schema-valid',\n        'breakpoint-enforced'\n    ],\n    timeout='30s'\n)\ndef verified_invoke(input_state: AgentState):\n    return graph.invoke(input_state)\n\nresult = verified_invoke({\n    'messages': ['What is Agentic RAG?'],\n    'planned_queries': [],\n    'retrieved_chunks': [],\n    'citations': [],\n    'confidence': 0.0\n})",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node for Source Faithfulness",
+        "description": "Inline verification of retrieval-to-answer attribution",
+        "code": "def vex_source_verifier(state: AgentState) -> AgentState:\n    if not state['retrieved_chunks']:\n        raise ValueError('No chunks retrieved')\n    \n    # Vex verifies answer uses only provided chunks\n    verification = vex_client.verify(\n        claim=state['messages'][-1],\n        evidence=[c['content'] for c in state['retrieved_chunks']],\n        checks=['source-faithfulness', 'no-hallucination'],\n        context={'sources': [c['source'] for c in state['retrieved_chunks']]}\n    )\n    \n    if not verification.passed:\n        state['messages'].append('VERIFICATION FAILED: Regenerating...')\n        return {'needs_regeneration': True}\n    \n    return {'faithfulness_score': verification.score}",
+        "language": "python"
+      },
+      {
+        "title": "Query Planning Accuracy Guard",
+        "description": "Ensure planned sub-queries are relevant to original question",
+        "code": "def vex_planner_guard(state: AgentState) -> AgentState:\n    original_query = state['messages'][0]\n    planned = state['planned_queries']\n    \n    # Verify planning relevance\n    planning_check = vex_client.verify(\n        claim=f\"Queries {{planned}} answer {{original_query}}\",\n        checks=['query-planning-accuracy'],\n        context={\n            'original': original_query,\n            'planned': planned\n        }\n    )\n    \n    if planning_check.score < 0.8:\n        raise ValueError(f'Poor planning: {planning_check.reason}')\n    \n    state['planning_verified'] = True\n    return state\n\n# Add as node before parallel retrieval\nrag_graph.add_node('vex_planner', vex_planner_guard)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph Agentic RAG",
+      "description": "Deploy production-ready Agentic RAG with Vex verification in minutes - start your free trial today."
+    }
+  }
+}

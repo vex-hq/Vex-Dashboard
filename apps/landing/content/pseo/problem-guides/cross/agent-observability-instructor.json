@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Instructor Agents",
+    "description": "How to detect and fix ai agent observability in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Instructor agent-observability",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Observability in Instructor manifests as failures in structured output validation, where Pydantic models reject LLM responses due to schema mismatches, retries exhaust, or partial extractions. These issues appear as `ValidationError` exceptions from Instructor's patched `client.chat.completions.create()` calls, breaking agent workflows that depend on reliable structured data. Vex integration via `vex.verify()` captures these failures with rich traces for debugging agent reliability.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor raises `InstructorValidationError` after max_retries with `response_model` validation failing",
+        "impact": "Agent workflow halts, no structured output returned to downstream logic"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "`ValidationError: field required` for mandatory Pydantic fields in `mode='json'",
+        "impact": "Incomplete data causes cascading failures in agent decision logic"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "`ValidationError: value is not a valid enumeration member` for `Enum` fields",
+        "impact": "Agent receives invalid categorical data, corrupts business logic"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "`ValidationError: value is not a valid list` or missing nested `dict` keys",
+        "impact": "Hierarchical data structures fail, breaking complex agent reasoning chains"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Catch Instructor Validation Errors",
+        "description": "Detect `InstructorValidationError` and extract Pydantic validation details",
+        "code": "from instructor import InstructorValidationError\nimport traceback\n\ntry:\n    response = client.chat.completions.create(\n        ...,\n        response_model=AgentOutput\n    )\nexcept InstructorValidationError as e:\n    print(f\"Validation failed: {e}\")\n    print(f\"Raw response: {e.response}\")\n    print(f\"Validation errors: {e.errors()}\")\n    traceback.print_exc()",
+        "language": "python"
+      },
+      {
+        "name": "Monitor Retry Exhaustion",
+        "description": "Track `max_retries` exhaustion in Instructor's retry logic",
+        "code": "from instructor import from_openai\n\nclient = from_openai(openai_client)\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=AgentOutput,\n    max_retries=3,\n    max_leading_whitespaces=1,\n    # Monitor via logging\n    extra_body={\"logprobs\": True}\n)\n\n# Detect retry exhaustion\nif hasattr(response, '_instructor_retries_exhausted'):\n    print(\"Retries exhausted after max attempts\")",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Instructor Error Detection",
+        "description": "Catch Zod validation failures in JS Instructor client",
+        "code": "import { Instructor } from 'instructor';\nimport { openai } from './openai';\n\nconst instructor = new Instructor({ client: openai });\n\ntry {\n  const response = await instructor.chat.completions.create({\n    model: 'gpt-4o',\n    responseModel: AgentOutput,\n    maxRetries: 3\n  });\n} catch (error) {\n  if (error.name === 'ZodError') {\n    console.log('Zod validation failed:', error.errors);\n    console.log('Raw response:', error.response);\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Flexible Enum Handling",
+        "description": "Use `Field` with `regex` pattern matching instead of strict enums",
+        "code": "from pydantic import BaseModel, Field\nfrom instructor import from_openai\nfrom typing import Literal\n\nclass Status(BaseModel):\n    value: str = Field(..., pattern=r'^(pending|active|completed|failed)$')\n\nclass AgentOutput(BaseModel):\n    status: Status\n    task: str\n\nclient = from_openai(openai_client)\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=AgentOutput,\n    prompt=\"Extract status and task...\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Partial Validation Mode",
+        "description": "Enable `partial=True` for extraction with missing optional fields",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass AgentOutput(BaseModel):\n    required_field: str\n    optional_field: Optional[str] = Field(None, default=None)\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=AgentOutput,\n    partial=True,  # Allow partial extraction\n    max_retries=5\n)",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Strict Mode Disable",
+        "description": "Use `strict: false` in Zod schema for flexible parsing",
+        "code": "import { z } from 'zod';\n\nconst AgentOutputSchema = z.object({\n  status: z.enum(['pending', 'active', 'completed', 'failed']).optional(),\n  task: z.string(),\n}).strict(false);\n\nconst instructor = new Instructor({ client: openai });\n\nconst response = await instructor.chat.completions.create({\n  model: 'gpt-4o',\n  responseModel: AgentOutputSchema,\n  strict: false,\n  maxRetries: 5\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex automates Instructor observability by wrapping `client.chat.completions.create()` with `vex.verify()`, capturing all `InstructorValidationError`, `ValidationError`, and retry exhaustion events. It extracts rich traces including raw LLM responses, Pydantic/Zod validation errors, retry counts, and schema mismatches for root cause analysis. Vex's agent reliability platform provides automated remediation suggestions like schema relaxation, retry tuning, and prompt engineering fixes.\n\nThe integration requires only `pip install instructor vex-sdk` and a single decorator. Vex traces span across agent runs, correlating validation failures with upstream prompt issues and downstream workflow impacts. Automated alerts trigger when failure rates exceed thresholds, with one-click remediation workflows.\n\nVex's ML-powered analysis identifies patterns like 'enum hallucination spikes during high traffic' and suggests targeted fixes like dynamic schema expansion or model switching.",
+      "code": "import vex\nfrom instructor import from_openai\nfrom pydantic import BaseModel\n\n@vex.verify()\ndef extract_agent_output(prompt: str) -> AgentOutput:\n    client = from_openai(openai_client)\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=AgentOutput,\n        max_retries=3,\n        messages=[{\"role\": \"user\", \"content\": prompt}]\n    ).model_dump()\n\n# Vex automatically captures:\n# - InstructorValidationError traces\n# - Pydantic validation details\n# - Retry exhaustion events\n# - Raw LLM response diffs\n\nresult = extract_agent_output(\"Extract task status and description\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk instructor` and wrap your Instructor calls to get instant observability and automated fixes."
+    }
+  }
+}

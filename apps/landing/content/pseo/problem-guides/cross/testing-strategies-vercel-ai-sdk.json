@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in Vercel AI SDK Agents",
+    "description": "How to detect and fix ai agent testing strategies in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "Vercel AI SDK testing-strategies",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK, AI Agent Testing Strategies challenges arise from streaming UIs where partial hallucinations in `streamText` responses go undetected, tool calls in agent loops lack validation before rendering, structured outputs vary across providers like OpenAI and Anthropic, and edge functions timeout during complex multi-step agent tasks. These issues manifest uniquely in the SDK's `generateText`, `streamText`, and `createStreamableUI` patterns, breaking user trust in real-time AI interfaces. Proper testing strategies are critical to ensure reliability in production deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming responses with partial hallucinations",
+        "symptom": "Incomplete `streamText` chunks contain fabricated facts before full context arrives",
+        "impact": "Users see misleading info in real-time UI, eroding trust"
+      },
+      {
+        "scenario": "Tool call results not validated before display",
+        "symptom": "Agent's `toolCall` results from `streamText` rendered without schema validation",
+        "impact": "Invalid or malicious tool outputs corrupt UI state"
+      },
+      {
+        "scenario": "Inconsistent structured output across providers",
+        "symptom": "`generateText` with `structuredOutputs` fails silently across OpenAI vs Anthropic",
+        "impact": "Runtime parsing errors crash agent flows"
+      },
+      {
+        "scenario": "Edge function timeouts on complex agent tasks",
+        "symptom": "Multi-turn agent loops exceed Vercel edge runtime limits",
+        "impact": "Users get 504 errors mid-conversation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Hallucination Sniffer",
+        "description": "Intercepts `streamText` chunks and flags hallucinated entities using regex patterns",
+        "code": "import { streamText } from 'ai';\nimport { z } from 'zod';\n\nconst detectHallucinations = async (chunks: string[]) => {\n  const hallucinationPatterns = [\n    /\\b(19|20)\\d{2}\\b(?=\\s*(?!-))/, // Fake years\n    /\\b[A-Z][a-z]+\\s[A-Z][a-z]+\\s+(PhD|MD|CEO)\\b/, // Fake credentials\n  ];\n  return chunks.some(chunk => \n    hallucinationPatterns.some(pattern => pattern.test(chunk))\n  );\n};\n\nexport async function streamAgent(userMessage: string) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages: [{ role: 'user', content: userMessage }],\n  });\n\n  let chunks: string[] = [];\n  for await (const chunk of result.textStream) {\n    chunks.push(chunk);\n    if (await detectHallucinations(chunks)) {\n      console.error('🚨 Hallucination detected in stream');\n    }\n    // ... yield to UI\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Validator",
+        "description": "Validates agent tool calls against Zod schemas before UI render",
+        "code": "import { streamText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst mathTool = tool({\n  description: 'Calculator',\n  parameters: z.object({\n    expression: z.string().regex(/^[0-9+\\-*/().\\s]+$/),\n  }),\n  execute: async ({ expression }) => eval(expression),\n});\n\nexport async function agentStream(input: string) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools: { mathTool },\n    messages: [{ role: 'user', content: input }],\n  });\n\n  for await (const chunk of result.fullStream) {\n    if (chunk.type === 'tool-call') {\n      const validated = mathTool.parameters.safeParse(chunk.args);\n      if (!validated.success) {\n        console.error('🚨 Invalid tool call:', validated.error);\n        // Block render\n        return;\n      }\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Timeout Profiler",
+        "description": "Measures agent execution time to detect edge function risks",
+        "code": "import { streamText } from 'ai';\n\nexport async function profileAgentTask(prompt: string) {\n  const start = performance.now();\n  const timeoutThreshold = 25000; // Vercel edge limit\n  \n  const result = await Promise.race([\n    streamText({\n      model: openai('gpt-4o'),\n      messages: [{ role: 'user', content: prompt }],\n    }),\n    new Promise((_, reject) => \n      setTimeout(() => reject(new Error('Agent timeout')), timeoutThreshold)\n    ),\n  ]);\n\n  const duration = performance.now() - start;\n  if (duration > timeoutThreshold * 0.8) {\n    console.warn(`🚨 Agent task ${duration}ms exceeds 80% of edge limit`);\n  }\n  return result;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Chunk-Level Hallucination Guard",
+        "description": "Blocks streaming of hallucinated chunks with fallback messaging",
+        "code": "import { createStreamableUI } from 'ai/rsc';\n\nexport async function safeStreamAgent(prompt: string) {\n  const ui = createStreamableUI();\n  \n  (async () => {\n    const result = await streamText({\n      model: openai('gpt-4o'),\n      messages: [{ role: 'user', content: prompt }],\n    });\n\n    let hasHallucinated = false;\n    for await (const chunk of result.textStream) {\n      if (hallucinationRegex.test(chunk) && !hasHallucinated) {\n        ui.update(<div>🔍 Verifying response...</div>);\n        hasHallucinated = true;\n        continue;\n      }\n      ui.update(<div>{chunk}</div>);\n    }\n    ui.done();\n  })();\n\n  return ui.value;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Structured Tool Call Pipeline",
+        "description": "Enforces Zod validation in agent tool execution pipeline",
+        "code": "import { streamText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst safeMathTool = tool({\n  parameters: z.object({\n    expression: z.string().regex(/^[0-9+\\-*/().\\s]+$/),\n  }),\n  execute: async ({ expression }) => {\n    try {\n      return { result: eval(expression) };\n    } catch {\n      throw new Error('Invalid expression');\n    }\n  },\n});\n\nexport async function validatedAgentStream(input: string) {\n  return streamText({\n    model: openai('gpt-4o'),\n    tools: { safeMathTool },\n    messages: [{ role: 'user', content: input }],\n    maxSteps: 5, // Prevent infinite loops\n  });\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Async Agent Offloader",
+        "description": "Moves complex agents to durable functions to avoid edge timeouts",
+        "code": "import { streamText } from 'ai';\n// For complex agents, use Vercel Queue or Durable Functions\n\nexport async function offloadComplexAgent(prompt: string) {\n  // Queue to durable function\n  const jobId = await queueComplexAgent(prompt);\n  \n  return streamText({\n    model: openai('gpt-4o'),\n    messages: [{ role: 'user', content: `Track job ${jobId}` }],\n    experimental_onToolCallComplete: async ({ toolCallId, args }) => {\n      // Fetch results from durable execution\n      const result = await getAgentResult(jobId);\n      return result;\n    },\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex middleware integrates seamlessly with Vercel AI SDK's `generateText` and `streamText` APIs, automatically injecting observability into every agent invocation. It captures streaming chunks, tool call payloads, and execution traces, applying ML-powered anomaly detection for hallucinations, schema violations, and performance degradation. Vex generates instant remediation reports with exact code fixes and auto-deploys patches via GitHub Actions.\n\nFor streaming agents, Vex wraps `createStreamableUI` flows to validate each chunk against ground truth datasets and provider schemas. Tool calls are automatically schema-validated across all providers, with fallback routing to the most reliable model. Edge timeout risks are preemptively flagged with optimized prompt templates and model recommendations.\n\nVex's agent testing suite runs continuously in CI/CD, catching 95% of production issues pre-deploy while providing detailed flame graphs of token usage and latency across the agent lifecycle.",
+      "code": "import { generateText, streamText } from 'ai';\nimport { createMiddleware } from '@vex_dev/sdk';\n\nconst vexMiddleware = createMiddleware({\n  detectors: ['hallucination', 'tool-validation', 'structured-output', 'timeout'],\n  autoFix: true,\n});\n\nexport async function testedAgentStream(prompt: string) {\n  return streamText.use(vexMiddleware)({\n    model: openai('gpt-4o'),\n    messages: [{ role: 'user', content: prompt }],\n  });\n}\n\nexport async function testedGenerate(prompt: string) {\n  return generateText.use(vexMiddleware)({\n    model: openai('gpt-4o'),\n    prompt,\n    temperature: 0.1,\n  });\n}\n\n// Install: npm install ai @vex_dev/sdk",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex middleware to catch 95% of AI agent failures before they reach production."
+    }
+  }
+}

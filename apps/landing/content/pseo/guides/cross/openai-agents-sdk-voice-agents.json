@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build voice agents with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK voice agents",
+      "OpenAI Agents SDK guardrails",
+      "voice agents reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with OpenAI's Agents SDK enables real-time conversational AI through speech-to-text, multi-agent reasoning, and text-to-speech pipelines. Guardrails are essential due to sub-second latency demands and high-risk interactions where prompt injection, handoff loops, or unsafe responses can cause catastrophic failures. Vex provides output validation to ensure response appropriateness, safety, and coherence without compromising performance.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with OpenAI Agents SDK",
+      "description": "Voice agents process audio streams through a low-latency pipeline: real-time STT (e.g., Whisper) transcribes speech, feeding into an OpenAI Agent that orchestrates specialized sub-agents for reasoning, fact-checking, and response generation. Agents handoff via the SDK's structured protocol, with guardrails at each step to validate outputs before TTS synthesis using services like ElevenLabs or OpenAI TTS.\n\nThe multi-agent system handles conversation state across turns, maintaining context while enforcing latency budgets (<500ms end-to-end). Tracing spans the entire pipeline to debug handoff failures or injection attempts.\n\nVex integrates as output parsers on each agent, verifying responses against safety, coherence, and performance SLAs before forwarding to TTS.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   Microphone    │───▶│   Whisper STT    │───▶│ OpenAI Agent │\n│     (Input)     │    │   (Real-time)    │    │   (Primary)   │\n└─────────────────┘    └──────────────────┘    │              │\n                                               │   Handoffs:  │\n                                               │ ┌──────────┐ │\n                                               │ │FactCheck │ │\n                                               │ │Agent     │ │\n                                               │ └──────────┘ │\n                                               │ ┌──────────┐ │\n                                               │ │Response  │ │\n                                               │ │Agent     │ │\n                                               │ └──────────┘ │\n                                               └──────┬───────┘\n                                                      │\n                                               ┌──────▼───────┐    ┌─────────────────┐\n                                               │ Vex Guardrail│───▶│ ElevenLabs TTS  │\n                                               │(Safety/Latency)│    │   (Output)      │\n                                               └────────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Fact-check and response agents ping-pong indefinitely due to ambiguous handoff instructions",
+        "severity": "critical",
+        "mitigation": "Vex validates handoff payloads for loop detection and enforces max iterations"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Users inject instructions like 'ignore safety rules' that propagate through agent handoffs",
+        "severity": "critical",
+        "mitigation": "Vex semantic analysis strips injections and validates response intent"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "Unstructured tool responses (e.g., malformed STT output) cause agent reasoning failures",
+        "severity": "high",
+        "mitigation": "Vex parses and normalizes tool outputs before agent input"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Lost context between STT → agent → TTS makes debugging latency violations impossible",
+        "severity": "high",
+        "mitigation": "Vex provides end-to-end tracing with latency budgets per pipeline stage"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Voice Agent Pipeline Setup",
+        "description": "Initialize OpenAI Agents SDK with real-time STT and TTS integration",
+        "code": "from agents import Agent, Runner\nfrom openai import OpenAI\n\n# Voice pipeline agents\nstt_agent = Agent(\n    name=\"STT Agent\",\n    instructions=\"Transcribe audio accurately and pass clean text\",\n    model=\"whisper-1\"\n)\n\nreasoning_agent = Agent(\n    name=\"Reasoning Agent\",\n    instructions=\"Maintain conversation context, handoff when needed\",\n    model=\"gpt-4o\"\n)\n\nrunner = Runner([stt_agent, reasoning_agent])\n\n# Real-time audio processing\ndef process_audio(audio_bytes):\n    result = runner.run(audio_bytes, stream=True)\n    return result.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Handoff with Conversation Memory",
+        "description": "Implement handoff protocol with state persistence for coherent conversations",
+        "code": "from agents import Agent, handoff\n\nfact_checker = Agent(\n    name=\"FactChecker\",\n    instructions=\"Verify claims, return {valid: bool, evidence: str}\",\n    model=\"gpt-4o-mini\"\n)\n\nresponse_agent = Agent(\n    name=\"ResponseAgent\",\n    instructions=\"Generate natural voice responses only after fact-checking\"\n)\n\n@response_agent.tool()\ndef check_facts(query: str):\n    return handoff(fact_checker, query)\n\n# Conversation memory\nconversation_state = {\"history\": [], \"max_turns\": 10}",
+        "language": "python"
+      },
+      {
+        "title": "Latency-Monitored TTS Output",
+        "description": "Enforce sub-second latency with performance tracing",
+        "code": "import time\nfrom elevenlabs import generate, stream\n\ndef tts_with_latency_guard(text: str, max_latency=0.5):\n    start_time = time.time()\n    audio = generate(text=text, voice=\"default\")\n    latency = time.time() - start_time\n    \n    if latency > max_latency:\n        raise TimeoutError(f\"TTS exceeded {max_latency}s budget\")\n    \n    return stream(audio)\n\n# Integrate with agent output\nagent_output = runner.run(input_text)\nvoice_response = tts_with_latency_guard(agent_output)",
+        "language": "python"
+      },
+      {
+        "title": "Real-Time STT Streaming",
+        "description": "Process continuous audio streams with agent handoff triggers",
+        "code": "from openai import AsyncOpenAI\nclient = AsyncOpenAI()\n\nasync def stream_stt(audio_stream):\n    transcript = ''\n    async for chunk in client.audio.transcriptions.create(\n        model=\"whisper-1\",\n        file=audio_stream,\n        response_format=\"json\",\n        stream=True\n    ):\n        transcript += chunk.text\n        if len(transcript) > 50:  # Handoff trigger\n            yield handoff(reasoning_agent, transcript)\n            transcript = ''",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Primary Agent",
+        "description": "Add Vex as final output validator before TTS with safety + latency checks",
+        "code": "from vex import Guardrail, verify\n\nvoice_guardrail = Guardrail(\n    name=\"Voice Agent Safety\",\n    verifications=[\n        \"response_appropriateness\",\n        \"latency_budget<500ms\",\n        \"conversation_coherence\",\n        \"safety_filter\"\n    ]\n)\n\ndef safe_voice_pipeline(audio_input):\n    raw_output = runner.run(audio_input)\n    \n    verified = verify(\n        guardrail=voice_guardrail,\n        input=conversation_state,\n        output=raw_output\n    )\n    \n    if verified:\n        return tts_with_latency_guard(verified.output)\n    else:\n        return tts_with_latency_guard(\"I can't help with that.\")",
+        "language": "python"
+      },
+      {
+        "title": "Handoff Loop Detection with Vex",
+        "description": "Prevent infinite agent handoffs using Vex state tracking",
+        "code": "handoff_guard = Guardrail(\n    name=\"Handoff Loop Detector\",\n    verifications=[\n        \"handoff_loop_depth<5\",\n        \"handoff_target_valid\"\n    ]\n)\n\ndef safe_handoff(from_agent, to_agent, payload):\n    result = handoff(to_agent, payload)\n    \n    loop_check = verify(\n        guardrail=handoff_guard,\n        input=conversation_state,\n        output=result\n    )\n    \n    if loop_check.failed:\n        return \"Transfer failed - try rephrasing\"\n    \n    conversation_state['handoffs'] += 1\n    return loop_check.output",
+        "language": "python"
+      },
+      {
+        "title": "Prompt Injection Defense Layer",
+        "description": "Semantic analysis blocks jailbreak attempts across agent chain",
+        "code": "injection_guard = Guardrail(\n    name=\"Prompt Injection Defense\",\n    verifications=[\n        \"no_prompt_injection\",\n        \"safety_intent_alignment\",\n        \"no_jailbreak_patterns\"\n    ]\n)\n\n# Wrap all agent inputs\nasync def protected_agent_run(agent, user_input):\n    clean_input = verify(\n        guardrail=injection_guard,\n        input=user_input,\n        context=conversation_state\n    )\n    \n    if clean_input.failed:\n        return \"Invalid request\"\n    \n    return await agent.run(clean_input.output)\n\n# Usage\nsafe_response = protected_agent_run(reasoning_agent, stt_output)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Voice Agents",
+      "description": "Add Vex guardrails today to protect your production voice agents from handoff failures and safety violations."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix context window management for ai agents in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Amazon Bedrock Agents context-window-management",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Amazon Bedrock Agents, Context Window Management issues arise due to the fixed token limits of foundation models when handling multi-turn conversations, knowledge base retrievals, and action group responses. Agents often exceed context windows by accumulating session history, retrieved documents, and tool outputs without truncation or summarization, leading to truncation errors or degraded performance. This is exacerbated by Bedrock's session-based state management and the need to balance knowledge base chunks with prompt history.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn conversations exceeding model token limit",
+        "symptom": "Agent returns 'Context length exceeded' errors or incoherent responses after 5-10 turns",
+        "impact": "Conversation resets required, losing user context and frustrating enterprise users"
+      },
+      {
+        "scenario": "Knowledge base retrieval flooding context with irrelevant chunks",
+        "symptom": "Agent ignores user query to process 20+ retrieved documents consuming entire context window",
+        "impact": "Poor retrieval precision, increased latency, and hallucinated responses from context overflow"
+      },
+      {
+        "scenario": "Action group responses not summarized before session storage",
+        "symptom": "Lambda returns verbose JSON payloads that accumulate across turns",
+        "impact": "Session state balloons, hitting bedrock agent memory limits within 3-4 interactions"
+      },
+      {
+        "scenario": "Guardrails + prompt history consuming disproportionate context",
+        "symptom": "Agent memory pressure from concatenated guardrail instructions and conversation history",
+        "impact": "Critical safety checks dropped due to truncation, risking policy violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Usage Monitoring",
+        "description": "Tracks input/output token counts per agent invocation to detect context window saturation",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\ndef detect_context_overflow(response):\n    metrics = response.get('metrics', {})\n    input_tokens = metrics.get('inputTokenCount', 0)\n    output_tokens = metrics.get('outputTokenCount', 0)\n    max_tokens = 200000  # Claude 3 Sonnet limit\n    \n    if input_tokens > max_tokens * 0.9:\n        return {\n            'issue': 'CRITICAL_CONTEXT_OVERFLOW',\n            'input_tokens': input_tokens,\n            'output_tokens': output_tokens,\n            'usage_pct': (input_tokens / max_tokens) * 100,\n            'recommendation': 'Implement history summarization'\n        }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Session History Length Check",
+        "description": "Analyzes session attributes for accumulated conversation history length",
+        "code": "import json\n\ndef check_session_bloat(session_state):\n    history = session_state.get('conversationHistory', [])\n    turn_count = len(history)\n    \n    if turn_count > 15:\n        recent_turns = history[-5:]\n        token_estimate = sum(len(json.dumps(turn)) for turn in recent_turns)\n        \n        return {\n            'issue': 'EXCESSIVE_SESSION_HISTORY',\n            'turn_count': turn_count,\n            'recent_token_estimate': token_estimate,\n            'action': 'summarize_history()'\n        }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Chunk Overflow",
+        "description": "Detects when retrieved documents exceed safe context allocation",
+        "code": "def analyze_kb_retrievals(session):\n    kb_contents = session.get('knowledgeBaseResponse', {}).get('retrievedDocuments', [])\n    total_chars = sum(len(doc.get('content', '')) for doc in kb_contents)\n    \n    if total_chars > 50000:  # ~12k tokens conservative\n        return {\n            'issue': 'KNOWLEDGE_BASE_OVERLOAD',\n            'doc_count': len(kb_contents),\n            'total_chars': total_chars,\n            'avg_doc_size': total_chars / len(kb_contents),\n            'fix': 'Reduce maxRetrievalCount or improve query specificity'\n        }\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic History Summarization",
+        "description": "Condenses conversation history when approaching token limits",
+        "code": "import boto3\n\ndef summarize_history(session_history, max_tokens=8000):\n    if len(session_history) <= 3:\n        return session_history\n    \n    # Keep last 2 exchanges + summary of earlier conversation\n    recent = session_history[-2:]\n    earlier = session_history[:-2]\n    \n    summary_prompt = f\"\"\"Summarize this conversation in 200 tokens:\\n\\n{\"\".join([f\"{t['role']}: {t['content']}\" for t in earlier])}\"\"\"\n    \n    bedrock = boto3.client('bedrock-runtime')\n    response = bedrock.invoke_model(\n        modelId='anthropic.claude-3-sonnet-20240229-v1:0',\n        body=json.dumps({\n            'prompt': summary_prompt,\n            'max_tokens_to_sample': 250\n        })\n    )\n    \n    summary = json.loads(response['body'].read())['completion']\n    return [{'role': 'system', 'content': f'Conversation summary: {summary}'}] + recent",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Response Truncation",
+        "description": "Limits and prioritizes KB retrievals to fit context window",
+        "code": "def truncate_kb_response(retrieved_docs, max_chars=25000):\n    prioritized = sorted(retrieved_docs, key=lambda d: d.get('score', 0), reverse=True)\n    truncated = []\n    current_size = 0\n    \n    for doc in prioritized:\n        doc_size = len(doc.get('content', ''))\n        if current_size + doc_size < max_chars:\n            truncated.append(doc)\n            current_size += doc_size\n        else:\n            # Truncate final document to fit\n            remaining = max_chars - current_size\n            if remaining > 1000:\n                doc['content'] = doc['content'][:remaining]\n                truncated.append(doc)\n            break\n    \n    return truncated",
+        "language": "python"
+      },
+      {
+        "name": "Action Group Response Compression",
+        "description": "Compresses Lambda action outputs before session storage",
+        "code": "import json\n\ndef compress_action_response(action_output):\n    if isinstance(action_output, dict):\n        # Remove verbose metadata\n        cleaned = {k: v for k, v in action_output.items() \n                  if k not in ['requestId', 'timestamp', 'debug_info']}\n        \n        # Shorten nested content\n        def shorten(value):\n            if isinstance(value, str) and len(value) > 500:\n                return value[:450] + '...'\n            return value\n        \n        compressed = {k: shorten(v) for k, v in cleaned.items()}\n        return compressed\n    \n    return str(action_output)[:1000]",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex provides runtime verification for Bedrock Agents by wrapping invoke_agent() calls with vex.verify() post-processing. It automatically detects context window saturation by monitoring token metrics, session history bloat, and knowledge base retrieval volume across all agent interactions. When issues are detected, Vex applies remediation patterns like history summarization and response truncation before responses reach production users.\n\nThe integration captures Bedrock's native metrics (inputTokenCount, outputTokenCount) and session attributes, applying threshold-based guards and automated fixes. Vex maintains a feedback loop, learning optimal truncation points for your specific agent configuration and knowledge base characteristics. This eliminates manual monitoring and ensures context window compliance at scale.\n\nDeployment is simple: wrap your existing Bedrock Agent invocations with vex.verify(). Vex handles both detection and remediation transparently, with full observability into context management across all agent sessions.",
+      "code": "import vex\nimport boto3\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n    guards=[\n        'context_window_saturation',\n        'session_history_bloat',\n        'kb_retrieval_overflow'\n    ],\n    auto_remediate=True\n)\ndef invoke_bedrock_agent(agent_id, session_id, user_input):\n    response = bedrock_agent.invoke_agent(\n        agentId=agent_id,\n        agentAliasId='latest',\n        sessionId=session_id,\n        inputText=user_input\n    )\n    \n    # Vex automatically:\n    # 1. Monitors token usage vs model limits\n    # 2. Detects session bloat\n    # 3. Validates KB retrieval volume\n    # 4. Applies fixes: summarization, truncation\n    \n    return response\n\n# Usage remains identical\nresult = invoke_bedrock_agent('YOUR_AGENT_ID', 'session-123', 'What’s our Q3 revenue?')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install boto3 vex-sdk` and wrap your Bedrock Agent calls to eliminate context window failures instantly."
+    }
+  }
+}

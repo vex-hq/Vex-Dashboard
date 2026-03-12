@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "agno",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Agno + Vex Guardrails",
+    "description": "Learn how to build customer support with Agno + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Agno customer support",
+      "Agno guardrails",
+      "customer support reliability",
+      "Vex Agno",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Agno enables powerful multi-modal RAG systems that integrate CRM data, knowledge bases, and tool-calling for ticket management and order lookups. However, these agents face risks like hallucinated responses, PII leaks, inconsistent tone, and policy violations that can damage customer trust and compliance. Vex provides essential guardrails through its verify decorator, ensuring response accuracy, security, and reliability at runtime.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Agno",
+      "description": "A typical Agno customer support agent follows a RAG pattern with three core layers: input processing, retrieval & reasoning, and action execution. User queries (text, images of tickets/receipts) flow through a multi-modal LLM that retrieves from vectorized knowledge bases (FAQs, product docs) and CRM systems (Zendesk, Salesforce). The agent uses tools for order lookup via API calls and ticket creation with structured outputs.\n\nThe agent's session memory maintains conversation context across multi-turn interactions, while team coordination handles escalations to human agents or specialists. Tool-calling ensures actions like 'create_ticket' generate valid JSON payloads that pass CRM schema validation. This architecture excels at handling complex support scenarios but amplifies risks around data accuracy and compliance.\n\nVex integration wraps the critical agent.run() call, verifying outputs against custom rules for PII redaction, tone analysis, policy checks, and escalation triggers before responses reach customers.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Input    │───▶│   Agno Agent     │───▶│   CRM/Tools      │\n│ (Text/Image)    │    │  + RAG + Memory  │    │ (Tickets/Orders) │\n└─────────────────┘    │                  │    └─────────────────┘\n                       │   agent.run()    │         ▲\n                       └──────────┬───────┘         │\n                                  │                 │\n                       ┌──────────▼───────┐         │\n                       │    Vex.verify    │◀────────┘\n                       │ (Guardrails)     │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-modal agent misinterpreting image or audio inputs",
+        "description": "OCR errors on ticket images or misheard audio queries lead to wrong order lookups or escalations",
+        "severity": "critical",
+        "mitigation": "Vex verifies extracted entities against CRM data and flags confidence < 90%"
+      },
+      {
+        "name": "Agentic session memory recalling fabricated past interactions",
+        "description": "Hallucinated conversation history causes inconsistent support or security breaches",
+        "severity": "high",
+        "mitigation": "Vex cross-checks memory references against actual CRM ticket history"
+      },
+      {
+        "name": "Structured output failing validation on complex nested schemas",
+        "description": "Invalid ticket creation JSON payloads rejected by CRM APIs, blocking resolutions",
+        "severity": "high",
+        "mitigation": "Vex schema validation + Pydantic enforcement before tool execution"
+      },
+      {
+        "name": "Team agent coordination producing contradictory sub-results",
+        "description": "Billing agent says 'refund approved' while escalation agent says 'under review'",
+        "severity": "medium",
+        "mitigation": "Vex consistency checks across sub-agent outputs before final response"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Agno RAG Agent Setup",
+        "description": "Initialize Agno agent with knowledge base and CRM tools for support workflows",
+        "code": "from agno.agent import Agent\nfrom agno.tools.zendesk import ZendeskTools\nfrom agno.retrievers import Vector\nfrom agno.models.openai import OpenAI\n\nagent = Agent(\n    name=\"SupportBot\",\n    model=OpenAI(model=\"gpt-4o\"),\n    retriever=Vector.from_documents(docs=support_docs),\n    tools=[ZendeskTools(api_key=\"your-key\")],\n    show_tool_calls=True\n)\n\nresponse = agent.run(\"Customer says order #12345 never arrived\")\nprint(response)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-modal Image Processing for Tickets",
+        "description": "Handle customer-uploaded receipt images with vision capabilities",
+        "code": "from agno.agent import AgentMultiModal\n\nvision_agent = AgentMultiModal(\n    name=\"TicketVision\",\n    model=OpenAI(model=\"gpt-4o\"),\n    tools=[ZendeskTools()],\n    max_tokens=2000\n)\n\n# Process uploaded image\nresult = vision_agent.run(\n    \"Extract order number and issue from this receipt image:\",\n    image_url=\"https://example.com/receipt.jpg\"\n)\nprint(result['order_number'])",
+        "language": "python"
+      },
+      {
+        "title": "Structured Ticket Creation Tool",
+        "description": "Generate CRM-compliant ticket JSON with Pydantic validation",
+        "code": "from pydantic import BaseModel, Field\nfrom agno.tools.base import Tool\n\nclass TicketSchema(BaseModel):\n    customer_email: str = Field(..., description=\"Customer email\")\n    order_id: str\n    issue_type: str\n    priority: str = Field(\"medium\", pattern=\"^(low|medium|high|critical)$\")\n\nclass CreateTicketTool(Tool):\n    name = \"create_support_ticket\"\n    description = \"Create Zendesk ticket from customer issue\"\n    schema = TicketSchema\n\n    def call(self, **kwargs) -> dict:\n        ticket = TicketSchema(**kwargs)\n        return zendesk_client.tickets.create(ticket.dict())\n\nagent.tools.append(CreateTicketTool())",
+        "language": "python"
+      },
+      {
+        "title": "Session Memory for Multi-turn Support",
+        "description": "Maintain conversation context across support interactions",
+        "code": "from agno.memory.chat import ChatMemory\n\nagent = Agent(\n    name=\"SupportAgent\",\n    memory=ChatMemory.from_session_id(\"cust_123\"),\n    add_base_tools=True\n)\n\n# Multi-turn conversation\nfor message in customer_messages:\n    response = agent.run(message)\n    print(f\"Bot: {response}\")\n\n# Memory persists across sessions\nagent.save_memory()",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap agent.run() with Vex Verify Decorator",
+        "description": "Essential decorator ensuring all outputs pass verification before customer delivery",
+        "code": "from vex import verify\n\n@verify(\n    risk_profile=\"high\",\n    checks=[\n        \"response_accuracy\",\n        \"pii_filtering\",\n        \"tone_consistency\"\n    ]\n)\ndef safe_agent_run(query: str):\n    return agent.run(query)\n\n# Usage\ntry:\n    verified_response = safe_agent_run(\"My order #12345 is missing\")\n    print(verified_response)\nexcept Exception as e:\n    print(f\"Blocked: {e}\")  # Vex rejection reason",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering + Policy Compliance Check",
+        "description": "Redact sensitive data and enforce support policies automatically",
+        "code": "from vex import verify, Policy\n\nsupport_policy = Policy(\n    name=\"CustomerSupport\",\n    rules=[\n        \"no_internal_ips\",\n        \"no_credit_card_display\",\n        \"escalate_high_value_orders\"\n    ]\n)\n\n@verify(\n    policies=[support_policy],\n    pii_filters=[\"email\", \"phone\", \"order_id\"]\n)\ndef protected_support(query: str, customer_id: str):\n    context = crm.get_customer_context(customer_id)\n    return agent.run(f\"{query}\\nContext: {context}\")\n\nresponse = protected_support(\"What's my refund status?\", \"cust_456\")",
+        "language": "python"
+      },
+      {
+        "title": "Escalation Triggers + Accuracy Verification",
+        "description": "Auto-escalate complex issues and validate factual accuracy against CRM",
+        "code": "from vex import verify, FactCheck\n\ncrm_fact_checker = FactCheck(\n    source=\"zendesk_crm\",\n    fields=[\"order_status\", \"ticket_history\"]\n)\n\n@verify(\n    fact_checks=[crm_fact_checker],\n    escalation_triggers=[\n        \"refund_amount > 1000\",\n        \"vip_customer\",\n        \"legal_keywords\"\n    ]\n)\ndef verified_support_action(query: str):\n    result = agent.run(query)\n    if \"escalate\" in result:\n        return agent.tools.escalate_to_human(result)\n    return result\n\nfinal_response = verified_support_action(\"Authorize $2500 refund\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Agno Customer Support",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your agents to eliminate support risks immediately."
+    }
+  }
+}

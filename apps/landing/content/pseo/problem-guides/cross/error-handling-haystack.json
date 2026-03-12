@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Haystack Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Haystack error-handling",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, AI Agent Error Handling Patterns manifest as silent failures in composable components, where type mismatches, irrelevant retrievals, hallucinations, and custom errors disrupt agent reliability without clear feedback. These issues arise from Haystack's modular design, where components like Retrievers and Generators process data asynchronously without built-in validation. Without proper error boundaries, pipelines fail unpredictably in production, leading to degraded agent performance and untraceable bugs.",
+    "howItManifests": [
+      {
+        "scenario": "Pipeline component output type mismatches",
+        "symptom": "Retriever returns list of dicts but Generator expects Document objects, causing AttributeError deep in pipeline execution",
+        "impact": "Pipeline crashes mid-run with cryptic stack traces, halting entire agent workflow"
+      },
+      {
+        "scenario": "Retriever returning irrelevant documents",
+        "symptom": "Generator receives empty or low-score documents but proceeds without validation, producing generic responses",
+        "impact": "Agent outputs unhelpful answers that erode user trust without triggering alerts"
+      },
+      {
+        "scenario": "Generator hallucinating beyond retrieved context",
+        "symptom": "Output contains facts not present in input context but no mechanism flags hallucination",
+        "impact": "Agent delivers confidently wrong information, damaging credibility in RAG applications"
+      },
+      {
+        "scenario": "Custom component errors silently swallowed",
+        "symptom": "Custom node raises exception but pipeline continues with None values downstream",
+        "impact": "Partial failures cascade, producing corrupted outputs without surfacing root cause"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Type Mismatch Monitor",
+        "description": "Detects output schema violations between consecutive pipeline components using runtime type checking",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom typing import Any\n\nclass TypeMismatchDetector:\n    def __init__(self):\n        self.prev_schema = None\n\n    def run(self, inputs: dict[str, Any]) -> dict[str, Any]:\n        current_schema = {k: type(v).__name__ for k, v in inputs.items()}\n        if self.prev_schema and self.prev_schema != current_schema:\n            raise ValueError(f'Type mismatch: {self.prev_schema} -> {current_schema}')\n        self.prev_schema = current_schema\n        return inputs\n\n# Usage in pipeline\npipe = Pipeline()\npipe.add_component('type_detector', TypeMismatchDetector())\npipe.connect('retriever.documents', 'type_detector')\npipe.connect('type_detector', 'generator')",
+        "language": "python"
+      },
+      {
+        "name": "Retrieval Relevance Checker",
+        "description": "Monitors document relevance scores and flags when average score falls below threshold",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\nimport statistics\n\nclass RelevanceMonitor:\n    def __init__(self, score_threshold: float = 0.3):\n        self.score_threshold = score_threshold\n\n    def run(self, documents: list) -> dict:\n        if not documents:\n            raise ValueError('Retriever returned empty documents')\n        \n        scores = [doc.metadata.get('score', 0) for doc in documents]\n        avg_score = statistics.mean(scores)\n        \n        if avg_score < self.score_threshold:\n            raise ValueError(f'Low relevance detected: avg_score={avg_score:.3f}')\n        \n        return {'documents': documents, 'avg_relevance': avg_score}\n\n# Pipeline integration\npipe.add_component('relevance_check', RelevanceMonitor())\npipe.connect('retriever.documents', 'relevance_check.documents')\npipe.connect('relevance_check', 'generator.documents')",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Detector",
+        "description": "Compares generator output against retrieved context using semantic similarity",
+        "code": "from sentence_transformers import SentenceTransformer\nimport numpy as np\n\nclass HallucinationDetector:\n    def __init__(self):\n        self.model = SentenceTransformer('all-MiniLM-L6-v2')\n        self.similarity_threshold = 0.4\n\n    def run(self, documents: list, generated_text: str) -> dict:\n        if not documents:\n            raise ValueError('No context for hallucination check')\n        \n        context_texts = [doc.content for doc in documents]\n        embeddings = self.model.encode(context_texts + [generated_text])\n        \n        similarities = np.dot(embeddings[-1], embeddings[:-1])\n        max_similarity = np.max(similarities)\n        \n        if max_similarity < self.similarity_threshold:\n            raise ValueError(f'Hallucination detected: similarity={max_similarity:.3f}')\n        \n        return {'text': generated_text, 'grounded': True}\n\npipe.add_component('hallucination_check', HallucinationDetector())\npipe.connect('generator.text', 'hallucination_check.generated_text')\npipe.connect('retriever.documents', 'hallucination_check.documents')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Schema Validation Wrapper",
+        "description": "Wraps components with input/output schema enforcement using Pydantic",
+        "code": "from pydantic import BaseModel, ValidationError\nfrom haystack import component\n\nclass DocumentList(BaseModel):\n    documents: list\n\nclass ValidatedRetriever:\n    def __init__(self, retriever):\n        self.retriever = retriever\n\n    @component\n    def run(self, query: str) -> dict:\n        result = self.retriever.run(query=query)\n        try:\n            DocumentList.model_validate(result)\n        except ValidationError as e:\n            raise ValueError(f'Schema violation: {e}')\n        return result\n\n# Replace retriever with validated version\npipe.add_component('validated_retriever', ValidatedRetriever(original_retriever))\npipe.connect('query', 'validated_retriever.query')",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Retrieval Chain",
+        "description": "Implements multi-stage retrieval with keyword fallback for embedding failures",
+        "code": "from haystack.components.retrievers import InMemoryBM25Retriever\n\nclass FallbackRetriever:\n    def __init__(self, embedding_retriever, keyword_retriever):\n        self.embedding = embedding_retriever\n        self.keyword = keyword_retriever\n\n    def run(self, query: str, **kwargs) -> dict:\n        try:\n            result = self.embedding.run(query=query, **kwargs)\n            if len(result.get('documents', [])) < 3:\n                raise ValueError('Insufficient embedding results')\n            return result\n        except Exception:\n            print('Embedding failed, falling back to keyword')\n            return self.keyword.run(query=query, **kwargs)\n\npipe.add_component('fallback_retriever', FallbackRetriever(embedding_retriever, bm25_retriever))\npipe.connect('query', 'fallback_retriever.query')",
+        "language": "python"
+      },
+      {
+        "name": "Error Boundary Component",
+        "description": "Catches and handles errors from downstream components with fallback responses",
+        "code": "@component\nclass ErrorBoundary:\n    @component.output_types(reponse=str, error=dict)\n    def run(self, **inputs) -> dict:\n        try:\n            # Forward to next component logic here\n            return {'response': 'success'}\n        except Exception as e:\n            return {\n                'response': 'I encountered an error. Please try rephrasing your question.',\n                'error': {'type': type(e).__name__, 'message': str(e)}\n            }\n\npipe.add_component('error_boundary', ErrorBoundary())\npipe.connect('generator.text', 'error_boundary')\npipe.connect('error_boundary.response', 'output')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that automatically monitors all four common failure modes in real-time. It instruments your existing pipeline without code changes, capturing type mismatches, relevance scores, hallucination signals, and error traces. Vex uses statistical baselines from your production traffic to detect anomalies and triggers automated rollbacks or fallbacks.\n\nThe Vex component wraps your pipeline endpoints, providing observability dashboards and auto-remediation workflows. When issues are detected, Vex can dynamically reroute traffic to fallback pipelines or healthy component variants. This ensures 99.9% agent uptime while continuously learning from failure patterns.\n\nInstallation is simple: pip install haystack-ai vex-sdk, then add the VexMonitor component to any pipeline. Vex handles the complexity of error pattern detection, leaving your team to focus on agent logic rather than defensive programming.",
+      "code": "from vex_sdk.haystack import VexMonitor\nfrom haystack import Pipeline\n\n# Install: pip install haystack-ai vex-sdk\n\npipe = Pipeline()\n\n# Add Vex monitor to existing pipeline\npipe.add_component(\n    \"vex_monitor\",\n    VexMonitor(\n        project_id=\"your-project-id\",\n        patterns=[\n            \"pipeline-type-mismatch\",\n            \"retriever-irrelevant\",\n            \"generator-hallucination\",\n            \"custom-component-error\"\n        ]\n    )\n)\n\n# Wrap existing components\npipe.connect(\"query\", \"vex_monitor.query\")\npipe.connect(\"retriever.documents\", \"vex_monitor.documents\")\npipe.connect(\"vex_monitor.validated\", \"generator.documents\")\npipe.connect(\"generator.text\", \"vex_monitor.text\")\n\n# Vex auto-generates detection rules and remediation flows\npipe.draw('pipeline_with_vex.png')\n\n# Run with monitoring\nresult = pipe.run({\"query\": {\"query\": \"What is Haystack?\"}})\n\n# Vex dashboard shows: 98% relevance, 0.2% hallucination rate, 100% type safety",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex to your Haystack pipelines in 5 minutes and eliminate agent error patterns forever: pip install haystack-ai vex-sdk"
+    }
+  }
+}

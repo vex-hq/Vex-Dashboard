@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with AutoGen + Vex Guardrails",
+    "description": "Learn how to build workflow automation with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen workflow automation",
+      "AutoGen guardrails",
+      "workflow automation reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Workflow Automation with AutoGen enables multi-agent systems to handle complex, multi-step tasks with API integrations, conditional logic, and human approvals. However, conversational agents risk infinite loops, unsafe code execution, and incorrect decisions that can cascade through workflows. Vex provides essential guardrails by filtering agent replies to ensure action correctness, permission validation, and safe execution.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with AutoGen",
+      "description": "The architecture features a Supervisor Agent that orchestrates task execution by delegating to specialized Worker Agents (API Caller, Validator, Condition Checker). Each agent collaborates conversationally, with human-in-the-loop approvals at critical decision points. The workflow processes sequential steps like data retrieval, validation, conditional branching, and final execution, all while maintaining conversation state.\n\nAPI integrations occur through code-executing agents that make HTTP calls or database queries. Conditional logic is handled by decision agents that analyze prior outputs. Human approvals are triggered via registered functions that pause execution for manual review. Vex integrates as a reply filter to validate every agent response before it propagates through the workflow.\n\nThis setup scales to complex enterprise workflows but amplifies risks from agent miscommunication or hallucinated actions.",
+      "diagram": "Supervisor Agent\n       |\n   +---+---+\n   |       |\nWorker  Human\nAgents  Approval\n(API/   (oobabooga\n Cond.   message)\nLogic)  |\n   |       |\n   +---+---+\n       |\n    Vex Filter\n(Reply  |\nValidation)   --> Final Action\n"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents enter repetitive back-and-forth without task progression",
+        "severity": "critical",
+        "mitigation": "Vex conversation state tracking and loop detection"
+      },
+      {
+        "name": "Code execution producing unsafe outputs",
+        "description": "API agents execute dangerous code or make unauthorized calls",
+        "severity": "critical",
+        "mitigation": "Vex permission validation and sandboxed execution checks"
+      },
+      {
+        "name": "Agents agreeing on incorrect conclusions",
+        "description": "Multiple agents validate wrong actions through group hallucination",
+        "severity": "high",
+        "mitigation": "Vex action correctness verification against workflow spec"
+      },
+      {
+        "name": "Uncontrolled token spending in multi-turn debates",
+        "description": "Endless condition-checking conversations exhaust budget",
+        "severity": "medium",
+        "mitigation": "Vex token budget enforcement and early termination"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set up Multi-Agent Workflow GroupChat",
+        "description": "Create supervisor and worker agents with group chat manager for workflow orchestration",
+        "code": "from autogen import AssistantAgent, GroupChat, GroupChatManager\n\nsupervisor = AssistantAgent(\n    name=\"Supervisor\",\n    llm_config={\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": \"your_key\"}]},\n    system_message=\"Orchestrate workflow: delegate to API/Validator agents\"\n)\n\napi_agent = AssistantAgent(\n    name=\"API_Agent\",\n    llm_config={\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": \"your_key\"}]},\n    system_message=\"Execute safe API calls only\"\n)\n\ngroupchat = GroupChat(agents=[supervisor, api_agent], messages=[])\nmanager = GroupChatManager(groupchat=groupchat)",
+        "language": "python"
+      },
+      {
+        "title": "Implement Human-in-the-Loop Approval",
+        "description": "Register approval function for critical decision points",
+        "code": "def human_approval(context, sender):\n    action = context.get('proposed_action')\n    print(f\"Approve? {action}\")\n    return input(\"y/n: \") == 'y'\n\napi_agent.register_for_llm(name=\"approval\", description=\"Request human approval\")(human_approval)\n\n# Trigger in workflow\nsupervisor.initiate_chat(\n    api_agent,\n    message=\"Execute payment workflow - check approvals first\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Add Conditional Logic Agent",
+        "description": "Decision agent for workflow branching based on API results",
+        "code": "validator = AssistantAgent(\n    name=\"Validator\",\n    system_message=\"Validate API results and decide next step: approve/rollback/retry\"\n)\n\ndef conditional_branch(result):\n    if result['status'] == 'success' and result['amount'] < 1000:\n        return 'execute'\n    elif result['status'] == 'error':\n        return 'rollback'\n    return 'human_review'\n\n# Used by validator agent\nmanager.add_agent(validator)",
+        "language": "python"
+      },
+      {
+        "title": "API Integration with Error Handling",
+        "description": "Safe API calling with idempotency and rollback",
+        "code": "import requests\n\ndef safe_api_call(params):\n    idempotency_key = params['idempotency_key']\n    response = requests.post(\n        'https://api.example.com/workflows',\n        json=params,\n        headers={'Idempotency-Key': idempotency_key}\n    )\n    if response.status_code == 409:\n        return {'status': 'idempotent', 'action': 'skip'}\n    return response.json()\n\napi_agent.register_for_llm(name=\"call_api\")(safe_api_call)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as Reply Function Filter",
+        "description": "Install and configure Vex to filter all agent replies for safety",
+        "code": "pip install autogen vex-sdk\n\nfrom vex_sdk import VexClient\nfrom autogen import register_function\n\nvex = VexClient(api_key=\"your_vex_key\")\n\ndef vex_reply_filter(context, sender):\n    message = sender.last_message()['content']\n    verdict = vex.verify({\n        'action': 'agent_reply',\n        'content': message,\n        'workflow_step': context.get('step'),\n        'permissions': ['read_api', 'write_safe']\n    })\n    return verdict['approved']\n\n# Register globally\nregister_function(\n    vex_reply_filter,\n    caller=api_agent,\n    executor=supervisor,\n    name=\"vex_filter\",\n    description=\"Vex safety filter\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Action Correctness Verification",
+        "description": "Validate proposed actions match workflow specification",
+        "code": "WORKFLOW_SPEC = {\n    'steps': ['validate', 'api_call', 'human_review', 'execute'],\n    'allowed_apis': ['payment', 'notification'],\n    'max_amount': 5000\n}\n\ndef verify_action_correctness(proposed_action):\n    step = proposed_action['step']\n    if step not in WORKFLOW_SPEC['steps']:\n        return False\n    \n    api = proposed_action.get('api')\n    if api and api not in WORKFLOW_SPEC['allowed_apis']:\n        return False\n    \n    return vex.verify({\n        'type': 'action_correctness',\n        'spec': WORKFLOW_SPEC,\n        'action': proposed_action\n    })['valid']\n\nvalidator.register_for_llm(name=\"verify_action\")(verify_action_correctness)",
+        "language": "python"
+      },
+      {
+        "title": "Permission and Rollback Validation",
+        "description": "Ensure permissions and enable safe rollback on failure",
+        "code": "def validate_permissions_and_rollback(context):\n    action = context['action']\n    user_permissions = context['user_permissions']\n    \n    # Permission check\n    required_perm = f\"{action['type']}:{action['resource']}\"\n    if required_perm not in user_permissions:\n        return {'approved': False, 'reason': 'insufficient_permissions'}\n    \n    # Idempotency/rollback check\n    if 'idempotency_key' not in action:\n        action['idempotency_key'] = vex.generate_idempotency_key(action)\n    \n    verdict = vex.verify({\n        'type': 'permission_validation',\n        'action': action,\n        'rollback_enabled': True\n    })\n    \n    return verdict\n\nsupervisor.register_for_llm(name=\"permission_check\")(validate_permissions_and_rollback)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Workflow Automation",
+      "description": "Install Vex today and protect your multi-agent workflows from cascading failures - start with `pip install vex-sdk`"
+    }
+  }
+}

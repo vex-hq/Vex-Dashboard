@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build research agents with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI research agents",
+      "Pydantic AI guardrails",
+      "research agents reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Pydantic AI enables building type-safe research agents that perform multi-step web searches, data synthesis, and structured summarization for production applications. Guardrails are essential to mitigate risks like hallucinated claims, outdated sources, and biased outputs in high-stakes information retrieval tasks. Vex integration provides runtime verification for source accuracy, recency, and factual consistency without disrupting agent workflows.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Pydantic AI",
+      "description": "Pydantic AI research agents follow a multi-stage pipeline: a router agent dispatches queries to specialized tools for web search, page scraping, and claim extraction. Search tools use APIs like SerpAPI or Tavily, feeding raw content into LLM analyzers that structure data into Pydantic models for claims, sources, and summaries. A synthesis agent validates and compiles results, applying result validators to ensure structured outputs meet schema requirements before final delivery.\n\nThe architecture emphasizes dependency injection for tool contexts and streaming validation for real-time feedback. Nested tool calls maintain state via Pydantic's context propagation, while retry logic handles transient API failures. This creates reliable, observable pipelines for production research applications.\n\nCommon patterns include agent-tool hierarchies with structured tool responses and multi-turn reasoning chains that accumulate evidence across steps.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Router Agent    │\n└─────────────────┘    │  (PydanticModel)  │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼──────────┐\n                       │   Tool Calls        │\n                       │ • SerpAPI Search    │\n                       │ • Web Scraper       │\n                       │ • Claim Extractor   │\n                       └──────────┬──────────┘\n                                  │\n                       ┌──────────▼──────────┐    ┌──────────────────┐\n                       │ Synthesis Agent     │───▶│ Vex Validator    │\n                       │ (w/ ResultValidator)│    │ (Source/Accuracy)│\n                       └──────────────────────┘    └──────────────────┘\n                                                             │\n                                                      ┌──────▼──────┐\n                                                      │ Structured  │\n                                                      │   Summary   │\n                                                      └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Result validator rejecting valid but unexpected model outputs",
+        "description": "Pydantic schemas reject semantically correct responses that deviate from expected formats during streaming synthesis",
+        "severity": "high",
+        "mitigation": "Vex result validators with flexible claim verification before strict Pydantic parsing"
+      },
+      {
+        "name": "Tool retry logic masking persistent underlying errors",
+        "description": "Search APIs fail consistently (rate limits, blocks) but retries hide source quality issues",
+        "severity": "medium",
+        "mitigation": "Vex monitors tool call success rates and flags persistent failures"
+      },
+      {
+        "name": "Dependency injection context not available in nested tool calls",
+        "description": "Nested scrapers lose search context, leading to orphaned claims without source attribution",
+        "severity": "high",
+        "mitigation": "Vex propagates context through tool call traces for end-to-end verification"
+      },
+      {
+        "name": "Streaming structured responses failing mid-generation validation",
+        "description": "Partial summaries fail Pydantic validation during token streaming, causing incomplete responses",
+        "severity": "critical",
+        "mitigation": "Vex validates streaming chunks incrementally with source verification"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Agent with Pydantic AI",
+        "description": "Define a router agent that orchestrates search and synthesis with structured Pydantic outputs",
+        "code": "from pydantic_ai import Agent, tool\nfrom pydantic import BaseModel, Field\nfrom typing import List\n\nclass Claim(BaseModel):\n    text: str\n    source_url: str\n    recency_score: float = Field(..., ge=0, le=1)\n\nclass ResearchResult(BaseModel):\n    summary: str\n    claims: List[Claim]\n    sources: List[str]\n\n@tool\nasync def web_search(query: str) -> List[str]:\n    # Simulated SerpAPI call\n    return [f'https://example.com/search?q={query}']\n\nresearch_agent = Agent(\n    'Research Agent',\n    model='gpt-4o',\n    result_model=ResearchResult,\n    tools=[web_search]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Step Claim Extraction Pipeline",
+        "description": "Chain search → scrape → extract → verify for comprehensive research workflows",
+        "code": "from pydantic_ai import Agent, tool\n\n@tool\nasync def scrape_page(url: str) -> str:\n    return 'Sample content from ' + url\n\n@tool\nasync def extract_claims(content: str) -> List[Claim]:\n    return [Claim(text='AI improves productivity', source_url='example.com', recency_score=0.8)]\n\nextraction_agent = Agent(\n    'Extraction Agent',\n    tools=[scrape_page, extract_claims],\n    result_model=List[Claim]\n)\n\nasync def research_pipeline(query: str):\n    search_results = await research_agent.run(query)\n    claims = await extraction_agent.run(search_results)\n    return claims",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Research Results",
+        "description": "Enable streaming structured outputs with real-time validation",
+        "code": "async for chunk in research_agent.stream(query, stream=True):\n    if chunk.type == 'result_chunk':\n        print(f'Partial summary: {chunk.data.summary}')\n    elif chunk.type == 'tool_call':\n        print(f'Searching: {chunk.data.args.query}')\n\n# Full structured result\nresult = await research_agent.run(query)\nassert isinstance(result, ResearchResult)",
+        "language": "python"
+      },
+      {
+        "title": "Error Handling with Retry Logic",
+        "description": "Implement robust tool retry patterns for unreliable search APIs",
+        "code": "from pydantic_ai import Agent\nfrom tenacity import retry, stop_after_attempt, wait_exponential\n\n@retry(stop=stop_after_attempt(3), wait=wait_exponential())\n@tool\nasync def reliable_search(query: str) -> List[str]:\n    # API call with fallback\n    return await web_search(query)\n\nagent = Agent(\n    'Robust Agent',\n    tools=[reliable_search],\n    max_retries=3\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex Source Verification Validator",
+        "description": "Verify all claims have valid, accessible source URLs before Pydantic parsing",
+        "code": "from vex_sdk import Vex, Verifier\nfrom pydantic_ai import Agent\n\nvex = Vex(api_key='your-vex-key')\nsource_verifier = Verifier(\n    name='source_accessibility',\n    checks=[\n        'url_reachable',\n        'content_length>100',\n        'no_404_errors'\n    ]\n)\n\n@research_agent.result_validator\nasync def verify_sources(result: ResearchResult):\n    for claim in result.claims:\n        await vex.verify(claim.dict(), source_verifier)\n    return result",
+        "language": "python"
+      },
+      {
+        "title": "Claim Accuracy with Vex Fact-Checking",
+        "description": "Cross-verify extracted claims against source content and web consensus",
+        "code": "claim_accuracy = Verifier(\n    name='claim_accuracy',\n    checks=[\n        'semantic_match>0.8',\n        'source_content_alignment',\n        'web_consensus_support',\n        'temporal_consistency'\n    ]\n)\n\n@extraction_agent.result_validator\nasync def check_claims(claims: List[Claim]):\n    verified_claims = []\n    for claim in claims:\n        verdict = await vex.verify(claim.dict(), claim_accuracy)\n        if verdict.passed:\n            verified_claims.append(claim)\n    return verified_claims",
+        "language": "python"
+      },
+      {
+        "title": "Recency and Bias Detection Guardrails",
+        "description": "Ensure sources are recent and detect viewpoint bias in research results",
+        "code": "recency_bias_checker = Verifier(\n    name='temporal_bias_check',\n    checks=[\n        'published_date>30_days',\n        'author_diversity',\n        'domain_neutrality',\n        'citation_balance'\n    ]\n)\n\nasync def full_research_with_vex(query: str):\n    raw_result = await research_agent.run(query)\n    \n    # Multi-verifier pipeline\n    verifiers = [source_verifier, claim_accuracy, recency_bias_checker]\n    \n    verified_result = await vex.batch_verify(\n        raw_result.dict(), verifiers\n    )\n    \n    return ResearchResult(**verified_result)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI Research Agents",
+      "description": "Add Vex verification in 5 minutes to protect against hallucinated claims and unreliable sources - start your free trial today."
+    }
+  }
+}

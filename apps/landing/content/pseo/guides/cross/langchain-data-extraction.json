@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with LangChain + Vex Guardrails",
+    "description": "Learn how to build data extraction with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain data extraction",
+      "LangChain guardrails",
+      "data extraction reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with LangChain enables structured output from unstructured documents using schema-guided LLM calls, powering applications like invoice processing and contract analysis. Guardrails are essential to ensure schema compliance, field accuracy, and completeness, preventing costly downstream errors from hallucinations or inconsistent formatting. Vex provides runtime verification to catch these failures before they impact your production systems.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with LangChain",
+      "description": "The typical LangChain data extraction architecture starts with document loaders that ingest unstructured text (PDFs, emails, web pages). Text is split into chunks and embedded using models like OpenAI embeddings, then passed to an LLM chain configured with Pydantic/output parsers for schema-guided extraction. A prompt template defines the extraction schema, and the LLM generates structured JSON output validated against the defined model.\n\nFor complex documents, retrieval chains (RAG) may fetch relevant context, while agents with tools handle multi-step extraction. Output parsers like PydanticOutputParser ensure type consistency, with fallbacks for parsing errors. This architecture scales to production but is vulnerable to hallucination, schema drift, and context overflow.\n\nVex wraps the chain.invoke() call to verify outputs against predefined checks for completeness, accuracy, and format compliance before forwarding to downstream systems.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Unstructured   │───▶│   LangChain      │───▶│   Structured     │\n│     Documents    │    │ Extraction Chain │    │      Output      │\n│ (PDFs, Emails)   │    │ • Load & Split   │    │ (JSON Schema)    │\n└─────────────────┘    │ • Embed & Prompt  │    └──────────────────┘\n                       │ • LLM + Parser    │           ▲\n                       └──────────┬─────────┘           │\n                                  │                     │\n                       ┌──────────▼─────────┐           │\n                       │     Vex.verify()   │───────────┘\n                       │  (Schema/Accuracy) │\n                       └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Schema Non-Compliance",
+        "description": "LLM generates JSON missing required fields or with incorrect structure",
+        "severity": "high",
+        "mitigation": "Vex schema validation + Pydantic fallback parsing"
+      },
+      {
+        "name": "Field Hallucination",
+        "description": "LLM invents non-existent values (wrong invoice amounts, dates)",
+        "severity": "critical",
+        "mitigation": "Vex field accuracy checks with regex/pattern matching"
+      },
+      {
+        "name": "Incomplete Extraction",
+        "description": "Required fields left null or empty despite being present in document",
+        "severity": "high",
+        "mitigation": "Vex completeness validation across all schema fields"
+      },
+      {
+        "name": "Type Inconsistency",
+        "description": "String dates parsed as numbers, missing type coercion",
+        "severity": "medium",
+        "mitigation": "Vex type consistency checks + strict output parsing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Schema-Guided Extraction (Python)",
+        "description": "Define Pydantic model and create extraction chain with structured output",
+        "code": "from langchain.prompts import PromptTemplate\nfrom langchain.output_parsers import PydanticOutputParser\nfrom langchain_openai import ChatOpenAI\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(description=\"Unique invoice ID\")\n    date: str = Field(description=\"Invoice date\")\n    amount: float = Field(description=\"Total amount\")\n    vendor: str = Field(description=\"Vendor name\")\n\nparser = PydanticOutputParser(pydantic_object=Invoice)\nprompt = PromptTemplate(\n    template=\"Extract invoice data: {format_instructions}\\nDocument: {document}\",\n    input_variables=[\"document\"],\n    partial_variables={\"format_instructions\": parser.get_format_instructions()},\n)\nllm = ChatOpenAI(model=\"gpt-4o-mini\", temperature=0)\nchain = prompt | llm | parser\n\nresult = chain.invoke({\"document\": \"Invoice #INV-1234 dated 2024-03-15 from Acme Corp: $2,500\"})\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Extraction Chain",
+        "description": "Zod schema validation with LangChain.js structured output",
+        "code": "import { ChatOpenAI } from \"@langchain/openai\";\nimport { PromptTemplate } from \"@langchain/core/prompts\";\nimport { StructuredOutputParser } from \"langchain/output\";\nimport { z } from \"zod\";\n\nconst schema = z.object({\n  invoiceNumber: z.string().describe(\"Unique invoice ID\"),\n  date: z.string().describe(\"Invoice date\"),\n  amount: z.number().describe(\"Total amount\"),\n  vendor: z.string().describe(\"Vendor name\"),\n});\n\nconst parser = StructuredOutputParser.fromZodSchema(schema);\nconst prompt = new PromptTemplate({\n  template: \"Extract invoice data: {format_instructions}\\nDocument: {document}\",\n  inputVariables: [\"document\"],\n  partialVariables: { format_instructions: parser.getFormatInstructions() },\n});\n\nconst model = new ChatOpenAI({ model: \"gpt-4o-mini\", temperature: 0 });\nconst chain = prompt.pipe(model).pipe(parser);\n\nconst result = await chain.invoke({\n  document: \"Invoice #INV-1234 dated 2024-03-15 from Acme Corp: $2,500\",\n});\nconsole.log(result);",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG-Enhanced Extraction (Python)",
+        "description": "Combine retrieval with extraction for long documents",
+        "code": "from langchain_community.vectorstores import FAISS\nfrom langchain_openai import OpenAIEmbeddings\nfrom langchain_text_splitters import RecursiveCharacterTextSplitter\n\n# Assume documents loaded and split\ntext_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)\nsplits = text_splitter.split_documents(documents)\nvectorstore = FAISS.from_documents(splits, OpenAIEmbeddings())\nretriever = vectorstore.as_retriever()\n\nextraction_chain = prompt | llm | parser\nrag_chain = ({\"context\": retriever, \"document\": RunnablePassthrough()}) | extraction_chain\n\nresult = rag_chain.invoke(\"invoice #1234\")",
+        "language": "python"
+      },
+      {
+        "title": "Batch Extraction (TypeScript)",
+        "description": "Process multiple documents with parallel execution",
+        "code": "const batchResults = await Promise.all(\n  documents.map(async (doc) => {\n    try {\n      const result = await chain.invoke({ document: doc.content });\n      return { success: true, data: result, docId: doc.id };\n    } catch (error) {\n      return { success: false, error: error.message, docId: doc.id };\n    }\n  })\n);\nconst validExtractions = batchResults.filter(r => r.success);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap chain.invoke() with Vex Verify (Python)",
+        "description": "Single line integration catches all extraction failures",
+        "code": "import vex\n\n# Your existing LangChain chain\nresult = chain.invoke({\"document\": document_text})\n\n# Vex verification\nverified = vex.verify(\n    result,\n    checks=[\n        vex.schema_matches(Invoice),\n        vex.field_present(\"invoice_number\"),\n        vex.field_matches_regex(\"date\", r\"^\\d{4}-\\d{2}-\\d{2}$\"),\n        vex.field_positive(\"amount\"),\n    ],\n    risk_profile=\"medium\"\n)\n\nif verified:\n    # Safe to process\n    save_to_database(verified)\nelse:\n    # Handle failure\n    log_extraction_error(document_id)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Type-safe verification with Zod schema matching",
+        "code": "import { verify } from 'vex-sdk';\n\n// Your LangChain chain result\nconst result = await chain.invoke({ document });\n\n// Vex verification\nconst verified = await verify({\n  data: result,\n  checks: [\n    schemaMatch(schema),\n    fieldExists('invoiceNumber'),\n    regexMatch('date', /^\\d{4}-\\d{2}-\\d{2}$/),\n    numberGt('amount', 0),\n    completeness([\n      'invoiceNumber', 'date', 'amount', 'vendor'\n    ]),\n  ],\n  riskProfile: 'medium'\n});\n\nif (verified.passed) {\n  await saveExtraction(verified.data);\n} else {\n  console.error('Extraction failed verification:', verified.failures);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Production Batch Verification (Python)",
+        "description": "Verify batches with detailed failure reporting",
+        "code": "batch_results = []\nfor doc in document_batch:\n    raw_result = chain.invoke({\"document\": doc.content})\n    \n    verification = vex.verify(\n        raw_result,\n        checks=[\n            vex.schema_matches(Invoice),\n            vex.all_fields_present(),\n            vex.accuracy_threshold(0.95),\n        ],\n        metadata={\"doc_id\": doc.id, \"batch_id\": batch_id}\n    )\n    \n    batch_results.append({\n        \"doc_id\": doc.id,\n        \"verified\": verification,\n        \"output\": verification.data if verification else None,\n        \"failures\": verification.failures if not verification else []\n    })\n\nsuccess_rate = sum(1 for r in batch_results if r[\"verified\"]) / len(batch_results)\nif success_rate < 0.95:\n    alert_team(f\"Batch {batch_id} only {success_rate:.1%} verified\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Data Extraction",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your chains today to eliminate extraction failures."
+    }
+  }
+}

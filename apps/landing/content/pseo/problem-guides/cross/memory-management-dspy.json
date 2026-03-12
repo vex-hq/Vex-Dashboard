@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in DSPy Agents",
+    "description": "How to detect and fix ai agent memory management in DSPy agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "DSPy memory-management",
+      "DSPy reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In DSPy agents, AI Agent Memory Management issues manifest as modules failing to retain or selectively retrieve context from memory stores during multi-step reasoning, leading to context drift and hallucinated responses. Optimized signatures and chains often overfit to training examples without proper memory injection, causing assertion violations when real-world state diverges from training distributions. Vex integration around DSPy module forward() calls catches these failures at inference time before they cascade through agent execution.",
+    "howItManifests": [
+      {
+        "scenario": "ConversationMemory module forgets prior user context after optimization",
+        "symptom": "Agent repeats questions or references non-existent prior conversation",
+        "impact": "User experience degradation, infinite clarification loops"
+      },
+      {
+        "scenario": "RetrievalAugmentedGeneration chain loses tool call history",
+        "symptom": "Repeated API calls to same endpoints, ignoring cached results",
+        "impact": "Excessive latency and API costs, rate limit violations"
+      },
+      {
+        "scenario": "Multi-hop reasoning chain drops intermediate memory state",
+        "symptom": "Final answer contradicts earlier verified facts from memory",
+        "impact": "Assertion violations in downstream validation modules"
+      },
+      {
+        "scenario": "Agentic workflow with shared memory store has race conditions",
+        "symptom": "Different execution paths see inconsistent memory snapshots",
+        "impact": "Non-deterministic outputs violating reproducibility guarantees"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Context Drift Detector",
+        "description": "Wraps DSPy ChainOfThought forward() to verify memory references match expected context window",
+        "code": "import dspy\n\ndef detect_memory_drift(module):\n    original_forward = module.forward\n    \n    def monitored_forward(**kwargs):\n        # Capture memory state before forward pass\n        memory_keys_before = set(kwargs.get('memory', {}).keys())\n        \n        result = original_forward(**kwargs)\n        \n        # Verify memory references in output\n        output_text = result.get('res', '')\n        referenced_entities = extract_entities(output_text)\n        \n        missing_refs = memory_keys_before - set(referenced_entities)\n        if missing_refs:\n            raise AssertionError(f'Memory drift detected: {missing_refs}')\n        \n        return result\n    \n    module.forward = monitored_forward\n    return module\n\ndef extract_entities(text):\n    # Simple entity extraction - replace with spaCy/NER\n    return set(word for word in text.split() if len(word) > 3)",
+        "language": "python"
+      },
+      {
+        "name": "Session Memory Consistency Check",
+        "description": "Validates that agent maintains consistent memory state across multiple turns",
+        "code": "class MemoryConsistencyMonitor(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.session_memory = {}\n        \n    def forward(self, session_id, **kwargs):\n        # Store memory snapshot\n        current_memory = kwargs.get('memory', {})\n        prev_memory = self.session_memory.get(session_id, {})\n        \n        # Check for unexpected memory mutations\n        if prev_memory:\n            deleted_keys = set(prev_memory) - set(current_memory)\n            if deleted_keys:\n                print(f'⚠️  Memory loss in session {session_id}: {deleted_keys}')\n        \n        self.session_memory[session_id] = current_memory.copy()\n        return kwargs",
+        "language": "python"
+      },
+      {
+        "name": "Memory Injection Coverage Audit",
+        "description": "Measures what percentage of available memory context actually influences outputs",
+        "code": "import dspy\nfrom collections import Counter\n\ndef audit_memory_influence(module, memory_docs, n=10):\n    coverage_scores = []\n    \n    for doc in memory_docs[:n]:\n        # Run with full memory\n        full_result = module(memory=doc)\n        full_output = full_result['res']\n        \n        # Run without this specific memory item\n        partial_memory = [d for d in memory_docs if d != doc]\n        partial_result = module(memory=partial_memory)\n        partial_output = partial_result['res']\n        \n        # Measure output divergence\n        divergence = sum(a != b for a, b in zip(full_output, partial_output))\n        coverage_scores.append(divergence / max(len(full_output), 1))\n    \n    avg_coverage = sum(coverage_scores) / len(coverage_scores)\n    print(f'Memory influence coverage: {avg_coverage:.1%}')\n    return avg_coverage",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Persistent DSPy Memory Wrapper",
+        "description": "Wraps DSPy modules with automatic memory injection and validation",
+        "code": "import dspy\nimport json\nfrom typing import Dict, Any\n\nclass PersistentMemoryModule(dspy.Module):\n    def __init__(self, base_module, memory_store):\n        super().__init__()\n        self.base_module = base_module\n        self.memory_store = memory_store\n        \n    def forward(self, session_id: str, query: str, **kwargs):\n        # Always inject complete memory context\n        memory_context = self.memory_store.get(session_id, {})\n        \n        enriched_kwargs = {\n            **kwargs,\n            'memory': memory_context,\n            'session_id': session_id,\n            'query': query\n        }\n        \n        result = self.base_module(**enriched_kwargs)\n        \n        # Persist any memory updates\n        if 'memory_updates' in result:\n            self.memory_store[session_id] = {\n                **memory_context,\n                **result['memory_updates']\n            }\n        \n        return result\n\n# Usage\nmemory_store = {}\nchat_module = PersistentMemoryModule(dspy.ChainOfThought('query -> answer'), memory_store)",
+        "language": "python"
+      },
+      {
+        "name": "Memory-Augmented Signature",
+        "description": "DSPy signature that explicitly handles memory context",
+        "code": "class MemoryAwareQA(dspy.Signature):\n    \"\"\"Answer questions using conversation memory and retrieved context.\"\"\"\n    \n    memory_context: str = dspy.InputField()\n    current_query: str = dspy.InputField()\n    conversation_history: str = dspy.InputField()\n    \n    relevant_memory: str = dspy.OutputField()\n    grounded_answer: str = dspy.OutputField(desc='Answer using ONLY provided memory')\n\nclass MemoryRetrievalModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.retrieve = dspy.ChainOfThought(MemoryAwareQA)\n        self.generate = dspy.ChainOfThought('context, query -> answer')\n    \n    def forward(self, memory_docs, query, history=''):\n        # Format memory for signature\n        memory_str = '\\n'.join([f'- {doc.page_content}' for doc in memory_docs])\n        \n        result = self.retrieve(\n            memory_context=memory_str,\n            current_query=query,\n            conversation_history=history\n        )\n        \n        return self.generate(\n            context=result.relevant_memory,\n            query=query\n        )",
+        "language": "python"
+      },
+      {
+        "name": "Vex-Verified Memory Chain",
+        "description": "Integrates Vex verification around memory operations",
+        "code": "import vex\nfrom vex.integrations import dspy_vex\n\nimport dspy\n\nclass VexMemoryChain(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.memory_selector = dspy.ChainOfThought('memory_docs, query -> relevant_docs')\n        self.answerer = dspy.ChainOfThought('context, query -> answer')\n    \n    @vex.verify(\n        assertions={\n            'memory_used': lambda res: len(res['used_memory']) > 0,\n            'no_hallucination': lambda res: all(\n                fact in res['raw_memory'] for fact in extract_facts(res['answer'])\n            )\n        }\n    )\n    def forward(self, session_id, query, memory_docs):\n        # Select relevant memory with Vex protection\n        selection = self.memory_selector(\n            memory_docs=str(memory_docs),\n            query=query\n        )\n        \n        answer = self.answerer(\n            context=selection.relevant_docs,\n            query=query\n        )\n        \n        return {\n            'answer': answer.answer,\n            'used_memory': selection.relevant_docs,\n            'raw_memory': memory_docs,\n            'session_id': session_id\n        }",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex automates memory management detection by wrapping DSPy module forward() calls with runtime assertions that verify memory consistency, context utilization, and state persistence across agent executions. When optimization teleports signatures into failure modes where memory drift occurs, Vex captures these failures and provides remediation suggestions like explicit memory injection signatures or persistent context wrappers.\n\nThe platform maintains execution lineage, showing exactly which memory state led to assertion violations and suggesting optimal memory window sizes based on empirical failure patterns. DSPy optimizers can then be constrained to only accept programs passing Vex memory assertions, creating a self-healing optimization loop.\n\nIntegration requires only pip install dspy vex-sdk and wrapping your core modules with vex.verify(), after which Vex provides dashboard monitoring of memory health metrics across all deployments.",
+      "code": "import dspy\nimport vex\n\nfrom typing import Dict, Any\n\n# Complete Vex+DSPy memory agent\n@vex.integration('dspy-memory-agent')\nclass MemoryManagedAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.select_memory = dspy.ChainOfThought('available_memory, query -> selected_context')\n        self.reason = dspy.ChainOfThought('context, query, memory_summary -> answer')\n        self.memory_store: Dict[str, Dict] = {}\n    \n    @vex.verify(\n        timeout=30,\n        assertions={\n            'memory_persistence': 'memory_store[session_id] is not empty',\n            'context_utilization': lambda res: len(res['used_context']) / len(res['available_memory']) > 0.1,\n            'no_context_drift': lambda res: verify_memory_consistency(res)\n        },\n        remediation={'add_memory_wrapper': 'Wrap with PersistentMemoryModule'}\n    )\n    def forward(self, session_id: str, query: str, **kwargs) -> Dict[str, Any]:\n        # Load persistent memory\n        available_memory = self.memory_store.get(session_id, {})\n        \n        # Vex-protected memory selection\n        selection = self.select_memory(\n            available_memory=str(available_memory),\n            query=query\n        )\n        \n        result = self.reason(\n            context=selection.selected_context,\n            query=query,\n            memory_summary=f\"Session: {session_id}, Items: {len(available_memory)}\"\n        )\n        \n        # Persist updates\n        self.memory_store.setdefault(session_id, {}).update({\n            'last_query': query,\n            'last_answer': result.answer\n        })\n        \n        return {\n            'answer': result.answer,\n            'used_context': selection.selected_context,\n            'available_memory': list(available_memory.keys()),\n            'session_id': session_id\n        }\n\n# Usage\nagent = MemoryManagedAgent()\nresult = agent(session_id='user123', query='What was discussed previously?')\nprint(result['answer'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with pip install vex-sdk and wrap your DSPy modules to catch memory failures before they reach production."
+    }
+  }
+}

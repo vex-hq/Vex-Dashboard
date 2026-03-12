@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with AutoGen + Vex Guardrails",
+    "description": "Learn how to build voice agents with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen voice agents",
+      "AutoGen guardrails",
+      "voice agents reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with AutoGen enables real-time conversational AI through multi-agent orchestration, combining speech-to-text, LLM reasoning, and text-to-speech for natural human interactions. However, the high-stakes nature of voice interfaces demands robust guardrails to prevent infinite loops, unsafe outputs, and excessive latency that can break user trust. Vex integration ensures reliability by filtering agent replies against strict latency, safety, and coherence criteria before audio synthesis.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with AutoGen",
+      "description": "Voice agents with AutoGen follow a real-time pipeline: audio input is transcribed via speech-to-text (e.g., Whisper), fed into an AutoGen orchestrator managing specialized agents (listener, reasoner, responder), then synthesized back to speech (e.g., ElevenLabs). Agents collaborate in a conversational loop, but require sub-second end-to-end latency for natural flow. Vex intercepts agent replies as a filter function to enforce verification before TTS.\n\nThe AutoGen group chat manager coordinates agents, but voice constraints add latency budgets and safety checks. Common patterns use `register_reply` hooks to inject Vex verification, ensuring responses pass appropriateness, coherence, and safety before audio generation. Human-in-the-loop can override via voice commands.\n\nFailure modes like infinite debates or unsafe code execution are amplified in voice due to real-time expectations and lack of visual feedback.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   Microphone    │───▶│ Speech-to-Text   │───▶│ AutoGen      │\n│     Input       │    │    (Whisper)     │    │ Orchestrator │\n└─────────────────┘    └──────────────────┘    │ (Agents)     │\n                                               │   + Vex      │\n┌─────────────────┐    ┌──────────────────┐    │ Filter       │\n│   Speaker       │◀───│ Text-to-Speech   │◀───│              │\n│     Output      │    │   (ElevenLabs)   │    └──────────────┘\n└─────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents ping-pong without converging, causing latency violations and unnatural pauses in voice output",
+        "severity": "critical",
+        "mitigation": "Vex conversation state tracking with loop detection and termination"
+      },
+      {
+        "name": "Code execution producing unsafe outputs",
+        "description": "Voice agents executing unverified code from user speech can generate harmful audio content",
+        "severity": "critical",
+        "mitigation": "Vex sandboxed code execution verification before TTS synthesis"
+      },
+      {
+        "name": "Agents agreeing on incorrect conclusions",
+        "description": "Multi-agent consensus on factual errors leads to confidently wrong voice responses",
+        "severity": "high",
+        "mitigation": "Vex fact-checking and coherence scoring across agent replies"
+      },
+      {
+        "name": "Uncontrolled token spending in multi-turn debates",
+        "description": "Extended agent debates exceed latency budgets, causing speech synthesis delays >500ms",
+        "severity": "high",
+        "mitigation": "Vex token budget enforcement with early termination signals"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic AutoGen Voice Agent Setup",
+        "description": "Initialize AutoGen agents with real-time voice pipeline integration",
+        "code": "from autogen import AssistantAgent, GroupChat, GroupChatManager\n\nllm_config = {\"config_list\": [{\"model\": \"gpt-4o-mini\", \"api_key\": \"your-key\"}]}\nlistener = AssistantAgent(name=\"Listener\", llm_config=llm_config)\nreasoner = AssistantAgent(name=\"Reasoner\", llm_config=llm_config)\nresponder = AssistantAgent(name=\"Responder\", llm_config=llm_config)\n\ngroupchat = GroupChat(agents=[listener, reasoner, responder], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)",
+        "language": "python"
+      },
+      {
+        "title": "Speech-to-Text Integration",
+        "description": "Real-time transcription feeding into AutoGen conversation",
+        "code": "import whisper\nmodel = whisper.load_model(\"tiny.en\")\n\ndef transcribe_audio(audio_bytes):\n    result = model.transcribe(audio_bytes, fp16=False)\n    return result[\"text\"]\n\n# Feed to AutoGen\ntranscript = transcribe_audio(audio_input)\nlistener.initiate_chat(responder, message=transcript)",
+        "language": "python"
+      },
+      {
+        "title": "Latency-Monitored Reply Handler",
+        "description": "Wrap AutoGen replies with timing enforcement for voice latency",
+        "code": "import time\ndef voice_reply_handler(recipient, messages, sender, config):\n    start_time = time.time()\n    reply = recipient.generate_reply(messages, sender, config)\n    latency = time.time() - start_time\n    if latency > 0.4:  # 400ms budget\n        reply = \"[LATENCY_VIOLATION] Please repeat.\"\n    return reply",
+        "language": "python"
+      },
+      {
+        "title": "Text-to-Speech Output",
+        "description": "Convert verified AutoGen response to real-time speech",
+        "code": "from elevenlabs import generate, play\n\ndef synthesize_response(text):\n    audio = generate(text=text, voice=\"Adam\", model=\"eleven_multilingual_v2\")\n    play(audio)\n\n# After Vex verification\nsynthesize_response(verified_agent_reply)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as Reply Filter",
+        "description": "Hook Vex verification into AutoGen's reply mechanism for all agents",
+        "code": "from vex_sdk import VexClient\nfrom autogen import register_function\n\nvex = VexClient(api_key=\"your-vex-key\")\n\ndef vex_verify_reply(sender, recipient, messages):\n    result = vex.verify({\n        \"prompt\": messages[-1][\"content\"],\n        \"response\": recipient.last_message()[\"content\"],\n        \"checks\": [\"appropriateness\", \"latency_budget\", \"coherence\", \"safety\"]\n    })\n    return result[\"verified_response\"] if result[\"pass\"] else \"[BLOCKED]\"\n\n# Register as filter\nregister_function(\n    vex_verify_reply,\n    caller=reasoner,\n    executor=responder,\n    name=\"vex_guardrail\",\n    description=\"Verify response safety and latency\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Loop Detection",
+        "description": "Prevent infinite agent debates with Vex state tracking",
+        "code": "def vex_loop_detector(messages, max_turns=5):\n    conv_state = vex.track_conversation(messages)\n    if conv_state[\"loop_detected\"] or len(messages) > max_turns:\n        return \"[LOOP_DETECTED] Conversation terminated for coherence.\"\n    return None\n\n# In reply handler\nloop_check = vex_loop_detector(groupchat.messages)\nif loop_check:\n    manager.send(reply=loop_check, sender=listener)",
+        "language": "python"
+      },
+      {
+        "title": "Latency Budget Enforcement",
+        "description": "Real-time latency verification before TTS synthesis",
+        "code": "def vex_latency_guard(response, pipeline_latency):\n    verdict = vex.verify({\n        \"type\": \"latency_check\",\n        \"measured_latency\": pipeline_latency,\n        \"budget\": 500,  # ms\n        \"response\": response\n    })\n    if not verdict[\"pass\"]:\n        return \"[LATENCY_EXCEEDED] Processing...\"\n    return response\n\n# Before TTS\nfinal_reply = vex_latency_guard(agent_reply, total_latency_ms)\nsynthesize_response(final_reply)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Voice Agents",
+      "description": "Install Vex today with `pip install autogen vex-sdk` and register as reply filter to achieve production-grade voice agent reliability."
+    }
+  }
+}

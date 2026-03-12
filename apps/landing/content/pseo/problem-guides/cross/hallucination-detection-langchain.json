@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in LangChain Agents",
+    "description": "How to detect and fix ai agent hallucination detection in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "LangChain hallucination-detection",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Hallucination in LangChain manifests as agents generating fabricated facts, incorrect tool calls, or inconsistent reasoning due to LLM uncertainties amplified by chain compositions and agent loops. This is particularly evident in RAG chains where retrieval misses lead to invented context, or in agent executors where infinite tool loops produce nonsensical outputs. Vex provides robust detection by wrapping LangChain's invoke patterns to catch these failures early.",
+    "howItManifests": [
+      {
+        "scenario": "Hallucination in RAG retrieval chains",
+        "symptom": "Agent cites non-retrieved documents or fabricates quotes from empty context",
+        "impact": "Downstream decisions based on false premises, eroding trust in RAG-powered Q&A"
+      },
+      {
+        "scenario": "Tool call loops in agent executors",
+        "symptom": "Agent repeatedly calls same tool with hallucinated parameters, exceeding max iterations",
+        "impact": "Infinite loops consuming tokens and failing to reach final answer"
+      },
+      {
+        "scenario": "Context window overflow in long conversations",
+        "symptom": "Agent references conversation history details that were never actually said",
+        "impact": "Loss of factual grounding in memory-intensive agent interactions"
+      },
+      {
+        "scenario": "Inconsistent output formatting across chain steps",
+        "symptom": "Agent produces malformed JSON tool calls or varying Pydantic schema violations",
+        "impact": "Parsing failures and broken agent-tool integration"
+      }
+    ],
+    "detection": [
+      {
+        "name": "RAG Context Fidelity Check",
+        "description": "Detects hallucinations by verifying all cited sources exist in retrieved context using LangChain's retriever output",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.schema import BaseRetriever\n\ndef detect_rag_hallucination(chain_output, retriever: BaseRetriever):\n    response = chain_output['result']\n    # Extract cited doc ids from response\n    cited_docs = extract_cited_docs(response)  # Custom regex parser\n    \n    query = chain_output['query']\n    retrieved_docs = retriever.get_relevant_documents(query)\n    doc_contents = {doc.metadata.get('id', i): doc.page_content for i, doc in enumerate(retrieved_docs)}\n    \n    for cited_id in cited_docs:\n        if cited_id not in doc_contents:\n            return {'hallucination': True, 'missing_doc': cited_id}\n    return {'hallucination': False}",
+        "language": "python"
+      },
+      {
+        "name": "Agent Tool Call Loop Detector",
+        "description": "Monitors agent executor intermediate steps for repeated tool calls with similar inputs",
+        "code": "from langchain.agents import AgentExecutor\nfrom collections import defaultdict\n\ndef detect_tool_loops(executor_output):\n    steps = executor_output.get('intermediate_steps', [])\n    tool_calls = defaultdict(list)\n    \n    for action, _ in steps:\n        tool_name = action.tool\n        tool_args = str(action.tool_input)\n        tool_calls[tool_name].append(tool_args)\n        \n        # Detect 3+ identical calls\n        if len(tool_calls[tool_name]) >= 3 and len(set(tool_calls[tool_name][-3:])) == 1:\n            return {'loop_detected': True, 'tool': tool_name, 'count': len(tool_calls[tool_name])}\n    \n    return {'loop_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "JSON Schema Compliance Check",
+        "description": "Validates agent tool call outputs against Pydantic schemas used in LangChain tools",
+        "code": "from langchain.tools import BaseTool\nimport json\n\ndef validate_tool_schema(tool_call: dict, tool: BaseTool):\n    try:\n        parsed_args = json.loads(tool_call['args'])\n        tool._run(parsed_args)  # Schema validation happens here\n        return {'valid': True}\n    except Exception as e:\n        return {'valid': False, 'error': str(e), 'hallucination': 'malformed_args'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Grounded RAG with Source Verification",
+        "description": "Forces agent to only cite verified retrieved documents using custom output parser",
+        "code": "from langchain.output_parsers import BaseOutputParser\nfrom langchain.schema import BaseMessage\n\nclass GroundedCitationParser(BaseOutputParser):\n    def parse(self, text: str) -> dict:\n        # Extract answer and citations\n        answer = extract_answer(text)\n        citations = extract_citations(text)\n        \n        verified_citations = []\n        for citation in citations:\n            if verify_citation_exists(citation, self.retriever):\n                verified_citations.append(citation)\n            else:\n                answer = answer.replace(f'[{citation}]', '[Source not found]')\n        \n        return {'answer': answer, 'citations': verified_citations}\n\n# Usage\nqa_chain = RetrievalQA.from_chain_type(\n    llm=llm,\n    retriever=retriever,\n    chain_type_kwargs={'output_parser': GroundedCitationParser(retriever)})",
+        "language": "python"
+      },
+      {
+        "name": "Loop-Breaking Tool Call Validator",
+        "description": "Prevents tool loops by caching recent calls and forcing final answer on repetition",
+        "code": "from langchain.agents import AgentExecutor\nfrom functools import lru_cache\n\nclass LoopProofAgentExecutor(AgentExecutor):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.recent_calls = []\n        \n    def _should_continue(self, observation, *args, **kwargs):\n        action = super()._should_continue(observation, *args, **kwargs)\n        \n        # Check for loop\n        call_signature = f\"{action.tool}_{str(action.tool_input)}\"\n        if call_signature in self.recent_calls[-3:]:\n            return AgentFinish({'output': 'Loop detected. Final answer based on available info.'}, log='Loop terminated')\n        \n        self.recent_calls.append(call_signature)\n        if len(self.recent_calls) > 10:\n            self.recent_calls.pop(0)\n        \n        return action",
+        "language": "python"
+      },
+      {
+        "name": "Structured Output Enforcement",
+        "description": "Uses LangChain's with_structured_output() to guarantee Pydantic-compliant tool calls",
+        "code": "from langchain_core.prompts import ChatPromptTemplate\nfrom langchain_core.output_parsers import PydanticOutputParser\nfrom pydantic import BaseModel, Field\n\nclass ToolCall(BaseModel):\n    name: str = Field(description=\"Tool name\")\n    args: dict = Field(description=\"Tool arguments\")\n\n# Bind structured output to LLM\nmodel_with_structured_output = chat_model.with_structured_output(ToolCall)\n\nprompt = ChatPromptTemplate.from_messages([\n    (\"system\", \"Respond with valid tool calls using exact JSON schema\"),\n    (\"human\", \"{input}\")\n])\n\nagent_chain = prompt | model_with_structured_output\n\n# Now all outputs are guaranteed Pydantic compliant\nresult = agent_chain.invoke({\"input\": \"call weather tool for NYC\"})",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex automates hallucination detection by wrapping LangChain's chain.invoke() and agent_executor.invoke() calls with vex.verify(), providing real-time monitoring of the four key failure modes. It automatically detects RAG context mismatches, tool call loops, context overflow, and schema violations without requiring custom instrumentation. Vex's agent-specific detectors analyze intermediate steps and tool interactions natively, surfacing hallucination root causes with precise stack traces.\n\nRemediation is automatic: Vex can retry with grounded prompts, truncate context windows intelligently, or force structured outputs. The platform maintains a hallucination dashboard showing failure rates by chain type, helping teams prioritize fixes. Integration takes minutes via the vex-sdk pip package.",
+      "code": "import vex\nfrom langchain.agents import create_react_agent, AgentExecutor\nfrom langchain.tools import Tool\n\n# Install: pip install langchain vex-sdk\n\n# Wrap any LangChain invoke call\n@vex.verify(\n    monitors=[\n        'langchain.rag_hallucination',\n        'langchain.agent_loops',\n        'langchain.context_overflow',\n        'langchain.schema_violations'\n    ]\n)\ndef run_langchain_agent(query: str):\n    agent = create_react_agent(llm, tools, prompt)\n    executor = AgentExecutor(agent=agent, tools=tools, max_iterations=5)\n    \n    result = executor.invoke({\"input\": query})\n    return result\n\n# Vex auto-detects all 4 failure modes\nresponse = run_langchain_agent(\"What's the weather in NYC?\")\n\n# View detections\nprint(vex.get_latest_test().failures)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate LangChain hallucinations with one decorator: pip install vex-sdk"
+    }
+  }
+}

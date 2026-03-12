@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in AG2 Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "AG2 tool-loop-detection",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, Tool Loop Detection addresses a critical failure mode where AI agents enter infinite cycles of redundant tool calls during multi-agent conversations, particularly in group chats with enhanced speaker selection. This manifests as agents repeatedly invoking the same tools like code interpreters or search APIs without progressing toward task completion, exacerbated by AG2's dynamic turn-taking and tool-augmented agent patterns. The problem is amplified in complex workflows where multiple agents share tool access, leading to cascading loop behaviors across the conversation graph.",
+    "howItManifests": [
+      {
+        "scenario": "Code review group chat with shared code_execution tool",
+        "symptom": "Developer agent calls code_execution → Tester agent calls same tool on identical code → Developer re-executes same validation",
+        "impact": "Conversation stalls after 50+ redundant tool calls, exhausting API quotas"
+      },
+      {
+        "scenario": "Research team with web_search tool integration",
+        "symptom": "Researcher queries 'latest AI benchmarks' → Analyst searches identical query → Researcher repeats search with minor rephrasing",
+        "impact": "Search API costs skyrocket; no synthesis occurs after 30+ identical queries"
+      },
+      {
+        "scenario": "Multi-agent debugging session with file_analysis tool",
+        "symptom": "Debugger analyzes same log file 15x across 3 agents; each iteration produces identical error summaries",
+        "impact": "Group chat timeout after 2 hours of zero progress; speaker selection becomes erratic"
+      },
+      {
+        "scenario": "Planning agents with math_solver tool",
+        "symptom": "Planner calculates route distance → Validator recalculates identical coordinates → Planner re-verifies same math",
+        "impact": "Task completion delayed by 40 minutes; agents reach tool call limit and fail"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Frequency Tracker",
+        "description": "Monitors identical tool calls within sliding window across all agents in group chat",
+        "code": "from collections import defaultdict, deque\nimport ag2\n\ndef tool_loop_detector(conversation):\n    tool_history = defaultdict(lambda: deque(maxlen=10))\n    \n    for msg in conversation.messages:\n        if msg.get('tool_calls'):\n            for tool_call in msg['tool_calls']:\n                tool_id = f\"{tool_call['name']}:{tool_call['args']}\"\n                tool_history[tool_id].append(msg)\n                \n                if len(tool_history[tool_id]) >= 5:\n                    recent_calls = list(tool_history[tool_id])\n                    time_window = recent_calls[-1].timestamp - recent_calls[0].timestamp\n                    if time_window < 300:  # 5min window\n                        return {\n                            'loop_detected': True,\n                            'tool': tool_call['name'],\n                            'count': len(tool_history[tool_id]),\n                            'agents_involved': len(set(m.agent_id for m in recent_calls))\n                        }\n    return {'loop_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Agent-Tool Call Pattern Analyzer",
+        "description": "Detects when multiple agents call same tool with semantically identical parameters",
+        "code": "import hashlib\nfrom ag2 import GroupChat\n\ndef semantic_tool_loop_detector(group_chat: GroupChat):\n    tool_patterns = {}\n    \n    for turn in group_chat.chat_history[-20:]:  # last 20 turns\n        speaker = turn.speaker\n        if hasattr(turn, 'tool_calls') and turn.tool_calls:\n            for tool_call in turn.tool_calls:\n                # Hash tool name + args for semantic comparison\n                arg_str = str(sorted(tool_call.args.items()))\n                pattern_hash = hashlib.md5(f\"{tool_call.name}:{arg_str}\".encode()).hexdigest()\n                \n                if pattern_hash not in tool_patterns:\n                    tool_patterns[pattern_hash] = {'count': 0, 'agents': set()}\n                \n                tool_patterns[pattern_hash]['count'] += 1\n                tool_patterns[pattern_hash]['agents'].add(speaker.agent_id)\n                \n                if tool_patterns[pattern_hash]['count'] >= 4 and len(tool_patterns[pattern_hash]['agents']) >= 2:\n                    return {\n                        'loop_detected': True,\n                        'pattern_hash': pattern_hash,\n                        'tool_name': tool_call.name,\n                        'agent_diversity': len(tool_patterns[pattern_hash]['agents'])\n                    }\n    return {'loop_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "State Convergence Monitor",
+        "description": "Tracks when tool outputs converge to identical results across multiple calls",
+        "code": "from difflib import SequenceMatcher\nimport ag2.types as ag_types\n\ndef output_convergence_detector(messages: list[ag_types.Message]):\n    tool_outputs = []\n    \n    for msg in messages[-15:]:\n        if hasattr(msg, 'tool_results') and msg.tool_results:\n            for result in msg.tool_results:\n                tool_outputs.append({\n                    'content': result.content,\n                    'agent': msg.agent_id,\n                    'timestamp': msg.timestamp\n                })\n    \n    if len(tool_outputs) < 3:\n        return {'loop_detected': False}\n    \n    # Check last 3 outputs for >95% similarity\n    recent = tool_outputs[-3:]\n    similarity = SequenceMatcher(None, recent[0]['content'], recent[-1]['content']).ratio()\n    \n    if similarity > 0.95:\n        return {\n            'loop_detected': True,\n            'similarity_score': similarity,\n            'identical_outputs': len(recent),\n            'agents': len(set(r['agent'] for r in recent))\n        }\n    \n    return {'loop_detected': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Cooldown Wrapper",
+        "description": "Implements per-tool cooldown periods and shared state across agents",
+        "code": "from ag2 import register_message_hook\nimport time\nfrom typing import Dict, Any\n\nclass ToolCooldownManager:\n    def __init__(self):\n        self.cooldowns: Dict[str, float] = {}\n        self.last_call: Dict[str, float] = {}\n    \n    def check_cooldown(self, tool_signature: str, cooldown_secs: int = 60) -> bool:\n        now = time.time()\n        if tool_signature in self.last_call:\n            if now - self.last_call[tool_signature] < cooldown_secs:\n                return False\n        self.last_call[tool_signature] = now\n        return True\n\ncooldown_mgr = ToolCooldownManager()\n\ndef cooldown_hook(message):\n    if message.get('tool_calls'):\n        for tool_call in message['tool_calls']:\n            signature = f\"{tool_call['name']}:{str(sorted(tool_call['args'].items()))}\"\n            if not cooldown_mgr.check_cooldown(signature):\n                message['tool_calls'] = []  # Block redundant call\n                message['content'] += \"\\n[Tool on cooldown - using cached result]\"\n    return message\n\nregister_message_hook(cooldown_hook)",
+        "language": "python"
+      },
+      {
+        "name": "Shared Tool Cache Middleware",
+        "description": "Caches tool results across all agents in group chat with TTL",
+        "code": "from ag2 import GroupChatManager\nimport json\nfrom datetime import datetime, timedelta\n\nclass SharedToolCache:\n    def __init__(self):\n        self.cache = {}  # tool_signature -> {'result': data, 'expires': timestamp}\n    \n    def get(self, tool_signature: str) -> dict | None:\n        if tool_signature in self.cache:\n            if datetime.now() < self.cache[tool_signature]['expires']:\n                return self.cache[tool_signature]['result']\n            del self.cache[tool_signature]\n        return None\n    \n    def set(self, tool_signature: str, result: dict, ttl_minutes: int = 10):\n        expires = datetime.now() + timedelta(minutes=ttl_minutes)\n        self.cache[tool_signature] = {'result': result, 'expires': expires}\n\nshared_cache = SharedToolCache()\n\ndef cache_tool_calls(agent):\n    original_execute = agent.execute_tool\n    \n    def cached_execute(tool_name, tool_args):\n        signature = f\"{tool_name}:{json.dumps(tool_args, sort_keys=True)}\"\n        cached = shared_cache.get(signature)\n        if cached:\n            return cached\n        result = original_execute(tool_name, tool_args)\n        shared_cache.set(signature, result)\n        return result\n    \n    agent.execute_tool = cached_execute\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Loop Breaking Speaker Override",
+        "description": "Forces speaker rotation when tool loop detected in group chat",
+        "code": "from ag2 import GroupChat, register_groupchat_hook\n\nclass LoopBreaker:\n    def __init__(self):\n        self.tool_call_counts = defaultdict(int)\n        self.last_tool_users = set()\n    \n    def detect_loop(self, chat_history):\n        recent_tools = [m for m in chat_history[-10:] if m.get('tool_calls')]\n        if len(recent_tools) >= 5 and len({m.agent_id for m in recent_tools}) <= 2:\n            return True\n        return False\n    \n    def break_loop(self, group_chat: GroupChat):\n        # Force select agent who hasn't used tools recently\n        non_tool_agents = set(group_chat.agents) - self.last_tool_users\n        if non_tool_agents:\n            next_speaker = non_tool_agents.pop()\n            group_chat.override_speaker(next_speaker)\n            return True\n        return False\n\ndef loop_breaker_hook(group_chat: GroupChat, proposed_speaker):\n    breaker = LoopBreaker()\n    if breaker.detect_loop(group_chat.chat_history):\n        if breaker.break_loop(group_chat):\n            return {'interrupted': True, 'reason': 'tool_loop_detected'}\n    return {'interrupted': False}\n\nregister_groupchat_hook(loop_breaker_hook)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a message hook in AG2 group chats, automatically detecting tool loop patterns across multi-agent conversations using its real-time monitoring capabilities. The platform maintains conversation state graphs that track tool call signatures, agent participation patterns, and output convergence metrics, surfacing loops before they exhaust API budgets or timeout sessions. \n\nVex's remediation engine applies context-aware fixes including dynamic cooldowns, shared caching layers, and intelligent speaker rotation, all without requiring code changes to existing AG2 workflows. The platform provides real-time dashboards showing loop frequency, cost impact, and resolution effectiveness across all active group chats.\n\nIntegration takes <5 minutes via pip install and hook registration, with automatic baseline establishment from your first conversations. Vex learns your specific tool patterns and team workflows, continuously improving detection accuracy while respecting conversation context and task requirements.",
+      "code": "from vex_sdk import VexMonitor\nfrom ag2 import ConversableAgent, GroupChat\n\n# Install: pip install ag2 vex-sdk\n\n# 1. Initialize Vex monitor\nvex = VexMonitor(\n    project_id=\"your-project\",\n    patterns=[\"tool_loop_detection\"]\n)\n\n# 2. Register as message hook on all agents\ndef vex_hook(message):\n    return vex.process_message(message)\n\n# Apply to agents\nalice = ConversableAgent(name=\"Alice\")\nbob = ConversableAgent(name=\"Bob\")\n\nalice.register_message_hook(vex_hook)\nbob.register_message_hook(vex_hook)\n\n# 3. Auto-instrument group chat\ngroupchat = GroupChat(agents=[alice, bob], \n                     message_history_hooks=[vex_hook])\n\n# Vex auto-detects loops and applies fixes:\n# ✅ Cooldowns on redundant tool calls\n# ✅ Shared result caching\n# ✅ Speaker rotation\n# ✅ Real-time alerts & dashboards\n\n# Start conversation - Vex handles everything\ngroupchat.initiate_chat(\n    alice,\n    message=\"Let's analyze this codebase for security issues\"\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops across all your AG2 conversations in under 5 minutes"
+    }
+  }
+}

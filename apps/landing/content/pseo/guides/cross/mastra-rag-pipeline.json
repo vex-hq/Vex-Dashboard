@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Mastra + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra rag pipeline",
+      "Mastra guardrails",
+      "rag pipeline reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG Pipeline with Mastra enables scalable document retrieval, vector search, and LLM synthesis for accurate knowledge-grounded responses. However, common pitfalls like unvalidated workflow outputs, malformed tool responses, and stale memory retrieval can lead to hallucinations and unreliable answers. Vex provides essential guardrails as middleware to verify source faithfulness, context relevance, and citation accuracy in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Mastra",
+      "description": "The Mastra RAG pipeline starts with a user query triggering a workflow that performs vector search over a knowledge base to retrieve relevant document chunks. These chunks are assembled into context, augmented with metadata for attribution, and passed to an LLM for synthesis. Mastra's agentic workflows handle transitions between retrieval, ranking, and generation steps, with memory stores persisting conversation history.\n\nVex integrates as middleware at key transition points: post-retrieval validation, pre-LLM context checks, and post-generation verification. This ensures retrieved sources are relevant, context is fresh, and final outputs include accurate citations without hallucinations.\n\nThe architecture leverages Mastra's `WorkflowNode` and `Agent` primitives, with Vex `Guardrail` wrappers around tool calls and LLM prompts for continuous monitoring.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vector Retrieval │───▶│ Context Assembly │\n└─────────────────┘    │ (Mastra Tool)    │    │ + Vex Validation │\n                       └──────────────────┘    └──────────────────┘\n                                                   │\n                                        ┌──────────▼──────────┐\n                                        │   LLM Synthesis     │\n                                        │ + Vex Hallucination│\n                                        │   + Citation Check  │\n                                        └──────────┬──────────┘\n                                                   │\n                                              ┌────▼────┐\n                                              │Response │\n                                              │w/Sources│\n                                              └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra workflows pass unverified retrieval results directly to LLM, risking irrelevant context propagation",
+        "severity": "critical",
+        "mitigation": "Vex middleware validates retrieval scores and chunk relevance before context assembly"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Vector search tools return inconsistent embeddings or broken metadata, breaking citation chains",
+        "severity": "high",
+        "mitigation": "Vex schemas enforce structured tool outputs with source metadata validation"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Mastra memory stores outdated document versions, causing factual drift in multi-turn conversations",
+        "severity": "high",
+        "mitigation": "Vex freshness checks against knowledge base timestamps before context injection"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Third-party doc syncs introduce format changes that confuse retrieval and attribution logic",
+        "severity": "medium",
+        "mitigation": "Vex monitors integration health and flags schema drift in real-time"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra RAG Workflow Setup",
+        "description": "Define the core retrieval-to-generation workflow with vector search tool",
+        "code": "import { Workflow, WorkflowNode, Agent } from 'mastra';\n\nconst ragWorkflow = new Workflow({\n  nodes: {\n    retrieve: new WorkflowNode({\n      execute: async (input: { query: string }) => {\n        // Vector search implementation\n        const results = await vectorStore.similaritySearch(input.query, 5);\n        return { chunks: results.map(r => ({ text: r.pageContent, metadata: r.metadata })) };\n      }\n    }),\n    generate: new Agent({\n      model: 'gpt-4o',\n      tools: [],\n      systemPrompt: 'Synthesize answer using provided context. Cite sources.'\n    })\n  },\n  edges: [{ from: 'retrieve', to: 'generate' }]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Search Tool Integration",
+        "description": "Mastra tool for document retrieval with metadata preservation",
+        "code": "import { Tool } from 'mastra';\n\nexport const vectorSearchTool = new Tool({\n  name: 'vector_search',\n  description: 'Search knowledge base for relevant documents',\n  schema: z.object({\n    query: z.string().describe('Search query'),\n    topK: z.number().default(5)\n  }),\n  execute: async ({ query, topK }) => {\n    const results = await pineconeIndex.query({\n      vector: await embeddingModel.embed(query),\n      topK,\n      includeMetadata: true\n    });\n    return {\n      sources: results.matches.map((m, i) => ({\n        content: m.metadata.text as string,\n        score: m.score,\n        source: m.metadata.source,\n        chunk_id: i\n      }))\n    };\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Assembly with Citations",
+        "description": "Format retrieved chunks for LLM with source attribution markers",
+        "code": "function assembleContext(sources: any[]) {\n  const context = sources\n    .map((source, i) => `Source [${i}]: ${source.content}\\nCitation: ${source.source} (score: ${source.score.toFixed(3)})`)\n    .join('\\n\\n');\n  \n  return {\n    context,\n    sources,\n    instruction: `Answer using only the provided context. Use [${i}] to cite sources inline.`\n  };\n}\n\nconst enrichedInput = assembleContext(retrievalResult.sources);",
+        "language": "typescript"
+      },
+      {
+        "title": "LLM Synthesis with Source Attribution",
+        "description": "Final generation step with citation extraction",
+        "code": "const response = await llm.generate({\n  prompt: `${enrichedInput.instruction}\\n\\nContext:\\n${enrichedInput.context}\\n\\nQuestion: ${userQuery}`,\n  temperature: 0.1\n});\n\nconst citations = extractCitations(response.text); // [1], [2] etc.\nconst finalAnswer = {\n  answer: response.text,\n  sources: enrichedInput.sources.filter((_, i) => citations.includes(i)),\n  confidence: calculateConfidence(response.text, enrichedInput.context)\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Retrieval Validation Middleware",
+        "description": "Validate vector search outputs for relevance and format before context assembly",
+        "code": "import { Vex, Guardrail } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nconst retrievalGuardrail = new Guardrail({\n  name: 'rag_retrieval_validation',\n  checks: [\n    'source_faithfulness',\n    { context_relevance: { threshold: 0.7 } },\n    'structured_output_schema'\n  ]\n});\n\nconst validatedRetrieval = await vex.runGuardrail(\n  retrievalGuardrail,\n  {\n    query: userQuery,\n    retrieved_chunks: rawResults,\n    scores: rawResults.map(r => r.score)\n  }\n);\n\nif (!validatedRetrieval.passes) {\n  throw new Error(`Retrieval failed validation: ${validatedRetrieval.issues}`);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Context Freshness Check",
+        "description": "Ensure memory and retrieved context isn't stale before LLM injection",
+        "code": "const freshnessGuardrail = new Guardrail({\n  name: 'context_freshness',\n  checks: [\n    'temporal_freshness',\n    { staleness_check: { max_age_hours: 24 } },\n    'memory_consistency'\n  ]\n});\n\nconst contextCheck = await vex.runGuardrail(freshnessGuardrail, {\n  retrieved_context: assembledContext,\n  memory_context: conversationHistory,\n  current_timestamp: Date.now(),\n  knowledge_base_version: kbVersion\n});\n\nif (contextCheck.issues.stale_sources?.length > 0) {\n  // Re-retrieve affected sources\n  console.warn('Stale context detected:', contextCheck.issues.stale_sources);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Generation + Citation Verification",
+        "description": "Final output guardrail for hallucination detection and citation accuracy",
+        "code": "const generationGuardrail = new Guardrail({\n  name: 'rag_final_verification',\n  checks: [\n    'hallucination_detection',\n    'citation_accuracy',\n    { source_faithfulness: { strict: true } },\n    'grounding_score'\n  ]\n});\n\nconst finalVerification = await vex.runGuardrail(generationGuardrail, {\n  generated_answer: llmResponse.text,\n  source_context: assembledContext.context,\n  extracted_citations: citations,\n  source_mapping: enrichedInput.sources\n});\n\nif (finalVerification.score < 0.85) {\n  return { error: 'Response failed quality checks', issues: finalVerification.issues };\n}\n\nreturn {\n  ...finalAnswer,\n  vex_score: finalVerification.score,\n  verified: true\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra RAG Pipeline",
+      "description": "Add Vex middleware today to achieve production-grade reliability for your Mastra RAG workflows."
+    }
+  }
+}

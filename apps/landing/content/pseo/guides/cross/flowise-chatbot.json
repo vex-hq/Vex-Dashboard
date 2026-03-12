@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Flowise + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise ai chatbot",
+      "Flowise guardrails",
+      "ai chatbot reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise is a low-code platform for building customized AI chatbots with drag-and-drop RAG pipelines, agent orchestration, and multi-turn conversations. Integrating Vex guardrails ensures reliability by validating intermediate outputs, detecting hallucinations, and maintaining conversation coherence. This guide shows how to secure your Flowise AI chatbot against common failure modes in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Flowise",
+      "description": "A typical Flowise AI Chatbot follows a retrieval-augmented generation (RAG) pattern with intent classification and memory management. User input flows through an Intent Classifier Node to route to appropriate chains: conversational (with memory), RAG retrieval, or tool-calling agents. The Vector Store Embeddings node retrieves relevant documents, which are passed to an LLM Chain for grounded response generation, with Conversation Memory nodes maintaining multi-turn context across agent handoffs.\n\nKey components include Custom Tool Nodes for external API calls, Multi-Agent Supervisor patterns for complex routing, and Safety Filter nodes for content moderation. Failures often occur in unvalidated intermediate retrievals, silent tool failures, or context loss during agent transitions, making runtime verification essential for production reliability.\n\nVex integrates as a callback handler to monitor every node execution, validate outputs against business rules, and provide observability into chain-of-thought reasoning.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│ Intent Classifier │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │ Conversational Chain      │◄──┌──────────────┐\n                │ + Memory Buffer           │   │ Conversation  │\n                └─────────────┬─────────────┘   │ Memory        │\n                             │                 └──────────────┘\n                ┌─────────────▼─────────────┐\n                │   Vector Store Retrieval  │\n                │     (Embeddings)          │\n                └─────────────┬─────────────┘\n                             │\n                       ┌─────▼─────┐    ┌──────────────┐\n                       │ LLM Chain │───▶│ Vex Guardrails│\n                       │ + Tools   │    │ (Validation)  │\n                       └───────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated RAG Retrievals",
+        "description": "Vector store returns low-relevance documents that degrade response quality",
+        "severity": "critical",
+        "mitigation": "Semantic similarity scoring + relevance thresholds via Vex"
+      },
+      {
+        "name": "Context Loss in Multi-Turn",
+        "description": "Memory buffer fails to maintain conversation state between agent handoffs",
+        "severity": "high",
+        "mitigation": "Session state validation and memory reconstruction checks"
+      },
+      {
+        "name": "Silent Tool Failures",
+        "description": "Custom tool nodes fail without error propagation, breaking downstream logic",
+        "severity": "high",
+        "mitigation": "Tool output schema validation and error recovery patterns"
+      },
+      {
+        "name": "Hallucination in Final Response",
+        "description": "LLM generates unsupported claims despite RAG context",
+        "severity": "critical",
+        "mitigation": "Groundedness scoring and citation verification"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Vex Client in Flowise",
+        "description": "Set up Vex SDK with your API key and configure session tracking for chat history",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-chatbot',\n});\n\nconst sessionId = `chat-${userId}-${Date.now()}`;\nconst trace = await vex.trace.start({\n  name: 'flowise-chatbot-session',\n  sessionId,\n  metadata: { userId, intent: 'conversation' },\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Instrument Chatflow Nodes",
+        "description": "Wrap Flowise node outputs with Vex spans for intermediate validation",
+        "code": "async function instrumentNode<T>(nodeName: string, input: any, fn: () => Promise<T>): Promise<T> {\n  const span = await trace.span.start({ name: `flowise-${nodeName}` });\n  \n  try {\n    const output = await fn();\n    \n    // Validate intermediate output\n    await vex.verify({\n      traceId: trace.id,\n      spanId: span.id,\n      data: output,\n      checks: [\n        'json_schema',\n        { hallucination: { threshold: 0.2 } },\n        'pii_detection'\n      ]\n    });\n    \n    return output;\n  } finally {\n    await span.end();\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG Relevance Validation",
+        "description": "Verify retrieved documents meet semantic similarity threshold before LLM",
+        "code": "async function validateRetrieval(docs: Document[], query: string): Promise<boolean> {\n  const results = await vex.verify({\n    data: { query, docs: docs.map(d => d.pageContent) },\n    checks: [\n      {\n        type: 'rag_relevance',\n        threshold: 0.75,\n        metadata: { min_docs: 3 }\n      }\n    ]\n  });\n  \n  return results.passed && results.metrics.relevance.score > 0.75;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Final Response Guardrails",
+        "description": "Comprehensive safety checks before returning response to user",
+        "code": "async function guardResponse(response: string, context: Context): Promise<VerifiedResponse> {\n  const verification = await vex.verify({\n    data: { response, context },\n    checks: [\n      'safety_filter',\n      'pii_protection',\n      { hallucination: { threshold: 0.1 } },\n      'response_accuracy',\n      { coherence: { sessionId: trace.sessionId } }\n    ]\n  });\n  \n  return {\n    response: verification.passed ? response : 'I need to verify that information...',\n    safe: verification.passed,\n    issues: verification.failures\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Flowise Callback Handler Setup",
+        "description": "Configure Vex as global callback in Flowise chatflow configuration",
+        "code": "// flowise.config.ts\n\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\n// Add to Flowise chatflow callbacks\nexport const vexCallback = {\n  handleLLMStart: async (params: any) => {\n    const trace = await vex.trace.start({ name: 'llm-call' });\n    return { traceId: trace.id };\n  },\n  \n  handleLLMEnd: async (output: any, traceId: string) => {\n    await vex.verify({\n      traceId,\n      data: output.generations[0][0].text,\n      checks: ['hallucination', 'safety_filter']\n    });\n  },\n  \n  handleRetrieval: async (docs: any[]) => {\n    return vex.verify({\n      data: docs,\n      checks: [{ type: 'rag_relevance', threshold: 0.75 }]\n    });\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Tool Node Instrumentation",
+        "description": "Wrap Flowise custom tools with error propagation and validation",
+        "code": "// In Flowise Custom Tool Node\nclass VexInstrumentedTool extends BaseTool {\n  async _call(input: string): Promise<string> {\n    const span = await this.trace.span.start({ name: 'custom-tool' });\n    \n    try {\n      const result = await this.toolLogic(input);\n      \n      // Schema validation\n      const valid = await vex.verify({\n        spanId: span.id,\n        data: result,\n        checks: ['json_schema']\n      });\n      \n      if (!valid.passed) {\n        throw new Error('Tool output validation failed');\n      }\n      \n      return result;\n    } catch (error) {\n      await vex.span.update(span.id, { error: error.message });\n      throw error;\n    } finally {\n      await span.end();\n    }\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Validation",
+        "description": "Ensure conversation memory maintains coherence across turns",
+        "code": "async function validateMemoryContext(history: ChatMessage[], currentInput: string) {\n  const contextCheck = await vex.verify({\n    data: {\n      history: history.slice(-5), // Last 5 exchanges\n      current: currentInput\n    },\n    checks: [\n      {\n        type: 'conversation_coherence',\n        params: {\n          max_topic_drift: 0.3,\n          session_timeout: 3600\n        }\n      },\n      'pii_detection'\n    ]\n  });\n  \n  if (!contextCheck.passed) {\n    // Reset or summarize memory\n    return await summarizeConversation(history);\n  }\n  \n  return history;\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise AI Chatbot",
+      "description": "Get started with Vex free tier at vex.dev to protect your production chatbot today."
+    }
+  }
+}

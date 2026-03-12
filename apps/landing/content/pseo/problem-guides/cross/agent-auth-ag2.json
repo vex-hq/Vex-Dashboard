@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in AG2 Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "AG2 agent-auth",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, AI Agent Authentication and Authorization issues manifest when agents lack proper identity verification and permission controls, leading to unauthorized actions in multi-agent conversations. Without robust auth mechanisms, agents can impersonate others, access restricted tools, or escalate privileges during group chats, exploiting AG2's enhanced speaker selection and conversation flows. This is particularly risky in AG2's group chat patterns where agents dynamically select speakers and execute code without identity validation.",
+    "howItManifests": [
+      {
+        "scenario": "Unauthorized tool access in group chat",
+        "symptom": "Agent B executes code tool without proper auth check despite Agent A denying permission",
+        "impact": "Data leaks or malicious code execution across agent boundaries"
+      },
+      {
+        "scenario": "Speaker impersonation during consensus",
+        "symptom": "Rogue agent overrides group consensus by faking trusted agent identity",
+        "impact": "Incorrect decisions based on forged authority in multi-agent voting"
+      },
+      {
+        "scenario": "Privilege escalation via message hooks",
+        "symptom": "Unverified agent messages trigger admin-level actions in conversation flow",
+        "impact": "System compromise through hook injection attacks"
+      },
+      {
+        "scenario": "Cross-agent memory access violation",
+        "symptom": "Agent reads private conversation history without auth token validation",
+        "impact": "Privacy breaches and information leakage in shared memory pools"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Missing Auth Headers in Agent Messages",
+        "description": "Scans AG2 message payloads for missing or invalid auth tokens in agent communications",
+        "code": "from ag2 import GroupChat, Agent\n\ndef detect_missing_auth_messages(chat_history):\n    auth_missing = []\n    for msg in chat_history:\n        if hasattr(msg, 'content') and 'auth_token' not in msg.content:\n            if msg.sender != 'system':\n                auth_missing.append({\n                    'message_id': msg.message_id,\n                    'sender': msg.sender,\n                    'timestamp': msg.timestamp\n                })\n    return len(auth_missing) > 0, auth_missing",
+        "language": "python"
+      },
+      {
+        "name": "Unauthorized Speaker Selection",
+        "description": "Detects when AG2 speaker manager selects agents without permission validation",
+        "code": "from ag2.groupchat import GroupChatManager\n\ndef detect_unauth_speaker_selection(manager):\n    violations = []\n    for selection in manager.speaker_history:\n        selected_agent = selection['agent']\n        required_role = selection['context_role']\n        if not selected_agent.has_role(required_role):\n            violations.append({\n                'agent': selected_agent.name,\n                'required_role': required_role,\n                'selection_time': selection['timestamp']\n            })\n    return len(violations) > 0, violations",
+        "language": "python"
+      },
+      {
+        "name": "Tool Execution Without Auth Check",
+        "description": "Monitors AG2 tool calls for missing authorization validation",
+        "code": "from ag2 import register_message_hook\n\ndef detect_unauth_tool_calls():\n    def hook(message):\n        if message.get('type') == 'tool_call':\n            tool_name = message['tool_name']\n            caller_id = message['caller_id']\n            if 'auth_verified' not in message or not message['auth_verified']:\n                print(f'🚨 Unauthorized tool call: {tool_name} by {caller_id}')\n                return {'block': True, 'reason': 'Missing auth verification'}\n        return {'allow': True}\n    register_message_hook(hook)\n    return hook",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "JWT Auth Middleware for AG2 Messages",
+        "description": "Implements JWT token validation for all agent messages in AG2 conversations",
+        "code": "import jwt\nfrom ag2 import register_message_hook\n\nSECRET_KEY = 'your-secret-key'\n\ndef ag2_auth_middleware():\n    def validate_jwt(token):\n        try:\n            return jwt.decode(token, SECRET_KEY, algorithms=['HS256'])\n        except:\n            return None\n    \n    def auth_hook(message):\n        token = message.get('auth_token')\n        if not token:\n            return {'block': True, 'error': 'Missing auth token'}\n        \n        payload = validate_jwt(token)\n        if not payload or payload['agent_id'] != message['sender']:\n            return {'block': True, 'error': 'Invalid auth token'}\n        \n        message['auth_verified'] = True\n        return {'allow': True}\n    \n    register_message_hook(auth_hook)\n    return auth_hook",
+        "language": "python"
+      },
+      {
+        "name": "Role-Based Speaker Manager",
+        "description": "Enforces RBAC for AG2 group chat speaker selection",
+        "code": "from ag2.groupchat import GroupChatManager\n\nclass SecureSpeakerManager(GroupChatManager):\n    def __init__(self, role_permissions):\n        self.role_permissions = role_permissions\n    \n    def select_speaker(self, context):\n        candidates = self.get_candidates(context)\n        for agent in candidates:\n            required_role = context.get('required_role')\n            if self.has_permission(agent, required_role):\n                return agent\n        raise PermissionError('No authorized speaker available')\n    \n    def has_permission(self, agent, role):\n        return role in self.role_permissions.get(agent.name, [])\n\n# Usage\npermissions = {'coder': ['code', 'debug'], 'admin': ['all']}\nmanager = SecureSpeakerManager(permissions)",
+        "language": "python"
+      },
+      {
+        "name": "Agent Identity Wrapper",
+        "description": "Wraps AG2 agents with identity and permission enforcement",
+        "code": "from ag2 import Agent\nfrom typing import Dict, List\n\nclass AuthenticatedAgent(Agent):\n    def __init__(self, name, auth_token, permissions: List[str]):\n        super().__init__(name)\n        self.auth_token = auth_token\n        self.permissions = permissions\n    \n    def send_message(self, content, recipient):\n        if not self.verify_permissions(content):\n            raise PermissionError(f'{self.name} lacks permissions')\n        \n        message = {\n            'sender': self.name,\n            'content': content,\n            'auth_token': self.auth_token,\n            'permissions': self.permissions\n        }\n        return super().send_message(message, recipient)\n    \n    def verify_permissions(self, content):\n        if 'tool_call' in content:\n            tool = content['tool_call']['name']\n            return tool in self.permissions\n        return True",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly as a message hook in AG2, automatically scanning every agent interaction for authentication failures, unauthorized speaker selections, and privilege escalations. It provides real-time blocking of malicious actions and generates comprehensive audit logs for compliance. Vex's AG2-specific detectors catch issues like missing JWT tokens, role violations, and tool access abuse before they impact conversations.\n\nThe Vex SDK (`pip install vex-sdk`) registers as a zero-config hook that monitors AG2's group chat manager, message flows, and tool executions. It automatically applies remediation policies like token validation, RBAC enforcement, and conversation quarantine when threats are detected. Vex also provides dashboards for visualizing auth failures across multi-agent deployments.\n\nWith Vex, AG2 developers get enterprise-grade security without custom auth infrastructure, covering 95% of common failure modes out-of-the-box.",
+      "code": "from vex_sdk import Vex\nfrom ag2 import GroupChat, register_message_hook\n\n# Install: pip install ag2 vex-sdk\nvex = Vex(api_key='your-vex-key')\n\n@vex.register_detector('ag2-auth-failures')\ndef scan_ag2_auth_issues(messages):\n    failures = []\n    for msg in messages:\n        if msg.get('type') == 'agent_message':\n            if not msg.get('auth_verified'):\n                failures.append({\n                    'type': 'missing_auth',\n                    'agent': msg['sender'],\n                    'message_id': msg['id']\n                })\n    return {\n        'score': len(failures),\n        'issues': failures,\n        'remediation': 'block_unauthenticated_agents'\n    }\n\n# Auto-register Vex as AG2 message hook\nregister_message_hook(vex.ag2_hook())\n\n# Start monitoring\nvex.start_monitoring()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to secure your AG2 agents against authentication failures: `pip install vex-sdk`"
+    }
+  }
+}

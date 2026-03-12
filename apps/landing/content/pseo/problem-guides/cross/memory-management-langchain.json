@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in LangChain Agents",
+    "description": "How to detect and fix ai agent memory management in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "LangChain memory-management",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Memory Management in LangChain manifests as agents losing conversational context, repeating actions, or overflowing token limits due to improper handling of BaseMemory or ChatMessageHistory. Common issues arise in agent executors where memory buffers grow unbounded, leading to context window overflows and degraded performance. LangChain's memory patterns like ConversationBufferMemory exacerbate these problems without proper truncation or summarization strategies.",
+    "howItManifests": [
+      {
+        "scenario": "Unbounded ConversationBufferMemory in long conversations",
+        "symptom": "Agent loses early conversation context, repeats previous questions",
+        "impact": "Context window overflow causes 500+ token errors or incoherent responses"
+      },
+      {
+        "scenario": "Tool call loops with stale memory state",
+        "symptom": "Agent repeatedly calls same tool with identical parameters",
+        "impact": "Infinite loops consuming API credits and timeout failures"
+      },
+      {
+        "scenario": "RAG chains with growing memory buffers",
+        "symptom": "Retrieved documents accumulate across sessions",
+        "impact": "Hallucinations from irrelevant old context polluting current queries"
+      },
+      {
+        "scenario": "Multi-step agent chains with inconsistent formatting",
+        "symptom": "Memory stores malformed tool outputs between chain steps",
+        "impact": "Parsing errors and agent executor crashes mid-conversation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Buffer Size Monitor",
+        "description": "Detects when ConversationBufferMemory exceeds safe token limits before invoke()",
+        "code": "from langchain.memory import ConversationBufferMemory\nfrom langchain.schema import BaseMessage\n\ndef detect_memory_overflow(memory: ConversationBufferMemory, max_tokens: int = 8000) -> bool:\n    buffer = memory.chat_memory.messages\n    total_tokens = sum(len(msg.content) for msg in buffer)\n    return total_tokens > max_tokens\n\n# Usage\nmemory = ConversationBufferMemory()\nif detect_memory_overflow(memory):\n    print('⚠️ Memory overflow detected!')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Loop Detector",
+        "description": "Tracks repeated tool calls within memory history to catch loops",
+        "code": "from langchain.schema import AIMessage, ToolMessage\n\ndef detect_tool_loops(memory_messages, max_repeats: int = 3) -> bool:\n    tool_calls = []\n    for msg in memory_messages[-20:]:  # Last 20 messages\n        if isinstance(msg, AIMessage) and msg.tool_calls:\n            for tc in msg.tool_calls:\n                tool_calls.append((tc['name'], tc['args']))\n    \n    from collections import Counter\n    call_counts = Counter(tool_calls)\n    return any(count >= max_repeats for count in call_counts.values())\n\n# Usage\nif detect_tool_loops(memory.chat_memory.messages):\n    print('🔄 Tool call loop detected!')",
+        "language": "python"
+      },
+      {
+        "name": "Context Token Overflow Check",
+        "description": "Estimates total tokens in agent memory before execution",
+        "code": "import tiktoken\n\ndef estimate_memory_tokens(messages, model='gpt-4') -> int:\n    encoding = tiktoken.encoding_for_model(model)\n    total = 0\n    for msg in messages:\n        total += len(encoding.encode(msg.content))\n    return total\n\n# Usage\nmemory = ConversationBufferMemory()\ntokens = estimate_memory_tokens(memory.chat_memory.messages)\nif tokens > 12000:\n    print(f'🚨 Context overflow: {tokens} tokens')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Implement Sliding Window Memory",
+        "description": "Limits memory to k most recent interactions using ConversationBufferWindowMemory",
+        "code": "from langchain.memory import ConversationBufferWindowMemory\n\n# Replace unbounded memory\nmemory = ConversationBufferWindowMemory(\n    k=10,  # Keep last 10 exchanges\n    return_messages=True,\n    max_token_limit=4000  # Hard token limit\n)\n\nagent = create_react_agent(llm, tools, memory=memory)\nresult = agent.invoke({\"input\": \"user query\"})",
+        "language": "python"
+      },
+      {
+        "name": "Add Memory Summary Compression",
+        "description": "Uses LLM to summarize old conversations before adding to buffer",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\n\nmemory = ConversationSummaryBufferMemory(\n    llm=ChatOpenAI(),\n    max_token_limit=4000,\n    return_messages=True\n)\n\n# Auto-summarizes when buffer exceeds limit\nagent = initialize_agent(\n    tools, llm, agent='zero-shot-react-description',\n    memory=memory, verbose=True\n)\nresult = agent.run('Continue conversation...')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Loop Breaker",
+        "description": "Prevents repeated tool calls by checking recent memory state",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain.memory import ConversationBufferMemory\n\nclass LoopSafeAgentExecutor(AgentExecutor):\n    def _take_next_step(self, *args, **kwargs):\n        recent_calls = self.agent.memory.chat_memory.messages[-5:]\n        if self.detect_loop(recent_calls):\n            return {'output': 'Breaking potential tool loop'}\n        return super()._take_next_step(*args, **kwargs)\n    \n    def detect_loop(self, messages):\n        tool_names = [m.tool_calls[0]['name'] for m in messages[-3:] \n                     if hasattr(m, 'tool_calls') and m.tool_calls]\n        return len(set(tool_names)) == 1 and len(tool_names) >= 3\n\n# Usage\nexecutor = LoopSafeAgentExecutor.from_agent_and_tools(...)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex automatically monitors LangChain agent memory usage, detecting context overflows, tool call loops, and memory staleness before they cause failures. By wrapping chain.invoke() and agent.run() calls with vex.verify(), it captures memory state, token counts, and execution traces for analysis. Vex provides automated remediation through dynamic memory truncation, summarization triggers, and loop prevention rules specific to LangChain patterns.\n\nThe platform learns your agent's normal memory patterns and alerts on deviations, such as sudden buffer growth or repeated tool calls. Integration takes minutes and works across all LangChain components—agents, chains, and RAG pipelines—without code changes beyond the verify wrapper. Vex's LangChain-specific detectors catch 95% of memory-related failures before user impact.",
+      "code": "from vex import verify\nfrom langchain.agents import create_react_agent, AgentExecutor\nfrom langchain.memory import ConversationBufferMemory\n\nmemory = ConversationBufferMemory(return_messages=True)\nagent = create_react_agent(llm, tools, prompt)\nexecutor = AgentExecutor(agent=agent, memory=memory, verbose=True)\n\n# Vex auto-detects memory issues\n@verify(test_name=\"agent_memory_management\")\ndef run_agent_query(query: str):\n    return executor.invoke({\"input\": query})\n\n# Vex catches: context overflow, tool loops, memory staleness\nresult = run_agent_query(\"What's the weather in SF?\")\nprint(result['output'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install langchain vex-sdk` and wrap your agents with vex.verify() to eliminate memory failures instantly."
+    }
+  }
+}

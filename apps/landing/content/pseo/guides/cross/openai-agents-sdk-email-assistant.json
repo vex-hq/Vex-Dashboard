@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK ai email assistant",
+      "OpenAI Agents SDK guardrails",
+      "ai email assistant reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with OpenAI's Agents SDK enables sophisticated multi-agent workflows for intent detection, draft generation, attachment handling, and send approval. However, production email systems face high risks like PII leaks, inappropriate tone, and unauthorized sends due to agent handoff loops and unvalidated tool outputs. Vex provides essential output guardrails to verify content across all agents, ensuring reliability and compliance.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with OpenAI Agents SDK",
+      "description": "The AI Email Assistant uses OpenAI Agents SDK to orchestrate specialized agents: an IntentDetectorAgent classifies email purpose (reply, forward, draft), a DraftGeneratorAgent creates responses with tone control, an AttachmentHandlerAgent processes files securely, and an ApprovalAgent validates before sending. Agents handoff via the SDK's agent.step() mechanism with shared context. Tracing spans multi-agent chains, but gaps expose risks in production.\n\nEmail flows through agents sequentially: incoming message → intent detection → draft generation → attachment validation → approval check → send or reject. Each agent uses tools for specific tasks (e.g., PII scanning, recipient lookup) and produces structured outputs consumed by downstream agents. Vex integrates as output parsers on each agent.step() to validate before handoff.\n\nThis modular design scales but amplifies failure modes like infinite loops between DraftGenerator and ApprovalAgent or guardrail bypasses via injected prompts in email content.",
+      "diagram": "Incoming Email\n       ↓\n[IntentDetectorAgent] → intent: 'reply' | 'draft' | 'forward'\n       ↓ (Vex Guardrail)\n[DraftGeneratorAgent] → email draft + tone score\n       ↓ (Vex Guardrail)\n[AttachmentHandlerAgent] → safe attachments\n       ↓ (Vex Guardrail)\n[ApprovalAgent] → send_approved: true/false\n       ↓\nSend Email / Reject"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops",
+        "description": "DraftGenerator and ApprovalAgent ping-pong indefinitely when tone validation fails repeatedly",
+        "severity": "critical",
+        "mitigation": "Vex max_iterations guardrail with loop detection on agent outputs"
+      },
+      {
+        "name": "Guardrail bypass via prompt injection",
+        "description": "Malicious email content like 'ignore safety checks' tricks agents into bypassing PII filters",
+        "severity": "critical",
+        "mitigation": "Vex input sanitization and output verification before agent consumption"
+      },
+      {
+        "name": "Unvalidated tool outputs",
+        "description": "AttachmentHandler returns unsafe file paths that ApprovalAgent sends without checking",
+        "severity": "high",
+        "mitigation": "Vex schema validation on all tool results before agent handoff"
+      },
+      {
+        "name": "PII leakage in drafts",
+        "description": "DraftGenerator includes unfiltered customer data from intent context",
+        "severity": "critical",
+        "mitigation": "Vex PII detection guardrail on every agent output"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Detection Agent",
+        "description": "Classifies email intent using Runner and specialized tools for categorization",
+        "code": "from agents import Agent, Runner, tool\nfrom typing import Literal\n\n@tool\ndef classify_intent(email_content: str) -> Literal['reply', 'draft', 'forward', 'schedule']:\n    \"\"\"Classify email intent\"\"\"\n    # OpenAI model call logic here\n    return 'reply'\n\nintent_agent = Agent(\n    name=\"Intent Detector\",\n    instructions=\"Classify email purpose accurately\",\n    tools=[classify_intent]\n)\n\nrunner = Runner()\nresult = runner.run_sync(intent_agent, \"Process: \" + email_body)\nintent = result.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation Agent",
+        "description": "Generates email drafts with tone control based on intent handoff",
+        "code": "from agents import Agent, tool\n\n@tool\ndef generate_draft(intent: str, original_email: str, tone: str = 'professional') -> str:\n    \"\"\"Generate email draft with specified tone\"\"\"\n    # LLM generation logic\n    return f\"Dear {recipient},\\n{response_content}\"\n\ndraft_agent = Agent(\n    name=\"Draft Generator\",\n    instructions=\"Generate appropriate email drafts. Maintain professional tone.\",\n    tools=[generate_draft]\n)\n\nresult = runner.run_sync(draft_agent, f\"Intent: {intent}, Email: {original_email}\")\ndraft = result.final_output",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Handler Agent",
+        "description": "Validates and processes email attachments safely",
+        "code": "from agents import Agent, tool\nimport os\n\n@tool\ndef validate_attachment(file_path: str) -> dict:\n    \"\"\"Validate attachment safety and type\"\"\"\n    if not os.path.exists(file_path):\n        return {\"safe\": False, \"error\": \"File not found\"}\n    # Virus scan, type check logic\n    return {\"safe\": True, \"type\": \"pdf\", \"size\": 102400}\n\nattachment_agent = Agent(\n    name=\"Attachment Handler\",\n    instructions=\"Ensure attachments are safe before processing\",\n    tools=[validate_attachment]\n)\n\nattachments_result = runner.run_sync(attachment_agent, \"Check attachments: \" + file_paths)",
+        "language": "python"
+      },
+      {
+        "title": "Send Approval Agent",
+        "description": "Final validation before email dispatch with recipient and content checks",
+        "code": "from agents import Agent, tool\n\n@tool\ndef validate_recipient(email: str) -> bool:\n    \"\"\"Check if recipient is authorized\"\"\"\n    authorized_domains = ['company.com', 'partner.org']\n    return any(domain in email for domain in authorized_domains)\n\napproval_agent = Agent(\n    name=\"Send Approval\",\n    instructions=\"ONLY approve safe, appropriate emails for sending\",\n    tools=[validate_recipient]\n)\n\napproval_result = runner.run_sync(approval_agent, f\"Draft: {draft}, Recipient: {recipient}\")\napproved = approval_result.final_output.get('approved', False)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Agent Steps",
+        "description": "Wrap every agent.run_sync() with Vex verify_output to catch failures before handoff",
+        "code": "from vex import Vex\nfrom agents import Runner\n\nvex = Vex(api_key=\"your-vex-key\")\n\ndef safe_agent_run(agent, input):\n    result = runner.run_sync(agent, input)\n    # Verify output before handoff\n    verified = vex.verify_output(\n        result.final_output,\n        guardrails={\n            'pii_filter': {'enabled': True},\n            'tone_check': {'min_score': 0.8},\n            'content_accuracy': {'enabled': True}\n        }\n    )\n    if not verified.valid:\n        raise ValueError(f\"Guardrail failed: {verified.issues}\")\n    return result\n\n# Usage\nintent_result = safe_agent_run(intent_agent, email_body)\ndraft_result = safe_agent_run(draft_agent, f\"Intent: {intent_result.final_output}\")",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering Guardrail",
+        "description": "Blocks PII in all agent outputs using Vex's built-in detectors",
+        "code": "from vex import Vex\n\nvex = Vex(api_key=\"your-vex-key\")\n\n# Apply to draft output\ndef check_pii_free(content: str) -> bool:\n    verdict = vex.verify_output(\n        content,\n        guardrails={\n            'pii_filter': {\n                'enabled': True,\n                'actions': ['ssn', 'email', 'phone'],\n                'block_threshold': 0.9\n            }\n        }\n    )\n    return verdict.valid\n\n# Before ApprovalAgent handoff\nif not check_pii_free(draft):\n    draft = vex.redact_pii(draft)\n    print(\"PII redacted from draft\")",
+        "language": "python"
+      },
+      {
+        "title": "Loop Prevention with Vex Tracing",
+        "description": "Detects agent handoff loops and enforces max iterations with full tracing",
+        "code": "from vex import Vex\n\nvex = Vex(api_key=\"your-vex-key\", trace=True)\n\nclass SafeRunner:\n    def __init__(self):\n        self.iteration_count = 0\n        self.max_iterations = 5\n    \n    def run_with_safeguards(self, agent, input):\n        if self.iteration_count >= self.max_iterations:\n            raise Exception(\"Max iterations exceeded - potential loop\")\n        \n        with vex.span(f\"agent-{agent.name}\"):\n            result = runner.run_sync(agent, input)\n            verified = vex.verify_output(result.final_output)\n            \n            self.iteration_count += 1\n            return verified.output if verified.valid else None\n\nsafe_runner = SafeRunner()\nresult = safe_runner.run_with_safeguards(draft_agent, agent_input)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK AI Email Assistant",
+      "description": "Add Vex guardrails today to protect your email workflows from PII leaks and agent failures - start with our free tier."
+    }
+  }
+}

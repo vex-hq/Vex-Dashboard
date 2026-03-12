@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with AutoGen + Vex Guardrails",
+    "description": "Learn how to build code generation with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen code generation",
+      "AutoGen guardrails",
+      "code generation reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AutoGen enables powerful multi-agent systems for code generation, where agents collaborate to write, test, and refine code iteratively. However, without proper guardrails, these systems risk infinite loops, unsafe code execution, and resource exhaustion. Vex integration provides essential verification to ensure safe, reliable code generation workflows.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with AutoGen",
+      "description": "The typical AutoGen code generation architecture features a CodeGenerator agent that produces code snippets based on user requirements, a CodeExecutor agent that runs the code in a sandboxed environment, and a Tester agent that validates outputs against test cases. These agents communicate via a group chat manager, enabling iterative refinement through feedback loops. Human oversight can be injected at key decision points.\n\nThe workflow begins with a user request routed to the CodeGenerator, which crafts initial code. The CodeExecutor runs it safely and returns results or errors. The Tester validates functionality, security, and performance, feeding issues back for regeneration. This closed-loop system excels at complex coding tasks but amplifies risks like malicious code injection and runaway conversations.",
+      "diagram": "User Request\n      ↓\n[GroupChatManager]\n  ↙       ↘\nCodeGenerator  ←→ CodeExecutor → Tester\n  ↓                    ↓\nCode Drafts     Sandbox Results  Test Verdict\n  ↑____________________________↑\n           Iterative Refinement"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents continuously debate code improvements without convergence criteria",
+        "severity": "critical",
+        "mitigation": "Vex enforces max-turn limits and convergence scoring on replies"
+      },
+      {
+        "name": "Code execution producing unsafe outputs",
+        "description": "Generated code executes system commands, network calls, or file modifications",
+        "severity": "critical",
+        "mitigation": "Vex scans code for dangerous APIs and enforces sandbox policies"
+      },
+      {
+        "name": "Agents agreeing on incorrect conclusions",
+        "description": "Multiple agents validate flawed code due to shared hallucination",
+        "severity": "high",
+        "mitigation": "Vex cross-verifies code syntax, safety, and test execution independently"
+      },
+      {
+        "name": "Uncontrolled token spending in multi-turn debates",
+        "description": "Verbose agent discussions exhaust budget without progress",
+        "severity": "high",
+        "mitigation": "Vex monitors token usage per turn and enforces conversation budgets"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set up AutoGen Agents for Code Generation",
+        "description": "Create specialized agents for code generation, execution, and testing with group chat orchestration",
+        "code": "from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager\n\nconfig_list = [{\"model\": \"gpt-4\", \"api_key\": \"your-key\"}]\n\ncoder = AssistantAgent(\n    name=\"Coder\",\n    llm_config={\"config_list\": config_list},\n    system_message=\"You generate Python code. Always include tests.\"\n)\nexecutor = AssistantAgent(\n    name=\"Executor\",\n    llm_config={\"config_list\": config_list},\n    system_message=\"Execute code safely and report results. Never run unsafe code.\"\n)\ntester = AssistantAgent(\n    name=\"Tester\",\n    llm_config={\"config_list\": config_list},\n    system_message=\"Validate code correctness, safety, and efficiency.\"\n)\nuser_proxy = UserProxyAgent(name=\"User\")\n\ngroupchat = GroupChat(agents=[user_proxy, coder, executor, tester], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"config_list\": config_list})",
+        "language": "python"
+      },
+      {
+        "title": "Implement Sandboxed Code Execution",
+        "description": "Use restricted execution environment to safely run generated code",
+        "code": "import subprocess\nimport tempfile\nimport os\n\ndef safe_execute(code: str) -> dict:\n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    \n    try:\n        result = subprocess.run(\n            ['python', temp_file],\n            capture_output=True,\n            text=True,\n            timeout=30,\n            env={**os.environ, 'PYTHONPATH': ''}\n        )\n        return {\n            'success': result.returncode == 0,\n            'stdout': result.stdout,\n            'stderr': result.stderr\n        }\n    finally:\n        os.unlink(temp_file)",
+        "language": "python"
+      },
+      {
+        "title": "Add Iterative Refinement Loop",
+        "description": "Enable agents to refine code based on execution feedback",
+        "code": "def run_code_generation(task: str, max_iterations: int = 5):\n    user_proxy.initiate_chat(\n        manager,\n        message=f\"Generate code for: {task}\"\n    )\n    \n    for i in range(max_iterations):\n        last_messages = groupchat.messages[-3:]  # Last 3 exchanges\n        if 'PASS' in last_messages[-1]['content']:\n            print(f\"✓ Code validated after {i+1} iterations\")\n            break\n        \n        feedback = tester.generate_reply(last_messages)\n        user_proxy.send(recipient=manager, message=f\"Refine based on: {feedback}\")\n    \n    return groupchat.messages[-1]['content']",
+        "language": "python"
+      },
+      {
+        "title": "Basic Code Safety Pre-checks",
+        "description": "Static analysis before execution to catch obvious dangers",
+        "code": "import ast\nimport re\n\ndef validate_code_safety(code: str) -> dict:\n    tree = ast.parse(code)\n    \n    dangers = {\n        'system_calls': bool(re.search(r'\\b(?:os|subprocess|exec|eval|open)\\b', code)),\n        'network': bool(re.search(r'\\b(?:requests|urllib|socket|http)\\b', code)),\n        'credentials': bool(re.search(r'(api_key|password|secret|token)=[\"\\'][^\"\\']+[\"\\']', code)),\n        'file_writes': any(isinstance(node, ast.Call) and \n                          any(isinstance(arg, ast.Str) and 'w' in arg.s for arg in node.args) \n                          for node in ast.walk(tree))\n    }\n    \n    return {'safe': not any(dangers.values()), 'issues': dangers}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as Reply Filter",
+        "description": "Install and configure Vex SDK to filter all agent replies for safety",
+        "code": "import vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Register Vex as reply function filter for all agents\n@vex.register_filter(policies=[\n    \"code-safety\",\n    \"no-credential-leakage\",\n    \"syntax-validity\",\n    \"dependency-safety\"\n])\ndef vex_reply_filter(message: str, agent_name: str, context: dict) -> bool:\n    \"\"\"Vex verifies code in agent replies before forwarding\"\"\"\n    verification = vex_client.verify({\n        \"content\": message,\n        \"context\": {\n            \"agent\": agent_name,\n            \"task_type\": \"code-generation\",\n            \"turn_count\": context.get('turn_count', 0)\n        },\n        \"policies\": [\n            \"safe-python-code\",\n            \"no-network-access\",\n            \"no-file-modification\",\n            \"syntax-valid\",\n            \"no-hardcoded-secrets\"\n        ]\n    })\n    return verification.passed\n\n# Apply to AutoGen agents\ncoder.register_reply(coder.generate_reply, reply_filter=vex_reply_filter)\nexecutor.register_reply(executor.generate_reply, reply_filter=vex_reply_filter)\ntester.register_reply(tester.generate_reply, reply_filter=vex_reply_filter)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Code Execution Guardrails",
+        "description": "Protect sandbox execution with Vex runtime verification",
+        "code": "def vex_safe_execute(code: str, context: dict) -> dict:\n    # Pre-execution Vex scan\n    exec_verification = vex_client.verify({\n        \"content\": code,\n        \"context\": context,\n        \"policies\": [\n            \"execution-sandboxing\",\n            \"dependency-safety\",\n            \"no-system-calls\",\n            \"timeout-protection\"\n        ]\n    })\n    \n    if not exec_verification.passed:\n        return {\n            'success': False,\n            'error': 'Vex blocked unsafe execution',\n            'issues': exec_verification.issues\n        }\n    \n    # Safe execution only after Vex approval\n    return safe_execute(code)\n\n# Update executor agent\nexecutor.system_message += \"\\nUse `vex_safe_execute(code)` for all executions.\"",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Loop Protection",
+        "description": "Prevent infinite loops and token exhaustion with Vex",
+        "code": "class VexGroupChat(GroupChat):\n    def __init__(self, *args, max_turns=20, token_budget=10000, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_turns = max_turns\n        self.token_budget = token_budget\n        self.turn_count = 0\n        self.tokens_used = 0\n    \n    def append(self, message, **kwargs):\n        if self.turn_count >= self.max_turns:\n            raise Exception(\"Max conversation turns exceeded\")\n        \n        # Vex conversation health check\n        health_check = vex_client.verify({\n            \"content\": message[\"content\"],\n            \"context\": {\n                \"turn_count\": self.turn_count,\n                \"tokens_used\": self.tokens_used,\n                \"agents_involved\": len(self.agents)\n            },\n            \"policies\": [\"prevent-loops\", \"convergence-check\", \"token-budget\"]\n        })\n        \n        if not health_check.passed:\n            message[\"content\"] += \"\\n[VEX: Conversation terminated - loop detected]\"\n        \n        super().append(message, **kwargs)\n        self.turn_count += 1\n        self.tokens_used += len(message[\"content\"])\n\n# Use protected group chat\nprotected_chat = VexGroupChat(agents=[user_proxy, coder, executor, tester])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Code Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and register as reply filter to eliminate code generation risks."
+    }
+  }
+}

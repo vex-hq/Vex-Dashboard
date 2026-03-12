@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Smolagents + Vex Guardrails",
+    "description": "Learn how to build voice agents with Smolagents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Smolagents voice agents",
+      "Smolagents guardrails",
+      "voice agents reliability",
+      "Vex Smolagents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Smolagents enables lightweight, code-based reasoning for real-time conversational AI, processing speech-to-text inputs through simple agent loops. However, the high-stakes nature of voice interactions—demanding sub-second latency and safety—amplifies risks like unsafe code generation and coherence failures. Vex guardrails ensure reliability by verifying responses, latency, and safety in this critical pipeline.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Smolagents",
+      "description": "Voice agents follow a real-time pipeline: microphone audio streams to a speech-to-text model (e.g., Whisper Tiny), producing text fed into a Smolagents loop for reasoning and tool calls. The agent generates responses via code agents or tools, which are converted to speech using a fast TTS model like Piper or Bark Nano, targeting <500ms end-to-end latency. Smolagents' simplicity shines here, but lacks native error handling, making Vex essential for wrapping agent runs.\n\nThe core loop is: STT → Smolagent.run() → TTS, with state management for conversation history. Multi-step reasoning in Smolagents can compound errors, especially under latency pressure, where agents might generate inefficient or unsafe code.",
+      "diagram": "Mic → [STT: Whisper] → [Smolagents Loop: Code/Tools] → [TTS: Piper] → Speaker\n                  ↑                           ↓\n             Vex.verify() ← Latency/Safety Checks → Conversation State"
+    },
+    "risks": [
+      {
+        "name": "Unsafe Python Execution",
+        "description": "Smolagents code agents can generate exec() calls with user-controlled inputs, enabling RCE in voice pipelines.",
+        "severity": "critical",
+        "mitigation": "Wrap agent.run() with Vex verify() using code_safety checks"
+      },
+      {
+        "name": "Latency Budget Violations",
+        "description": "Multi-step reasoning exceeds sub-second requirements, causing choppy voice interactions.",
+        "severity": "high",
+        "mitigation": "Vex latency assertions with <500ms budgets"
+      },
+      {
+        "name": "Conversation Incoherence",
+        "description": "Agents lose context across turns, generating irrelevant or repetitive responses.",
+        "severity": "high",
+        "mitigation": "Vex coherence checks against conversation history"
+      },
+      {
+        "name": "Unfiltered Toxic Responses",
+        "description": "Voice agents amplify harmful content through TTS without safety layers.",
+        "severity": "critical",
+        "mitigation": "Vex response appropriateness and safety filtering"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Smolagents Voice Loop",
+        "description": "Core agent setup with STT/TTS integration for real-time processing.",
+        "code": "from smolagents import CodeAgent, tool\nfrom faster_whisper import WhisperModel\nimport pyttsx3\n\nstt = WhisperModel(\"tiny\")\ntts = pyttsx3.init()\n\n@tool\ndef speak(text: str):\n    tts.say(text)\n    tts.runAndWait()\n\nagent = CodeAgent(tools=[speak], model=\"gpt-4o-mini\")\n\ndef voice_loop(audio_input):\n    text = stt.transcribe(audio_input)[0].text\n    response = agent.run(text)\n    speak(response)",
+        "language": "python"
+      },
+      {
+        "title": "Streaming STT Integration",
+        "description": "Real-time audio chunking for sub-second transcription latency.",
+        "code": "import pyaudio\nimport numpy as np\n\nCHUNK = 1024\nFORMAT = pyaudio.paInt16\nCHANNELS = 1\nRATE = 16000\n\np = pyaudio.PyAudio()\nstream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)\n\ndef get_realtime_transcript():\n    frames = []\n    for _ in range(0, int(RATE / CHUNK * 3)):  # 3s buffer\n        data = stream.read(CHUNK)\n        frames.append(np.frombuffer(data, dtype=np.int16))\n    audio = np.concatenate(frames)\n    segments, _ = stt.transcribe(audio, beam_size=5)\n    return ' '.join(seg.text for seg in segments)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation State Management",
+        "description": "Persistent memory for multi-turn voice coherence.",
+        "code": "history = []\n\ndef voice_agent_with_memory(user_input):\n    history.append({\"role\": \"user\", \"content\": user_input})\n    context = \"\\n\".join([f\"{msg['role']}: {msg['content']}\" for msg in history[-8:]])\n    response = agent.run(f\"Context: {context}\\nRespond naturally:\")\n    history.append({\"role\": \"assistant\", \"content\": response})\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Low-Latency TTS Pipeline",
+        "description": "Fast TTS optimized for real-time voice output.",
+        "code": "from piper import PiperVoice\n\nvoice = PiperVoice.load(\"en_US-lessac-medium.onnx\")\n\ndef fast_tts(text):\n    with open(\"output.wav\", \"wb\") as f:\n        voice.synthesize(text, f)\n    # Play with low-latency audio\n    import pygame\n    pygame.mixer.init(frequency=22050)\n    pygame.mixer.music.load(\"output.wav\")\n    pygame.mixer.music.play()\n    while pygame.mixer.music.get_busy():\n        pygame.time.wait(10)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Safety + Latency Verification",
+        "description": "Wrap agent.run() with comprehensive Vex checks for voice-critical guarantees.",
+        "code": "from vex import verify\n\ndef safe_voice_agent(audio_input):\n    user_text = get_realtime_transcript(audio_input)\n    \n    @verify([\n        \"response.appropriateness > 0.9\",\n        \"latency.total < 500ms\",\n        \"code_safety.passed\",\n        \"response.toxicity < 0.1\"\n    ])\n    def checked_run():\n        return agent.run(user_text)\n    \n    response = checked_run()\n    fast_tts(response)\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Coherence Across Turns",
+        "description": "Verify conversation flow maintains context in multi-turn interactions.",
+        "code": "def coherent_voice_loop(audio_input, history):\n    user_text = get_realtime_transcript(audio_input)\n    history_str = \"\\n\".join([f\"{h['role']}: {h['content']}\" for h in history])\n    \n    @verify([\n        \"response.coherence > 0.85\",\n        \"response.relevance(history_context) > 0.9\",\n        \"latency.reasoning < 300ms\"\n    ])\n    def verify_coherence():\n        return agent.run(f\"History: {history_str}\\nUser: {user_text}\")\n    \n    response = verify_coherence()\n    history.append({\"role\": \"assistant\", \"content\": response})\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Tool Call Safety Wrapper",
+        "description": "Prevent dangerous tool execution in voice agents.",
+        "code": "from vex import verify\n\n@verify([\n    \"tools_used in ['speak', 'search', 'calc']\",\n    \"code_execution.safe\",\n    \"no_file_io\",\n    \"no_network_calls_unless_authorized\"\n])\ndef safe_tool_agent(user_text):\n    return agent.run(user_text)\n\ndef voice_with_tools(audio):\n    text = get_realtime_transcript(audio)\n    verified_response = safe_tool_agent(text)\n    fast_tts(verified_response)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Smolagents Voice Agents",
+      "description": "Integrate Vex today to guarantee safe, coherent, and low-latency voice interactions at scale."
+    }
+  }
+}

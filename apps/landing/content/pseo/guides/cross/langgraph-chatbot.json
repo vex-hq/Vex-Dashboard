@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with LangGraph + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph ai chatbot",
+      "LangGraph guardrails",
+      "ai chatbot reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with LangGraph enables complex, stateful conversational agents with retrieval-augmented generation, intent classification, and multi-turn memory. However, cyclical workflows and parallel state updates introduce risks like infinite loops, state corruption, and hallucinated responses. Vex provides runtime verification to ensure response accuracy, safety, and coherence in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with LangGraph",
+      "description": "The LangGraph chatbot follows a cyclical graph pattern with nodes for intent classification, RAG retrieval, response generation, and safety checks. State is managed via a shared `ChatState` schema that persists conversation history, retrieved context, and metadata across turns. Parallel branches handle tool calls and human-in-the-loop approvals before merging into the main response path.\n\nIntent classification routes user input to RAG (for knowledge queries) or tool nodes (for actions), with conditional edges preventing infinite loops. Checkpoints save state after each turn, enabling memory across sessions. Human-in-the-loop breakpoints allow review of sensitive responses before final output.\n\nThe graph uses `StateGraph` with persistent checkpointers (SQLite/Postgres) for production-scale deployments, handling 1000s of concurrent conversations while maintaining coherence.",
+      "diagram": "┌──────────────┐    ┌──────────────┐\n│   User Input  │───▶│ Intent Class │\n└──────────────┘    └──────┬───────┘\n                         │\n                ┌────────▼────────┐ ┌──────────────┐\n                │   RAG Retrieval  │ │   Tool Call  │\n                └────────┬────────┘ └──────────────┘\n                         │              │\n                ┌────────▼────────┐    │\n                │ Safety Filter   │◀───┘\n                │  (Vex Guard)    │\n                └────────┬────────┘\n                         │\n                ┌────────▼────────┐\n                │  LLM Response   │\n                └────────┬────────┘\n                         │\n                ┌────────▼────────┐\n                │ Human-in-Loop?  │──┐\n                └────────┬────────┘  │\n                         │           │\n                  ┌──────▼──────┐   │\n                  │ Final Reply │◀──┘\n                  └─────────────┘\n\nChatState: {messages, context, intent, metadata}"
+    },
+    "risks": [
+      {
+        "name": "Cyclic execution loops",
+        "description": "Intent classification errors cause infinite routing between RAG and tool nodes",
+        "severity": "critical",
+        "mitigation": "Vex monitors state transition depth and blocks loops > 10 cycles"
+      },
+      {
+        "name": "State corruption on merge",
+        "description": "Parallel RAG/tool branches overwrite conversation history inconsistently",
+        "severity": "high",
+        "mitigation": "Atomic state updates with Vex schema validation before checkpointing"
+      },
+      {
+        "name": "Hallucinated RAG responses",
+        "description": "LLM generates facts outside retrieved context, breaking accuracy",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks between context and response"
+      },
+      {
+        "name": "Bypassed safety breakpoints",
+        "description": "Conditional edges skip human-in-the-loop for PII/safety violations",
+        "severity": "critical",
+        "mitigation": "Vex runtime assertions enforce breakpoint execution"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "ChatState Schema Definition",
+        "description": "Shared state schema with conversation history and RAG context for multi-turn coherence",
+        "code": "from typing import Annotated, TypedDict\nfrom langgraph.graph import add_messages, StateGraph\nfrom langgraph.graph.message import add_messages\n\nclass ChatState(TypedDict):\n    messages: Annotated[list, add_messages]\n    context: str\n    intent: str\n    metadata: dict\n\n    def __init__(self):\n        self.messages = []\n        self.context = ''\n        self.intent = 'unknown'\n        self.metadata = {}\n\nprint('ChatState schema ready for graph')",
+        "language": "python"
+      },
+      {
+        "title": "Intent Classification Node",
+        "description": "Routes conversations to RAG or tools based on user intent",
+        "code": "from langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model='gpt-4o-mini', temperature=0)\n\nasync def classify_intent(state: ChatState) -> ChatState:\n    last_message = state['messages'][-1].content\n    \n    intent_prompt = f\"\"\"Classify intent: {last_message}\n    Return only: 'rag' | 'tool' | 'greeting'\"\"\"\n    \n    intent = await llm.ainvoke(intent_prompt)\n    return {'intent': intent.content.strip()}\n\nprint('Intent node functional')",
+        "language": "python"
+      },
+      {
+        "title": "RAG Retrieval Node",
+        "description": "Fetches relevant context from vector store for grounded responses",
+        "code": "from langchain_community.vectorstores import FAISS\nfrom langchain_openai import OpenAIEmbeddings\n\nembeddings = OpenAIEmbeddings()\n# Assume pre-built index\nvectorstore = FAISS.load_local('rag_index')\n\nasync def retrieve_context(state: ChatState) -> ChatState:\n    query = state['messages'][-1].content\n    docs = vectorstore.similarity_search(query, k=3)\n    context = '\\n'.join([doc.page_content for doc in docs])\n    \n    return {\n        'context': context,\n        'metadata': {'sources': [doc.metadata for doc in docs]}\n    }\n\nprint('RAG node ready')",
+        "language": "python"
+      },
+      {
+        "title": "Core Chatbot Graph Assembly",
+        "description": "Compiles nodes into cyclical workflow with conditional routing",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\n\ncheckpointer = SqliteSaver.from_conn_string(':memory:')\n\ngraph = StateGraph(ChatState)\n\n# Add nodes\ngraph.add_node('classify', classify_intent)\ngraph.add_node('retrieve', retrieve_context)\ngraph.add_node('respond', respond_with_context)  # defined elsewhere\n\n# Conditional edges\ndef route_intent(state):\n    return state['intent']\n\ngraph.add_conditional_edges('classify', route_intent, {\n    'rag': 'retrieve',\n    'tool': 'tools',\n    'greeting': 'respond'\n})\n\ngraph.set_entry_point('classify')\napp = graph.compile(checkpointer=checkpointer)\n\nprint('LangGraph compiled successfully')",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap graph.invoke() with Vex.verify()",
+        "description": "Runtime verification of final responses for accuracy and safety",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        'response-accuracy',\n        'conversation-coherence',\n        'safety-filtering',\n        'pii-protection',\n        'hallucination-detection'\n    ],\n    risk_profile='high'\n)\nasync def safe_chatbot(config, user_input):\n    thread_id = config.get('thread_id', 'default')\n    \n    input_message = {'messages': [{'role': 'user', 'content': user_input}]}\n    \n    result = await app.ainvoke(input_message, config={'configurable': {'thread_id': thread_id}})\n    \n    return result['messages'][-1].content\n\n# Usage\nresponse = await safe_chatbot({'thread_id': 'user_123'}, 'What is LangGraph?')\nprint(response)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Safety Node in Graph",
+        "description": "Dedicated graph node for inline verification before human-in-the-loop",
+        "code": "import vex\n\nasync def vex_safety_node(state: ChatState) -> ChatState:\n    response = state['messages'][-1].content\n    \n    verified = await vex.verify_text(\n        text=response,\n        checks=['safety-filtering', 'pii-protection', 'hallucination-detection'],\n        context=state['context']\n    )\n    \n    if not verified:\n        state['messages'].append({\n            'role': 'system',\n            'content': 'Response blocked by safety filters'\n        })\n    \n    return state\n\n# Add to graph\ngraph.add_node('vex_safety', vex_safety_node)\ngraph.add_edge('respond', 'vex_safety')",
+        "language": "python"
+      },
+      {
+        "title": "State Schema Validation Checkpoint",
+        "description": "Prevents checkpoint deserialization errors with Vex schema enforcement",
+        "code": "import vex\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\n@vex.schema_validator\nclass ValidatedChatState(ChatState):\n    \"\"\"Vex-validated state prevents corruption\"\"\"\n    pass\n\nclass VexCheckpointer(SqliteSaver):\n    async def aget_tuple(self, config):\n        state = await super().aget_tuple(config)\n        \n        # Vex validates before returning\n        await vex.validate_schema(state, ValidatedChatState)\n        return state\n    \ncheckpointer = VexCheckpointer.from_conn_string('chatbot.db')\napp = graph.compile(checkpointer=checkpointer)\n\nprint('Vex-validated checkpointer active')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph AI Chatbot",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your production conversations from critical failures."
+    }
+  }
+}

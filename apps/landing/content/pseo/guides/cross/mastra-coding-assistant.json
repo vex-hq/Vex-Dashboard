@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Mastra + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra ai coding assistant",
+      "Mastra guardrails",
+      "ai coding assistant reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with Mastra enables powerful code-aware agents that analyze repositories, execute in sandboxes, validate tests, and debug iteratively. However, without proper guardrails, these agents risk generating insecure code, leaking credentials, or failing silently due to unvalidated workflow transitions. Vex integration as middleware ensures reliability by verifying code correctness, security, and compliance at every step.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Mastra",
+      "description": "The Mastra-based AI Coding Assistant follows a workflow-driven architecture where an LLM agent receives repository context via knowledge retrieval, generates code proposals, executes them in a sandbox, validates tests, and iterates on debugging. Mastra's workflow steps handle transitions between analysis, generation, execution, and validation phases, with memory managing conversation history and repo state. Third-party integrations pull git repos and run security scans.\n\nKey components include Mastra's AgentExecutor for LLM orchestration, KnowledgeBase for repo context retrieval, and custom tools for sandbox execution (e.g., Docker-in-Docker) and test runners (e.g., Jest/Pytest). Vex middleware intercepts outputs between steps to validate code artifacts before progression.\n\nThis setup scales to handle multiple repos simultaneously but introduces risks around stale context injection and malformed tool responses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Mastra Workflow  │\n│  (Fix this bug) │    │   + Vex Guard    │\n└─────────────────┘    │  Middleware      │\n                       └────────┬─────────┘\n                                │\n                       ┌────────▼─────────┐\n                       │   LLM Agent      │◀──┐\n                       │ (Code Generator) │   │\n                       └────────┬─────────┘   │\n                                │             │\n                       ┌────────▼─────────┐   │\n                       │   Sandbox Exec   │◀──┘\n                       │   + Test Runner  │\n                       └────────┬─────────┘\n                                │\n                       ┌────────▼─────────┐\n                       │  Validation &    │\n                       │   Iteration      │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra workflows pass unverified code between generation, execution, and validation steps, allowing malformed outputs to propagate.",
+        "severity": "high",
+        "mitigation": "Vex middleware validates JSON schemas and code syntax at each transition point."
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Sandbox execution tools return inconsistent formats, confusing the LLM during iterative debugging.",
+        "severity": "medium",
+        "mitigation": "Standardize tool outputs with Vex response validation before agent consumption."
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "KnowledgeBase retrieves outdated repo snapshots, causing agents to debug non-existent code.",
+        "severity": "critical",
+        "mitigation": "Vex freshness checks on retrieved context with repo commit validation."
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Third-party git integrations deliver partial repo states, leading to incomplete code analysis.",
+        "severity": "high",
+        "mitigation": "Vex verifies integration completeness before workflow progression."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Workflow with Coding Agent",
+        "description": "Define the core workflow that orchestrates code analysis, generation, execution, and validation.",
+        "code": "import { createWorkflow, createAgent } from 'mastra';\nimport { z } from 'zod';\n\nconst codingAgent = createAgent({\n  name: 'coding-assistant',\n  model: 'gpt-4o',\n  instructions: `You are a senior software engineer. Analyze code, fix bugs, write tests.`\n});\n\nconst codeGenWorkflow = createWorkflow({\n  name: 'code-debug-workflow',\n  steps: [\n    {\n      name: 'analyze',\n      agent: codingAgent,\n      inputSchema: z.object({\n        repoContext: z.string(),\n        bugDescription: z.string()\n      }),\n      outputSchema: z.object({\n        diagnosis: z.string(),\n        proposedFix: z.string()\n      })\n    },\n    {\n      name: 'execute',\n      tool: 'sandboxExecutor',\n      inputSchema: z.object({ code: z.string() })\n    }\n  ]\n});\n\nexport default codeGenWorkflow;",
+        "language": "typescript"
+      },
+      {
+        "title": "Repository Context Retrieval",
+        "description": "KnowledgeBase integration pulls relevant code files with commit freshness.",
+        "code": "import { KnowledgeBase } from 'mastra/knowledge';\n\nconst repoKB = new KnowledgeBase({\n  name: 'code-repo',\n  sources: [\n    {\n      type: 'git',\n      url: 'https://github.com/user/project',\n      branch: 'main',\n      filePatterns: ['**/*.ts', '**/*.js', 'tests/**/*.test.ts']\n    }\n  ],\n  embeddingModel: 'text-embedding-3-small',\n  chunkSize: 2000,\n  chunkOverlap: 200\n});\n\nconst retrieveContext = async (query: string) => {\n  const results = await repoKB.search({\n    query,\n    limit: 10,\n    filter: { metadata: { commitAfter: '2024-01-01' } }\n  });\n  return results.map(r => r.content).join('\\n');\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Sandbox Execution Tool",
+        "description": "Secure code execution with test validation in isolated environment.",
+        "code": "import { createTool } from 'mastra/tools';\n\nconst sandboxExecutor = createTool({\n  name: 'sandbox_execute',\n  description: 'Execute code in secure sandbox and return results',\n  parameters: z.object({\n    language: z.enum(['typescript', 'python']),\n    code: z.string(),\n    tests: z.string().optional()\n  }),\n  execute: async ({ language, code, tests }) => {\n    const dockerRun = `docker run --rm -i code-sandbox-${language} 'node -e \"${code}\"'`;\n    const result = await execShell(dockerRun);\n    \n    if (tests) {\n      const testResult = await execShell(`docker run --rm -i code-sandbox-${language} 'npm test -- ${tests}'`);\n      return { execution: result, tests: testResult, passed: testResult.includes('PASS') };\n    }\n    \n    return { execution: result, passed: true };\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Iterative Debugging Loop",
+        "description": "Workflow loop that continues until tests pass or max iterations reached.",
+        "code": "const debugWorkflow = createWorkflow({\n  name: 'iterative-debug',\n  steps: [\n    {\n      name: 'generate-fix',\n      agent: codingAgent,\n      inputSchema: z.object({\n        prevError: z.string(),\n        code: z.string()\n      })\n    },\n    {\n      name: 'validate',\n      condition: async (ctx) => {\n        const execResult = await sandboxExecutor(ctx);\n        return !execResult.passed;\n      },\n      maxIterations: 5\n    }\n  ],\n  onComplete: (ctx) => {\n    if (ctx.testsPassed) {\n      return { status: 'success', finalCode: ctx.code };\n    }\n    return { status: 'failed', attempts: ctx.iteration };\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware in Mastra Pipeline",
+        "description": "Wrap Mastra workflow with Vex validation at critical transition points.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'coding-assistant-prod'\n});\n\nconst withVexGuard = async (mastraWorkflow: any, input: any) => {\n  // Pre-execution: Validate input context\n  await vex.verify({\n    data: input,\n    checks: ['no-credential-leakage'],\n    context: { stage: 'input-validation' }\n  });\n  \n  const result = await mastraWorkflow.run(input);\n  \n  // Post-generation: Validate code output\n  await vex.verify({\n    data: result,\n    checks: ['code-correctness', 'security-vulnerabilities'],\n    context: { stage: 'code-generation', language: 'typescript' }\n  });\n  \n  return result;\n};\n\nexport const secureCodingWorkflow = (input: any) => withVexGuard(codeGenWorkflow, input);",
+        "language": "typescript"
+      },
+      {
+        "title": "Code Correctness & Security Check",
+        "description": "Vex policy suite for verifying generated code meets quality standards.",
+        "code": "const codeSafetyPolicy = await vex.policy({\n  name: 'coding-assistant-safety',\n  checks: [\n    {\n      id: 'code-correctness',\n      type: 'llm',\n      prompt: `Review this code for correctness:\\n{{data.code}}\\nCheck syntax, logic errors, and best practices.`\n    },\n    {\n      id: 'security-vulnerabilities',\n      type: 'external',\n      service: 'semgrep',\n      config: {\n        rules: ['javascript/xss', 'typescript/insecure-deserialization']\n      }\n    },\n    {\n      id: 'no-credential-leakage',\n      type: 'regex',\n      patterns: [/\b(?:api_|secret_|password_|token_)[A-Za-z0-9]{32,}/]\n    },\n    {\n      id: 'dependency-safety',\n      type: 'npm',\n      config: { checkVulnerabilities: true }\n    }\n  ]\n});\n\nconst verifyCode = async (code: string) => {\n  return vex.verify({\n    data: { code },\n    policyId: codeSafetyPolicy.id\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Freshness Validation",
+        "description": "Ensure repo context is current before agent processing.",
+        "code": "const validateContextFreshness = async (repoContext: string, repoUrl: string) => {\n  const contextCheck = await vex.verify({\n    data: { context: repoContext, repoUrl },\n    checks: [\n      {\n        id: 'context-freshness',\n        type: 'custom',\n        validator: async (data) => {\n          const latestCommit = await fetchLatestCommit(repoUrl);\n          const contextAge = Date.now() - new Date(latestCommit.date).getTime();\n          return contextAge < 24 * 60 * 60 * 1000; // < 24h\n        }\n      },\n      {\n        id: 'complete-repo-state',\n        type: 'llm',\n        prompt: `Verify this repo context is complete for debugging:\\n{{data.context}}`\n      }\n    ]\n  });\n  \n  return contextCheck.passed;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra AI Coding Assistant",
+      "description": "Add Vex middleware today to eliminate code generation risks and ensure production-ready reliability."
+    }
+  }
+}

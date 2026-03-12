@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Claude Tool Use Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Claude Tool Use pii-filtering",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, PII Filtering failures occur when the model processes or exposes sensitive data like emails, phone numbers, or SSNs during tool calls without redaction, often in multi-step agentic workflows. This manifests as unfiltered PII leaking into tool arguments, logs, or responses, amplified by Claude's parallel tool execution and extended reasoning chains. Without proper safeguards, agents can inadvertently propagate PII across tools, leading to compliance violations and security risks.",
+    "howItManifests": [
+      {
+        "scenario": "Email extraction tool called on customer support query",
+        "symptom": "Tool argument contains unredacted email 'john.doe@example.com' in messages.create() payload",
+        "impact": "PII logged to monitoring systems and exposed in agent traces"
+      },
+      {
+        "scenario": "Parallel contact lookup tools querying CRM and email APIs",
+        "symptom": "Conflicting tool results both return phone numbers without filtering",
+        "impact": "Agent resolves to output raw phone numbers in final response"
+      },
+      {
+        "scenario": "Extended thinking chain analyzing user profile data",
+        "symptom": "Reasoning tokens include SSN patterns before tool use",
+        "impact": "Inconsistent final output redacts PII but intermediate steps leak it"
+      },
+      {
+        "scenario": "Computer use agent scraping screen for contact info",
+        "symptom": "Screen element text with addresses passed to summarization tool",
+        "impact": "Unintended PII extraction and storage in agent memory"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex PII Scan in Tool Arguments",
+        "description": "Intercepts Claude messages.create() tool_use payloads and scans for common PII patterns before API call",
+        "code": "import re\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}-\\d{3}-\\d{4}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b[A-Z]\\d[A-Z] \\d[A-Z]\\d\\b'\n]\n\ndef scan_tool_pii(message):\n    for content in message.get('content', []):\n        if content.get('type') == 'tool_use':\n            args = content.get('input', {})\n            args_str = str(args)\n            for pattern in PII_PATTERNS:\n                if re.search(pattern, args_str):\n                    raise ValueError(f'PII detected in tool args: {args_str[:100]}...')\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Response PII Validator",
+        "description": "Validates Claude tool_use responses for PII leakage using presidio analyzer",
+        "code": "from presidio_analyzer import AnalyzerEngine\n\nanalyzer = AnalyzerEngine()\n\ndef validate_claude_response(response):\n    results = analyzer.analyze(\n        text=str(response),\n        entities=['PHONE_NUMBER', 'EMAIL_ADDRESS', 'US_SSN'],\n        language='en'\n    )\n    if results:\n        pii_entities = [r.entity_type for r in results]\n        raise ValueError(f'PII found in response: {pii_entities}')\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Tool Call Interceptor",
+        "description": "Middleware for Anthropic JS SDK that scans tool_use content before sending",
+        "code": "const PII_REGEX = /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b|\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g;\n\nfunction interceptToolUse(messages: any[]): boolean {\n  for (const msg of messages) {\n    if (msg.role === 'user' && msg.content?.some((c: any) => c.type === 'tool_use')) {\n      const toolContent = msg.content.find((c: any) => c.type === 'tool_use');\n      const argsStr = JSON.stringify(toolContent.input);\n      const matches = argsStr.match(PII_REGEX);\n      if (matches) {\n        throw new Error(`PII detected in tool_use: ${matches.slice(0, 3).join(', ')}`);\n      }\n    }\n  }\n  return true;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Presidio PII Redactor Wrapper",
+        "description": "Automatically redacts PII from tool arguments before Claude API calls",
+        "code": "from presidio_anonymizer import AnonymizerEngine\nfrom presidio_analyzer import AnalyzerEngine\n\nanalyzer = AnalyzerEngine()\nanonymizer = AnonymizerEngine()\n\ndef safe_tool_use(message):\n    for content in message['content']:\n        if content.get('type') == 'tool_use':\n            results = analyzer.analyze(text=str(content['input']), entities=['PHONE_NUMBER', 'EMAIL_ADDRESS'], language='en')\n            content['input'] = anonymizer.anonymize(text=str(content['input']), analyzer_results=results)\n    return message",
+        "language": "python"
+      },
+      {
+        "name": "Claude Messages PII Filter",
+        "description": "Pre-processes all messages.create() inputs to strip PII patterns",
+        "code": "import re\n\nPII_REPLACEMENT = {'EMAIL': '[EMAIL]', 'PHONE': '[PHONE]', 'SSN': '[SSN]'}\nPATTERNS = {\n    'email': r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    'phone': r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b',\n    'ssn': r'\\b\\d{3}-\\d{2}-\\d{4}\\b'\n}\n\ndef filter_pii_messages(messages):\n    filtered = []\n    for msg in messages:\n        filtered_msg = msg.copy()\n        content_str = str(msg)\n        for pii_type, pattern in PATTERNS.items():\n            content_str = re.sub(pattern, PII_REPLACEMENT[pii_type], content_str)\n        filtered.append(filtered_msg)\n    return filtered",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript PII Sanitizer",
+        "description": "Sanitizes tool_use inputs in Anthropic JS client before API submission",
+        "code": "const PII_PATTERNS = {\n  email: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n  phone: /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g\n};\n\nconst PII_REPLACEMENTS = {\n  email: '[EMAIL]',\n  phone: '[PHONE]'\n};\n\nfunction sanitizeToolUse(messages: any[]) {\n  return messages.map(msg => {\n    if (msg.content?.some((c: any) => c.type === 'tool_use')) {\n      const toolContent = msg.content.find((c: any) => c.type === 'tool_use');\n      let sanitizedInput = JSON.stringify(toolContent.input);\n      Object.entries(PII_PATTERNS).forEach(([type, regex]) => {\n        sanitizedInput = sanitizedInput.replace(regex, PII_REPLACEMENTS[type as keyof typeof PII_REPLACEMENTS]);\n      });\n      toolContent.input = JSON.parse(sanitizedInput);\n    }\n    return msg;\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex provides production-grade PII filtering for Claude Tool Use agents by wrapping messages.create() calls with vex.verify(), automatically detecting and redacting sensitive data across tool arguments, responses, and agent reasoning chains. The platform runs entity recognition models (NER) on all tool_use payloads, parallel executions, and computer use screen captures, blocking executions that contain unfiltered PII. Vex's remediation engine can auto-redact detected entities or route to human review, maintaining agent performance while ensuring compliance.\n\nIntegration takes <5 minutes via the vex-sdk, with built-in support for Anthropic's tool use schema validation. Vex traces provide complete audit logs of PII detections, redaction events, and compliance metrics, essential for SOC2 and GDPR requirements. The platform auto-scales with agent traffic and supports custom PII patterns for industry-specific needs like healthcare or finance.",
+      "code": "from vex import verify\nfrom anthropic import Anthropic\n\nclient = Anthropic()\n\n@verify(checks=['pii_filter', 'tool_schema', 'no_cascading_errors'])\ndef safe_claude_agent(prompt: str, tools: list):\n    message = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        tools=tools,\n        messages=[{\"role\": \"user\", \"content\": prompt}],\n        temperature=0\n    )\n    return message\n\n# Usage\nresult = safe_claude_agent(\"Extract contact info from: john.doe@example.com (555) 123-4567\", [contact_tool])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to automatically filter PII across all your Claude Tool Use agents: pip install vex-sdk"
+    }
+  }
+}

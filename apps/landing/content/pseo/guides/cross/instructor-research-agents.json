@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Instructor + Vex Guardrails",
+    "description": "Learn how to build research agents with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor research agents",
+      "Instructor guardrails",
+      "research agents reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies building Research Agents by patching LLM clients to return validated Pydantic models, ensuring structured outputs from web search synthesis tasks. Guardrails are essential for multi-step agents that perform source verification, claim accuracy checks, recency validation, and bias detection. Vex integration prevents common Instructor failures like schema violations and hallucinated enum values, maintaining agent reliability.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Instructor",
+      "description": "Research Agents typically follow a multi-step pipeline: 1) Query decomposition into sub-questions, 2) Web search execution with source retrieval, 3) Content extraction and structured parsing using Instructor's Pydantic models, 4) Claim verification against sources, and 5) Bias/recency analysis before final synthesis. Instructor wraps the LLM client to enforce schemas for extracted facts, sources, and summaries, preventing partial or malformed outputs.\n\nThe agent orchestrates these steps iteratively, using structured outputs to maintain state and validate intermediate results. Common patterns include SourceFact models with URL, excerpt, and recency fields, plus ClaimVerification models scoring accuracy and bias. This ensures downstream synthesis builds on verified data rather than hallucinated content.\n\nVex enhances this by verifying critical outputs like source authenticity and claim validity, catching issues Instructor's schema validation misses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│  User Query     │───▶│ 1. Query Split   │───▶│ 2. Web Search    │\n└─────────────────┘    │ (Instructor)     │    │ + Source Extract │\n                       └──────────────────┘    │ (Instructor)     │\n                                               └──────────────────┘\n                                                            │\n                       ┌──────────────────┐    ┌──────────────────┐\n                       │ 3. Fact Extract  │◀──┤ 4. Verify Claims │\n                       │ (Pydantic Model) │    │ (Vex + Instructor)│\n                       └──────────────────┘    └──────────────────┘\n                                                            │\n                                               ┌──────────────────┐\n                                               │ 5. Synthesize    │\n                                               │ Final Report     │\n                                               └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Structured output validation retries exhausted",
+        "description": "Instructor retries parsing when LLM outputs don't match Pydantic schema, but exhausts after max attempts, leaving agent without structured facts",
+        "severity": "high",
+        "mitigation": "Wrap with Vex.verify() to validate content before schema parsing and provide fallback prompts"
+      },
+      {
+        "name": "Partial extraction missing required fields",
+        "description": "LLM extracts some source facts but omits required fields like 'recency' or 'confidence_score', breaking downstream verification",
+        "severity": "medium",
+        "mitigation": "Vex source verification ensures all critical fields are populated with valid data before Instructor processing"
+      },
+      {
+        "name": "Model hallucinating enum values outside schema",
+        "description": "LLM generates invalid 'bias_type' values like 'political_left' when schema expects 'neutral|positive|negative', causing parsing failures",
+        "severity": "critical",
+        "mitigation": "Vex claim accuracy checks validate enum values against real sources before Instructor validation"
+      },
+      {
+        "name": "Nested object extraction producing inconsistent depth",
+        "description": "Source citation objects have varying nesting levels (some have 'page_num', others don't), breaking uniform fact verification",
+        "severity": "medium",
+        "mitigation": "Instructor's partial=True mode + Vex recency checks normalize nested structures across sources"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Query Decomposition with Instructor",
+        "description": "Split complex research queries into verifiable sub-questions using Pydantic models",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom openai import OpenAI\n\nclass SubQuery(BaseModel):\n    question: str\n    search_query: str = Field(..., description=\"Optimized search terms\")\n    requires_verification: bool\n\nclient = from_openai(OpenAI())\nsub_queries = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=[SubQuery],\n    messages=[{\"role\": \"user\", \"content\": \"Break down: What are the latest AI safety benchmarks?\"}]\n)\n\nfor q in sub_queries:\n    print(f\"Search: {q.search_query} (verify: {q.requires_verification})\")",
+        "language": "python"
+      },
+      {
+        "title": "Source Fact Extraction",
+        "description": "Extract structured facts from search results with source attribution",
+        "code": "from pydantic import BaseModel, Field, HttpUrl\nfrom typing import List, Optional\nfrom instructor import from_openai\nfrom openai import OpenAI\n\nclass SourceFact(BaseModel):\n    claim: str\n    source_url: HttpUrl\n    excerpt: str\n    recency_days: int = Field(..., ge=0)\n    confidence: float = Field(..., ge=0, le=1)\n\nclient = from_openai(OpenAI())\nfacts = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=List[SourceFact],\n    messages=[\n        {\"role\": \"user\", \"content\": \"Extract facts from: [search results]\"},\n        {\"role\": \"system\", \"content\": \"Always include recency_days from publication date\"}\n    ]\n)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Source Verification",
+        "description": "Validate extracted sources using Instructor's Zod integration",
+        "code": "import { fromOpenai } from 'instructor';\nimport { OpenAI } from 'openai';\nimport { z } from 'zod';\n\nconst SourceFact = z.object({\n  claim: z.string(),\n  sourceUrl: z.string().url(),\n  excerpt: z.string().min(50),\n  recencyDays: z.number().min(0),\n  confidence: z.number().min(0).max(1)\n});\n\nconst client = fromOpenai(new OpenAI());\nconst facts = await client.chat.completions.create({\n  model: 'gpt-4o',\n  responseModel: z.array(SourceFact),\n  messages: [{ role: 'user', content: 'Extract from search results...' }]\n});\n\nconsole.log(facts.map(f => `${f.claim} (${f.recencyDays}d)`));",
+        "language": "typescript"
+      },
+      {
+        "title": "Claim Synthesis with Bias Check",
+        "description": "Synthesize verified claims with bias detection",
+        "code": "from pydantic import BaseModel\nfrom enum import Enum\nfrom instructor import from_openai\nfrom openai import OpenAI\n\nclass BiasType(str, Enum):\n    NEUTRAL = \"neutral\"\n    POSITIVE = \"positive\"\n    NEGATIVE = \"negative\"\n\nclass ResearchSummary(BaseModel):\n    summary: str\n    key_claims: list[str]\n    bias_detected: BiasType\n    sources_cited: int\n\nclient = from_openai(OpenAI())\nsummary = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=ResearchSummary,\n    messages=[\n        {\"role\": \"user\", \"content\": \"Synthesize these verified facts:\"},\n        {\"role\": \"system\", \"content\": \"Use only provided sources, detect bias\"}\n    ]\n)\nprint(f\"Summary: {summary.summary} (Bias: {summary.bias_detected})\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Source Verification Wrapper",
+        "description": "Verify source authenticity before Instructor parsing",
+        "code": "import vex\nfrom instructor import from_openai\nfrom pydantic import BaseModel\nfrom openai import OpenAI\n\n@vex.verify(criteria=[\"source_verification\", \"recency_checks\"])\ndef extract_trusted_facts(content: str, sources: list) -> list[dict]:\n    client = from_openai(OpenAI())\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=list,\n        messages=[{\"role\": \"user\", \"content\": f\"Extract from verified sources: {content}\"}]\n    )\n\n# Usage\nfacts = extract_trusted_facts(search_results, source_urls)\n# Vex auto-retries if sources fail verification",
+        "language": "python"
+      },
+      {
+        "title": "Claim Accuracy with Vex",
+        "description": "Validate claims against sources before structured extraction",
+        "code": "import vex\nfrom instructor import from_openai\nfrom openai import OpenAI\n\n@vex.verify(criteria=[\"claim_accuracy\", \"bias_detection\"])\ndef verify_claims(claims: list[str], sources: list[str]) -> dict:\n    client = from_openai(OpenAI())\n    class VerifiedClaim(BaseModel):\n        claim: str\n        verified: bool\n        evidence_score: float\n    \n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=list[VerifiedClaim],\n        messages=[{\"role\": \"user\", \"content\": f\"Verify: {claims} against {sources}\"}]\n    )\n\nverified = verify_claims(extracted_claims, source_texts)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + Instructor Pipeline",
+        "description": "End-to-end verification for TypeScript research agents",
+        "code": "import { verify } from 'vex-sdk';\nimport { fromOpenai } from 'instructor';\nimport OpenAI from 'openai';\n\nconst researchPipeline = verify(\n  async (query: string) => {\n    const client = fromOpenai(new OpenAI());\n    \n    const facts = await client.chat.completions.create({\n      model: 'gpt-4o',\n      responseModel: SourceFactArray,\n      messages: [{ role: 'user', content: query }],\n      criteria: ['source_verification', 'claim_accuracy']\n    });\n    \n    return facts;\n  },\n  { criteria: ['source_verification', 'recency_checks', 'bias_detection'] }\n);\n\n// Usage\nconst results = await researchPipeline('Latest AI benchmarks');",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Research Agents",
+      "description": "Integrate Vex today to eliminate hallucinated sources and ensure claim accuracy in your research pipeline."
+    }
+  }
+}

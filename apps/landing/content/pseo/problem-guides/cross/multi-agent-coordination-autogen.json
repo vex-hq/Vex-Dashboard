@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in AutoGen Agents",
+    "description": "How to detect and fix multi-agent coordination failure in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "AutoGen multi-agent-coordination",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, Multi-Agent Coordination Failure occurs when agents fail to converge on solutions due to misaligned communication protocols or unbounded conversational loops. This manifests as agents endlessly debating without resolution, executing unsafe code from unverified suggestions, or collectively endorsing incorrect outputs. These failures undermine the reliability of multi-agent systems built for complex tasks like code generation or decision-making.",
+    "howItManifests": [
+      {
+        "scenario": "Infinite conversation loops between agents",
+        "symptom": "Agents repeatedly send similar messages without termination condition",
+        "impact": "Uncontrolled token usage and stalled task completion"
+      },
+      {
+        "scenario": "Code execution producing unsafe outputs",
+        "symptom": "One agent suggests malicious code that others execute without validation",
+        "impact": "System compromise or data corruption from untrusted code execution"
+      },
+      {
+        "scenario": "Agents agreeing on incorrect conclusions",
+        "symptom": "Groupthink where all agents validate wrong solution through mutual affirmation",
+        "impact": "Deployment of fundamentally flawed code or decisions"
+      },
+      {
+        "scenario": "Uncontrolled token spending in multi-turn debates",
+        "symptom": "Debate rounds exceed configured limits without convergence",
+        "impact": "Excessive API costs and timeout failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Conversation Loop Detector",
+        "description": "Monitors message similarity and round count to detect infinite loops in AutoGen group chats",
+        "code": "from autogen import GroupChat, GroupChatManager\nimport hashlib\n\ndef detect_loop(messages, max_rounds=20):\n    recent_msgs = messages[-10:]\n    msg_hashes = [hashlib.md5(msg.content.encode()).hexdigest() for msg in recent_msgs]\n    if len(set(msg_hashes)) < len(msg_hashes) * 0.3:\n        return {'type': 'loop_detected', 'rounds': len(messages), 'similarity': True}\n    return None\n\n# Usage in group chat\nchat_history = []\ndef loop_filter(message):\n    chat_history.append(message)\n    if len(chat_history) > max_rounds:\n        result = detect_loop(chat_history)\n        if result:\n            return 'TERMINATE'\n    return message",
+        "language": "python"
+      },
+      {
+        "name": "Unsafe Code Detector",
+        "description": "Scans agent messages for dangerous code patterns before execution in AutoGen's code executor",
+        "code": "import re\n\ndef detect_unsafe_code(message):\n    dangerous_patterns = [\n        r'system\\(\\s*[\"\\']shutdown[\"\\']\\s*\\)',\n        r'rm\\s+-rf\\s+',\n        r'del\\s+\\\\*\\*',\n        r'exec\\(input\\(\\s*\\)',\n        r'__import__\\(\\s*[\"\\']os[\"\\']\\s*\\)'\n    ]\n    if '```python' in message.content:\n        code_block = re.search(r'```python\\n(.*?)```', message.content, re.DOTALL)\n        if code_block:\n            code = code_block.group(1)\n            for pattern in dangerous_patterns:\n                if re.search(pattern, code):\n                    return {'type': 'unsafe_code', 'pattern': pattern}\n    return None\n\ndef safe_reply_filter(message):\n    if detect_unsafe_code(message):\n        return 'Code execution blocked: unsafe patterns detected.'\n    return message",
+        "language": "python"
+      },
+      {
+        "name": "Consensus Error Detector",
+        "description": "Tracks agent agreement patterns to identify when all agents converge on incorrect solutions",
+        "code": "from collections import Counter\n\ndef detect_false_consensus(messages):\n    # Extract final conclusions from last 3 messages per agent\n    conclusions = []\n    for msg in messages[-9:]:\n        if 'final answer' in msg.content.lower() or 'solution' in msg.content.lower():\n            conclusions.append(msg.content.lower()[:100])\n    \n    if len(conclusions) >= 3:\n        counts = Counter(conclusions)\n        top_consensus = counts.most_common(1)[0]\n        if top_consensus[1] / len(conclusions) > 0.8:\n            # Verify if consensus is likely wrong (simple heuristic)\n            if 'error' in top_consensus[0] or len(top_consensus[0].split()) < 10:\n                return {'type': 'false_consensus', 'confidence': top_consensus[1]/len(conclusions)}\n    return None\n\n# Integrate as reply filter\ndef consensus_filter(message):\n    result = detect_false_consensus(chat_history + [message])\n    if result:\n        return f'⚠️ Potential false consensus detected: {result}'\n    return message",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Rounds Termination",
+        "description": "Enforce strict round limits with early termination in AutoGen GroupChat",
+        "code": "from autogen import GroupChat, GroupChatManager\n\nconfig_list = [{'model': 'gpt-4', 'api_key': 'your-key'}]\n\n# Create agents with termination logic\nclass SafeGroupChat(GroupChat):\n    def __init__(self, *args, max_rounds=15, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_rounds = max_rounds\n        self.round_count = 0\n    \n    def append(self, *args, **kwargs):\n        if self.round_count >= self.max_rounds:\n            raise Exception('Max rounds exceeded - terminating conversation')\n        super().append(*args, **kwargs)\n        self.round_count += 1\n\nllm_config = {'config_list': config_list, 'timeout': 60}\ngroupchat = SafeGroupChat(\n    agents=[user_proxy, coder, critic],\n    messages=[],\n    max_round=15,\n    speaker_selection_method='auto'\n)\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)",
+        "language": "python"
+      },
+      {
+        "name": "Code Sandbox Executor",
+        "description": "Wrap AutoGen code execution in isolated sandbox with strict permissions",
+        "code": "import subprocess\nimport tempfile\nimport os\nfrom autogen import register_function\n\ndef safe_execute_code(code):\n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    \n    try:\n        # Restricted execution environment\n        result = subprocess.run(\n            ['python', temp_file],\n            capture_output=True,\n            text=True,\n            timeout=30,\n            env={'PYTHONPATH': '', 'HOME': '/tmp'}\n        )\n        os.unlink(temp_file)\n        return {\n            'stdout': result.stdout,\n            'stderr': result.stderr,\n            'returncode': result.returncode\n        }\n    except subprocess.TimeoutExpired:\n        os.unlink(temp_file)\n        return {'error': 'Execution timeout'}\n\n# Register as safe function\nregister_function(\n    safe_execute_code,\n    caller=user_proxy,\n    executor=coder,\n    name='safe_code_exec',\n    description='Execute Python code safely in sandbox'\n)",
+        "language": "python"
+      },
+      {
+        "name": "Dissent Injection Fix",
+        "description": "Force periodic disagreement rounds to break false consensus in AutoGen debates",
+        "code": "from autogen import ConversableAgent\n\nclass DissentAgent(ConversableAgent):\n    def __init__(self, *args, dissent_freq=3, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.message_count = 0\n        self.dissent_freq = dissent_freq\n    \n    def generate_reply(self, messages, sender, config):\n        self.message_count += 1\n        if self.message_count % self.dissent_freq == 0:\n            return self.inject_dissent(messages)\n        return super().generate_reply(messages, sender, config)\n    \n    def inject_dissent(self, messages):\n        return \"🤔 Let me challenge the consensus: What if we're missing an edge case? \" \\\n               \"Consider the opposite approach - [counter-proposal]. \" \\\n               \"Let's validate assumptions before proceeding.\"\n\n# Usage\ndissent_critic = DissentAgent(\n    name=\"DissentCritic\",\n    system_message=\"Challenge consensus every 3rd response.\",\n    llm_config=llm_config\n)\n\n# Add to groupchat\nagents = [user_proxy, coder, dissent_critic, validator]",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates seamlessly as a reply function filter in AutoGen, automatically detecting coordination failures across conversation loops, unsafe code, false consensus, and token overspending. By registering Vex's analysis functions, every agent message passes through real-time reliability checks that catch issues before they cascade through the multi-agent system. Vex provides structured failure reports with remediation suggestions, enabling automatic recovery or human intervention.\n\nThe integration requires only `pip install autogen vex-sdk` and a single registration call. Vex monitors AutoGen's native message objects, preserving full context while adding zero-latency failure detection through compiled filters. When failures are detected, Vex can terminate conversations, inject recovery prompts, or escalate to human review - all without modifying core agent logic.\n\nVex's AutoGen integration supports both GroupChat and two-agent workflows, automatically scaling detection rules based on agent count and conversation complexity. This eliminates manual monitoring and ensures production-grade reliability for multi-agent deployments.",
+      "code": "import autogen\nfrom vex_sdk import VexFilter\n\n# Install: pip install autogen vex-sdk\nllm_config = {'config_list': [{'model': 'gpt-4o', 'api_key': os.getenv(\"OPENAI_API_KEY\")}]}\n\n# Initialize Vex filter for AutoGen\nvex = VexFilter(\n    project_id=\"your-vex-project\",\n    detectors=[\n        \"autogen-loop-detector\",\n        \"unsafe-code-detector\", \n        \"false-consensus-detector\",\n        \"token-overspend-detector\"\n    ]\n)\n\n# Register Vex as reply filter for all agents\nuser_proxy = autogen.UserProxyAgent(\n    name=\"user\",\n    code_execution_config=False,\n    reply_filter=vex.filter_messages  # Vex integration\n)\n\ncoder = autogen.AssistantAgent(\n    name=\"coder\",\n    llm_config=llm_config,\n    reply_filter=vex.filter_messages\n)\n\n# GroupChat automatically inherits filters from agents\ngroupchat = autogen.GroupChat([user_proxy, coder, critic], max_round=20)\nmanager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)\n\n# Vex auto-generates remediation reports\nprint(vex.get_failure_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AutoGen coordination failures with one line of integration."
+    }
+  }
+}

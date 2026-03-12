@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "dspy",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in DSPy Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in DSPy agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "DSPy rag-retrieval-quality",
+      "DSPy reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In DSPy, RAG Retrieval Quality Optimization issues manifest when retrieval modules fail to fetch relevant context, leading to degraded LM performance despite signature optimization. DSPy's optimizers like BootstrapFewShot can overfit prompts to noisy retrieved contexts, producing plausible but inaccurate responses. This is exacerbated by module composition where ChainOfThought or Retrieve modules propagate low-quality retrievals upstream, violating assertions at inference.",
+    "howItManifests": [
+      {
+        "scenario": "BootstrapFewShot optimizer tunes RAGChain on dev set with irrelevant retrieved chunks",
+        "symptom": "High train accuracy but dev set responses cite wrong documents with confident tone",
+        "impact": "Production hallucinations increase 3x as model trusts bad context"
+      },
+      {
+        "scenario": "Retrieve module returns top-k passages with low semantic similarity to query",
+        "symptom": "ChainOfThought module generates elaborate reasoning chains citing irrelevant facts",
+        "impact": "Assertion 'answer_cites_correct_doc' fails 70% of test cases"
+      },
+      {
+        "scenario": "Multi-hop RAG composes Retrieve → GenerateAnswer → Retrieve",
+        "symptom": "Second retrieval drifts due to first generation's factual errors",
+        "impact": "Final answer accuracy drops from 85% to 32% across composition"
+      },
+      {
+        "scenario": "ColBERTv2 retriever optimized but returns passages with keyword overlap only",
+        "symptom": "Signature outputs format: context=wrong_docs, answer=plausible_fiction",
+        "impact": "Unexpected output distribution: 60% confident wrong vs 20% uncertain correct"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Score Monitor",
+        "description": "Wrap Retrieve forward() and compute cosine similarity between query embedding and top-k passages using DSPy's ColBERTv2",
+        "code": "import dspy\nfrom dspy.retrieve import ColBERTv2\n\nclass RetrievalQualityMonitor(dspy.Module):\n    def __init__(self):\n        self.retrieve = ColBERTv2(url='http://20.102.90.50:2017/wiki17_abstracts')\n        \n    def forward(self, query):\n        passages = self.retrieve(query).passages\n        query_emb = self.retrieve.encode_query(query)\n        rel_scores = [self.cosine_sim(query_emb, p) for p in passages[:5]]\n        avg_rel = sum(rel_scores) / len(rel_scores)\n        \n        if avg_rel < 0.7:\n            print(f'LOW RETRIEVAL QUALITY: {query} -> avg_rel={avg_rel:.3f}')\n        \n        return dspy.Prediction(passages=passages, relevance=avg_rel)\n    \n    def cosine_sim(self, a, b):\n        return dspy.settings.lm.inspect.embed(a) @ dspy.settings.lm.inspect.embed(b)",
+        "language": "python"
+      },
+      {
+        "name": "RAG Assertion Chain Validator",
+        "description": "Add DSPy assertions to verify retrieved context contains answer keywords and spans",
+        "code": "class RAGWithAssertions(dspy.Module):\n    def __init__(self):\n        self.retrieve = dspy.Retrieve(k=5)\n        self.generate = dspy.ChainOfThought('query, context -> answer')\n    \n    def forward(self, query):\n        context = self.retrieve(query)\n        prediction = self.generate(query=query, context=context.passages)\n        \n        # Assert context relevance\n        context_words = ' '.lower().split()\n        answer_words = prediction.answer.lower().split()\n        overlap = len(set(answer_words) & set(context_words)) / len(answer_words)\n        \n        assert overlap > 0.3, f'Low context overlap: {overlap:.2f}'\n        \n        return prediction",
+        "language": "python"
+      },
+      {
+        "name": "Optimizer Drift Detector",
+        "description": "Compare pre/post-optimization retrieval distributions using KL divergence",
+        "code": "import numpy as np\nfrom scipy.stats import entropy\n\nclass OptimizationDriftDetector:\n    def __init__(self, baseline_retriever):\n        self.baseline = baseline_retriever\n        \n    def detect_drift(self, optimized_retriever, test_queries):\n        baseline_scores = []\n        opt_scores = []\n        \n        for query in test_queries[:100]:\n            base_ctx = self.baseline(query).passages\n            opt_ctx = optimized_retriever(query).passages\n            \n            baseline_scores.append(np.mean([len(p.split()) for p in base_ctx]))\n            opt_scores.append(np.mean([len(p.split()) for p in opt_ctx]))\n        \n        kl_div = entropy(np.histogram(baseline_scores, bins=10)[0], \n                        np.histogram(opt_scores, bins=10)[0])\n        \n        if kl_div > 0.5:\n            print(f'OPTIMIZER DRIFT DETECTED: KL={kl_div:.3f}')\n        \n        return kl_div",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Dense+Sparse Retrieval",
+        "description": "Combine ColBERTv2 dense retrieval with BM25 sparse for diverse, relevant passages",
+        "code": "class HybridRAG(dspy.Module):\n    def __init__(self):\n        self.dense = ColBERTv2(url='http://20.102.90.50:2017/wiki17_abstracts')\n        self.sparse = dspy.BM25Retriever(documents=load_wiki_corpus())\n        \n    def forward(self, query):\n        dense_results = self.dense(query, k=3)\n        sparse_results = self.sparse(query, k=3)\n        \n        # Deduplicate and rerank\n        combined = list(set(dense_results.passages + sparse_results.passages))\n        reranked = self.rerank(query, combined)\n        \n        return dspy.Prediction(passages=reranked[:5])\n    \n    def rerank(self, query, passages):\n        scores = []\n        for passage in passages:\n            score = self.dense.score([query], [passage])[0,0]\n            scores.append(score)\n        return [p for _, p in sorted(zip(scores, passages), reverse=True)]",
+        "language": "python"
+      },
+      {
+        "name": "Retrieval Constrained Optimization",
+        "description": "BootstrapFewShot with retrieval quality metric in metric fn",
+        "code": "def rag_metric_with_retrieval(example, pred, trace=None):\n    # Standard answer accuracy\n    acc = dspy.evaluate.answer_exact_match(example, pred)\n    \n    # Retrieval quality (context must contain gold answer keywords)\n    gold_words = set(example.answer.lower().split())\n    ctx_words = set(' '.join(trace.retrieval.context).lower().split())\n    retrieval_rel = len(gold_words & ctx_words) / len(gold_words)\n    \n    return acc * 0.7 + retrieval_rel * 0.3\n\n# Use in optimizer\nteleprompter = BootstrapFewShot(metric=rag_metric_with_retrieval)\noptimized_rag = teleprompter.compile(rag_module, trainset=trainset)",
+        "language": "python"
+      },
+      {
+        "name": "Self-Reflective RAG with Re-retrieval",
+        "description": "Add confidence-based re-retrieval when initial retrieval scores low",
+        "code": "class ReflectiveRAG(dspy.Module):\n    def __init__(self):\n        self.retrieve = dspy.Retrieve(k=5)\n        self.generate = dspy.ChainOfThought('query, context -> answer, confidence')\n        self.rerank = ColBERTv2()\n        \n    def forward(self, query):\n        context = self.retrieve(query)\n        pred = self.generate(query=query, context=context.passages)\n        \n        if pred.confidence < 0.7:\n            print('Low confidence, re-retrieving...')\n            # Use answer snippet to refine query\n            refined_query = f'{query} {pred.answer[:50]}'\n            context = self.rerank(refined_query, k=5)\n            pred = self.generate(query=refined_query, context=context.passages)\n        \n        return pred",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex wraps DSPy module forward() calls to automatically capture retrieval traces, compute relevance metrics, and flag quality violations without changing agent code. It detects the four common failure modes by analyzing input/output distributions and assertion violations in real-time during optimization and inference. Vex's DSPy integration runs continuously across teleprompter.compile() and production predict() calls, surfacing issues like overfitting retrieval prompts or composition drift before they impact accuracy.\n\nRemediation workflows trigger hybrid retrieval upgrades, constrained optimization, or self-reflective reranking when violations exceed thresholds. Vex maintains a historical baseline of healthy retrieval distributions, alerting when KL divergence indicates optimizer drift. This ensures RAG quality remains stable across DSPy program evolution.",
+      "code": "import vex\nimport dspy\n\n# 1. Decorate your DSPy RAG module\n@vex.verify(\n    assertions={\n        'retrieval_relevance': 'avg_cosine_sim(query_emb, top5_passages) > 0.7',\n        'no_drift': 'kl_div(retrieval_scores, baseline_scores) < 0.5',\n        'context_overlap': 'answer_keywords_in_context > 0.3'\n    },\n    remediation='upgrade_to_hybrid_retrieval'\n)\nclass ProductionRAG(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.retrieve = dspy.Retrieve(k=5)\n        self.generate = dspy.ChainOfThought('query, context -> answer')\n    \n    def forward(self, query):\n        ctx = self.retrieve(query)\n        pred = self.generate(query=query, context=ctx.passages)\n        return pred\n\n# 2. Vex auto-instruments optimizer too\nteleprompter = dspy.BootstrapFewShot()\noptimized_rag = teleprompter.compile(ProductionRAG(), trainset=trainset)\n\n# Vex dashboard shows: 23% retrieval violations, auto-applied hybrid fix",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex (`pip install vex-sdk`) and catch RAG quality issues before they tank your DSPy agent's production accuracy."
+    }
+  }
+}

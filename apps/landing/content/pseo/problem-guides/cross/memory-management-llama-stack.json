@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "llama-stack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Llama Stack Agents",
+    "description": "How to detect and fix ai agent memory management in Llama Stack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Llama Stack memory-management",
+      "Llama Stack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Llama Stack agents, AI Agent Memory Management issues arise from improper handling of the memory bank's retrieval and update mechanisms, leading to hallucinated document associations and context drift. Agents often fail to maintain coherent memory state across turns, causing repeated retrieval of irrelevant memories or loss of critical context. This manifests uniquely through Llama Stack's standardized memory APIs, where retrieval-augmented generation (RAG) pipelines produce unreliable associations between queries and stored documents.",
+    "howItManifests": [
+      {
+        "scenario": "Memory bank retrieval during multi-turn conversations",
+        "symptom": "Agent returns document IDs that don't match query semantic similarity",
+        "impact": "Hallucinated context leads to incorrect tool calls and conversation derailment"
+      },
+      {
+        "scenario": "Long-running agentic loops with memory updates",
+        "symptom": "Memory bank size grows exponentially without relevance pruning",
+        "impact": "Retrieval latency spikes and token limits exceeded"
+      },
+      {
+        "scenario": "Safety filtering on memory retrieval results",
+        "symptom": "Benign memory chunks flagged as unsafe, causing blank responses",
+        "impact": "Agent loses conversational context and appears unresponsive"
+      },
+      {
+        "scenario": "Tool response memory persistence",
+        "symptom": "Tool outputs not properly schema-validated before memory storage",
+        "impact": "Corrupted memory entries poison future retrievals"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Retrieval Hallucination Detector",
+        "description": "Monitors Llama Stack memory bank retrievals for semantic mismatch between query embeddings and returned document chunks",
+        "code": "from llama_stack_client import LlamaStackAgent\nfrom vex_sdk import verify\n\nagent = LlamaStackAgent()\n\n@verify(check='memory_retrieval_hallucination')\ndef detect_memory_hallucination(query, retrieved_docs):\n    from sentence_transformers import SentenceTransformer, util\n    model = SentenceTransformer('all-MiniLM-L6-v2')\n    \n    query_emb = model.encode(query)\n    doc_embs = model.encode([doc['content'] for doc in retrieved_docs])\n    \n    similarities = util.cos_sim(query_emb, doc_embs)[0]\n    avg_similarity = float(similarities.mean())\n    \n    if avg_similarity < 0.3:\n        return {\n            'pass': False,\n            'score': avg_similarity,\n            'failure': f'Low semantic similarity: {avg_similarity:.3f}',\n            'retrieved_doc_ids': [doc['doc_id'] for doc in retrieved_docs]\n        }\n    return {'pass': True, 'score': avg_similarity}",
+        "language": "python"
+      },
+      {
+        "name": "Memory Bank Bloat Monitor",
+        "description": "Tracks memory bank growth rate and detects when irrelevant entries accumulate without pruning",
+        "code": "from llama_stack_client import MemoryBank\n\n@verify(check='memory_bank_bloat')\ndef detect_memory_bloat(memory_bank: MemoryBank):\n    stats = memory_bank.get_stats()\n    total_entries = stats['total_entries']\n    active_entries = stats['active_entries']\n    growth_rate = stats.get('growth_rate', 0)\n    \n    bloat_ratio = (total_entries - active_entries) / max(total_entries, 1)\n    \n    if bloat_ratio > 0.4 or growth_rate > 10:\n        return {\n            'pass': False,\n            'bloat_ratio': bloat_ratio,\n            'growth_rate': growth_rate,\n            'total_entries': total_entries,\n            'failure': f'Bloat ratio {bloat_ratio:.2f}, growth {growth_rate}',\n        }\n    return {'pass': True}",
+        "language": "python"
+      },
+      {
+        "name": "Safety False Positive Detector",
+        "description": "Identifies when Llama Stack safety shield blocks benign memory retrievals",
+        "code": "@verify(check='safety_false_positive')\ndef detect_safety_false_positives(safety_events):\n    benign_blocked = 0\n    total_blocked = 0\n    \n    for event in safety_events:\n        if event['blocked'] and event['confidence'] < 0.3:\n            benign_blocked += 1\n        if event['blocked']:\n            total_blocked += 1\n    \n    false_positive_rate = benign_blocked / max(total_blocked, 1)\n    \n    if false_positive_rate > 0.25:\n        return {\n            'pass': False,\n            'false_positive_rate': false_positive_rate,\n            'benign_blocked': benign_blocked,\n            'total_blocked': total_blocked\n        }\n    return {'pass': True}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Semantic Pruning Filter",
+        "description": "Automatically prunes low-relevance memory entries before Llama Stack retrieval",
+        "code": "from llama_stack_client import MemoryBank\nfrom sentence_transformers import SentenceTransformer, util\n\nclass SemanticPruner:\n    def __init__(self):\n        self.model = SentenceTransformer('all-MiniLM-L6-v2')\n    \n    def prune_memory(self, memory_bank: MemoryBank, query: str, threshold: float = 0.4):\n        query_emb = self.model.encode(query)\n        \n        # Get all memory entries\n        entries = memory_bank.list_entries(limit=1000)\n        \n        # Calculate similarities\n        contents = [e['content'] for e in entries]\n        doc_embs = self.model.encode(contents)\n        similarities = util.cos_sim(query_emb, doc_embs)[0]\n        \n        # Prune low-relevance entries\n        to_prune = [entries[i] for i, sim in enumerate(similarities) if sim < threshold]\n        \n        for entry in to_prune:\n            memory_bank.delete(entry['doc_id'])\n        \n        return len(to_prune)",
+        "language": "python"
+      },
+      {
+        "name": "Schema-Validated Memory Writer",
+        "description": "Ensures tool responses conform to expected schema before Llama Stack memory storage",
+        "code": "from pydantic import BaseModel, ValidationError\nfrom llama_stack_client import MemoryBank\n\nclass ToolResponse(BaseModel):\n    tool_name: str\n    args: dict\n    result: dict\n    timestamp: str\n\n@verify(check='schema_validated_memory')\ndef safe_memory_write(memory_bank: MemoryBank, tool_output: dict):\n    try:\n        validated = ToolResponse(**tool_output)\n        memory_bank.write(\n            doc_id=f\"tool_{validated.timestamp}\",\n            content=str(validated),\n            metadata={'tool_name': validated.tool_name}\n        )\n        return {'pass': True, 'doc_id': validated.timestamp}\n    except ValidationError as e:\n        return {\n            'pass': False,\n            'error': str(e),\n            'raw_output': tool_output\n        }",
+        "language": "python"
+      },
+      {
+        "name": "Safety Shield Override",
+        "description": "Bypasses false positives in Llama Stack safety filtering for known benign memory patterns",
+        "code": "from llama_stack_client import LlamaStackAgent\n\nBENIGN_PATTERNS = [\n    'retrieved memory',\n    'tool response',\n    'conversation history',\n    'document chunk'\n]\n\nclass SafeMemoryRetriever:\n    def __init__(self, agent: LlamaStackAgent):\n        self.agent = agent\n    \n    def retrieve_with_safety_override(self, query: str, max_results: int = 5):\n        results = self.agent.memory_bank.retrieve(query, limit=max_results)\n        \n        filtered = []\n        for doc in results:\n            # Check if safety-blocked but matches benign pattern\n            if doc.get('safety_blocked') and any(pattern in doc['content'] for pattern in BENIGN_PATTERNS):\n                doc['safety_overridden'] = True\n                filtered.append(doc)\n            elif not doc.get('safety_blocked'):\n                filtered.append(doc)\n        \n        return filtered",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex provides continuous monitoring of Llama Stack memory operations through its post-processing verification layer. Every agent turn's memory retrieval and update is automatically wrapped with vex.verify(), catching issues like hallucinated associations and bloat in real-time. The platform maintains historical baselines of healthy memory behavior, flagging deviations instantly.\n\nVex's automation goes beyond detection with auto-remediation workflows. When memory issues are detected, Vex can trigger semantic pruning, schema validation, or safety overrides automatically based on predefined policies. This ensures Llama Stack agents maintain reliable memory state without manual intervention, even in production deployments handling thousands of conversations daily.\n\nIntegration requires just wrapping your LlamaStackAgent response handler with vex.verify(). Vex handles the rest: metric collection, anomaly detection, and remediation execution through its agent reliability dashboard.",
+      "code": "from vex_sdk import verify\nfrom llama_stack_client import LlamaStackAgent\n\n# Initialize Llama Stack agent\nagent = LlamaStackAgent(memory_bank=True)\n\n@verify(\n    checks=[\n        'memory_retrieval_hallucination',\n        'memory_bank_bloat',\n        'safety_false_positive',\n        'schema_validated_memory'\n    ],\n    auto_remediate=True\n)\ndef agent_turn(user_message: str):\n    # Llama Stack memory retrieval\n    context = agent.memory_bank.retrieve(user_message, limit=5)\n    \n    # Agent reasoning with memory\n    response = agent.generate(\n        messages=[{'role': 'user', 'content': user_message}],\n        context=context\n    )\n    \n    # Auto-tool calling with schema validation\n    if response.get('tool_calls'):\n        tool_results = agent.execute_tools(response['tool_calls'])\n        agent.memory_bank.write_tool_results(tool_results)\n    \n    return response\n\n# Production deployment\nresult = agent_turn('What’s the latest project status?')\nif not result.get('vex_passed'):\n    print(f'Blocked: {result[\"vex_failure\"]}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK today and eliminate Llama Stack memory issues with one line of code: pip install vex-sdk"
+    }
+  }
+}

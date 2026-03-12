@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with CrewAI + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI ai chatbot",
+      "CrewAI guardrails",
+      "ai chatbot reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Chatbot with CrewAI enables multi-agent collaboration for handling complex conversational tasks like intent classification, RAG, and multi-turn memory. However, agent delegation loops, task drift, and hallucinations can lead to incoherent responses, safety violations, or PII leaks in high-risk chat environments. Vex integration provides runtime verification to ensure response accuracy, coherence, and safety across crew tasks.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with CrewAI",
+      "description": "The CrewAI-powered AI Chatbot uses specialized agents: an IntentClassifierAgent to route user queries, a RetrievalAgent for RAG-based context fetching, a ResponseGeneratorAgent for crafting replies, and a SafetyCheckerAgent for final validation. Agents share a memory store for multi-turn context and collaborate via a Crew orchestrator that delegates tasks sequentially or in parallel based on conversation state.\n\nEach agent executes tools (e.g., vector DB search, LLM calls) and passes structured outputs. The architecture handles intent → retrieval → generation → verification flow, with shared memory preventing context loss. Vex callbacks intercept task outputs for guardrail checks before agent handoffs.\n\nThis modular design scales for production chatbots but risks propagation errors if one agent's hallucination or loop contaminates the crew.",
+      "diagram": "User Input\n    ↓\n[IntentClassifierAgent] → classify_intent_tool\n    ↓\n[RetrievalAgent] → vector_db_search_tool → Context\n    ↓\n[ResponseGeneratorAgent] → llm_generate_tool → Draft Response\n    ↓ (Vex Callback)\n[SafetyCheckerAgent] → safety_filter_tool → Final Response\n    ↓\nUser Output\n\nShared: Memory Store ↔ All Agents"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "IntentClassifier repeatedly delegates to RetrievalAgent without progress",
+        "severity": "critical",
+        "mitigation": "Vex task callback enforces delegation depth limits and loop detection"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "RetrievalAgent fabricates search results passed to ResponseGenerator",
+        "severity": "high",
+        "mitigation": "Vex verifies tool outputs against ground truth schemas before agent handoff"
+      },
+      {
+        "name": "Task drift in conversations",
+        "description": "ResponseGenerator reinterprets safety instructions as creative liberties",
+        "severity": "high",
+        "mitigation": "Vex semantic similarity checks ensure outputs align with conversation objectives"
+      },
+      {
+        "name": "Inconsistent safety filtering",
+        "description": "SafetyCheckerAgent misses PII or harmful content variably across turns",
+        "severity": "critical",
+        "mitigation": "Vex deterministic PII/safety classifiers override agent decisions"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "CrewAI Chatbot Crew Setup",
+        "description": "Define specialized agents and crew with shared memory for multi-turn chat",
+        "code": "from crewai import Agent, Task, Crew\nfrom langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model=\"gpt-4o-mini\")\n\nintent_agent = Agent(\n    role='Intent Classifier',\n    goal='Classify user intent and route to retrieval or direct response',\n    backstory='Expert at understanding conversational intent',\n    llm=llm,\n    verbose=True\n)\n\nretrieval_agent = Agent(\n    role='Context Retriever',\n    goal='Fetch relevant context via RAG for informed responses',\n    backstory='RAG specialist with vector DB access',\n    llm=llm,\n    verbose=True\n)\n\ncrew = Crew(\n    agents=[intent_agent, retrieval_agent],\n    tasks=[],\n    memory=True,\n    verbose=2\n)",
+        "language": "python"
+      },
+      {
+        "title": "Intent Classification Task",
+        "description": "Task for classifying user query and deciding next agent delegation",
+        "code": "from crewai import Task\n\ndef create_intent_task(user_query: str):\n    return Task(\n        description=f\"\"\"\n        Analyze: '{user_query}'\n        1. Classify intent: [greeting, question, request, safety_concern]\n        2. If question/request → delegate to retrieval_agent with query\n        3. If greeting → direct polite response\n        4. Return structured output: {{'intent': str, 'next_action': str, 'query': str}}\n        \"\"\"\",\n        agent=intent_agent,\n        context=[user_query],\n        expected_output=\"JSON with intent classification and delegation decision\"\n    )",
+        "language": "python"
+      },
+      {
+        "title": "RAG Retrieval Task with Memory",
+        "description": "Retrieval task using conversation memory and vector search tool",
+        "code": "retrieval_task = Task(\n    description=\"\"\"Using conversation memory and user query:\n    1. Search knowledge base for relevant context\n    2. Return top 3 most relevant documents\n    3. Format as: {{'context': [doc1, doc2, doc3], 'sources': [urls]}}\n    Prioritize recency and query relevance.\"\"\",\n    agent=retrieval_agent,\n    expected_output=\"JSON with retrieved context and sources\",\n    context=[intent_task]  # Chains from intent output\n)\n\ncrew.tasks = [intent_task, retrieval_task]",
+        "language": "python"
+      },
+      {
+        "title": "Chatbot Execution Loop",
+        "description": "Multi-turn conversation loop kicking off crew for each user message",
+        "code": "def chatbot_loop():\n    memory = []\n    while True:\n        user_input = input(\"You: \")\n        if user_input.lower() == 'quit': break\n        \n        intent_task = create_intent_task(user_input)\n        response_task = Task(\n            description=f\"Generate response using context for: {user_input}\",\n            agent=response_agent\n        )\n        crew.tasks = [intent_task, retrieval_task, response_task]\n        \n        result = crew.kickoff()\n        print(f\"Bot: {result}\")\n        memory.append({\"user\": user_input, \"bot\": result})",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Task Callback for Loop Prevention",
+        "description": "Add Vex callback to detect delegation loops across crew tasks",
+        "code": "import vex\n\n@vex.checkpoint(\n    name=\"crew_delegation_limit\",\n    spec={\n        \"max_delegations\": 3,\n        \"blocked_patterns\": [\"redelegate\", \"ask.*again\"]\n    }\n)\ndef check_delegation_loop(task_output: str, context: dict) -> bool:\n    delegation_count = context.get('delegation_count', 0)\n    if delegation_count > 3:\n        return False\n    return \"loop\" not in task_output.lower()\n\n# Apply to agent tasks\nintent_task.checkpoint = check_delegation_loop\nretrieval_task.checkpoint = check_delegation_loop",
+        "language": "python"
+      },
+      {
+        "title": "Hallucination + PII Verification Callback",
+        "description": "Vex checkpoint validates tool outputs and detects PII before agent handoff",
+        "code": "@vex.checkpoint(\n    name=\"rag_pii_safety\",\n    spec={\n        \"hallucination_threshold\": 0.1,\n        \"pii_entities\": [\"PHONE_NUMBER\", \"EMAIL\", \"SSN\"],\n        \"safety_categories\": [\"hate\", \"violence\"]\n    }\n)\ndef verify_retrieval_output(output: str, sources: list) -> bool:\n    # Check if output matches source content\n    hallucination_score = vex.hallucination_score(output, sources)\n    \n    # PII detection\n    pii_detected = vex.pii_scan(output)\n    \n    # Safety filtering\n    safety_score = vex.safety_classify(output)\n    \n    return (hallucination_score < 0.1 and \n            not pii_detected and \n            safety_score > 0.8)\n\nretrieval_task.checkpoint = verify_retrieval_output",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Guardrail",
+        "description": "Ensure response maintains conversation thread coherence across turns",
+        "code": "@vex.checkpoint(\n    name=\"conversation_coherence\",\n    spec={\"semantic_drift_threshold\": 0.3}\n)\ndef check_coherence(response: str, conversation_history: list) -> bool:\n    if not conversation_history:\n        return True\n    \n    # Check semantic similarity to conversation thread\n    thread_embedding = vex.embed(\" \".join([msg['user'] + msg['bot'] for msg in conversation_history[-3:]]))\n    response_embedding = vex.embed(response)\n    \n    similarity = vex.cosine_similarity(thread_embedding, response_embedding)\n    \n    # Verify response addresses last user intent\n    return similarity > 0.7\n\nresponse_task.checkpoint = lambda output, ctx: check_coherence(output, ctx.get('memory', []))",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI AI Chatbot",
+      "description": "Add Vex guardrails today to eliminate agent failures and deploy production-ready chatbots."
+    }
+  }
+}

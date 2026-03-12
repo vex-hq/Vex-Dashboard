@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in LangChain Agents",
+    "description": "How to detect and fix ai agent observability in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "LangChain agent-observability",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Observability in LangChain is critical due to the framework's composable chains, agents, and retrieval systems that often lead to silent failures like infinite tool loops or hallucinated retrievals. Problems manifest uniquely through LangChain's AgentExecutor patterns, where intermediate steps are opaque without proper tracing, and RAG chains suffer from unverified retrieval relevance. Vex integration wraps chain.invoke() to expose these issues with automated detection and remediation.",
+    "howItManifests": [
+      {
+        "scenario": "Tool call loops in agent executors",
+        "symptom": "AgentExecutor repeatedly calls the same tool with identical inputs",
+        "impact": "Infinite loops consuming tokens and API costs without progress"
+      },
+      {
+        "scenario": "Hallucination in RAG retrieval chains",
+        "symptom": "RetrievalQA chain returns irrelevant documents despite query match",
+        "impact": "LLM generates factually incorrect answers based on wrong context"
+      },
+      {
+        "scenario": "Context window overflow in long conversations",
+        "symptom": "ConversationChain token count exceeds model limits mid-conversation",
+        "impact": "Truncated context leads to incoherent responses and lost conversation history"
+      },
+      {
+        "scenario": "Inconsistent output formatting across chain steps",
+        "symptom": "SequentialChain steps produce varying JSON schemas despite structured prompts",
+        "impact": "Downstream parsing failures break application logic"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Detect Tool Call Loops",
+        "description": "Monitor AgentExecutor intermediate steps for repeated tool calls with identical arguments",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain.callbacks import StdOutCallbackHandler\n\n# Wrap your agent execution\ndef detect_tool_loops(agent_executor: AgentExecutor, max_iterations=5):\n    tool_calls = {}\n    \n    class LoopDetector(StdOutCallbackHandler):\n        def on_tool_start(self, tool, input_str, **kwargs):\n            tool_key = f'{tool.name}:{input_str}'\n            if tool_key in tool_calls:\n                tool_calls[tool_key] += 1\n                if tool_calls[tool_key] > max_iterations:\n                    raise ValueError(f'Tool loop detected: {tool.name} called {tool_calls[tool_key]} times')\n            else:\n                tool_calls[tool_key] = 1\n    \n    agent_executor.callbacks = [LoopDetector()]\n    return agent_executor\n\ndetect_tool_loops(your_agent_executor)",
+        "language": "python"
+      },
+      {
+        "name": "RAG Hallucination Check",
+        "description": "Verify retrieval relevance by checking semantic similarity between query and retrieved docs",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.embeddings import OpenAIEmbeddings\nfrom sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\ndef detect_rag_hallucination(retrieval_qa, query, threshold=0.7):\n    docs = retrieval_qa.retriever.get_relevant_documents(query)\n    embeddings = OpenAIEmbeddings()\n    \n    query_emb = embeddings.embed_query(query)\n    doc_embs = embeddings.embed_documents([doc.page_content for doc in docs])\n    \n    similarities = cosine_similarity([query_emb], doc_embs)[0]\n    avg_similarity = np.mean(similarities)\n    \n    if avg_similarity < threshold:\n        print(f'RAG Hallucination Risk: Low relevance score {avg_similarity:.2f}')\n        return False\n    return True\n\n# Usage\ndetect_rag_hallucination(your_retrieval_qa, \"What is LangChain?\")",
+        "language": "python"
+      },
+      {
+        "name": "Context Window Monitor",
+        "description": "Track token usage in ConversationChain to prevent overflow",
+        "code": "from langchain.chains import ConversationChain\nfrom langchain.memory import ConversationBufferMemory\nimport tiktoken\n\ndef monitor_context_window(chain: ConversationChain, max_tokens=4000):\n    memory = chain.memory\n    tokenizer = tiktoken.get_encoding('cl100k_base')\n    \n    def check_tokens(input_text):\n        chat_history = memory.chat_memory.messages\n        history_tokens = sum(len(tokenizer.encode(msg.content)) for msg in chat_history)\n        input_tokens = len(tokenizer.encode(input_text))\n        total = history_tokens + input_tokens\n        \n        if total > max_tokens:\n            print(f'Context overflow! {total}/{max_tokens} tokens')\n            return False\n        return True\n    \n    return check_tokens\n\n# Usage\ntoken_checker = monitor_context_window(your_conversation_chain)\ntoken_checker('user message')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Loop Prevention",
+        "description": "Add stateful tool call tracking to AgentExecutor",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain.callbacks.base import BaseCallbackHandler\nfrom typing import Dict, Any\n\nclass ToolLoopGuard(BaseCallbackHandler):\n    tool_history: Dict[str, int] = {}\n    MAX_CALLS = 3\n    \n    def on_tool_start(self, tool_name: str, **kwargs):\n        if tool_name in self.tool_history:\n            self.tool_history[tool_name] += 1\n            if self.tool_history[tool_name] > self.MAX_CALLS:\n                raise ValueError(f'Tool {tool_name} called too many times')\n        else:\n            self.tool_history[tool_name] = 1\n\n# Apply to agent\nagent_executor = AgentExecutor.from_agent_and_tools(\n    agent=agent,\n    tools=tools,\n    callbacks=[ToolLoopGuard()],\n    max_iterations=10,\n    early_stopping_method='generate'\n)",
+        "language": "python"
+      },
+      {
+        "name": "RAG Relevance Filter",
+        "description": "Filter low-relevance documents before LLM generation",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.schema import Document\n\ndef relevance_filtered_retriever(retriever, embeddings, threshold=0.75):\n    def filtered_get_relevant_documents(query):\n        docs = retriever.get_relevant_documents(query)\n        query_emb = embeddings.embed_query(query)\n        doc_embs = embeddings.embed_documents([d.page_content for d in docs])\n        \n        from sklearn.metrics.pairwise import cosine_similarity\n        scores = cosine_similarity([query_emb], doc_embs)[0]\n        \n        filtered_docs = [\n            doc for doc, score in zip(docs, scores) \n            if score > threshold\n        ]\n        return filtered_docs or docs[:1]  # Fallback to best doc\n    \n    return filtered_get_relevant_documents\n\n# Usage\nfiltered_retriever = relevance_filtered_retriever(\n    vectorstore.as_retriever(), \n    OpenAIEmbeddings()\n)\nqa_chain = RetrievalQA.from_chain_type(\n    llm=llm,\n    retriever=filtered_retriever\n)",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Context Trimming",
+        "description": "Automatically trim conversation history to fit context window",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\nimport tiktoken\n\nclass SmartConversationMemory(ConversationSummaryBufferMemory):\n    def __init__(self, max_token_limit=3000, **kwargs):\n        super().__init__(**kwargs)\n        self.max_token_limit = max_token_limit\n        self.tokenizer = tiktoken.get_encoding('cl100k_base')\n    \n    def trim_messages(self, messages):\n        token_counts = [len(self.tokenizer.encode(msg.content)) for msg in messages]\n        total_tokens = sum(token_counts)\n        \n        if total_tokens > self.max_token_limit:\n            # Keep newest messages\n            trim_index = 0\n            current_tokens = 0\n            for i, count in enumerate(reversed(token_counts)):\n                if current_tokens + count > self.max_token_limit:\n                    trim_index = len(messages) - i\n                    break\n                current_tokens += count\n            \n            messages = messages[trim_index:]\n        return messages\n\n# Usage\nmemory = SmartConversationMemory(max_token_limit=3000)\nconversation = ConversationChain(llm=llm, memory=memory)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex automatically detects all four LangChain failure modes by wrapping chain.invoke() and agent_executor.invoke() calls. It traces intermediate steps, monitors token usage, validates retrieval relevance using semantic embeddings, and detects tool call patterns in real-time. Vex provides rich observability dashboards showing failure rates, token costs, and latency breakdowns specific to LangChain components.\n\nRemediation is automatic: Vex can inject loop guards, trim context windows, filter irrelevant retrievals, and enforce output schemas. Configuration is simple via vex.verify() decorators that work with any LangChain chain or agent. The platform learns from your application's patterns to set dynamic thresholds and reduce false positives over time.\n\nIntegration takes 2 lines of code and immediately surfaces issues that would otherwise silently degrade your production agents.",
+      "code": "import vex\nfrom langchain.agents import AgentExecutor\nfrom langchain.chains import RetrievalQA\n\n# Install: pip install langchain vex-sdk\n\n@vex.verify(\n    detect=['tool_loops', 'rag_hallucinations', 'context_overflow', 'output_schema'],\n    auto_fix=True,\n    alert_on='production'\n)\ndef safe_agent_run(agent_executor: AgentExecutor, input_data):\n    return agent_executor.invoke(input_data)\n\n@vex.verify(\n    max_tokens=4000,\n    rag_threshold=0.75,\n    output_format='json'\n)\ndef safe_rag_query(retrieval_qa: RetrievalQA, question: str):\n    return retrieval_qa.invoke({'query': question})\n\n# Usage - Vex handles everything automatically\nresult = safe_agent_run(your_agent_executor, {'input': 'user query'})\nprint(result)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add 2 lines of code to make your LangChain agents production-ready: pip install vex-sdk && wrap with vex.verify()"
+    }
+  }
+}

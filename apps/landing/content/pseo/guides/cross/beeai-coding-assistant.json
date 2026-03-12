@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with BeeAI + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI ai coding assistant",
+      "BeeAI guardrails",
+      "ai coding assistant reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with BeeAI enables powerful code-aware agents that analyze repositories, execute in sandboxes, validate tests, and debug iteratively. However, long coding sessions risk unbounded memory growth, tool injection vulnerabilities, state serialization failures, and inconsistent model outputs from Granite. Vex provides essential guardrails to ensure reliability, security, and correctness in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with BeeAI",
+      "description": "The AI Coding Assistant uses BeeAI's agent framework with a Granite LLM backbone, integrating repository context via git tooling, sandboxed code execution through isolated Python environments, automated test validation with pytest integration, and iterative debugging loops. Agents maintain conversation memory across sessions while tools handle file I/O, code generation, and vulnerability scanning. Observability is built-in via BeeAI's event system, making Vex integration seamless through event listeners.\n\nKey components include: a central CodeAgent with memory store, ToolRegistry for repo analysis (git diff, ast parsing), execution sandbox, and verification suite (bandit for security, safety checks, license scanners). The agent loop processes user requests like 'fix this bug' by retrieving context, generating code, testing, and iterating until validation passes.\n\nBeeAI's event-driven architecture emits lifecycle events (agent_start, tool_call, memory_update, response_generated) that Vex monitors for proactive intervention.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│   BeeAI Agent    │\n│  (fix bug, etc) │    │  (Granite LLM)   │\n└─────────────────┘    │  + Memory Store   │\n                       └──────┬─────────────┘\n                              │ Events ──▶ Vex\n                       ┌──────▼─────────────┐\n                       │ Tool Registry      │\n                       │ • git_context      │\n                       │ • sandbox_exec     │◄────┐\n                       │ • pytest_validate  │     │\n                       │ • bandit_scan      │     │\n                       └────────────────────┘     │\n                                 │                │\n                        ┌────────▼────────┐       │\n                        │   Sandbox       │◄──────┘\n                        │  (code exec)    │\n                        └────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Memory Growth",
+        "description": "Long debugging sessions accumulate massive context windows with code diffs and execution logs",
+        "severity": "high",
+        "mitigation": "Vex monitors memory events and triggers summarization/expiration policies"
+      },
+      {
+        "name": "Tool Injection via Code Execution",
+        "description": "Malicious user prompts craft payloads exploiting sandbox escape or command injection",
+        "severity": "critical",
+        "mitigation": "Vex validates tool inputs with AST parsing and syscall whitelisting before execution"
+      },
+      {
+        "name": "Credential Leakage in Codebase",
+        "description": "Agents process repos containing API keys, tokens, or secrets in generated fixes",
+        "severity": "high",
+        "mitigation": "Vex scans memory and outputs with regex patterns and entropy detection"
+      },
+      {
+        "name": "Insecure Dependency Introduction",
+        "description": "Agent-generated requirements.txt includes vulnerable or malicious packages",
+        "severity": "medium",
+        "mitigation": "Vex runs safety checks and license validation on all dependency changes"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "BeeAI CodeAgent with Repo Context",
+        "description": "Initialize the core agent with git tooling and memory for repository-aware coding",
+        "code": "from beeai import Agent, Tool\nfrom beeai.tools import GitTool, PythonREPL\n\nrepo_tool = GitTool(repo_path='/workspace/project')\nexec_tool = PythonREPL(sandbox=True, timeout=30)\n\ncoding_agent = Agent(\n    name='CodeAssistant',\n    model='ibm/granite-20b',\n    memory_size=100,\n    tools=[repo_tool, exec_tool],\n    system_prompt=\"You are a secure coding assistant. Analyze repos, fix bugs, validate tests. Never execute untrusted code.\"\n)\n\n@vex.listener('agent_start')\ndef validate_session(event):\n    if len(event['memory']) > 50:\n        event['memory'] = summarize_context(event['memory'])",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution with Test Validation",
+        "description": "Execute generated code in isolated environment and run pytest validation",
+        "code": "from beeai.tools import PythonREPL\n\n@pytest.fixture\ndef safe_exec():\n    return PythonREPL(\n        sandbox=True,\n        allowed_modules=['numpy', 'pandas'],\n        timeout=60,\n        memory_limit='256MB'\n    )\n\ndef test_code_fix():\n    code = agent.generate_fix(bug_description)\n    result = safe_exec.run(code + '\\n\\nimport pytest\\n# validation tests')\n    assert result.exit_code == 0\n    assert 'vulnerability' not in result.stdout",
+        "language": "python"
+      },
+      {
+        "title": "Security Scanning Integration",
+        "description": "Run bandit and safety checks on all generated code before applying fixes",
+        "code": "import subprocess\nfrom beeai.tools import ShellTool\n\nsecurity_tool = ShellTool(allowed_commands=['bandit', 'safety', 'pip-audit'])\n\n@agent.tool\ndef scan_security(code: str, requirements: str = None):\n    '''Scan code for vulnerabilities and check dependencies'''\n    \n    # Bandit static analysis\n    bandit_result = security_tool.run(f'bandit -f json -r /tmp/generated_code')\n    \n    if requirements:\n        safety_result = security_tool.run(f'safety check -r requirements.txt')\n    \n    return {\n        'bandit_issues': parse_bandit(bandit_result),\n        'safety_issues': parse_safety(safety_result),\n        'safe_to_apply': no_critical_issues()\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Debugging Loop",
+        "description": "Main agent loop with validation gates and memory management",
+        "code": "async def debug_loop(user_request: str):\n    context = await repo_tool.get_context()\n    \n    for iteration in range(5):  # max 5 iterations\n        code_proposal = await coding_agent.run(f'{user_request}\\nContext: {context}')\n        \n        scan_result = await scan_security(code_proposal)\n        if not scan_result['safe_to_apply']:\n            feedback = f\"Security issues: {scan_result['bandit_issues']}\"\n            continue\n        \n        exec_result = await exec_tool.run(code_proposal)\n        if exec_result.success:\n            return {'fixed': True, 'code': code_proposal}\n        \n        context += f\"Failed: {exec_result.error}\\n\"\n        \n    return {'fixed': False, 'reason': 'Max iterations exceeded'}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Hook Vex into BeeAI's event system to monitor all agent activity",
+        "code": "from vex import Vex\nfrom beeai import Agent\nfrom vex.integrations.beeai import BeeAIListener\n\n# Initialize Vex client\nvex = Vex(api_key='vex-your-key')\n\n# Create BeeAI listener\nlistener = BeeAIListener(vex_client=vex)\n\n# Register on agent events\ncoding_agent.add_event_listener(listener)\n\n# Define custom verifications\n@vex.verification('code_correctness')\ndef verify_code(event):\n    code = event['tool_call']['code']\n    exec_result = sandbox_exec(code)\n    return {\n        'passed': exec_result.success,\n        'test_coverage': exec_result.coverage,\n        'evidence': exec_result.stdout\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Memory Growth Guardrail",
+        "description": "Prevent unbounded memory accumulation during long sessions",
+        "code": "@vex.guardrail('memory_growth')\ndef monitor_memory(event):\n    if event['type'] == 'memory_update':\n        memory_size = len(event['agent_state']['memory'])\n        \n        if memory_size > 75:  # 75% of limit\n            # Trigger summarization\n            summary = ai_summarize(event['memory'])\n            event['agent_state']['memory'] = summary\n            \n            vex.record_metric('memory_summarized', {'size_before': memory_size})\n            \n        return {'action': 'summarize', 'threshold': 0.75}\n    \n@vex.guardrail('granite_format')\ndef validate_output_format(event):\n    if not is_structured_json(event['response']):\n        return {'action': 'retry', 'reason': 'Invalid Granite output format'}",
+        "language": "python"
+      },
+      {
+        "title": "Security Verification Pipeline",
+        "description": "Multi-stage verification for code correctness and security",
+        "code": "@vex.verification_pipeline('coding_assistant')\ndef secure_code_pipeline(event):\n    verifications = [\n        verify_code_correctness(event),\n        scan_security_vulnerabilities(event),\n        check_credential_leakage(event),\n        validate_dependencies(event),\n        check_license_compliance(event)\n    ]\n    \n    results = []\n    for verification in verifications:\n        result = verification.run(event)\n        results.append(result)\n        \n        if not result.passed:\n            vex.alert(f\"Verification failed: {result.name}\")\n            return {'status': 'blocked', 'failures': results}\n    \n    return {'status': 'approved', 'scores': {r.name: r.score for r in results}}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI AI Coding Assistant",
+      "description": "Deploy Vex guardrails today to protect your coding agents from production failures - start your free trial at vex.ai"
+    }
+  }
+}

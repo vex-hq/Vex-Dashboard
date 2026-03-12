@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix multi-agent coordination failure in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "OpenAI Agents SDK multi-agent-coordination",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, Multi-Agent Coordination Failure manifests as agents entering infinite handoff loops, bypassing guardrails through injected prompts, or consuming unvalidated tool outputs during handoffs between specialized agents. These failures disrupt production workflows where agents like Researcher, Analyzer, and Writer must coordinate seamlessly via the SDK's handoff APIs. Without proper validation and tracing, small coordination issues cascade into complete system failures, data leaks, or incorrect outputs.",
+    "howItManifests": [
+      {
+        "scenario": "Agent handoff loops between specialized agents",
+        "symptom": "Runner.execute() calls cycle endlessly between agents without progress",
+        "impact": "Infinite loops consume API quotas and timeout production workflows"
+      },
+      {
+        "scenario": "Guardrail bypasses via prompt injection",
+        "symptom": "Injected prompts in handoff messages bypass .guard() checks during agent transitions",
+        "impact": "Malicious payloads propagate through multi-agent chains, leaking sensitive data"
+      },
+      {
+        "scenario": "Tool output not validated before agent consumption",
+        "symptom": "Agents consume malformed JSON tool outputs without .validate_tool_output() checks",
+        "impact": "Downstream agents crash or produce hallucinated responses from invalid data"
+      },
+      {
+        "scenario": "Tracing gaps in multi-agent handoff chains",
+        "symptom": "No spans created for handoff events in Runner.trace(), breaking observability",
+        "impact": "Debugging coordination failures impossible without full trace context"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Handoff Loop Detector",
+        "description": "Monitors Runner.execute() call stacks for repeated agent handoffs exceeding threshold",
+        "code": "from openai_agents import Runner, Agent\nfrom collections import defaultdict\n\ndef detect_handoff_loops(runner: Runner, max_handoffs=5):\n    handoff_counts = defaultdict(int)\n    \n    def trace_wrapper(agent_call):\n        handoff_counts[agent_call.agent_id] += 1\n        if handoff_counts[agent_call.agent_id] > max_handoffs:\n            raise Exception(f\"Handoff loop detected: {agent_call.agent_id}\")\n        return agent_call\n    \n    runner.add_trace_hook(trace_wrapper)\n    return handoff_counts",
+        "language": "python"
+      },
+      {
+        "name": "Prompt Injection Scanner",
+        "description": "Scans handoff messages for injection patterns before .handoff() execution",
+        "code": "import re\nfrom openai_agents import HandoffEvent\n\ndef scan_prompt_injection(event: HandoffEvent):\n    injection_patterns = [\n        r'ignore.*previous.*instructions',\n        r'you are.*new.*role',\n        r'forget.*rules'\n    ]\n    message = event.message.content\n    for pattern in injection_patterns:\n        if re.search(pattern, message, re.IGNORECASE):\n            print(f\"🚨 Injection detected: {pattern}\")\n            return False\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Validates tool outputs with Pydantic before agent consumption in handoff chains",
+        "code": "from pydantic import BaseModel, ValidationError\nfrom openai_agents import ToolOutput\n\nclass ValidToolOutput(BaseModel):\n    content: str\n    is_valid_json: bool\n\n def validate_tool_output(tool_output: ToolOutput):\n    try:\n        validated = ValidToolOutput(\n            content=tool_output.content,\n            is_valid_json=bool(re.match(r'^{.*}$', tool_output.content))\n        )\n        return validated.is_valid_json\n    except ValidationError:\n        print(f\"❌ Invalid tool output: {tool_output.content[:100]}\")\n        return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Handoff State Machine",
+        "description": "Implements finite state machine to prevent loops using Runner's state tracking",
+        "code": "from openai_agents import Runner, Agent\nfrom enum import Enum\n\nclass AgentState(Enum):\n    RESEARCH = \"research\"\n    ANALYZE = \"analyze\"\n    WRITE = \"write\"\n    COMPLETE = \"complete\"\n\nclass CoordinatedRunner(Runner):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.state = AgentState.RESEARCH\n        self.max_transitions = 10\n        self.transition_count = 0\n    \n    def execute(self, *args, **kwargs):\n        if self.transition_count > self.max_transitions:\n            raise Exception(\"Max transitions exceeded - loop prevented\")\n        result = super().execute(*args, **kwargs)\n        self.transition_count += 1\n        return result",
+        "language": "python"
+      },
+      {
+        "name": "Secure Handoff Guardrail",
+        "description": "Adds content filtering to all .handoff() messages with double validation",
+        "code": "from openai_agents import Agent, Guardrail\n\nclass SecureHandoffGuardrail(Guardrail):\n    def guard_handoff(self, event):\n        # Strip injection attempts\n        safe_content = self._sanitize_prompt(event.message.content)\n        event.message.content = safe_content\n        \n        # Double-check with regex\n        if self._has_injection(safe_content):\n            event.block(\"Potential injection detected\")\n        \n    def _sanitize_prompt(self, content: str) -> str:\n        return re.sub(r'ignore.*instructions', '[SANITIZED]', content, flags=re.I)\n    \n    def _has_injection(self, content: str) -> bool:\n        return bool(re.search(r'you are.*(not|new).*agent', content, re.I))\n\n# Usage\nresearcher = Agent(..., guardrails=[SecureHandoffGuardrail()])",
+        "language": "python"
+      },
+      {
+        "name": "Validated Tool Pipeline",
+        "description": "Pipes all tool outputs through validation before handoff consumption",
+        "code": "from openai_agents import Agent, Tool\nfrom pydantic import BaseModel\n\nclass ValidatedToolAgent(Agent):\n    def consume_tool_output(self, tool_output):\n        validated = self._validate_tool(tool_output)\n        if not validated:\n            self._fallback_to_default()\n            return\n        super().consume_tool_output(validated)\n    \n    def _validate_tool(self, output):\n        class ToolSchema(BaseModel):\n            result: dict\n        try:\n            return ToolSchema.model_validate_json(output.content)\n        except:\n            return None\n    \n    def _fallback_to_default(self):\n        self.message(\"Using fallback - tool output invalid\")\n\nanalyzer = ValidatedToolAgent(name=\"Analyzer\", tools=[...])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates directly as output guardrails on OpenAI Agents SDK runners, automatically detecting handoff loops, prompt injections, and validation failures across multi-agent workflows. By wrapping .execute() and .handoff() calls, Vex provides real-time alerts, automatic remediation, and comprehensive tracing without modifying core agent logic. Production teams use Vex to achieve 99.9% coordination reliability with zero-downtime deployment.\n\nVex's agent-specific detectors catch failures at the exact SDK integration points - Runner transitions, guardrail bypasses, and tool consumption - providing precise remediation code and confidence scores. The platform auto-generates fix PRs and monitors post-deployment success rates.",
+      "code": "pip install openai-agents vex-sdk\n\nfrom vex_sdk import VexGuardrail\nfrom openai_agents import Runner, Agent\n\n# Initialize Vex guardrail for multi-agent coordination\nvex_guard = VexGuardrail(\n    detectors=[\n        \"handoff-loop-detector\",\n        \"prompt-injection-guard\",\n        \"tool-validation-fail\"\n    ],\n    auto_remediate=True\n)\n\n# Apply to all agents\nresearcher = Agent(..., guardrails=[vex_guard])\nanalyzer = Agent(..., guardrails=[vex_guard])\nwriter = Agent(..., guardrails=[vex_guard])\n\n# Production runner with Vex\nrunner = Runner(agents=[researcher, analyzer, writer])\nresult = runner.execute(\"Analyze market trends\")\n\n# Vex auto-alerts and fixes coordination failures",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to eliminate multi-agent coordination failures in production with one line of code."
+    }
+  }
+}

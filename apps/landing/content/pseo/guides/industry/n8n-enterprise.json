@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "industry": "enterprise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "n8n AI Agents Guardrails for Enterprise SaaS",
+    "description": "Compliance guide for n8n AI Agents agents in enterprise saas. Meet SOC 2 Type II, ISO 27001 requirements with Vex guardrails.",
+    "keywords": [
+      "n8n AI Agents enterprise saas",
+      "enterprise saas AI compliance",
+      "n8n AI Agents guardrails",
+      "enterprise saas AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Enterprise SaaS teams using n8n AI Agents face heightened compliance risks due to complex workflow automation handling sensitive customer data across multi-tenant environments. Without proper guardrails, common issues like unvalidated AI outputs, recursive executions, and credential leaks can lead to SLA breaches, data sovereignty violations, and regulatory fines under SOC 2, GDPR, and CCPA. Vex provides runtime compliance verification as a webhook node, ensuring AI agent actions meet enterprise standards before execution.",
+    "complianceRequirements": [
+      {
+        "regulation": "SOC 2 Type II",
+        "description": "Requires continuous monitoring, audit logging, and control validation for security, availability, processing integrity, confidentiality, and privacy in SaaS platforms.",
+        "howVexHelps": "Vex automatically logs all AI agent decisions with immutable audit trails and enforces runtime policy checks, generating SOC 2-compliant evidence for controls like access validation and data handling."
+      },
+      {
+        "regulation": "ISO 27001",
+        "description": "Mandates information security management systems with risk assessment, access controls, and incident response for handling enterprise data.",
+        "howVexHelps": "Vex implements runtime ISMS controls by validating AI outputs against ISO 27001 patterns, blocking credential exposure and ensuring data isolation between tenants."
+      },
+      {
+        "regulation": "GDPR",
+        "description": "Enforces data protection principles including lawful processing, data minimization, and right to explanation for automated decision-making.",
+        "howVexHelps": "Vex scans AI agent tool calls for PII leakage, enforces data residency rules, and provides explainability logs for GDPR Article 22 automated decisions."
+      },
+      {
+        "regulation": "CCPA/CPRA",
+        "description": "Requires consumer data rights, opt-out mechanisms, and security measures for California residents' personal information in SaaS.",
+        "howVexHelps": "Vex detects and blocks CCPA-sensitive data flows in n8n workflows, enforces tenant isolation, and logs opt-out compliance for AI-driven personalization."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI nodes triggering themselves create infinite loops, consuming resources and potentially executing unauthorized actions across tenants.",
+        "severity": "critical",
+        "example": "Customer support agent workflow recursively calls itself on error responses, exhausting API quotas and violating enterprise SLAs."
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unstructured LLM outputs containing PII or malicious payloads execute in downstream nodes like email or database actions.",
+        "severity": "critical",
+        "example": "AI summarization node generates customer SSN which passes to broadcast email node, causing GDPR breach."
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI agents log or expose API keys/database credentials in tool call parameters visible in workflow debugging.",
+        "severity": "high",
+        "example": "Custom tool node receives LLM-generated parameters with embedded Stripe secret key, logged in n8n execution history."
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Expired or incorrect conversation memory leaks cross-tenant data or provides outdated context leading to incorrect actions.",
+        "severity": "high",
+        "example": "Multi-tenant chat agent serves Tenant A data to Tenant B due to memory window overlap, violating data isolation."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Add Vex Webhook After AI Agent Nodes",
+        "description": "Insert Vex as a webhook node immediately after every AI Agent node to validate outputs before action nodes. This catches unvalidated LLM responses containing PII or malicious payloads.",
+        "code": "// n8n webhook node configuration\nconst vexSDK = require('@vex_dev/sdk');\n\nconst policyId = 'ent-saas-n8n-ai-agent'; // Your Vex policy ID\nconst tenantId = $('Tenant ID').first().json.tenantId;\n\nconst payload = {\n  action: 'ai_agent_execution',\n  workflowId: $workflow.name,\n  nodeName: $node.name,\n  aiOutput: $('AI Agent').first().json.output,\n  toolCalls: $('AI Agent').first().json.tool_calls || [],\n  tenantId: tenantId,\n  dataResidency: $('Customer Config').first().json.residency || 'US'\n};\n\nconst client = new vexSDK.Client({\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst result = await client.verify({\n  policyId,\n  payload,\n  context: {\n    executionId: $execution.id,\n    timestamp: new Date().toISOString()\n  }\n});\n\nif (!result.pass) {\n  throw new Error(`Vex blocked: ${result.reason}`);\n}\n\nreturn [{ json: { vexPassed: true, result } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Credential Exposure Prevention in Tool Calls",
+        "description": "Validate AI-generated tool parameters for credential patterns before execution. Blocks API keys, secrets, and tokens from reaching action nodes.",
+        "code": "// Tool call validation webhook node\nimport { patternMatch } from '@vex_dev/sdk/patterns';\n\nconst toolCalls = $('AI Agent').first().json.tool_calls || [];\nconst suspiciousPatterns = [\n  /sk-\\w{48}/, // OpenAI keys\n  /ak[A-Z0-9]{20}/, // AWS keys\n  /(?i)(password|secret|key|token)[:=]\\s*[\\w\\-]+/ // Generic creds\n];\n\nconst violations = toolCalls.flatMap(call => \n  suspiciousPatterns\n    .map(pattern => patternMatch(call.parameters, pattern))\n    .filter(match => match)\n);\n\nif (violations.length > 0) {\n  await fetch('https://api.vex.dev/v1/incident', {\n    method: 'POST',\n    headers: { 'Authorization': `Bearer ${process.env.VEX_API_KEY}` },\n    body: JSON.stringify({\n      policyId: 'n8n-credential-exposure',\n      severity: 'critical',\n      evidence: violations,\n      workflowId: $workflow.id\n    })\n  });\n  throw new Error('Credential exposure detected in tool parameters');\n}\n\nreturn [{ json: { toolCallsValidated: true } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Tenant Isolation and Data Residency Check",
+        "description": "Enforce multi-tenancy isolation and contract-specific data residency rules before any customer data leaves the workflow.",
+        "code": "// Tenant isolation validation node\nconst currentTenant = $('Auth').first().json.tenantId;\nconst targetTenant = $('AI Agent').first().json.target_tenant;\nconst residency = $('Customer Config').first().json.residency;\n\nconst allowedRegions = {\n  'tenant-us-1': ['us-east-1', 'us-west-2'],\n  'tenant-eu-1': ['eu-west-1', 'eu-central-1'],\n  'tenant-ca-1': ['ca-central-1']\n};\n\n// Cross-tenant data flow check\nif (currentTenant !== targetTenant) {\n  throw new Error(`Cross-tenant violation: ${currentTenant} -> ${targetTenant}`);\n}\n\n// Data residency validation\nconst client = new (require('@vex_dev/sdk')).Client({ apiKey: process.env.VEX_API_KEY });\nconst residencyCheck = await client.verify({\n  policyId: 'enterprise-data-residency',\n  payload: {\n    tenantId: currentTenant,\n    actionResidency: $('Action Node').first().json.aws_region,\n    contractResidency: residency,\n    dataClassification: 'customer-pii'\n  }\n});\n\nif (!residencyCheck.pass) {\n  throw new Error(`Data residency violation: ${residencyCheck.reason}`);\n}\n\nreturn [{ json: { tenantIsolated: true, residencyCompliant: true } }];",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "n8n AI Agents in Enterprise SaaS: A Scenario",
+      "scenario": "FinTech SaaS provider MoneyFlow uses n8n to power AI-driven customer support agents handling KYC workflows, transaction disputes, and compliance reporting across 5,000 enterprise customers. Their n8n workflows chain AI Agent nodes for intent classification → data retrieval → action execution, processing 100K+ daily conversations with PCI and GDPR-sensitive data. Without validation, AI summarization nodes occasionally generated PII-containing summaries passed to broadcast nodes, memory windows mixed tenant conversations, and recursive error-handling loops consumed 300% quota during peak hours.\n\nA routine SOC 2 audit revealed credential patterns in workflow logs from AI tool calls and cross-tenant data flows, triggering contract reviews from their top 3 customers (each $2M+ ARR). Data residency violations occurred when US customers' data processed in EU regions due to auto-scaling, risking $15M in penalties.",
+      "outcome": "After adding Vex webhook nodes post every AI Agent, MoneyFlow achieved 100% compliance across 47 workflows. Vex blocked 2,847 credential exposures, 1,200+ PII leaks, and 89 recursive loops in the first month, preventing SLA breaches. Audit logging captured 500K+ compliant executions as immutable evidence, passing SOC 2 Type II with zero findings. Customer retention improved 15% as trust metrics rose, and engineering velocity increased 3x by replacing custom validation code with Vex policies."
+    },
+    "cta": {
+      "heading": "Comply with Enterprise SaaS Regulations Using Vex",
+      "description": "Add Vex webhook nodes to your n8n AI Agent workflows today and eliminate compliance risk across SOC 2, GDPR, and enterprise SLAs."
+    }
+  }
+}

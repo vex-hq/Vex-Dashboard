@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Google ADK + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK ai chatbot",
+      "Google ADK guardrails",
+      "ai chatbot reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI Chatbots with Google's Agent Development Kit (ADK) enables sophisticated multi-agent systems powered by Gemini models, supporting conversational flows with RAG, intent classification, and memory management. However, multi-agent delegation, model switching, and session state handling introduce risks like circular dependencies, output inconsistency, and state corruption. Vex provides essential guardrails to ensure response accuracy, coherence, safety, PII protection, and hallucination detection in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Google ADK",
+      "description": "The typical Google ADK AI Chatbot architecture features an orchestrator agent that handles user input, performs intent classification using Gemini, and delegates to specialized sub-agents for RAG retrieval, response generation, and safety checks. A shared session store manages multi-turn memory, while tools for vector search and PII detection are invoked across agents. This modular design enables complex conversations but risks circular delegation loops and state corruption during long interactions.\n\nKey components include the IntentClassifierAgent for routing, RetrievalAgent for RAG, SafetyAgent for filtering, and ResponseGeneratorAgent for final output. Gemini model switching between agents can cause format mismatches, while session state must persist accurately across turns. Vex integrates as a before_agent_callback to verify inputs/outputs at each delegation point.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│     User Input   │───▶│  Orchestrator    │\n└─────────────────┘    │  (Intent Classify)│\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼──────────┐\n                       │   Vex Guardrails    │\n                       │ (before_agent_cb)   │\n                       └──────────┬──────────┘\n                                  │\n             ┌────────────────────▼─────────────┐\n             │ ┌─────────────┐ ┌─────────────┐ │\n             │ │RetrievalAgent│ │SafetyAgent  │ │\n             │ │   (RAG)     │ │ (PII Filter) │ │\n             │ └─────────────┘ └─────────────┘ │\n             │         │              │        │\n             └─────────▼──────────────▼────────┘\n                           │\n                    ┌──────▼──────┐\n                    │Response Gen │\n                    │   Agent     │\n                    └─────────────┘\n                           │\n                    ┌──────▼──────┐\n                    │  Final Out  │\n                    └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Orchestrator delegates to RetrievalAgent, which calls SafetyAgent, which loops back to IntentClassifier creating infinite delegation cycles.",
+        "severity": "critical",
+        "mitigation": "Vex traces agent call graphs and blocks cyclic delegations before execution."
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different agents use Gemini-1.5-Pro vs Gemini-2.0-Flash, leading to mismatched tool response formats and parsing failures.",
+        "severity": "high",
+        "mitigation": "Vex standardizes output schemas across model variants with verification assertions."
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Multi-turn memory overwrites critical context during parallel agent execution, causing incoherent responses.",
+        "severity": "high",
+        "mitigation": "Vex validates session state integrity and conversation coherence before agent responses."
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "RAG agent returns unstructured docs while SafetyAgent expects JSON, causing downstream parsing errors.",
+        "severity": "medium",
+        "mitigation": "Vex enforces consistent tool response schemas via Pydantic validation."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic ADK Chatbot with Multi-Agent Setup",
+        "description": "Initialize Google ADK orchestrator with intent classification and sub-agents for RAG and safety checks.",
+        "code": "from google_adk import Agent, Orchestrator\nfrom google_adk.sessions import SessionStore\n\n# Shared session store for multi-turn memory\nsession_store = SessionStore()\n\nintent_agent = Agent(\n    name=\"intent_classifier\",\n    model=\"gemini-2.0-flash\",\n    instruction=\"Classify user intent: 'rag_query', 'general_chat', or 'sensitive'\"\n)\n\nrag_agent = Agent(\n    name=\"retrieval_agent\",\n    model=\"gemini-1.5-pro\",\n    tools=[vector_search_tool]\n)\n\norchestrator = Orchestrator(\n    agents=[intent_agent, rag_agent],\n    session_store=session_store\n)",
+        "language": "python"
+      },
+      {
+        "title": "Intent Classification and Delegation",
+        "description": "Orchestrator routes based on intent and delegates to appropriate sub-agents.",
+        "code": "async def handle_user_message(user_input: str, session_id: str):\n    session = session_store.get(session_id)\n    \n    intent_result = await intent_agent.run(\n        \"Classify: \" + user_input,\n        session=session\n    )\n    \n    if intent_result.intent == \"rag_query\":\n        rag_response = await rag_agent.run(\n            user_input,\n            session=session\n        )\n        return rag_response\n    elif intent_result.intent == \"sensitive\":\n        return \"Content filtered for safety\"\n    \n    return await general_agent.run(user_input, session=session)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Integration with Vector Search",
+        "description": "Retrieval agent performs semantic search and augments Gemini prompt with context.",
+        "code": "from google_adk.tools import Tool\n\nvector_search_tool = Tool(\n    name=\"vector_search\",\n    description=\"Search knowledge base\",\n    function=lambda query: search_vector_db(query, top_k=5)\n)\n\nrag_agent.instruction = \"\"\"\nUse vector_search tool for RAG queries.\nALWAYS return context + answer in format:\n```json\n{\\\"context\\\": \\\"...\\\", \\\"answer\\\": \\\"...\\\"}\n```\n\"\"\"",
+        "language": "python"
+      },
+      {
+        "title": "Session Memory Management",
+        "description": "Maintain conversation history across turns with automatic state persistence.",
+        "code": "class ChatbotSession:\n    def __init__(self):\n        self.history = []\n        self.user_context = {}\n    \n    async def add_turn(self, user_msg: str, agent_response: str):\n        self.history.append({\n            \"role\": \"user\", \"content\": user_msg\n        })\n        self.history.append({\n            \"role\": \"assistant\", \"content\": agent_response\n        })\n        # Trim history to last 10 turns\n        self.history = self.history[-20:]\n    \n# Integrated in orchestrator\nsession_store.register_session_class(ChatbotSession)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install Vex and Configure before_agent_callback",
+        "description": "Add Vex as pre-execution guardrail for all agent calls with high-risk verification suite.",
+        "code": "import vex\n\nfrom vex.suites import high_risk_chatbot_suite\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define verification suite for ADK chatbot\nguardrail_suite = high_risk_chatbot_suite([\n    \"response_accuracy\",\n    \"conversation_coherence\", \n    \"safety_filtering\",\n    \"pii_protection\",\n    \"hallucination_detection\"\n])\n\n# Global before_agent_callback\nasync def vex_before_agent(agent_name: str, input_data: dict, session_state: dict):\n    verdict = await vex_client.verify(\n        suite=guardrail_suite,\n        inputs={\"agent\": agent_name, \"prompt\": input_data},\n        context=session_state\n    )\n    if not verdict.approved:\n        raise ValueError(f\"Vex blocked: {verdict.reason}\")\n    return input_data",
+        "language": "python"
+      },
+      {
+        "title": "Integrate Vex into ADK Orchestrator",
+        "description": "Hook Vex callback into every agent execution path.",
+        "code": "from google_adk import Orchestrator\n\nclass VexGuardedOrchestrator(Orchestrator):\n    async def _execute_agent(self, agent_name: str, input_data: str, session):\n        # Vex verification BEFORE agent execution\n        await vex_before_agent(agent_name, input_data, session.state)\n        \n        # Execute agent\n        result = await super()._execute_agent(agent_name, input_data, session)\n        \n        # Vex verification AFTER agent execution\n        post_verdict = await vex_client.verify(\n            suite=guardrail_suite,\n            inputs={\"agent\": agent_name, \"output\": result},\n            context=session.state\n        )\n        \n        if not post_verdict.approved:\n            return \"[VEX BLOCKED: Safety violation detected]\"\n        \n        return result\n\norchestrator = VexGuardedOrchestrator(agents=[intent_agent, rag_agent])",
+        "language": "python"
+      },
+      {
+        "title": "Custom Vex Assertions for ADK-Specific Risks",
+        "description": "Define assertions targeting circular dependencies and Gemini format issues.",
+        "code": "from vex import Assertion, AssertionSuite\n\nadk_chatbot_suite = AssertionSuite([\n    # Prevent circular delegation\n    Assertion(\n        name=\"no_circular_deps\",\n        test=lambda trace: not has_circular_calls(trace.agent_calls),\n        failure_message=\"Circular agent delegation detected\"\n    ),\n    # Gemini format consistency\n    Assertion(\n        name=\"gemini_format_match\",\n        test=lambda output: is_valid_json_tool_response(output),\n        failure_message=\"Gemini tool response format mismatch\"\n    ),\n    # Conversation coherence\n    Assertion(\n        name=\"coherence_check\",\n        test=lambda history: semantic_similarity(history[-2], history[-1]) > 0.7,\n        failure_message=\"Conversation lost coherence\"\n    ),\n    # PII protection\n    Assertion(\n        name=\"no_pii_leak\",\n        test=lambda text: not contains_pii(text),\n        failure_message=\"PII detected in response\"\n    )\n])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK AI Chatbot",
+      "description": "Deploy Vex guardrails today to eliminate multi-agent risks and ensure production-ready reliability."
+    }
+  }
+}

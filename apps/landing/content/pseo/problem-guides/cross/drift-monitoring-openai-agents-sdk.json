@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix ai agent drift monitoring in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "OpenAI Agents SDK drift-monitoring",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in OpenAI Agents SDK manifests as agents deviating from intended behaviors during multi-agent handoffs, creating infinite loops, bypassing guardrails through prompt injection, or consuming unvalidated tool outputs. These issues are particularly prevalent in production systems where specialized agents hand off tasks without proper state validation or tracing. The SDK's flexible handoff patterns and async execution make drift detection challenging without systematic monitoring.",
+    "howItManifests": [
+      {
+        "scenario": "Agent handoff loops between specialized agents",
+        "symptom": "Agents ping-pong tasks indefinitely without task completion",
+        "impact": "Infinite API calls, escalating costs, and system hangs"
+      },
+      {
+        "scenario": "Guardrail bypasses via prompt injection",
+        "symptom": "Injected prompts override agent instructions during handoffs",
+        "impact": "Security vulnerabilities and unauthorized actions"
+      },
+      {
+        "scenario": "Tool output not validated before agent consumption",
+        "symptom": "Agents process malformed or malicious tool responses",
+        "impact": "Incorrect decisions and cascading failures"
+      },
+      {
+        "scenario": "Tracing gaps in multi-agent handoff chains",
+        "symptom": "Lost visibility into which agent caused drift",
+        "impact": "Impossible to debug or attribute failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Handoff Loop Detector",
+        "description": "Monitors agent handoff patterns to detect circular dependencies",
+        "code": "from openai_agents import Agent, Runner\nfrom collections import defaultdict\n\nclass HandoffLoopDetector:\n    def __init__(self):\n        self.handoff_counts = defaultdict(int)\n        self.handoff_chain = []\n\n    def track_handoff(self, from_agent_id, to_agent_id):\n        chain_key = f'{from_agent_id}->{to_agent_id}'\n        self.handoff_counts[chain_key] += 1\n        self.handoff_chain.append((from_agent_id, to_agent_id))\n        \n        if self.handoff_counts[chain_key] > 5:\n            return {'alert': 'LOOP_DETECTED', 'chain': self.handoff_chain[-10:]}\n        return None\n\n# Usage in agent runner\nloop_detector = HandoffLoopDetector()\ndef on_handoff_event(from_agent, to_agent):\n    result = loop_detector.track_handoff(from_agent.id, to_agent.id)\n    if result:\n        print(f'LOOP ALERT: {result}')\n        return False\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Prompt Injection Scanner",
+        "description": "Detects jailbreak attempts in agent inputs and handoff messages",
+        "code": "import re\nfrom openai_agents import Agent\n\nclass PromptInjectionScanner:\n    JAILBREAK_PATTERNS = [\n        r'ignore.*previous.*instructions',\n        r'you are now.*(hacker|admin|root)',\n        r'forget.*rules',\n        r'override.*guardrails'\n    ]\n    \n    def scan(self, message: str, agent: Agent) -> dict:\n        for pattern in self.JAILBREAK_PATTERNS:\n            if re.search(pattern, message, re.IGNORECASE):\n                return {\n                    'alert': 'PROMPT_INJECTION_DETECTED',\n                    'pattern': pattern,\n                    'agent': agent.name,\n                    'message': message[:100]\n                }\n        return {'status': 'clean'}",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Validates tool responses before agent consumption",
+        "code": "from openai_agents import ToolResult\nfrom typing import Any, Dict\n\nclass ToolOutputValidator:\n    def __init__(self):\n        self.schema_validators = {}\n    \n    def validate_tool_output(self, tool_result: ToolResult) -> Dict[str, Any]:\n        expected_schema = tool_result.tool.output_schema\n        output = tool_result.content\n        \n        # Check for expected keys\n        missing_keys = set(expected_schema.get('required', [])) - set(output.keys())\n        if missing_keys:\n            return {\n                'alert': 'INVALID_TOOL_OUTPUT',\n                'missing': list(missing_keys),\n                'tool': tool_result.tool.name\n            }\n        \n        # Check for unexpected keys (potential injection)\n        extra_keys = set(output.keys()) - set(expected_schema.get('properties', {}).keys())\n        if extra_keys:\n            return {\n                'alert': 'TOOL_OUTPUT_INJECTION',\n                'extra': list(extra_keys)\n            }\n        \n        return {'status': 'valid'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Handoff Circuit Breaker",
+        "description": "Prevents infinite loops with max handoff limits",
+        "code": "from openai_agents import Agent, Runner\nfrom contextlib import contextmanager\n\n@contextmanager\ndef handoff_circuit_breaker(max_handoffs=10):\n    handoff_count = 0\n    try:\n        yield handoff_count\n    finally:\n        handoff_count += 1\n        if handoff_count > max_handoffs:\n            raise Exception('Handoff limit exceeded - circuit breaker triggered')\n\n# Agent configuration with breaker\nresearch_agent = Agent(\n    name='researcher',\n    instructions='...',\n    handoff_limit=3,  # SDK built-in limit\n    max_iterations=10\n)\n\nrunner = Runner(agents=[research_agent], circuit_breaker=True)",
+        "language": "python"
+      },
+      {
+        "name": "Input Sanitizer Guardrail",
+        "description": "Strips dangerous prompts before agent processing",
+        "code": "from openai_agents import Guardrail\n\nclass InputSanitizer(Guardrail):\n    def __init__(self):\n        self.blocked_patterns = [\n            'ignore instructions',\n            'you are now',\n            'forget rules',\n            'override guardrails'\n        ]\n    \n    def sanitize(self, message: str) -> str:\n        for pattern in self.blocked_patterns:\n            message = re.sub(pattern, '[REDACTED]', message, flags=re.IGNORECASE)\n        return message\n    \n    async def before_agent(self, message: str, agent: Agent) -> str:\n        return self.sanitize(message)\n\n# Apply to all agents\nfor agent in workflow.agents:\n    agent.add_guardrail(InputSanitizer())",
+        "language": "python"
+      },
+      {
+        "name": "Tracing Interceptor",
+        "description": "Captures full handoff chains for debugging",
+        "code": "from openai_agents import Runner, TraceEvent\nfrom opentelemetry import trace\n\nclass DriftTracer:\n    def __init__(self):\n        self.tracer = trace.get_tracer('agent-drift')\n    \n    async def trace_handoff(self, event: TraceEvent):\n        if event.type == 'AGENT_HANDOFF':\n            span = self.tracer.start_span('agent_handoff')\n            span.set_attribute('from_agent', event.from_agent)\n            span.set_attribute('to_agent', event.to_agent)\n            span.set_attribute('input_tokens', len(event.input))\n            span.set_attribute('handoff_depth', len(event.trace_stack))\n            \n            if len(event.trace_stack) > 10:\n                span.record_exception(Exception('Deep handoff chain'))\n            \n            span.end()\n\ntracer = DriftTracer()\nrunner = Runner(agents=[...], trace_handler=tracer.trace_handoff)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex provides production-grade drift monitoring by integrating as an output guardrail across all OpenAI Agents SDK workflows. It automatically detects handoff loops by tracking agent interaction graphs, identifies prompt injections through semantic analysis of handoff messages, and validates tool outputs against expected schemas. Vex's real-time alerting and automated remediation rules prevent drift from reaching production impact.\n\nThe integration requires adding VexGuardrail to each agent, which captures 100% of handoff events, tool calls, and state transitions. Vex maintains a baseline of normal agent behavior learned from your production traffic, flagging deviations like unexpected handoffs or schema violations. Remediation can be fully automated - Vex can terminate looping agents, sanitize injected prompts, or reroute tasks to fallback agents.\n\nVex dashboards provide drill-down visibility into drift incidents, showing the exact handoff chain, injected prompt, or malformed output that caused the issue. This eliminates manual tracing and debugging across complex multi-agent systems.",
+      "code": "pip install openai-agents vex-sdk\n\nfrom openai_agents import Agent, Runner, Guardrail\nfrom vex_sdk import VexGuardrail\n\n# Initialize Vex guardrail\nvex_guard = VexGuardrail(\n    api_key='vex-your-key',\n    detectors=[\n        'handoff_loops',\n        'prompt_injection',\n        'tool_schema_drift',\n        'state_drift'\n    ],\n    auto_remediate=True\n)\n\n# Apply to research agent\nresearcher = Agent(\n    name='researcher',\n    model='gpt-4o',\n    instructions='Research topics...',\n    guardrails=[vex_guard]\n)\n\n# Apply to all agents in workflow\ncoordinator = Agent(\n    name='coordinator',\n    instructions='Manage handoffs...',\n    guardrails=[vex_guard]\n)\n\n# Production runner\nrunner = Runner(\n    agents=[researcher, coordinator],\n    max_parallel=5\n)\n\nresult = runner.run('Analyze market trends')\n\n# Vex auto-generates alerts and fixes drift",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with Vex in 5 minutes - automatic drift monitoring for all your OpenAI Agents SDK workflows."
+    }
+  }
+}

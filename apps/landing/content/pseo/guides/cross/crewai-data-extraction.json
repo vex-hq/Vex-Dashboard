@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with CrewAI + Vex Guardrails",
+    "description": "Learn how to build data extraction with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI data extraction",
+      "CrewAI guardrails",
+      "data extraction reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with CrewAI enables multi-agent collaboration to parse unstructured documents into structured schemas, leveraging specialized agents for different extraction tasks. Guardrails are essential to prevent agent delegation loops, hallucinated outputs, and task drift that can compromise schema compliance and data accuracy. Vex integration ensures reliable outputs through automated verification at each task step.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with CrewAI",
+      "description": "CrewAI orchestrates a crew of agents for data extraction: a Document Analyzer agent preprocesses and segments unstructured text, an Extractor agent identifies key fields using schema-guided prompts, a Validator agent cross-checks completeness and accuracy, and a Formatter agent outputs JSON-compliant results. Each agent executes tasks sequentially or hierarchically, passing intermediate results via shared memory. Tools like Pydantic models enforce schema structure during extraction.\n\nThe architecture handles diverse document types (invoices, contracts, reports) by delegating subtasks dynamically. Agents use LLMs with custom tools for entity recognition and validation, but without guardrails, issues like inconsistent field mapping or fabricated data emerge. Vex callbacks intercept task outputs for schema compliance checks before handoff.\n\nThis setup scales to parallel extraction across document batches, with a Manager agent overseeing delegation and final aggregation.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Input Docs    │───▶│ Analyzer Agent   │\n│   (PDF/Text)    │    │   (preprocess)   │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                       ┌───────▼───────┐\n                       │ Extractor     │\n                       │ Agent         │\n                       │ (schema parse)│\n                       └───────┬───────┘\n                              │ + Vex Check\n                       ┌───────▼───────┐\n                       │ Validator     │\n                       │ Agent         │\n                       │ (accuracy)    │\n                       └───────┬───────┘\n                              │ + Vex Check\n                         ┌─────▼──────┐\n                         │ Formatter   │\n                         │ Agent       │───▶ Structured JSON\n                         │ (output)    │\n                         └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "Agents endlessly pass incomplete extractions between roles, stalling progress",
+        "severity": "critical",
+        "mitigation": "Vex task timeouts and delegation cycle detection"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "Agents fabricate missing fields with plausible but incorrect data",
+        "severity": "high",
+        "mitigation": "Vex schema compliance and field presence validation"
+      },
+      {
+        "name": "Task drift",
+        "description": "Agents reinterpret extraction schemas, missing required fields",
+        "severity": "high",
+        "mitigation": "Vex objective anchoring and completeness checks"
+      },
+      {
+        "name": "Inconsistent output quality",
+        "description": "Different agents produce varying JSON formats and accuracy levels",
+        "severity": "medium",
+        "mitigation": "Vex type consistency and format standardization"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Schema with Pydantic",
+        "description": "Create structured output model for invoice data extraction",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass InvoiceSchema(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date YYYY-MM-DD\")\n    total_amount: float = Field(..., description=\"Total invoice amount\")\n    vendor_name: str = Field(..., description=\"Vendor/Supplier name\")\n    line_items: list[dict] = Field(default_factory=list)\n\n    class Config:\n        json_schema_extra = {\"required\": [\"invoice_number\", \"date\", \"total_amount\"]}",
+        "language": "python"
+      },
+      {
+        "title": "Configure CrewAI Extractor Agent",
+        "description": "Set up specialized agent for schema-guided extraction",
+        "code": "from crewai import Agent, Task, Crew\nfrom pydantic import BaseModel\n\nextractor = Agent(\n    role=\"Data Extractor\",\n    goal=\"Extract invoice data from documents using exact schema\",\n    backstory=\"Expert in parsing financial documents with 100% field accuracy\",\n    verbose=True,\n    allow_delegation=False,\n    output_pydantic=InvoiceSchema\n)\n\nextraction_task = Task(\n    description=\"Extract invoice data from {document_text}\",\n    agent=extractor,\n    context=[\"Use InvoiceSchema exactly\"],\n    output_pydantic=InvoiceSchema\n)",
+        "language": "python"
+      },
+      {
+        "title": "Create Validation Agent",
+        "description": "Second agent verifies extraction quality before final output",
+        "code": "validator = Agent(\n    role=\"Quality Validator\",\n    goal=\"Verify extracted data completeness and accuracy\",\n    backstory=\"Meticulous auditor who rejects incomplete extractions\",\n    verbose=True,\n    output_pydantic=dict  # Simple validation report\n)\n\nvalidation_task = Task(\n    description=\"Validate {extracted_data} for schema compliance and accuracy\",\n    agent=validator,\n    context=[extraction_task],\n    expected_output=\"Validation report with pass/fail status\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Assemble and Execute Crew",
+        "description": "Orchestrate full extraction pipeline",
+        "code": "crew = Crew(\n    agents=[extractor, validator],\n    tasks=[extraction_task, validation_task],\n    verbose=2\n)\n\nresult = crew.kickoff(inputs={\n    \"document_text\": \"Invoice #INV-1234 dated 2024-01-15... Total: $1,250.00\"\n})\nprint(result)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Set up Vex for medium-risk data extraction verification",
+        "code": "pip install crewai vex-sdk\n\nfrom vex import Vex\nfrom pydantic import BaseModel\n\n# Initialize with your API key\nvex = Vex(api_key=\"your-vex-api-key\")\n\n# Define verification spec for medium risk\nextraction_spec = {\n    \"risk_profile\": \"medium\",\n    \"verifications\": [\"schema_compliance\", \"field_accuracy\", \"completeness\", \"type_consistency\"],\n    \"pydantic_model\": InvoiceSchema\n}",
+        "language": "python"
+      },
+      {
+        "title": "Add Vex Callback to Extraction Task",
+        "description": "Intercept agent outputs for schema validation before delegation",
+        "code": "from crewai import Task\n\ndef vex_callback(task_output):\n    result = vex.verify(\n        data=task_output,\n        spec=extraction_spec,\n        context={\"task\": \"invoice_extraction\"}\n    )\n    if not result.valid:\n        raise ValueError(f\"Vex failed: {result.issues}\")\n    return task_output\n\nextraction_task = Task(\n    description=\"Extract invoice data...\",\n    agent=extractor,\n    callback=vex_callback,  # Vex verification step\n    output_pydantic=InvoiceSchema\n)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Guardrails for Full Crew Pipeline",
+        "description": "Protect against delegation loops and output drift across all tasks",
+        "code": "def crew_vex_guardrail(task, agent, output):\n    # Check for loops (max 3 cycles per agent)\n    cycles = getattr(task, '_cycle_count', 0)\n    if cycles > 3:\n        return vex.block(\"Delegation loop detected\")\n    task._cycle_count = cycles + 1\n    \n    # Schema + completeness verification\n    result = vex.verify(\n        data=output,\n        spec=extraction_spec,\n        safeguards={\n            \"prevent_loops\": True,\n            \"anchor_objective\": \"invoice extraction\",\n            \"output_consistency\": True\n        }\n    )\n    return result.valid\n\n# Apply to crew\ncrew = Crew(\n    agents=[extractor, validator],\n    tasks=[extraction_task, validation_task],\n    task_callback=crew_vex_guardrail\n)\n\nfinal_result = crew.kickoff(inputs={\"document_text\": document})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI Data Extraction",
+      "description": "Add Vex guardrails today to ensure 100% schema-compliant extractions across your agent crews."
+    }
+  }
+}

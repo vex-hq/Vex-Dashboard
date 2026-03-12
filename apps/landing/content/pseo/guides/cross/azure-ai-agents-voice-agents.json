@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "azure-ai-agents",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Azure AI Agent Service + Vex Guardrails",
+    "description": "Learn how to build voice agents with Azure AI Agent Service + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Azure AI Agent Service voice agents",
+      "Azure AI Agent Service guardrails",
+      "voice agents reliability",
+      "Vex Azure AI Agent Service",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Azure AI Agent Service enables building sophisticated voice agents by integrating real-time speech-to-text, Azure OpenAI reasoning, and text-to-speech with enterprise-grade security. Voice agents demand sub-second latency and unerring reliability, making guardrails essential to prevent hallucinations, policy violations, and conversation breakdowns. Vex provides runtime verification middleware that ensures responses meet enterprise standards without compromising performance.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Azure AI Agent Service",
+      "description": "Voice agents follow a real-time pipeline: audio input is transcribed via Azure Speech Service, processed through Azure AI Agent Service for reasoning with grounding (Bing Search, file search, tools), then synthesized back to speech. Azure AI Agent Service orchestrates threads with memory, tools, and Azure OpenAI models while enforcing enterprise policies. The pipeline must maintain <500ms end-to-end latency, requiring careful middleware placement.\n\nVex integrates as middleware in the agent thread execution loop, validating tool outputs, grounding data freshness, and response safety before TTS. This non-blocking verification preserves latency budgets while catching failures like outdated search results or policy-violating tool calls.\n\nKey components include Agent Threads for conversation state, Tool Calls for enterprise actions, and Grounding Sources (Bing, files) with built-in security controls.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone    │───▶│ Speech-to-Text   │───▶│Azure AI Agent   │\n│     Input       │    │  (Azure Speech)  │    │   Service       │\n└─────────────────┘    └──────────────────┘    │  + Vex Guardrails│\n                                                │ - Tool Validation│\n┌─────────────────┐    ┌──────────────────┐    │ - Data Freshness │\n│ Azure OpenAI    │◀───│   Agent Thread   │◀───│ - Latency Check  │\n│   Reasoning     │    │(Grounding/Tools) │    │ - Safety Filter  │\n└─────────────────┘    └──────────────────┘    └─────────────────┘\n                                                ┌─────────────────┐\n                                                │ Text-to-Speech  │\n                                                │  (Azure Speech) │──▶ Speaker\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Tool execution results not validated against enterprise policies",
+        "description": "Agents may execute tools that return PII or violate compliance without validation",
+        "severity": "critical",
+        "mitigation": "Vex middleware scans tool outputs against enterprise DLP policies before response generation"
+      },
+      {
+        "name": "Grounding data from Bing Search containing outdated information",
+        "description": "Real-time voice conversations fail when agents cite stale search results",
+        "severity": "high",
+        "mitigation": "Vex validates search result recency (<24h) and source credibility before inclusion"
+      },
+      {
+        "name": "File search returning Azure-specific metadata instead of content",
+        "description": "RAG returns file paths/metadata instead of relevant content excerpts",
+        "severity": "high",
+        "mitigation": "Vex extracts and validates actual content chunks from file search results"
+      },
+      {
+        "name": "Agent thread token limits exceeded without graceful degradation",
+        "description": "Long conversations hit token limits causing abrupt failures mid-response",
+        "severity": "critical",
+        "mitigation": "Vex monitors token usage and triggers summarization before limits are reached"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Real-time STT → Agent Service Pipeline (Python)",
+        "description": "Core voice pipeline integrating Azure Speech with Agent Service threads",
+        "code": "import asyncio\nimport azure.cognitiveservices.speech as speechsdk\nfrom azure.ai.projects import ProjectsClient\nfrom vex_sdk import VexClient\n\nasync def voice_agent_pipeline(audio_stream):\n    # Speech-to-Text\n    speech_config = speechsdk.SpeechConfig(subscription=\"your-key\", region=\"eastus\")\n    recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config)\n    \n    # Agent Service Thread\n    client = ProjectsClient(credential=DefaultAzureCredential(), endpoint=\"https://your-project.api.azure.com\")\n    thread = await client.agents.create_thread(agent_id=\"voice-agent\")\n    \n    # Vex Middleware\n    vex = VexClient(api_key=\"vex-key\")\n    \n    result = await recognizer.recognize_once_async(audio_stream)\n    if result.reason == speechsdk.ResultReason.RecognizedSpeech:\n        # Send to agent with Vex verification\n        response = await client.agents.create_message(\n            agent_id=\"voice-agent\",\n            thread_id=thread.id,\n            content=result.text\n        )\n        verified = await vex.verify_agent_response(response, checks=[\"latency\", \"safety\"])\n        return verified.content\n    return None",
+        "language": "python"
+      },
+      {
+        "title": "Agent Thread with Tool Validation (TypeScript)",
+        "description": "TypeScript agent handler with Vex tool result validation",
+        "code": "import { ProjectsClient } from \"@azure/ai-projects\";\nimport { VexClient } from \"vex-sdk\";\n\nconst client = new ProjectsClient(\"https://your-project.api.azure.com\", credential);\nconst vex = new VexClient(\"vex-api-key\");\n\nexport async function handleAgentMessage(threadId: string, content: string) {\n  const thread = await client.getThread(threadId);\n  \n  const response = await client.createMessage({\n    agentId: \"voice-agent\",\n    threadId,\n    content\n  });\n  \n  // Vex validates tool calls and grounding\n  const verified = await vex.verify({\n    agentResponse: response,\n    checks: [\"tool_policy\", \"data_freshness\", \"latency_budget\"],\n    enterprisePolicy: \"your-dlp-policy\"\n  });\n  \n  if (verified.passed) {\n    return verified.content;\n  }\n  \n  // Graceful degradation\n  return \"I need to check that information. Let me get back to you.\";\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Latency Budget Monitoring (Python)",
+        "description": "Enforce <500ms end-to-end latency with Vex circuit breaker",
+        "code": "import time\nfrom vex_sdk import VexLatencyGuard\n\ndef latency_monitored_pipeline(audio_input):\n    guard = VexLatencyGuard(budget_ms=500, circuit_breaker_threshold=0.1)\n    \n    with guard.measure(\"full_pipeline\"):\n        start = time.time()\n        \n        # STT\n        stt_result = speech_recognizer.recognize(audio_input)\n        \n        # Agent Service\n        agent_response = agent_client.create_message(\n            agent_id=\"voice-agent\",\n            content=stt_result.text\n        )\n        \n        # TTS\n        audio_out = tts_synthesizer.speak_text(agent_response.content)\n        \n        latency = (time.time() - start) * 1000\n        \n        if not guard.check_passed():\n            raise Exception(\"Latency budget exceeded\")\n    \n    return audio_out",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Checker (TypeScript)",
+        "description": "Maintain voice conversation state with Vex coherence validation",
+        "code": "import { VexClient } from \"vex-sdk\";\n\nconst vex = new VexClient(\"vex-key\");\n\ninterface ConversationState {\n  threadId: string;\n  last3turns: string[];\n  topic: string;\n}\n\nexport async function ensureCoherence(state: ConversationState, newResponse: string) {\n  const check = await vex.verify({\n    type: \"conversation_coherence\",\n    context: {\n      history: state.last3turns,\n      currentTopic: state.topic,\n      proposedResponse: newResponse\n    },\n    thresholds: {\n      topic_drift: 0.2,\n      repetition: 0.1\n    }\n  });\n  \n  if (!check.passed) {\n    return await vex.generate_repair(\n      issue=check.failure_reason,\n      context=state\n    );\n  }\n  \n  state.last3turns.push(newResponse);\n  return newResponse;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for Agent Service (Python)",
+        "description": "Drop-in middleware wrapper for all Agent Service thread operations",
+        "code": "from vex_sdk.integrations.azure import AzureAgentMiddleware\nfrom azure.ai.projects import ProjectsClient\n\n# Wrap existing client\nagent_client = ProjectsClient(endpoint=\"your-endpoint\")\nvex_middleware = AzureAgentMiddleware(\n    client=agent_client,\n    api_key=\"vex-key\",\n    checks=[\n        \"enterprise_policy\",\n        \"data_freshness\",\n        \"token_limits\",\n        \"latency_budget\"\n    ]\n)\n\n# All calls automatically verified\nresponse = vex_middleware.create_message(\n    agent_id=\"voice-agent\",\n    thread_id=\"thread-123\",\n    content=\"user speech input\"\n)\n\n# Response is guaranteed safe or gracefully degraded\nassert response.verified, \"Vex blocked unsafe response\"",
+        "language": "python"
+      },
+      {
+        "title": "Tool Policy Validator (TypeScript)",
+        "description": "Pre-validate tool calls against enterprise policies",
+        "code": "import { VexClient } from \"vex-sdk\";\n\nconst vex = new VexClient(\"vex-key\");\n\nexport async function validateToolCall(toolCall: any) {\n  const validation = await vex.verify({\n    type: \"tool_execution\",\n    tool: toolCall,\n    enterprise_policy: \"finance-dlp\",\n    required_fields: [\"user_consent\", \"data_classification\"]\n  });\n  \n  if (!validation.passed) {\n    throw new Error(`Tool blocked: ${validation.failure_reason}`);\n  }\n  \n  // Execute validated tool\n  return await executeTool(toolCall);\n}\n\n// Integrate with Azure Agent Service tool binding\nclient.bindTool(\"transfer_funds\", validateToolCall);",
+        "language": "typescript"
+      },
+      {
+        "title": "Token Limit Graceful Degradation (Python)",
+        "description": "Proactive summarization before token limits are hit",
+        "code": "from vex_sdk import TokenGuard\n\nclass VoiceTokenGuard(TokenGuard):\n    def __init__(self, model=\"gpt-4o\", max_tokens=128000):\n        super().__init__(model, max_tokens)\n    \n    async def check_thread(self, thread_id: str, client):\n        thread = client.get_thread(thread_id)\n        usage = self.estimate_tokens(thread.messages)\n        \n        if usage > self.max_tokens * 0.8:\n            # Proactive summarization\n            summary = await self.summarize_conversation(thread.messages[-10:])\n            \n            await client.create_message(\n                agent_id=\"voice-agent\",\n                thread_id=thread_id,\n                content=f\"[SYSTEM: Conversation summarized to manage token limits] {summary}\"\n            )\n            \n        return usage < self.max_tokens\n\n# Usage\nguard = VoiceTokenGuard()\nif await guard.check_thread(\"thread-123\", agent_client):\n    response = agent_client.create_message(...)\nelse:\n    response = \"Continuing our conversation about... (context preserved)\"",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Azure AI Agent Service Voice Agents",
+      "description": "Add Vex middleware today to achieve production-grade reliability for your voice agents with one line of code."
+    }
+  }
+}

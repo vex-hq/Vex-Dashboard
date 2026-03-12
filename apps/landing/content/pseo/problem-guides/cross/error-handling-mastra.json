@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Mastra Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Mastra error-handling",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra, AI Agent Error Handling Patterns manifest as unhandled failures in workflow transitions, malformed tool responses, and stale memory injections that cascade through agent pipelines. Without robust validation between workflow steps and tool calls, agents produce unreliable outputs or enter infinite loops. Mastra's workflow-centric architecture amplifies these issues since errors in one step propagate unchecked across the entire agent execution.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent receives partial or malformed data from previous workflow step",
+        "impact": "Downstream steps fail silently or produce hallucinated responses"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "External API returns unexpected JSON structure or null values",
+        "impact": "Agent parsing fails, causing workflow termination or corrupted state"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent loads outdated conversation history or knowledge",
+        "impact": "Agent provides incorrect answers or loses conversation context"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Third-party data sync returns inconsistent schemas",
+        "impact": "Agent makes decisions based on contradictory information"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Transition Validation Monitor",
+        "description": "Detects missing output validation between Mastra workflow steps by tracing data schemas",
+        "code": "import { createAgent } from 'mastra';\nimport { z } from 'zod';\n\nconst agent = createAgent({\n  workflow: {\n    steps: [\n      {\n        name: 'analyze',\n        schema: z.object({ analysis: z.string() }),\n        handler: async (input) => ({ analysis: 'result' })\n      },\n      {\n        name: 'summarize',\n        // ❌ Missing input validation\n        handler: async (input) => {\n          if (!input.analysis) {\n            console.error('Missing analysis from previous step');\n            throw new Error('Workflow validation failed');\n          }\n          return { summary: input.analysis };\n        }\n      }\n    ]\n  }\n});\n\n// Detection: Check if step input schemas match previous output\nagent.on('step:execute', (step, input) => {\n  const prevStep = agent.workflow.steps[step.index - 1];\n  if (prevStep && !prevStep.schema.parse(input).success) {\n    console.warn('Workflow transition validation failed:', step.name);\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Schema Validator",
+        "description": "Monitors Mastra tool calls for malformed responses against expected schemas",
+        "code": "import { Tool } from 'mastra/tools';\nimport { z } from 'zod';\n\nconst weatherTool = new Tool({\n  name: 'get_weather',\n  schema: z.object({\n    temperature: z.number(),\n    condition: z.enum(['sunny', 'rainy', 'cloudy'])\n  }),\n  execute: async (params) => {\n    const result = await fetchWeather(params.city);\n    \n    // Detection: Validate tool response\n    const validation = weatherTool.schema.safeParse(result);\n    if (!validation.success) {\n      console.error('Tool returned malformed data:', validation.error);\n      return {\n        error: 'Tool response validation failed',\n        received: result\n      };\n    }\n    return result;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Staleness Detector",
+        "description": "Identifies stale memory retrievals in Mastra agents by checking timestamps",
+        "code": "import { Memory } from 'mastra/memory';\n\nconst memory = new Memory({\n  ttl: '1h'\n});\n\n// Detection: Check memory freshness\nagent.on('memory:retrieve', async (context) => {\n  const entries = await memory.get('conversation');\n  \n  for (const entry of entries) {\n    if (Date.now() - entry.timestamp > 60 * 60 * 1000) { // 1 hour\n      console.warn('Stale memory detected:', entry.id);\n      await memory.delete(entry.id);\n      return { stale: true, count: entries.length };\n    }\n  }\n  return { fresh: true };\n});",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Workflow Step Validation Middleware",
+        "description": "Adds automatic schema validation between all Mastra workflow transitions",
+        "code": "import { createAgent, Middleware } from 'mastra';\nimport { z } from 'zod';\n\nconst validationMiddleware: Middleware = {\n  async beforeStep(agent, step, input) {\n    const prevStep = agent.workflow.steps[step.index - 1];\n    if (prevStep?.outputSchema) {\n      const result = prevStep.outputSchema.safeParse(input);\n      if (!result.success) {\n        throw new Error(`Workflow validation failed: ${result.error.message}`);\n      }\n    }\n    return input;\n  }\n};\n\nconst agent = createAgent({\n  middleware: [validationMiddleware],\n  workflow: {\n    steps: [\n      {\n        name: 'analyze',\n        outputSchema: z.object({ analysis: z.string().min(10) }),\n        handler: async () => ({ analysis: 'Valid analysis result' })\n      },\n      {\n        name: 'summarize',\n        inputSchema: z.object({ analysis: z.string().min(10) }),\n        handler: async (input) => ({ summary: input.analysis })\n      }\n    ]\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Response Wrapper",
+        "description": "Wraps Mastra tool calls with fallback responses and retry logic",
+        "code": "import { Tool } from 'mastra/tools';\nimport { z } from 'zod';\n\nfunction safeTool<T>(tool: Tool, fallback: T): Tool {\n  return new Tool({\n    ...tool,\n    async execute(params) {\n      try {\n        const result = await tool.execute(params);\n        const validation = tool.schema.safeParse(result);\n        \n        if (!validation.success) {\n          console.warn('Tool validation failed, using fallback');\n          return fallback;\n        }\n        return result;\n      } catch (error) {\n        console.error('Tool execution failed:', error);\n        return fallback;\n      }\n    }\n  });\n}\n\nconst safeWeatherTool = safeTool(\n  weatherTool,\n  { temperature: 0, condition: 'unknown' } as any\n);",
+        "language": "typescript"
+      },
+      {
+        "name": "Fresh Memory TTL Enforcement",
+        "description": "Enforces TTL on Mastra memory retrievals with automatic cleanup",
+        "code": "import { Memory } from 'mastra/memory';\n\nclass SafeMemory extends Memory {\n  async getFresh(key: string, maxAgeMs: number = 60 * 60 * 1000) {\n    const entries = await this.get(key);\n    const now = Date.now();\n    \n    // Filter out stale entries\n    const freshEntries = entries.filter(\n      entry => now - entry.timestamp < maxAgeMs\n    );\n    \n    // Cleanup stale entries\n    const staleEntries = entries.filter(\n      entry => now - entry.timestamp >= maxAgeMs\n    );\n    \n    for (const stale of staleEntries) {\n      await this.delete(stale.id);\n    }\n    \n    return freshEntries;\n  }\n}\n\nconst safeMemory = new SafeMemory();\n\n// Usage in agent\nagent.on('memory:load', async (key) => {\n  return await safeMemory.getFresh(key);\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates directly into Mastra agent pipelines as middleware, automatically detecting workflow validation failures, malformed tool responses, and stale memory issues. It provides real-time observability with structured error traces and automatic remediation workflows that inject validation layers and cleanup stale context. Vex's agent reliability engine learns your Mastra workflow patterns and proactively prevents error cascades before they impact production agents.\n\nThe Vex SDK hooks into Mastra's step execution, tool calls, and memory operations, capturing 100% of execution traces with schema validation results. When issues are detected, Vex can automatically deploy hotfixes like validation middleware or trigger human-in-the-loop review for complex failures. This eliminates the need for manual error handling implementation across your entire Mastra agent fleet.",
+      "code": "import { createAgent } from 'mastra';\nimport { Vex } from '@vex_dev/sdk';\n\n// Initialize Vex middleware\nawait Vex.init({\n  projectId: 'your-project-id',\n  agentFramework: 'mastra',\n  autoRemediate: true\n});\n\nconst agent = createAgent({\n  middleware: [\n    // Vex automatically instruments all Mastra patterns\n    Vex.middleware({\n      detect: ['workflow_validation', 'tool_malformed', 'memory_stale'],\n      autoFix: ['add_validation', 'cleanup_stale'],\n      alertOn: ['production']\n    })\n  ],\n  workflow: {\n    steps: [\n      // Vex monitors every step automatically\n      { name: 'analyze', handler: analyze },\n      { name: 'summarize', handler: summarize }\n    ]\n  }\n});\n\n// Vex detects and fixes issues automatically\nagent.on('error', (error) => {\n  Vex.captureError(error, {\n    workflowStep: agent.currentStep,\n    autoRemediate: true\n  });\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in your Mastra agents today to eliminate error handling failures across your entire fleet."
+    }
+  }
+}

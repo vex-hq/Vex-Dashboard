@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Flowise + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise ai coding assistant",
+      "Flowise guardrails",
+      "ai coding assistant reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with Flowise enables rapid deployment of code-aware LLM agents that analyze repositories, generate fixes, and validate solutions through drag-and-drop chatflows. However, unvalidated code generation, silent tool failures, and context loss in multi-agent handoffs can lead to insecure or incorrect code recommendations. Vex provides essential guardrails to verify code correctness, scan for vulnerabilities, and ensure safe execution across the entire Flowise pipeline.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Flowise",
+      "description": "The typical Flowise AI Coding Assistant uses a multi-node chatflow starting with a Vector Store retriever that pulls relevant code files from a repository embedding store. This feeds into an LLM agent node configured with coding-specific prompts, followed by custom tool nodes for sandbox code execution and test validation. A multi-agent supervisor orchestrates iterative debugging loops, passing context through sequential handoffs until validation passes or escalation occurs.\n\nKey components include a GitHub Repo Loader → Chroma Vector Store → OpenAI Chat Model with function calling → PythonREPL Tool (sandboxed) → Test Runner Node → Final Validator Agent. Failures often occur at intermediate retrieval (low-relevance docs), tool execution (silent crashes), and agent handoffs (lost context).\n\nVex integrates as a global callback handler, intercepting outputs at each node to validate code semantics, security, and compliance before propagation.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Query    │───▶│ Vector Retrieval │───▶│   Code Agent     │\n│  (Fix this bug) │    │   (Repo Context) │    │ (Generate Fix)   │\n└─────────────────┘    └──────────────────┘    └─────────────────┘\n                                                        │\n                                                        ▼\n┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Vex Guardrail │◀──▶│Sandbox Executor  │───▶│Test Validator   │\n│ (Security/Code) │    │   (Run Generated │    │(Pass/Fail)      │\n└─────────────────┘    │     Code)        │    └─────────────────┘\n                        └──────────────────┘           │\n                                                       ▼\n                                                ┌─────────────────┐\n                                                │ Final Response  │\n                                                │   or Escalate   │\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated Code Generation",
+        "description": "LLM produces syntactically correct but semantically wrong or vulnerable code without test validation",
+        "severity": "critical",
+        "mitigation": "Vex semantic analysis + test execution verification at agent output"
+      },
+      {
+        "name": "Vector Retrieval Drift",
+        "description": "Irrelevant repository files retrieved due to embedding degradation, leading to hallucinated fixes",
+        "severity": "high",
+        "mitigation": "Vex relevance scoring on retrieved documents before LLM injection"
+      },
+      {
+        "name": "Sandbox Escape Attempts",
+        "description": "Generated code contains malicious payloads attempting credential extraction or system compromise",
+        "severity": "critical",
+        "mitigation": "Vex security scanning + AST analysis before sandbox execution"
+      },
+      {
+        "name": "Context Loss in Agent Handoffs",
+        "description": "Multi-agent debugging loses repository context between supervisor → executor → validator",
+        "severity": "medium",
+        "mitigation": "Vex context continuity checks across sequential Flowise node outputs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Flowise Chatflow with Vex Callback Handler",
+        "description": "Configure the main chatflow with Vex as the global callback to intercept all node outputs for validation",
+        "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlowiseCallbackHandler } from 'flowise';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  projectId: 'coding-assistant',\n  riskProfile: 'medium'\n});\n\nconst flowiseHandler = new ChatFlowiseCallbackHandler({\n  onChainStart: async (inputs) => {\n    await vex.startSpan({\n      name: 'coding-assistant-flow',\n      input: inputs,\n      metadata: { repo: inputs.repoUrl }\n    });\n  },\n  onChainEnd: async (output) => {\n    const result = await vex.verify({\n      output,\n      checks: ['code_correctness', 'security_vulnerability'],\n      context: { language: 'typescript' }\n    });\n    return result.approved ? output : result.fallback;\n  }\n});\n\n// Attach to Flowise chatflow\nconst chatflow = await loader.getChatflow();\nchatflow.callbacks = [flowiseHandler];",
+        "language": "typescript"
+      },
+      {
+        "title": "Repository Context Retriever with Relevance Check",
+        "description": "Enhance vector store node with Vex relevance scoring to filter low-quality retrievals",
+        "code": "import { VectorStoreRetriever } from 'flowise';\n\nconst retrieverNode = new VectorStoreRetriever({\n  vectorStore: chromaStore,\n  k: 5\n});\n\nretrieverNode.callbacks = [{\n  onRetrieverEnd: async (documents, query) => {\n    const scores = await vex.score({\n      input: query,\n      output: documents.map(d => d.pageContent),\n      check: 'semantic_relevance',\n      threshold: 0.7\n    });\n    \n    return documents.filter((_, i) => scores[i] > 0.7);\n  }\n}];",
+        "language": "typescript"
+      },
+      {
+        "title": "Secure Sandbox Tool Node",
+        "description": "Wrap PythonREPL tool with Vex security scanning before execution",
+        "code": "import { PythonREPLTool } from 'flowise/tools';\n\nconst secureREPL = new PythonREPLTool();\n\nsecureREPL.callbacks = [{\n  handleToolStart: async (toolInput: string) => {\n    const scan = await vex.verify({\n      output: toolInput,\n      checks: [\n        'no_credential_leakage',\n        'no_system_calls',\n        'dependency_safety',\n        'license_compliance'\n      ]\n    });\n    \n    if (!scan.approved) {\n      throw new Error(`Security violation: ${scan.issues[0]}`);\n    }\n    return toolInput;\n  }\n}];",
+        "language": "typescript"
+      },
+      {
+        "title": "Test Validation Agent",
+        "description": "Final agent validates generated code executes successfully with tests",
+        "code": "import { AgentExecutor } from 'flowise';\n\nconst validatorAgent = new AgentExecutor({\n  llm: openaiChat,\n  tools: [testRunner],\n  systemPrompt: `You are a code validator. Only approve code that:\n1. Passes all unit tests\n2. Has no security issues\n3. Uses safe dependencies\nRespond ONLY with APPROVED or REJECTED.`\n});\n\nvalidatorAgent.callbacks = [{\n  onAgentAction: async (action) => {\n    const testResult = await vex.verify({\n      output: action.toolInput,\n      checks: ['test_passed'],\n      context: { repo: 'current' }\n    });\n    return testResult.approved;\n  }\n}];",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Initialize Vex SDK for Flowise",
+        "description": "Set up Vex client with coding assistant specific configuration",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nexport const vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-coding-assistant',\n  riskProfile: 'medium',\n  defaultChecks: [\n    'code_correctness',\n    'security_vulnerability_scanning',\n    'no_credential_leakage',\n    'dependency_safety',\n    'license_compliance'\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Global Flowise Callback Handler",
+        "description": "Single callback that wraps entire chatflow with comprehensive validation",
+        "code": "import type { BaseChatMessage, CallbackManager } from 'flowise';\n\nexport class VexFlowiseHandler implements CallbackManager {\n  async onChainEnd(output: string, runId?: string): Promise<string> {\n    const result = await vex.verify({\n      spanId: runId,\n      output,\n      context: {\n        useCase: 'ai-coding-assistant',\n        framework: 'flowise',\n        language: 'typescript'\n      }\n    });\n    \n    return result.approved ? output : `Validation failed: ${result.reason}`;\n  }\n\n  async onError(error: Error): Promise<void> {\n    await vex.recordError(error.message, { tags: ['flowise', 'coding'] });\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Vex Coding Verifier",
+        "description": "Specialized verifier for code generation outputs with AST analysis",
+        "code": "export async function verifyCodeOutput(code: string, repoContext: string): Promise<VexResult> {\n  return vex.verify({\n    output: code,\n    input: repoContext,\n    checks: {\n      code_correctness: {\n        parser: 'typescript',\n        validateSemantics: true\n      },\n      security_vulnerability_scanning: {\n        scanFor: ['sql-injection', 'xss', 'command-injection']\n      },\n      no_credential_leakage: {\n        patterns: ['process.env', 'apiKey', 'secret']\n      },\n      dependency_safety: {\n        maxVulnerabilities: 0\n      }\n    }\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise AI Coding Assistant",
+      "description": "Get started with Vex in 5 minutes - npm install @vex_dev/sdk and deploy production-ready guardrails today."
+    }
+  }
+}

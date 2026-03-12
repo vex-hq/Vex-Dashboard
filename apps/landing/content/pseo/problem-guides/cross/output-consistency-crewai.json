@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "output-consistency",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Ensuring Output Consistency in AI Agents in CrewAI Agents",
+    "description": "How to detect and fix ensuring output consistency in ai agents in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ensuring-output-consistency-in-ai-agents",
+      "CrewAI output-consistency",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, ensuring output consistency in AI agents is challenging due to autonomous delegation between crew members, leading to loops and task drift. Agents often hallucinate tool outputs or reinterpret objectives differently, causing inconsistent quality across roles. This manifests as unreliable multi-agent workflows where outputs vary unpredictably across runs.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly pass tasks back and forth without progress",
+        "impact": "Infinite loops halt execution and waste tokens"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agents generate fake tool results that downstream agents treat as real",
+        "impact": "Cascading errors propagate through the crew"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Each agent slightly modifies the task description",
+        "impact": "Final output deviates from original crew goal"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Researcher agent produces detailed outputs but Writer agent varies in structure",
+        "impact": "Unpredictable final deliverables"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Detect Delegation Loops",
+        "description": "Monitor task delegation patterns to identify cycles between agents",
+        "code": "from crewai import Crew, Agent, Task\nimport re\n\ndef detect_loops(crew_history):\n    agent_transitions = []\n    for i, event in enumerate(crew_history):\n        if 'delegated_to' in event:\n            agent_transitions.append((event['from_agent'], event['to_agent']))\n    \n    # Detect cycles\n    seen = set()\n    for from_agent, to_agent in agent_transitions:\n        path = (from_agent, to_agent)\n        if path in seen:\n            return True, f\"Loop detected: {path}\"\n        seen.add(path)\n    return False, \"No loops\"\n\n# Usage: pass crew.task_history or agent logs",
+        "language": "python"
+      },
+      {
+        "name": "Validate Tool Output Consistency",
+        "description": "Check if tool outputs match expected schemas and contain hallucinations",
+        "code": "import json\nimport re\n\ndef validate_tool_output(tool_output, expected_schema):\n    try:\n        parsed = json.loads(tool_output)\n        # Check for hallucinated content (unrealistic data)\n        if re.search(r'\\b(error|failed|not found|unavailable)\\b', tool_output.lower()):\n            return False, \"Possible hallucinated failure\"\n        \n        # Schema validation\n        required_fields = expected_schema.get('required', [])\n        missing = [f for f in required_fields if f not in parsed]\n        if missing:\n            return False, f\"Missing fields: {missing}\"\n        return True, \"Valid\"\n    except:\n        return False, \"Invalid JSON\"\n\n# Usage: validate_tool_output(agent.last_tool_output, tool.schema)",
+        "language": "python"
+      },
+      {
+        "name": "Measure Task Objective Drift",
+        "description": "Compare task descriptions across agent handoffs for semantic drift",
+        "code": "from crewai import Task\n\ndef measure_objective_drift(original_task, current_task):\n    orig_text = original_task.description.lower()\n    curr_text = current_task.description.lower()\n    \n    # Keyword overlap\n    orig_words = set(orig_text.split())\n    curr_words = set(curr_text.split())\n    overlap = len(orig_words.intersection(curr_words)) / len(orig_words)\n    \n    # Length change indicator\n    length_ratio = len(curr_text) / len(orig_text)\n    \n    drift_score = 1 - overlap + abs(length_ratio - 1)\n    return drift_score > 0.3, f\"Drift score: {drift_score:.2f}\"\n\n# Usage in crew callback: measure_objective_drift(task.original, task.current)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Implement Delegation Limits",
+        "description": "Add max delegation depth to prevent loops",
+        "code": "from crewai import Agent, Task\n\nclass LoopProtectedAgent(Agent):\n    def __init__(self, *args, max_delegations=3, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.delegation_count = 0\n        self.max_delegations = max_delegations\n    \n    def should_delegate(self, task):\n        if self.delegation_count >= self.max_delegations:\n            return False, \"Max delegations reached\"\n        self.delegation_count += 1\n        return True, \"Can delegate\"\n\n# Usage\nresearcher = LoopProtectedAgent(\n    role='Researcher',\n    goal='Research topics',\n    backstory='Expert researcher',\n    max_delegations=2\n)\n\nresearcher_task = Task(\n    description='Research AI trends',\n    agent=researcher\n)",
+        "language": "python"
+      },
+      {
+        "name": "Structured Output Enforcement",
+        "description": "Force consistent JSON outputs with validation callbacks",
+        "code": "from crewai import Task\nfrom pydantic import BaseModel, Field\n\nclass ResearchOutput(BaseModel):\n    summary: str = Field(..., max_length=500)\n    key_findings: list[str]\n    sources: list[str]\n\nclass StructuredTask(Task):\n    def __init__(self, *args, output_model=None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.output_model = output_model\n    \n    def validate_output(self, raw_output):\n        try:\n            validated = self.output_model.model_validate_json(raw_output)\n            return validated.model_dump_json()\n        except:\n            return self.output_model.model_json_schema()\n\n# Usage\nresearch_task = StructuredTask(\n    description='Research AI trends in JSON format',\n    expected_output=\"\"\"{\"summary\": \"...\", \"key_findings\": [], \"sources\": []}\"\",\n    output_model=ResearchOutput,\n    agent=researcher\n)",
+        "language": "python"
+      },
+      {
+        "name": "Objective Lock with Context Injection",
+        "description": "Pin original objectives in every agent context to prevent drift",
+        "code": "from crewai import Crew\n\nclass ObjectiveLockedCrew(Crew):\n    def __init__(self, *args, pinned_objective=None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.pinned_objective = pinned_objective\n    \n    def create_task_context(self, task):\n        context = super().create_task_context(task)\n        if self.pinned_objective:\n            context['pinned_objective'] = self.pinned_objective\n            context['instruction'] = f\"Stick exactly to: {self.pinned_objective}\"\n        return context\n\n# Usage\ncrew = ObjectiveLockedCrew(\n    agents=[researcher, writer],\n    tasks=[research_task, write_task],\n    pinned_objective=\"Create comprehensive AI trends report under 1000 words\"\n)\nresult = crew.kickoff()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Ensuring Output Consistency in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback in CrewAI tasks, automatically detecting delegation loops, hallucinated outputs, task drift, and quality variance in real-time. It monitors agent interactions, validates outputs against Pydantic schemas, and flags inconsistencies before they cascade through the crew. \n\nWith Vex's step callbacks, every agent handoff triggers consistency checks using semantic similarity, schema validation, and behavioral pattern analysis specific to CrewAI's delegation model. When issues are detected, Vex can auto-remediate by injecting corrected context or rerouting tasks.\n\nThe integration requires only adding Vex as a task callback—no changes to agent logic needed. Vex maintains a historical baseline of successful runs to detect regressions and provides detailed dashboards for consistency metrics across crew executions.",
+      "code": "from crewai import Crew, Agent, Task\nfrom vex_sdk import VexMonitor\n\n# Install: pip install crewai vex-sdk\n\n# Initialize Vex monitor\nvex = VexMonitor(issue_type=\"crewai-consistency\")\n\n# Define agents\nresearcher = Agent(\n    role='Researcher',\n    goal='Research accurately',\n    backstory='Expert researcher'\n)\n\n# Add Vex callback to tasks\ntask = Task(\n    description='Research AI trends',\n    agent=researcher,\n    callback=vex.on_task_step,  # Vex integration point\n    context={\"consistency_check\": True}\n)\n\ncrew = Crew(\n    agents=[researcher],\n    tasks=[task],\n    verbose=True\n)\n\n# Vex auto-detects loops, drift, hallucinations\nresult = crew.kickoff()\n\n# View Vex report\nprint(vex.get_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and add one line to automate CrewAI consistency monitoring across all your agents."
+    }
+  }
+}

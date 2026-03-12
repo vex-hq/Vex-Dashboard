@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build agentic rag with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents agentic rag",
+      "n8n AI Agents guardrails",
+      "agentic rag reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "n8n AI Agents enable powerful Agentic RAG workflows where agents autonomously plan retrieval queries, fetch from multiple sources, and synthesize attributed responses. These multi-step agent chains introduce risks like hallucinated citations, unverified source faithfulness, and recursive execution loops that can cascade errors. Vex provides essential guardrails to verify query planning accuracy, cross-source consistency, and output reliability before actions execute.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with n8n AI Agents",
+      "description": "A typical n8n Agentic RAG workflow begins with a trigger node (webhook/HTTP) feeding user queries to an AI Agent node configured with planning tools. The planning agent decomposes queries into sub-queries and routes them to parallel Retriever Agents connected to vector stores (Pinecone/Weaviate) and structured data sources (PostgreSQL/Notion). Retrieved chunks flow to a Synthesis Agent that generates final responses with source attribution, often using memory nodes for conversation context.\n\nCritical failure points occur at agent handoffs: unvalidated retrieval outputs pass to synthesis, stale memory injects irrelevant context, and tool calls expose credentials if parameters aren't sanitized. The workflow chains 4-6 agent nodes with conditional routing based on confidence scores, making end-to-end verification essential.\n\nVex integrates as a webhook node after each AI Agent output, validating planning steps, retrieval faithfulness, and synthesis before downstream execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐    ┌──────────────┐\n│   Webhook       │───▶│ Planning     │───▶│ Vex Guard    │\n│   Trigger       │    │ Agent        │    │ (Query Plan) │\n└─────────────────┘    └──────────────┘    └──────────────┘\n                                   │\n                                   ▼\n                        ┌─────────────────────┐\n                        │ Parallel Retrieval  │──────┐\n                        │ - Vector Store      │      │\n                        │ - SQL/Notion        │      │\n                        └─────────────────────┘      │\n                                   │                 │\n                                   ▼                 │\n                            ┌──────────────┐    ┌──────────────┐\n                            │ Vex Guard    │    │ Vex Guard    │\n                            │ (Faithful-   │    │ (Consistency)│\n                            │ ness)        │    │               │\n                            └──────────────┘    └──────────────┘\n                                   │                 │\n                                   ▼                 │\n                            ┌──────────────┐         │\n                            │ Synthesis    │◀────────┘\n                            │ Agent        │\n                            └──────────────┘\n                                   │\n                                   ▼\n                            ┌──────────────┐\n                            │ Final Resp   │\n                            │ + Citations  │\n                            └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "Planning agent generates infinite sub-query loops when confidence thresholds fail",
+        "severity": "critical",
+        "mitigation": "Vex query planning verifier limits recursion depth and validates query divergence"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unverified retrieval chunks containing hallucinations propagate to synthesis agent",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks after each retriever before synthesis handoff"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "Dynamic tool parameters constructed by agents leak API keys in vector store calls",
+        "severity": "high",
+        "mitigation": "Vex parameter sanitizer scrubs credentials from tool call payloads"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Conversation memory pulls irrelevant prior retrievals, causing cross-query contamination",
+        "severity": "high",
+        "mitigation": "Vex context recency verifier filters memory by query similarity thresholds"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Planning Agent with Vex Query Validation",
+        "description": "Add Vex webhook after planning agent to verify sub-query decomposition before parallel retrieval",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  secretKey: process.env.VEX_SECRET\n});\n\n// n8n webhook receives planning agent output\napp.post('/validate-plan', async (req, res) => {\n  const { query, subQueries, confidence } = req.body;\n  \n  const result = await vex.verify({\n    useCase: 'agentic-rag',\n    inputs: { originalQuery: query, plannedQueries: subQueries },\n    checks: {\n      queryPlanning: {\n        maxDepth: 3,\n        minCoverage: 0.8,\n        preventLoops: true\n      }\n    }\n  });\n  \n  if (result.pass) {\n    res.json({ proceed: true, subQueries });\n  } else {\n    res.status(400).json({ error: 'Invalid query plan', issues: result.issues });\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Retriever Faithfulness Verification",
+        "description": "Validate retrieved chunks match planning sub-queries before synthesis",
+        "code": "// After vector store retriever nodes\nconst validateRetrievals = async (retrievals: any[]) => {\n  const vex = new Vex({ /* config */ });\n  \n  const results = await Promise.all(\n    retrievals.map(async (retrieval, index) => {\n      return vex.verify({\n        useCase: 'agentic-rag-retrieval',\n        inputs: {\n          subQuery: retrieval.subQuery,\n          chunks: retrieval.chunks,\n          metadata: retrieval.metadata\n        },\n        checks: {\n          sourceFaithfulness: {\n            threshold: 0.9,\n            requireAttribution: true\n          },\n          hallucination: 'strict'\n        }\n      });\n    })\n  );\n  \n  return results.every(r => r.pass);\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Cross-Source Consistency Check",
+        "description": "Ensure alignment across vector, SQL, and document retrievers",
+        "code": "const checkCrossSource = async (sources: { [type: string]: any[] }) => {\n  const vex = new Vex({ /* config */ });\n  \n  const result = await vex.verify({\n    useCase: 'agentic-rag-consistency',\n    inputs: {\n      vectorChunks: sources.vector,\n      sqlResults: sources.sql,\n      docChunks: sources.notion\n    },\n    checks: {\n      crossSourceConsistency: {\n        semanticThreshold: 0.75,\n        factAlignment: 'high',\n        citationCoverage: 0.9\n      }\n    }\n  });\n  \n  return {\n    consistent: result.pass,\n    citationGraph: result.citations,\n    conflicts: result.issues\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Final Synthesis + Citation Verification",
+        "description": "Verify final response faithfully represents retrieved sources",
+        "code": "// Before final response node\nconst verifySynthesis = async ({\n  synthesis,\n  sources,\n  citations\n}: {\n  synthesis: string;\n  sources: any[];\n  citations: number[];\n}) => {\n  const vex = new Vex({ /* config */ });\n  \n  const result = await vex.verify({\n    useCase: 'agentic-rag-synthesis',\n    inputs: {\n      response: synthesis,\n      citedSources: sources.filter((_, i) => citations.includes(i)),\n      allSources: sources\n    },\n    checks: {\n      citationVerification: 'strict',\n      hallucinationDetection: 'zero',\n      sourceFaithfulness: 0.95\n    }\n  });\n  \n  return {\n    verified: result.pass,\n    finalResponse: result.pass ? synthesis : null,\n    citationReport: result.citations\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "n8n Webhook Node Configuration",
+        "description": "Configure Vex as HTTP Request node after each AI Agent with this payload",
+        "code": "// Copy to n8n HTTP Request node - POST body\nconst payload = {\n  \"useCase\": \"{{ $json.useCase || 'agentic-rag' }}\",\n  \"inputs\": {\n    \"query\": \"{{ $('AI Agent').item.json.query }}\",\n    \"agentOutput\": \"{{ $('AI Agent').item.json.output }}\",\n    \"toolsCalled\": \"{{ $('AI Agent').item.json.tools }}\",\n    \"retrievals\": \"{{ $('Retriever').all().map(item => item.json.chunks) }}\"\n  },\n  \"checks\": {\n    \"queryPlanning\": {{ $json.planningChecks }},\n    \"sourceFaithfulness\": {{ $json.retrievalChecks }},\n    \"parameterSafety\": true\n  }\n};\n\n// Headers\nconst headers = {\n  \"Authorization\": \"Bearer {{ $env.VEX_SECRET }}\",\n  \"Content-Type\": \"application/json\"\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Credential Sanitizer Middleware",
+        "description": "n8n Code node to scrub tool parameters before Vex validation",
+        "code": "// n8n Code node before Vex webhook\nconst sanitizeTools = ($input) => {\n  const items = $input.all();\n  \n  return items.map(item => {\n    const tools = item.json.tools || [];\n    const safeTools = tools.map(tool => ({\n      ...tool,\n      parameters: Object.fromEntries(\n        Object.entries(tool.parameters || {}).map(([k, v]) => [\n          k,\n          typeof v === 'string' && (v.includes('sk-') || v.includes('api_key')) \n            ? '[REDACTED]' \n            : v\n        ])\n      )\n    }));\n    \n    return {\n      json: {\n        ...item.json,\n        tools: safeTools,\n        sanitized: true\n      }\n    };\n  });\n};\n\nreturn sanitizeTools($input);",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Routing After Vex",
+        "description": "IF node configuration to route based on Vex verification results",
+        "code": "// n8n IF node conditions after Vex webhook\n{\n  \"conditions\": {\n    \"options\": {\n      \"caseSensitive\": true,\n      \"leftValue\": \"\",\n      \"typeValidation\": \"strict\"\n    },\n    \"conditions\": [\n      {\n        \"id\": \"vex-pass\",\n        \"leftValue\": \"{{ $json.pass }}\",\n        \"rightValue\": true,\n        \"operator\": {\n          \"type\": \"boolean\",\n          \"operation\": \"equal\"\n        }\n      },\n      {\n        \"id\": \"no-critical-issues\",\n        \"leftValue\": \"{{ $json.issues.length }}\",\n        \"rightValue\": 0,\n        \"operator\": {\n          \"type\": \"number\",\n          \"operation\": \"lte\"\n        }\n      }\n    ],\n    \"combinator\": \"and\"\n  },\n  \"trueOutput\": \"Proceed to Next Agent\",\n  \"falseOutput\": \"Fail + Notify\"\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Agentic RAG",
+      "description": "Add Vex guardrails to your n8n workflows today with our free tier - prevent hallucinations and credential leaks in production."
+    }
+  }
+}

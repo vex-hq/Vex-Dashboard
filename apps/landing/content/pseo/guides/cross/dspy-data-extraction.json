@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with DSPy + Vex Guardrails",
+    "description": "Learn how to build data extraction with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy data extraction",
+      "DSPy guardrails",
+      "data extraction reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming LLMs for data extraction by composing optimizable modules that generate structured outputs from unstructured documents. Guardrails are essential to catch common failures like schema violations, inaccurate field extraction, and incomplete outputs that optimized prompts often miss. Vex provides runtime verification to ensure reliable production deployments.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with DSPy",
+      "description": "DSPy data extraction typically uses Signature modules to define input/output schemas, ChainOfThought for reasoning, and Program optimizers to tune prompts against training data. A basic pipeline chains document parsing, entity extraction, and validation modules. Outputs are Pydantic models or JSON matching predefined schemas for downstream consumption.\n\nThe flow starts with a raw document fed into a dspy.Signature defining fields like 'name', 'amount', 'date'. Modules are compiled with optimizers like BootstrapFewShot, then executed via program.forward(). Production risks emerge when optimized chains produce schema-invalid or hallucinated extractions.\n\nVex wraps module calls to verify schema compliance, field accuracy against ground truth samples, and completeness at inference time.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Raw Document  │───▶│ DSPy Signature   │───▶│  Vex Verify     │\n│     (PDF/Text)  │    │ (name,amount,...)│    │ (schema,types)  │\n└─────────────────┘    └──────────────────┘    └─────────────────┘\n                                   │                        │\n                                   ▼                        ▼\n                           ┌──────────────────┐    ┌─────────────────┐\n                           │ ChainOfThought   │    │   Valid Output  │\n                           │   + Optimizer    │◀───│  (JSON/Pydantic)│\n                           └──────────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Optimized prompts overfitting to training examples",
+        "description": "DSPy optimizers create prompts too specific to training data, failing on real documents with varied formats",
+        "severity": "high",
+        "mitigation": "Vex schema verification rejects format-specific hallucinations regardless of training data"
+      },
+      {
+        "name": "Chain-of-thought reasoning producing plausible but wrong logic",
+        "description": "CoT modules generate convincing reasoning chains that extract incorrect values from ambiguous text",
+        "severity": "critical",
+        "mitigation": "Vex field accuracy checks validate extracted values against document content and external sources"
+      },
+      {
+        "name": "Assertion violations not caught at inference time",
+        "description": "DSPy lacks runtime schema enforcement, allowing malformed JSON or missing required fields",
+        "severity": "high",
+        "mitigation": "Vex wraps forward() calls with comprehensive schema compliance assertions"
+      },
+      {
+        "name": "Module composition creating unexpected output distributions",
+        "description": "Chained modules amplify errors, producing inconsistent field types or incomplete extractions",
+        "severity": "medium",
+        "mitigation": "Vex completeness validation ensures all required fields present with correct types"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Signature",
+        "description": "Create DSPy Signature for invoice data extraction with typed fields",
+        "code": "import dspy\n\nclass InvoiceExtractor(dspy.Signature):\n    \"\"\"Extracts invoice details from text.\"\"\"\n    \n    document: str = dspy.InputField()\n    name: str = dspy.OutputField(desc=\"Invoice recipient name\")\n    amount: float = dspy.OutputField(desc=\"Total invoice amount\")\n    date: str = dspy.OutputField(desc=\"Invoice date in YYYY-MM-DD\")\n    invoice_id: str = dspy.OutputField(desc=\"Unique invoice ID\")\n\nextractor = InvoiceExtractor()\n\n# Usage\nresult = extractor(document=\"Invoice #INV-123 to Acme Corp... $1,250.00 on 2024-03-15\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Build Extraction Program",
+        "description": "Compose ChainOfThought program and optimize with few-shot examples",
+        "code": "import dspy\n\nco_t_extractor = dspy.ChainOfThought(InvoiceExtractor)\n\n# Training examples\ntrainset = [\n    dspy.Example(document=\"Invoice #ABC123 to XYZ Ltd $500.00 2024-01-15\", \n                 name=\"XYZ Ltd\", amount=500.0, date=\"2024-01-15\", invoice_id=\"ABC123\").with_inputs(\"document\")\n]\n\n# Optimize\noptimizer = dspy.BootstrapFewShot(metric=dspy.evaluate.answer_exact_match)\noptimized_extractor = optimizer.compile(co_t_extractor, trainset=trainset)\n\n# Execute\nresult = optimized_extractor(document=\"Invoice INV-456 Acme Inc $2,300 2024-04-01\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Structured Output Validation",
+        "description": "Add Pydantic model for runtime type checking post-extraction",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\nfrom datetime import date\n\nclass Invoice(BaseModel):\n    name: str = Field(..., min_length=1)\n    amount: float = Field(..., gt=0)\n    date: str = Field(regex=r'^\\d{4}-\\d{2}-\\d{2}$')\n    invoice_id: str = Field(..., pattern=r'^INV-\\d+$')\n\n# Parse DSPy output\ninvoice_data = {\n    'name': result.name,\n    'amount': float(result.amount),\n    'date': result.date,\n    'invoice_id': result.invoice_id\n}\n\ntry:\n    validated_invoice = Invoice(**invoice_data)\n    print(\"✓ Valid invoice:\", validated_invoice)\nexcept Exception as e:\n    print(\"✗ Validation failed:\", e)",
+        "language": "python"
+      },
+      {
+        "title": "Batch Processing Pipeline",
+        "description": "Process multiple documents with error handling and logging",
+        "code": "def extract_batch(documents: list[str]) -> list[Invoice]:\n    results = []\n    \n    for i, doc in enumerate(documents):\n        try:\n            raw_result = optimized_extractor(doc)\n            invoice = Invoice(**{\n                'name': raw_result.name,\n                'amount': float(raw_result.amount),\n                'date': raw_result.date,\n                'invoice_id': raw_result.invoice_id\n            })\n            results.append(invoice)\n            print(f\"✓ Document {i+1}: {invoice.invoice_id}\")\n        except Exception as e:\n            print(f\"✗ Document {i+1} failed: {e}\")\n    \n    return results\n\n# Usage\ninvoices = extract_batch([\n    \"Invoice #INV-123 to Acme Corp $1250 2024-03-15\",\n    \"Invoice INV-456 Beta Ltd $2300.50 2024-04-01\"\n])",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Module Calls with Vex Verify",
+        "description": "Basic integration wrapping DSPy forward() with schema verification",
+        "code": "import vex\n\n@vex.verify(\n    assertions=[\n        vex.schema_matches('Invoice'),\n        vex.field_accuracy('amount', tolerance=0.01),\n        \"len(name) > 0\",\n        \"invoice_id.startswith('INV-')\"\n    ],\n    risk_profile='medium'\n)\ndef verified_extractor(document: str) -> dict:\n    result = optimized_extractor(document)\n    return {\n        'name': result.name,\n        'amount': float(result.amount),\n        'date': result.date,\n        'invoice_id': result.invoice_id\n    }\n\n# Usage - fails fast on violations\nresult = verified_extractor(\"Invoice #INV-123 to Acme Corp $1250 2024-03-15\")\nprint(result)",
+        "language": "python"
+      },
+      {
+        "title": "Completeness + Type Verification",
+        "description": "Ensure all required fields present with correct types and formats",
+        "code": "import vex\nfrom typing import Dict, Any\n\n@vex.verify(\n    assertions=[\n        \"all(key in result for key in ['name', 'amount', 'date', 'invoice_id'])\",\n        \"isinstance(result['amount'], (int, float)) and result['amount'] > 0\",\n        \"bool(re.match(r'^\\\\d{4}-\\\\d{2}-\\\\d{2}$', result['date']))\",\n        vex.schema_compliance('Invoice')\n    ],\n    fallback='reject'\n)\ndef complete_extractor(document: str) -> Dict[str, Any]:\n    raw = optimized_extractor(document)\n    return dict(raw.__dict__)\n\n# Production usage\nsafe_results = [complete_extractor(doc) for doc in documents]",
+        "language": "python"
+      },
+      {
+        "title": "Production Pipeline with Vex Monitoring",
+        "description": "Full pipeline with failure mode detection and alerting",
+        "code": "import vex\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n@vex.verify(\n    assertions=[\n        vex.schema_matches('Invoice'),\n        vex.field_accuracy('amount'),\n        vex.completeness(['name', 'amount', 'date', 'invoice_id']),\n        \"len(name.strip()) >= 2\"\n    ],\n    risk_profile='medium',\n    alert_on_fail=True,\n    metric_tags={'pipeline': 'invoice_extraction'}\n)\ndef production_pipeline(document: str, doc_id: str) -> Invoice:\n    \"\"\"Production-ready extraction with full verification.\"\"\"\n    raw_result = optimized_extractor(document)\n    \n    invoice = Invoice(\n        name=raw_result.name,\n        amount=float(raw_result.amount),\n        date=raw_result.date,\n        invoice_id=raw_result.invoice_id\n    )\n    \n    logger.info(f\"Extracted invoice {doc_id}: {invoice.invoice_id}\")\n    return invoice\n\n# Batch processing\ninvoices = []\nfor doc_id, doc in documents.items():\n    try:\n        invoice = production_pipeline(doc, doc_id)\n        invoices.append(invoice)\n    except vex.VerificationError as e:\n        logger.error(f\"Vex blocked invalid extraction for {doc_id}: {e}\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Data Extraction",
+      "description": "Add Vex verification to your DSPy pipelines today with `pip install vex-sdk` and start catching extraction failures before they reach production."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in LangGraph Agents",
+    "description": "How to detect and fix ai agent observability in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "LangGraph agent-observability",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Observability in LangGraph is critical due to its stateful graph execution model, where cycles, parallel branches, and checkpoints can lead to silent failures like infinite loops or corrupted states. Problems manifest as unexpected state mutations, checkpoint errors, or bypassed human interventions that are hard to trace without deep visibility into graph traversals. Vex provides structured observability by capturing graph state snapshots, edge transitions, and checkpoint integrity at runtime.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic graph execution causing infinite state transitions",
+        "symptom": "Graph.invoke() never returns, CPU/memory spikes, no error logged",
+        "impact": "Production agents hang indefinitely, blocking downstream workflows"
+      },
+      {
+        "scenario": "State corruption when parallel branches merge conflicting data",
+        "symptom": "Final state has None values or inconsistent schema, partial data loss",
+        "impact": "Agent outputs garbage or crashes on type mismatches in downstream nodes"
+      },
+      {
+        "scenario": "Checkpoint deserialization errors after schema changes",
+        "symptom": "TypeError/KeyError on graph resume, 'checkpoint schema mismatch'",
+        "impact": "Long-running agents fail to recover from interruptions after code deploys"
+      },
+      {
+        "scenario": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "symptom": "INTERRUPT state ignored, agent continues without human input",
+        "impact": "Critical decisions made without approval, compliance violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Infinite Loop Detector",
+        "description": "Monitor graph execution by tracking node visits and state hash changes",
+        "code": "from langgraph.graph import StateGraph\nfrom collections import defaultdict\n\ndef detect_cycles(graph, config, max_iterations=50):\n    visited = defaultdict(int)\n    state_hash = None\n    \n    for i in range(max_iterations):\n        result = graph.invoke(None, config)\n        current_hash = hash(str(result))\n        visited[list(result.keys())[0]] += 1\n        \n        if current_hash == state_hash and i > 10:\n            return {'error': 'CYCLE_DETECTED', 'iterations': i}\n        state_hash = current_hash\n    return {'status': 'healthy'}",
+        "language": "python"
+      },
+      {
+        "name": "State Corruption Scanner",
+        "description": "Validate merged state schema and detect None/null values post-parallel execution",
+        "code": "import langgraph\n\ndef scan_state_corruption(final_state, expected_schema):\n    errors = []\n    for key, expected_type in expected_schema.items():\n        value = final_state.get(key)\n        if value is None:\n            errors.append(f'{key}: NULL_VALUE')\n        elif not isinstance(value, expected_type):\n            errors.append(f'{key}: TYPE_MISMATCH expected={expected_type} got={type(value)}')\n    return {'corrupted': len(errors) > 0, 'errors': errors}\n\n# Usage\nschema = {'messages': list, 'summary': str}\nresult = scan_state_corruption(state, schema)",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Integrity Check",
+        "description": "Verify checkpoint serialization roundtrip after schema evolution",
+        "code": "from langgraph.checkpoint import MemorySaver\n\ndef test_checkpoint_serialization(graph, config):\n    # Initial run\n    result1 = graph.invoke({'input': 'test'}, config)\n    checkpoint = graph.get_state(config).checkpoint\n    \n    # Simulate schema change and reload\n    graph_reloaded = StateGraph(...)  # Rebuild with new schema\n    graph_reloaded.compile(checkpointer=MemorySaver())\n    \n    try:\n        result2 = graph_reloaded.invoke(None, config)\n        return {'valid': True}\n    except (TypeError, KeyError) as e:\n        return {'valid': False, 'error': str(e)}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Cycle Breaker with Max Iterations",
+        "description": "Add iteration limit and emergency exit condition to graph config",
+        "code": "from langgraph.graph import END\n\ndef cycle_safe_node(state):\n    state['iteration'] = state.get('iteration', 0) + 1\n    if state['iteration'] > 50:\n        return {'error': 'MAX_ITERATIONS_EXCEEDED', 'next': END}\n    return state\n\n# Add to graph\nworkflow.add_node('safe_check', cycle_safe_node)\napp = workflow.compile()",
+        "language": "python"
+      },
+      {
+        "name": "Atomic State Merger",
+        "description": "Use reducer functions to resolve parallel branch conflicts deterministically",
+        "code": "from typing import Annotated, Sequence\nfrom langgraph.graph.message import add_messages\n\ndef merge_summaries(a, b):\n    return a if len(a) > len(b) else b  # Pick longer summary\n\nclass AgentState(TypedDict):\n    messages: Annotated[Sequence[BaseMessage], add_messages]\n    summary: Annotated[str, merge_summaries]\n\n# Compile with custom state\napp = workflow.compile(state_schema=AgentState)",
+        "language": "python"
+      },
+      {
+        "name": "Human-in-the-Loop Enforcement",
+        "description": "Force interrupt on conditional edges with strict breakpoint validation",
+        "code": "from langgraph.prebuilt import human_in_the_loop\n\ndef conditional_edge(state):\n    if state.get('requires_human'):\n        return 'human_approval'  # Always route to human node\n    return 'continue'\n\n# Add human node\nworkflow.add_node('human_approval', human_in_the_loop())\nworkflow.add_conditional_edges('router', conditional_edge)\napp = workflow.compile(interrupt_before=['human_approval'])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex automates LangGraph observability by wrapping graph.invoke() calls and injecting as graph nodes to capture full execution traces including state snapshots, edge traversals, and checkpoint diffs. It detects cycles by monitoring state hash stability across iterations, flags state corruption via schema validation on merge points, and alerts on bypassed interrupts by tracking conditional edge compliance. Remediation templates auto-generate cycle breakers, atomic mergers, and enforced human-in-the-loop routing with one-click deployment.\n\nVex's LangGraph integration provides span-level visibility into parallel execution branches and automatic checkpoint validation during schema migrations. Production teams use Vex dashboards to set SLOs on agent reliability metrics like 'cycle-free execution rate' and 'state integrity score'.",
+      "code": "from vex_sdk import verify\nfrom langgraph.graph import StateGraph\n\n# Method 1: Wrap invoke\n@verify(agent='langgraph-agent')\ndef run_agent(input_data):\n    app.invoke(input_data, config)\n\n# Method 2: Vex as graph node\ndef vex_observer(state):\n    verify_result = verify.check({\n        'state_snapshot': state,\n        'node': 'current_node',\n        'metrics': {'iteration': state.get('iteration', 0)}\n    })\n    if verify_result.errors:\n        return {'error': 'VEX_BLOCKED'}\n    return state\n\nworkflow.add_node('vex_check', vex_observer)\napp = workflow.compile()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LangGraph agents to catch these failures before they hit production."
+    }
+  }
+}

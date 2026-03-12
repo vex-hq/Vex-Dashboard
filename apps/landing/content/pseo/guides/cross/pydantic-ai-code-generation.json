@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build code generation with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI code generation",
+      "Pydantic AI guardrails",
+      "code generation reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Pydantic AI enables type-safe LLM agents for production code generation, combining structured outputs with agentic workflows for iterative refinement. Guardrails are essential to mitigate risks like malicious code injection, syntax errors, credential leaks, and sandbox escapes in high-stakes environments. Vex provides runtime verification that catches these failures before deployment impact.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Pydantic AI",
+      "description": "The architecture starts with a Pydantic AI agent receiving requirements and generating initial code via structured LLM calls. The generated code is sandboxed using restricted Python execution environments (like restrictedpython or Docker), validated against test suites, and scanned for safety violations. Failed validations trigger iterative refinement loops where the agent debugs and regenerates code.\n\nTool calling handles sandbox execution results, security scans, and test outcomes as structured Pydantic models. Streaming responses enable real-time validation during generation. The result_validator pattern intercepts all agent outputs for Vex verification before they reach the application layer.\n\nDependency injection provides test fixtures, sandbox configs, and credential vaults to nested tool calls, ensuring context preservation across refinement cycles.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Request  │───▶│ Pydantic AI Agent│───▶│   Vex Guardrail │\n│   (Requirements)│    │   + Tools        │    │ (result_validator)│\n└─────────────────┘    │ - Code Gen Tool  │    └──────────┬──────┘\n                       │ - Sandbox Exec   │               │\n                       │ - Test Validator │    ┌──────────▼──────┐\n                       └──────────────────┘    │ Sandbox + Tests │\n                                                │   (Iterative)   │\n                                                └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious Code Injection",
+        "description": "LLM generates code with syscalls, file writes, or network requests that escape sandbox boundaries",
+        "severity": "critical",
+        "mitigation": "Vex static analysis + dynamic sandbox execution with syscall filtering"
+      },
+      {
+        "name": "Credential Hardcoding",
+        "description": "Generated code embeds API keys, passwords, or secrets from training data leakage",
+        "severity": "critical",
+        "mitigation": "Vex regex pattern matching + semantic credential detection"
+      },
+      {
+        "name": "Syntax/Import Errors",
+        "description": "Invalid Python syntax or unavailable dependencies cause runtime failures post-generation",
+        "severity": "high",
+        "mitigation": "Vex AST parsing + restricted import validation"
+      },
+      {
+        "name": "Infinite Refinement Loops",
+        "description": "Tool retry logic masks persistent validation failures, consuming quota without progress",
+        "severity": "medium",
+        "mitigation": "Vex failure pattern detection + max iteration enforcement"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Agent",
+        "description": "Define Pydantic models and agent with code generation tool using structured outputs",
+        "code": "from pydantic_ai import Agent, tool\nfrom pydantic import BaseModel, Field\n\nclass CodeRequest(BaseModel):\n    requirements: str = Field(..., description=\"What the code should do\")\n    language: str = Field(default=\"python\")\n\nclass CodeResponse(BaseModel):\n    code: str\n    explanation: str\n\n@tool\nasync def generate_code(request: CodeRequest) -> CodeResponse:\n    \"\"\"Generate production-ready code from requirements.\"\"\"\n    agent = Agent(model=\"gpt-4o\")\n    response = await agent.run(f\"Generate {request.language} code for: {request.requirements}\")\n    return CodeResponse(code=response.content, explanation=\"Generated code\")\n\ncode_agent = Agent(tools=[generate_code])",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Tool",
+        "description": "Execute generated code in restricted environment with timeout and memory limits",
+        "code": "import restrictedpython\nimport asyncio\nfrom contextlib import asynccontextmanager\n\nclass SandboxResult(BaseModel):\n    output: str\n    error: str | None\n    passed: bool\n\n@tool\nasync def execute_sandbox(code: str, timeout: int = 5) -> SandboxResult:\n    @asynccontextmanager\n    async def sandbox_exec(code_str: str):\n        try:\n            # RestrictedPython safe globals\n            safe_globals = restrictedpython.safe_globals.copy()\n            safe_globals['print'] = print\n            exec(code_str, safe_globals)\n            yield \"Execution completed\"\n        except Exception as e:\n            yield f\"Error: {str(e)}\"\n    \n    try:\n        result = await asyncio.wait_for(sandbox_exec(code), timeout=timeout)\n        return SandboxResult(output=result, error=None, passed=True)\n    except asyncio.TimeoutError:\n        return SandboxResult(output=\"\", error=\"Timeout\", passed=False)",
+        "language": "python"
+      },
+      {
+        "title": "Test Suite Validator",
+        "description": "Validate generated code against unit tests and security patterns",
+        "code": "import ast\nimport re\nfrom typing import List\n\nclass ValidationResult(BaseModel):\n    tests_passed: int\n    tests_total: int\n    security_issues: List[str]\n    valid: bool\n\nDANGEROUS_PATTERNS = [\n    r'api_key|secret|password',\n    r'exec\\(|eval\\(',\n    r'__import__',\n    r'os\\.system',\n    r'subprocess\\.call'\n]\n\n@tool\ndef validate_code(code: str, test_cases: List[str]) -> ValidationResult:\n    # Security scan\n    security_issues = []\n    for pattern in DANGEROUS_PATTERNS:\n        if re.search(pattern, code, re.IGNORECASE):\n            security_issues.append(f\"Detected: {pattern}\")\n    \n    # AST syntax validation\n    try:\n        ast.parse(code)\n    except SyntaxError as e:\n        return ValidationResult(tests_passed=0, tests_total=0, security_issues=[str(e)], valid=False)\n    \n    # Test execution (simplified)\n    tests_passed = sum(1 for test in test_cases if \"pass\" in test.lower())\n    \n    return ValidationResult(\n        tests_passed=tests_passed,\n        tests_total=len(test_cases),\n        security_issues=security_issues,\n        valid=not security_issues and tests_passed == len(test_cases)\n    )",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Refinement Loop",
+        "description": "Main agent orchestrating code generation → sandbox → validation → refinement",
+        "code": "class CodeGenOrchestrator(BaseModel):\n    final_code: str\n    iterations: int\n    success: bool\n\nasync def run_code_pipeline(requirements: str) -> CodeGenOrchestrator:\n    agent = Agent(tools=[generate_code, execute_sandbox, validate_code])\n    \n    for iteration in range(5):  # Max 5 iterations\n        result = await agent.run(f\"\"\"\n        Generate code for: {requirements}\n        Previous feedback: {get_feedback()}\n        Ensure: valid syntax, passes tests, no security issues\n        \"\"\")\n        \n        sandbox_result = await execute_sandbox(result.code)\n        validation_result = await validate_code(result.code, [\"test_functionality()\"])\n        \n        if validation_result.valid:\n            return CodeGenOrchestrator(\n                final_code=result.code,\n                iterations=iteration + 1,\n                success=True\n            )\n    \n    return CodeGenOrchestrator(final_code=\"\", iterations=5, success=False)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Result Validator on Agent",
+        "description": "Add Vex as result_validator to catch all agent output failures before application consumption",
+        "code": "from vex_sdk import VexClient\nfrom pydantic_ai import Agent\n\n# Initialize Vex client\nvex = VexClient(api_key=\"your-vex-api-key\")\n\n# Define code generation guardrail\ncode_safety_suite = {\n    \"checks\": [\n        \"code_safety.static_analysis\",\n        \"code_safety.credential_leakage\",\n        \"code_safety.syntax_validation\",\n        \"code_safety.dependency_safety\"\n    ],\n    \"sandbox_execution\": True,\n    \"max_iterations\": 5\n}\n\n# Enhanced agent with Vex validation\nsecure_agent = Agent(\n    tools=[generate_code, execute_sandbox, validate_code],\n    result_validator=lambda output: vex.verify(\n        payload=output,\n        suite_id=\"code-generation-high-risk\",\n        context={\"requirements\": user_request}\n    )\n)\n\n# Usage\nresult = await secure_agent.run(user_request)\n# Vex validation happens automatically before result is returned",
+        "language": "python"
+      },
+      {
+        "title": "Custom Vex Check for Credential Leaks",
+        "description": "Define custom Vex check specifically for code generation credential patterns",
+        "code": "from vex_sdk import VexCheck, CheckResult\n\n@vex_sdk.check(name=\"codegen.credential_leak\")\nasync def detect_credentials(code: str) -> CheckResult:\n    patterns = [\n        r'(?i)(api[_-]?key|secret|password|token)=[\"\\']?[a-zA-Z0-9]{20,}',\n        r'Bearer\\s+[a-zA-Z0-9._-]+',\n        r'AIza[0-9A-Za-z_\\-]{35}'\n    ]\n    \n    issues = []\n    for pattern in patterns:\n        matches = re.finditer(pattern, code)\n        for match in matches:\n            issues.append({\n                'type': 'credential',\n                'pattern': pattern,\n                'location': match.span(),\n                'severity': 'critical'\n            })\n    \n    if issues:\n        return CheckResult(\n            passed=False,\n            issues=issues,\n            remediation=\"Remove hardcoded credentials, use environment variables\"\n        )\n    return CheckResult(passed=True)",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Validation with Vex",
+        "description": "Validate code chunks during streaming generation to catch issues mid-generation",
+        "code": "from vex_sdk.streaming import StreamingVerifier\n\nasync def stream_validated_code(requirements: str):\n    verifier = StreamingVerifier(\n        suite_id=\"code-generation-streaming\",\n        chunk_size=512  # Validate every 512 tokens\n    )\n    \n    agent = Agent(streaming=True)\n    \n    async for chunk in agent.stream(requirements):\n        # Send code chunk to Vex for partial validation\n        validation = await verifier.validate_chunk(chunk)\n        \n        if not validation.passed:\n            # Early termination on critical issues\n            if validation.severity == \"critical\":\n                raise ValueError(f\"Generation rejected: {validation.issues}\")\n            \n        yield chunk\n    \n    # Final validation\n    final_result = await verifier.finalize()\n    if not final_result.passed:\n        raise ValueError(\"Final validation failed\")\n\n# Usage\nasync for code_chunk in stream_validated_code(\"Generate login handler\"):\n    print(code_chunk, end='')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI Code Generation",
+      "description": "Add Vex result validators to your Pydantic AI agents today and eliminate code generation risks."
+    }
+  }
+}

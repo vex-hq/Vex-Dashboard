@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build voice agents with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack voice agents",
+      "Llama Stack guardrails",
+      "voice agents reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with Llama Stack enables real-time conversational AI using Meta's standardized interface for safety, memory, and tools. Guardrails are essential due to the high-risk nature of voice interactions, where false positives in safety filtering, latency violations, or incoherent responses can degrade user experience or cause harm. Vex provides runtime verification to ensure reliable, safe performance in sub-second latency pipelines.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with Llama Stack",
+      "description": "Voice agents follow a real-time pipeline: speech-to-text (STT) transcribes audio to text, Llama Stack's agentic loop handles reasoning with safety shields, memory retrieval, and tool calls, then text-to-speech (TTS) synthesizes responses. Llama Stack's SDK manages conversational state, applying safety filters and memory banks per turn. The challenge is maintaining sub-second end-to-end latency while ensuring coherent, safe outputs.\n\nKey components include the LlamaStackClient for agent turns, integrated with STT services like Whisper and TTS like Bark or ElevenLabs. Each agent turn is wrapped with Vex verification to catch failures like safety false positives or schema mismatches before TTS. Memory retrieval from vector stores must be precise to avoid hallucinated context in voice flows.\n\nThis architecture demands tight integration: STT → Llama Stack agent.verify() → Vex verify() → TTS, with latency budgets enforced at each stage.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ Llama Stack      │\n│     (Input)      │    │     (Whisper)    │    │   Agent Loop     │\n└─────────────────┘    └──────────────────┘    │ Safety/Memory/   │\n                                               │   Tools + Vex     │\n                                               │   verify()        │\n                                               └────────┬──────────┘\n                                                        │\n                                               ┌────────▼──────────┐\n                                               │  Text-to-Speech   │\n                                               │     (ElevenLabs)  │\n                                               └────────┬──────────┘\n                                                        │\n                                               ┌────────▼──────────┐\n                                               │   Speakers        │\n                                               │     (Output)      │\n                                               └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Safety shield false positives",
+        "description": "Llama Stack's safety filters block benign voice queries like medical symptom discussions",
+        "severity": "critical",
+        "mitigation": "Vex verifies response appropriateness post-safety filter with contextual voice intent"
+      },
+      {
+        "name": "Latency budget exceeded",
+        "description": "Agent turns + tools exceed 500ms, breaking real-time voice interaction",
+        "severity": "critical",
+        "mitigation": "Vex enforces strict latency SLAs per pipeline stage"
+      },
+      {
+        "name": "Conversation incoherence",
+        "description": "Memory retrieval hallucinates irrelevant context, causing disjointed voice dialogue",
+        "severity": "high",
+        "mitigation": "Vex validates memory associations against conversation history"
+      },
+      {
+        "name": "Tool schema violations",
+        "description": "Tool responses don't match expected JSON schemas, crashing voice pipeline",
+        "severity": "high",
+        "mitigation": "Vex schema validation on all tool outputs before TTS"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Llama Stack Voice Agent Setup",
+        "description": "Initialize LlamaStackClient with safety and memory enabled for voice pipeline",
+        "code": "from llama_stack_client import LlamaStackClient\nimport asyncio\n\nclient = LlamaStackClient(\n    model=\"llama-3.2-3b\",\n    safety_config={'enabled': True, 'categories': ['hate', 'violence']},\n    memory_config={'enabled': True, 'embedding_model': 'text-embedding-3-small'}\n)\n\nasync def voice_agent_turn(audio_text: str, conversation_id: str) -> str:\n    response = await client.chat.completions.create(\n        messages=[{'role': 'user', 'content': audio_text}],\n        conversation_id=conversation_id,\n        stream=False,\n        max_turns=3\n    )\n    return response.choices[0].message.content",
+        "language": "python"
+      },
+      {
+        "title": "STT → Llama Stack → TTS Pipeline",
+        "description": "Real-time pipeline integrating Whisper STT with Llama Stack agent turns",
+        "code": "import whisper\nimport elevenlabs\nfrom llama_stack_client import LlamaStackClient\n\nstt = whisper.load_model('tiny')\nclient = LlamaStackClient(model=\"llama-3.2-3b\")\nvoice = elevenlabs.Voice.from_id('your_voice_id')\n\nasync def voice_pipeline(audio_bytes: bytes, conversation_id: str) -> bytes:\n    # STT\n    text = stt.transcribe(audio_bytes)['text']\n    \n    # Llama Stack agent\n    response_text = await voice_agent_turn(text, conversation_id)\n    \n    # TTS\n    audio_response = voice.synthesize(response_text)\n    return audio_response",
+        "language": "python"
+      },
+      {
+        "title": "Tool Integration with Schema Validation",
+        "description": "Define and call tools within Llama Stack with strict schema enforcement",
+        "code": "from pydantic import BaseModel\nfrom typing import List\n\nclass WeatherToolResponse(BaseModel):\n    temperature: float\n    condition: str\n    location: str\n\nasync def get_weather(city: str) -> WeatherToolResponse:\n    # Mock weather API\n    return WeatherToolResponse(\n        temperature=72.5,\n        condition='sunny',\n        location=city\n    )\n\n# Register tool with Llama Stack\nclient.register_tool(\n    name='get_weather',\n    description='Get current weather for a city',\n    parameters={'city': {'type': 'string'}},\n    handler=get_weather\n)",
+        "language": "python"
+      },
+      {
+        "title": "Memory Bank for Conversation Context",
+        "description": "Store and retrieve conversation history with embedding similarity search",
+        "code": "async def store_conversation_memory(client, conversation_id: str, message: str):\n    await client.memory.store(\n        conversation_id=conversation_id,\n        content=message,\n        metadata={'timestamp': '2024-01-01T00:00:00Z', 'role': 'user'}\n    )\n\nasync def retrieve_context(client, conversation_id: str, query: str, top_k: int = 3):\n    memories = await client.memory.search(\n        conversation_id=conversation_id,\n        query=query,\n        top_k=top_k,\n        threshold=0.8\n    )\n    return [m.content for m in memories]",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Agent Turns with Vex Safety Verification",
+        "description": "Verify safety filter outputs don't block benign voice content",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        vex.safety_check(\n            categories=['hate_speech', 'violence'],\n            threshold=0.1,  # Low threshold for voice\n            context='voice_conversation'\n        )\n    ]\n)\nasync def safe_voice_turn(audio_text: str, conversation_id: str) -> str:\n    response = await client.chat.completions.create(\n        messages=[{'role': 'user', 'content': audio_text}],\n        conversation_id=conversation_id\n    )\n    return response.choices[0].message.content",
+        "language": "python"
+      },
+      {
+        "title": "Latency Budget Enforcement",
+        "description": "Ensure sub-second response times for real-time voice requirements",
+        "code": "import time\nimport vex\n\n@vex.verify(\n    checks=[\n        vex.latency_check(max_latency_ms=500),\n        vex.custom_check('end_to_end_latency', lambda ctx: ctx['total_time'] < 0.8)\n    ]\n)\nasync def low_latency_voice_pipeline(audio_bytes: bytes, conversation_id: str):\n    start_time = time.time()\n    \n    text = stt.transcribe(audio_bytes)['text']\n    response_text = await safe_voice_turn(text, conversation_id)\n    audio_out = voice.synthesize(response_text)\n    \n    total_latency = time.time() - start_time\n    return {\n        'audio': audio_out,\n        'total_time': total_latency,\n        'stt_time': stt_times,\n        'llm_time': llm_times\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Coherence and Memory Validation",
+        "description": "Validate conversation memory retrieval prevents hallucinated context",
+        "code": "@vex.verify(\n    checks=[\n        vex.schema_check('tool_response', WeatherToolResponse),\n        vex.semantic_similarity_check(\n            reference='conversation_history',\n            threshold=0.75,\n            description='Ensure response coherent with voice context'\n        ),\n        vex.custom_check('memory_relevance', validate_memory_associations)\n    ]\n)\nasync def coherent_voice_agent(audio_text: str, history: List[str]):\n    context = await retrieve_context(client, 'session_123', audio_text)\n    full_prompt = f\"History: {' '.join(history[-3:])}\\nContext: {' '.join(context)}\\nUser: {audio_text}\"\n    \n    response = await client.chat.completions.create(\n        messages=[{'role': 'user', 'content': full_prompt}]\n    )\n    return {\n        'response': response.choices[0].message.content,\n        'used_context': context,\n        'conversation_history': history\n    }",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack Voice Agents",
+      "description": "Integrate Vex today to achieve production-grade reliability for your real-time voice agents."
+    }
+  }
+}

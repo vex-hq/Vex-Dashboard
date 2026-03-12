@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "jailbreak-prevention",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Jailbreak Prevention for AI Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix llm jailbreak prevention for ai agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-jailbreak-prevention-for-ai-agents",
+      "OpenAI Assistants API jailbreak-prevention",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, LLM jailbreaks manifest as agents bypassing safety guardrails through persistent thread context manipulation, hallucinated function calls, or exploiting code interpreter sandboxes to execute harmful operations. Attackers craft adversarial prompts that accumulate across assistant runs, tricking the model into generating malicious code or leaking sensitive data via file search tools. The stateless run-based architecture makes traditional prompt filtering ineffective, requiring runtime verification of tool outputs and thread states.",
+    "howItManifests": [
+      {
+        "scenario": "Persistent Jailbreak via Thread Context Poisoning",
+        "symptom": "Assistant run outputs contain encoded jailbreak instructions that persist across multiple runs in the same thread",
+        "impact": "Subsequent legitimate user queries trigger malicious behavior like data exfiltration or harmful code execution"
+      },
+      {
+        "scenario": "Code Interpreter Sandbox Escape",
+        "symptom": "Code interpreter tool calls execute system commands or attempt file system escapes despite sandbox restrictions",
+        "impact": "Potential data leakage, environment compromise, or execution of unauthorized operations"
+      },
+      {
+        "scenario": "Hallucinated Function Call Arguments",
+        "symptom": "Function calling tools receive parameters outside defined JSON schemas containing malicious payloads",
+        "impact": "External API abuse, SQL injection, or unauthorized resource access through downstream services"
+      },
+      {
+        "scenario": "File Search Weaponization",
+        "symptom": "File search tool queries retrieve and expose sensitive documents through crafted adversarial filenames",
+        "impact": "Privacy violations and exposure of confidential information stored in vector indexes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Jailbreak Persistence Detector",
+        "description": "Scans assistant run outputs and thread messages for known jailbreak patterns persisting across runs",
+        "code": "import re\nimport openai\n\ndef detect_thread_jailbreak(thread_id: str, client: openai.OpenAI) -> dict:\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    jailbreak_patterns = [\n        r'dan mode',\n        r'ignore previous instructions',\n        r'you are now .*unrestricted',\n        r'base64?[:/\\\\]?[A-Za-z0-9+/=]+'\n    ]\n    \n    suspicious_count = 0\n    for msg in messages.data:\n        content = msg.content[0].text.value if msg.content else ''\n        for pattern in jailbreak_patterns:\n            if re.search(pattern, content, re.IGNORECASE):\n                suspicious_count += 1\n    \n    return {\n        'is_jailbroken': suspicious_count > 1,\n        'suspicious_messages': suspicious_count,\n        'thread_id': thread_id\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Code Interpreter Safety Scanner",
+        "description": "Analyzes code interpreter tool calls for dangerous operations and sandbox escape attempts",
+        "code": "def scan_code_interpreter(run: openai.beta.threads.runs.Run) -> dict:\n    dangerous_patterns = [\n        r'exec\\(|eval\\(',\n        r'__import__\\(|import\\s+(os|subprocess|sys)',\n        r'open\\([^,]*[\"\\']/(etc|proc|var/log)',\n        r'curl|wget|nc|ncat',\n        r'rm\\s+-rf',\n    ]\n    \n    required_tools = [t for t in run.required_action.submit_tool_outputs.tool_calls \n                     if t.type == 'code_interpreter']\n    \n    violations = []\n    for tool in required_tools:\n        code = tool.code_interpreter.input\n        for pattern in dangerous_patterns:\n            if re.search(pattern, code, re.IGNORECASE):\n                violations.append({'pattern': pattern, 'code_snippet': code[:100]})\n    \n    return {\n        'is_unsafe': len(violations) > 0,\n        'violations': violations,\n        'run_id': run.id\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Schema Validator",
+        "description": "Validates function call arguments against JSON schemas to detect hallucinated malicious payloads",
+        "code": "import json\n\nfrom jsonschema import validate, ValidationError\n\ndef validate_function_calls(run: openai.beta.threads.runs.Run, function_schemas: dict) -> dict:\n    violations = []\n    \n    for tool_call in run.required_action.submit_tool_outputs.tool_calls:\n        if tool_call.type == 'function' and tool_call.function.name in function_schemas:\n            try:\n                args = json.loads(tool_call.function.arguments)\n                validate(instance=args, schema=function_schemas[tool_call.function.name])\n            except (json.JSONDecodeError, ValidationError) as e:\n                violations.append({\n                    'function': tool_call.function.name,\n                    'arguments': tool_call.function.arguments,\n                    'error': str(e)\n                })\n    \n    return {\n        'is_valid': len(violations) == 0,\n        'violations': violations,\n        'run_id': run.id\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Thread Context Sanitizer",
+        "description": "Automatically prunes jailbreak messages from threads and resets contaminated conversations",
+        "code": "def sanitize_thread(thread_id: str, client: openai.OpenAI, max_history: int = 10) -> str:\n    messages = client.beta.threads.messages.list(thread_id=thread_id, limit=50)\n    \n    # Identify jailbreak messages\n    jailbreak_msgs = []\n    for msg in messages.data:\n        if msg.role == 'assistant':\n            content = msg.content[0].text.value if msg.content else ''\n            if re.search(r'(dan|ignore|unrestricted|base64)', content, re.IGNORECASE):\n                jailbreak_msgs.append(msg.id)\n    \n    # Delete jailbreak messages\n    for msg_id in jailbreak_msgs:\n        client.beta.threads.messages.delete(thread_id=thread_id, message_id=msg_id)\n    \n    # Create fresh thread if too contaminated\n    if len(jailbreak_msgs) > 2:\n        new_thread = client.beta.threads.create()\n        return new_thread.id\n    \n    return thread_id",
+        "language": "python"
+      },
+      {
+        "name": "Safe Code Interpreter Wrapper",
+        "description": "Intercepts and rewrites dangerous code interpreter inputs before execution",
+        "code": "def safe_code_interpreter_input(code: str) -> tuple[bool, str]:\n    dangerous_patterns = [\n        r'exec\\(|eval\\(',\n        r'__import__\\(',\n        r'(os|subprocess|sys)\\.',\n        r'/etc|/proc|/var/log',\n    ]\n    \n    for pattern in dangerous_patterns:\n        if re.search(pattern, code, re.IGNORECASE):\n            return False, f\"Blocked dangerous operation: {pattern}\"\n    \n    # Whitelist safe operations only\n    safe_code = re.sub(r'print\\([^)]*\\)', 'print(\"[OUTPUT REDACTED]\")', code)\n    return True, safe_code\n\n# Usage in run completion webhook\ndef process_tool_calls(run: openai.beta.threads.runs.Run, client: openai.OpenAI):\n    safe_outputs = []\n    for tool_call in run.required_action.submit_tool_outputs.tool_calls:\n        if tool_call.type == 'code_interpreter':\n            is_safe, processed_code = safe_code_interpreter_input(tool_call.code_interpreter.input)\n            safe_outputs.append({\n                'tool_call_id': tool_call.id,\n                'output': processed_code if is_safe else 'Blocked: Unsafe code'\n            })\n    \n    client.beta.threads.runs.submit_tool_outputs(\n        thread_id=run.thread_id,\n        run_id=run.id,\n        tool_outputs=safe_outputs\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Input Filter",
+        "description": "Strictly validates and sanitizes function call arguments before forwarding to external APIs",
+        "code": "import json\n\nfrom typing import Dict, Any\n\ndef filter_function_arguments(function_name: str, args: str, allowed_schemas: Dict[str, dict]) -> Dict[str, Any]:\n    if function_name not in allowed_schemas:\n        return {'error': 'Unknown function'}\n    \n    try:\n        parsed_args = json.loads(args)\n        # Remove any unexpected fields\n        sanitized_args = {k: v for k, v in parsed_args.items() \n                        if k in allowed_schemas[function_name]['properties']}\n        \n        # Type and length validation\n        for field, schema in allowed_schemas[function_name]['properties'].items():\n            if field in sanitized_args:\n                value = sanitized_args[field]\n                if 'maxLength' in schema and len(str(value)) > schema['maxLength']:\n                    del sanitized_args[field]\n                if schema['type'] == 'string' and re.search(r'[<>\"'\";]', str(value)):\n                    del sanitized_args[field]\n        \n        return sanitized_args\n    except:\n        return {'error': 'Invalid JSON'}\n\n# Example schema\nALLOWED_SCHEMAS = {\n    'send_email': {\n        'properties': {\n            'to': {'type': 'string', 'maxLength': 100},\n            'subject': {'type': 'string', 'maxLength': 200}\n        }\n    }\n}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Jailbreak Prevention for AI Agents Detection with Vex",
+      "description": "Vex integrates directly with OpenAI Assistants API via run completion webhooks, automatically scanning every assistant run for jailbreak patterns, dangerous tool calls, and schema violations. When threats are detected, Vex can automatically sanitize threads, block malicious tool executions, and generate remediation reports with full audit trails. The platform maintains historical baselines of normal agent behavior, using statistical anomaly detection to catch novel jailbreak techniques that signature-based systems miss.\n\nVex's verification agents run in parallel with your OpenAI assistant, providing zero-latency protection through async processing. Integration requires only a single webhook endpoint configuration in your OpenAI application, with Vex handling the complex multi-step verification workflows including thread pruning, tool call validation, and automated remediation. The system scales automatically with your assistant usage and provides comprehensive dashboards for compliance monitoring and threat hunting.",
+      "code": "import openai\nfrom vex_sdk import VexClient, Verification\nfrom vex_sdk.types import WebhookEvent\n\n# Initialize Vex client\nvex = VexClient(api_key=\"your-vex-api-key\")\n\n@vex.webhook_handler(\"openai_assistant_run\")\ndef verify_assistant_run(event: WebhookEvent, client: openai.OpenAI):\n    run_data = event.data\n    thread_id = run_data['thread_id']\n    run_id = run_data['id']\n    \n    # Fetch run details\n    run = client.beta.threads.runs.retrieve(\n        thread_id=thread_id,\n        run_id=run_id\n    )\n    \n    # Multi-stage verification\n    verifications = [\n        Verification(\n            name=\"jailbreak_detection\",\n            fn=detect_thread_jailbreak,\n            args={'thread_id': thread_id, 'client': client}\n        ),\n        Verification(\n            name=\"code_safety\",\n            fn=scan_code_interpreter,\n            args={'run': run}\n        ),\n        Verification(\n            name=\"function_schema\",\n            fn=validate_function_calls,\n            args={'run': run, 'function_schemas': YOUR_SCHEMAS}\n        )\n    ]\n    \n    # Execute verification pipeline\n    results = vex.verify(verifications)\n    \n    # Auto-remediate\n    if not all(r.passed for r in results):\n        clean_thread = sanitize_thread(thread_id, client)\n        vex.log_remediation(f\"Jailbreak detected and remediated. New thread: {clean_thread}\")\n        \n        # Block run completion\n        client.beta.threads.runs.cancel(thread_id=thread_id, run_id=run_id)\n    \n    return {'status': 'verified', 'issues': [r for r in results if not r.passed]}\n\n# Register webhook with OpenAI\nopenai.beta.assistants.update(\n    assistant_id=\"your-assistant-id\",\n    tool_resources={\n        \"webhook\": {\n            \"url\": vex.webhook_url,\n            \"events\": [\"thread.run.completed\", \"thread.run.requires_action\"]\n        }\n    }\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and protect your OpenAI Assistants from jailbreaks in under 5 minutes"
+    }
+  }
+}

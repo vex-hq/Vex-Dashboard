@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "industry": "ecommerce",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Haystack Guardrails for E-Commerce",
+    "description": "Compliance guide for Haystack agents in e-commerce. Meet FTC advertising guidelines, CCPA/GDPR requirements with Vex guardrails.",
+    "keywords": [
+      "Haystack e-commerce",
+      "e-commerce AI compliance",
+      "Haystack guardrails",
+      "e-commerce AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "E-Commerce teams using Haystack pipelines face heightened compliance risks when LLM-powered product search, recommendation, and customer service features generate unsubstantiated claims, inaccurate pricing, or misleading policy information. Without guardrails, common Haystack failure modes like generator hallucinations or irrelevant retrievals can violate FTC guidelines, CCPA/GDPR data rules, and PCI DSS payment standards. Vex provides runtime compliance checks as a custom pipeline component to prevent regulatory violations and protect revenue.",
+    "complianceRequirements": [
+      {
+        "regulation": "FTC Advertising Guidelines",
+        "description": "Product claims in search results and recommendations must be substantiated by retrieved evidence, avoiding deceptive marketing practices.",
+        "howVexHelps": "Vex validates generator outputs against retrieved documents, flagging unsubstantiated claims before they reach customers."
+      },
+      {
+        "regulation": "CCPA/GDPR",
+        "description": "Customer data in queries must be handled with privacy controls, and personalization must respect consent and data minimization.",
+        "howVexHelps": "Vex detects PII in query logs and enforces data retention policies within Haystack pipelines."
+      },
+      {
+        "regulation": "PCI DSS for Payments",
+        "description": "Payment-related recommendations must not expose card details or suggest insecure transactions.",
+        "howVexHelps": "Vex scans outputs for PCI violations and blocks responses containing payment instrument references."
+      },
+      {
+        "regulation": "ADA Accessibility",
+        "description": "LLM-generated product descriptions must use accessible language avoiding jargon that screen readers can't parse.",
+        "howVexHelps": "Vex enforces readability scores and flags complex language in product recommendations."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Hallucinated Product Claims",
+        "description": "Generator fabricates benefits not supported by product specs, violating FTC substantiation rules.",
+        "severity": "critical",
+        "example": "Haystack claims '100% organic' for non-certified product, triggering FTC complaint."
+      },
+      {
+        "name": "Incorrect Pricing Display",
+        "description": "Retriever pulls outdated prices, leading to refund disputes and pricing accuracy violations.",
+        "severity": "high",
+        "example": "$49.99 item shown as $29.99, causing chargeback flood."
+      },
+      {
+        "name": "Misrepresented Return Policy",
+        "description": "LLM alters policy terms like '30-day returns' to '60-day', misleading customers.",
+        "severity": "high",
+        "example": "Customer demands refund after 45 days based on hallucinated policy."
+      },
+      {
+        "name": "Irrelevant Recommendations",
+        "description": "Retriever surfaces unrelated products, degrading user trust and conversion rates.",
+        "severity": "medium",
+        "example": "Allergy medicine recommended for electronics query."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Add Vex as Custom Pipeline Component",
+        "description": "Insert VexGuard component after Generator to validate outputs against e-commerce compliance rules.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import CustomComponent\nfrom vex_sdk import VexClient\n\nclass VexGuard(CustomComponent):\n    def __init__(self):\n        self.vex = VexClient(api_key=\"your-vex-key\")\n\n    def run(self, query: str, retrieved_docs: list, generated_text: str):\n        result = self.vex.check({\n            \"prompt\": query,\n            \"context\": [doc.content for doc in retrieved_docs],\n            \"output\": generated_text,\n            \"rules\": [\"no_unsubstantiated_claims\", \"accurate_pricing\", \"correct_policy\"]\n        })\n        if not result.valid:\n            return {\"output\": \"Compliance check failed. Please refine your query.\", \"is_valid\": False}\n        return {\"output\": generated_text, \"is_valid\": True}\n\n# Usage in pipeline\nvex_guard = VexGuard()\npipeline.add_component(\"vex_guard\", vex_guard)\npipeline.connect(\"generator\", \"vex_guard.generated_text\")\npipeline.connect(\"retriever\", \"vex_guard.retrieved_docs\")\npipeline.connect(\"vex_guard\", \"output\")",
+        "language": "python"
+      },
+      {
+        "title": "Monitor Retrieval Relevance",
+        "description": "Use Vex to score document relevance and block low-confidence product recommendations.",
+        "code": "from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom vex_sdk import VexClient\n\nclass CompliantRetriever(InMemoryEmbeddingRetriever):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n        self.vex = VexClient(api_key=\"your-vex-key\")\n\n    def run(self, query: str, **kwargs):\n        docs = super().run(query=query, **kwargs)[\"documents\"]\n        relevance_scores = self.vex.score_retrieval(query, [d.content for d in docs])\n        filtered_docs = [docs[i] for i, score in enumerate(relevance_scores) if score > 0.8]\n        return {\"documents\": filtered_docs}\n\nretriever = CompliantRetriever(document_store=doc_store)",
+        "language": "python"
+      },
+      {
+        "title": "Pricing Accuracy Validator",
+        "description": "Custom component extracts and validates all prices against canonical product data.",
+        "code": "import re\nfrom haystack.components.builders import CustomComponent\nfrom vex_sdk import VexClient\n\nclass PricingValidator(CustomComponent):\n    def __init__(self):\n        self.vex = VexClient(api_key=\"your-vex-key\")\n        self.price_pattern = r'\\$?(\\d+(?:\\.\\d{2})?)'\n\n    def run(self, text: str, product_id: str):\n        prices = re.findall(self.price_pattern, text)\n        for price_str in prices:\n            price = float(price_str)\n            canonical_price = self.vex.get_product_price(product_id)\n            if abs(price - canonical_price) > 0.01:\n                return {\"approved\": False, \"error\": f\"Price mismatch: ${price} vs ${canonical_price}\"}\n        return {\"approved\": True}\n\npipeline.add_component(\"price_validator\", PricingValidator())\npipeline.connect(\"generator\", \"price_validator.text\")\npipeline.connect(\"metadata\", \"price_validator.product_id\")",
+        "language": "python"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Haystack in E-Commerce: A Scenario",
+      "scenario": "FashionCo deployed a Haystack RAG pipeline for their product search, using BM25 retriever + Cohere generator to provide detailed product recommendations including sizing advice, care instructions, and return policies. During Black Friday, a query for 'warm winter coat size M' triggered retrieval of relevant coats but the generator hallucinated 'lifetime warranty' (actual policy: 30 days) and suggested '$89 clearance price' (actual: $189). Customers purchased expecting the hallucinated terms, leading to 15% refund rate and FTC inquiry after social media complaints.\n\nWithout compliance guardrails, the pipeline silently passed flawed outputs. Pricing mismatches from stale index data compounded issues, with 200+ chargebacks processed. The team scrambled to implement manual review but couldn't scale for Cyber Monday traffic.",
+      "outcome": "After integrating Vex as a custom component, the pipeline caught 98% of hallucinations pre-response. Pricing validator blocked 47 inaccurate price mentions, and FTC claim substantiation checks flagged warranty fabrications. Deployment reduced refunds by 89% and prevented regulatory escalation. Vex dashboards provided evidence for FTC response, showing 99.7% compliance rate across 2M queries."
+    },
+    "cta": {
+      "heading": "Comply with E-Commerce Regulations Using Vex",
+      "description": "Add Vex to your Haystack pipelines today to eliminate compliance risks and protect your revenue."
+    }
+  }
+}

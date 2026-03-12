@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in LangChain Agents",
+    "description": "How to detect and fix ai agent drift monitoring in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "LangChain drift-monitoring",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in LangChain manifests as subtle degradations in agent performance over time, particularly in agent executors where tool calls become erratic, RAG chains hallucinate irrelevant retrievals, and long conversations exceed context windows leading to incoherent responses. These issues arise from LangChain's dynamic chain compositions and stateful agent loops, causing outputs to diverge from expected patterns without explicit error signals. Vex provides robust monitoring by wrapping LangChain's invoke() methods to capture drift in real-time.",
+    "howItManifests": [
+      {
+        "scenario": "Tool call loops in agent executors",
+        "symptom": "Agent repeatedly calls the same tool with identical parameters",
+        "impact": "Infinite loops consuming tokens and API costs without progress"
+      },
+      {
+        "scenario": "Hallucination in RAG retrieval chains",
+        "symptom": "Retriever returns irrelevant documents despite semantic similarity",
+        "impact": "Agent generates factually incorrect responses based on wrong context"
+      },
+      {
+        "scenario": "Context window overflow in long conversations",
+        "symptom": "Conversation history truncation causes context loss mid-conversation",
+        "impact": "Agent loses memory of critical user preferences and prior decisions"
+      },
+      {
+        "scenario": "Inconsistent output formatting across chain steps",
+        "symptom": "JSON parsing fails due to malformed tool call arguments",
+        "impact": "Downstream chain steps fail silently with cryptic parsing errors"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Loop Detector",
+        "description": "Detects repeated tool calls by tracking tool_name + input hash within agent executor runs",
+        "code": "```python\nfrom langchain.agents import AgentExecutor\nfrom langchain.tools import Tool\nfrom collections import defaultdict, hash\n\ndef detect_tool_loops(executor):\n    tool_calls = defaultdict(list)\n    \n    original_invoke = executor.invoke\n    \n    def wrapped_invoke(*args, **kwargs):\n        result = original_invoke(*args, **kwargs)\n        # Extract tool calls from intermediate steps\n        for step in result.get('intermediate_steps', []):\n            if hasattr(step[0], 'tool'):\n                tool_input_hash = hash(str(step[0].args))\n                tool_calls[step[0].name].append(tool_input_hash)\n                \n                # Detect loop: same tool + same input 3+ times\n                recent_calls = tool_calls[step[0].name][-3:]\n                if len(set(recent_calls)) == 1:\n                    raise ValueError(f'Tool loop detected: {step[0].name} called 3x with identical input')\n        return result\n    \n    executor.invoke = wrapped_invoke\n    return executor\n```",
+        "language": "python"
+      },
+      {
+        "name": "RAG Hallucination Score",
+        "description": "Measures semantic similarity between retrieved docs and query using embeddings",
+        "code": "```python\nfrom langchain.retrievers import EnsembleRetriever\nfrom langchain.embeddings import OpenAIEmbeddings\nimport numpy as np\n\ndef rag_drift_detector(retriever):\n    embeddings = OpenAIEmbeddings()\n    \n    def wrapped_get_relevant_documents(query, **kwargs):\n        docs = retriever.get_relevant_documents(query, **kwargs)\n        \n        # Score relevance of top docs\n        query_embedding = embeddings.embed_query(query)\n        doc_scores = []\n        \n        for doc in docs[:3]:\n            doc_embedding = embeddings.embed_query(doc.page_content[:1000])\n            similarity = np.dot(query_embedding, doc_embedding)\n            doc_scores.append(similarity)\n        \n        avg_relevance = np.mean(doc_scores)\n        if avg_relevance < 0.7:\n            print(f'⚠️ RAG Drift: Low relevance score {avg_relevance:.2f}')\n        \n        return docs\n    \n    retriever.get_relevant_documents = wrapped_get_relevant_documents\n    return retriever\n```",
+        "language": "python"
+      },
+      {
+        "name": "Context Overflow Monitor",
+        "description": "Tracks token count in conversation history and warns on threshold breach",
+        "code": "```typescript\nimport { ChatOpenAI } from \"langchain/chat_models/openai\";\nimport { BufferWindowMemory } from \"langchain/memory\";\n\nconst tiktoken = require('tiktoken'); // npm install tiktoken\n\nfunction monitorContextOverflow(memory: BufferWindowMemory, model: ChatOpenAI, maxTokens: number = 8000) {\n  const encoder = tiktoken.getEncoding('cl100k_base');\n  \n  const originalLoad = memory.loadMemoryVariables;\n  \n  memory.loadMemoryVariables = async function(variables: any) {\n    const result = await originalLoad.call(this, variables);\n    \n    const history = result.history || [];\n    let totalTokens = 0;\n    \n    for (const msg of history) {\n      totalTokens += encoder.encode(msg.content).length;\n    }\n    \n    if (totalTokens > maxTokens * 0.8) {\n      console.warn(`🚨 Context overflow risk: ${totalTokens}/${maxTokens} tokens`);\n      // Auto-trim oldest messages\n      while (totalTokens > maxTokens * 0.7 && history.length > 5) {\n        history.shift();\n        totalTokens -= encoder.encode(history[0]?.content || '').length;\n      }\n    }\n    \n    return result;\n  };\n  \n  return memory;\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Loop Prevention Guardrails",
+        "description": "Implements tool call cooldown and max iterations per tool",
+        "code": "```python\nfrom langchain.agents import AgentExecutor\nfrom typing import Dict, Any\nfrom collections import defaultdict\n\nclass LoopProofAgentExecutor(AgentExecutor):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n        self.tool_usage = defaultdict(int)\n        self.max_tool_calls = 3\n    \n    def _take_next_step(self, **kwargs) -> Dict[str, Any]:\n        action = kwargs['agent_outcome']\n        tool_name = action.tool\n        \n        # Enforce tool cooldown\n        if self.tool_usage[tool_name] >= self.max_tool_calls:\n            return {\n                'output': f'Tool {tool_name} usage limit exceeded. Switching to fallback reasoning.'\n            }\n        \n        self.tool_usage[tool_name] += 1\n        return super()._take_next_step(**kwargs)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Self-Healing RAG",
+        "description": "Fallback to web search or synthetic data when retrieval confidence is low",
+        "code": "```python\nfrom langchain.retrievers import ContextualCompressionRetriever\nfrom langchain.retrievers.document_compressors import EmbeddingsFilter\n\nclass AdaptiveRAG:\n    def __init__(self, primary_retriever, fallback_retriever, threshold=0.7):\n        self.primary = primary_retriever\n        self.fallback = fallback_retriever\n        self.threshold = threshold\n    \n    def retrieve(self, query):\n        docs = self.primary.get_relevant_documents(query)\n        \n        # Quick relevance check\n        if len(docs) == 0 or self._avg_relevance(query, docs) < self.threshold:\n            print('🔄 Low confidence retrieval, falling back to web search')\n            return self.fallback.get_relevant_documents(query)\n        \n        return docs\n    \n    def _avg_relevance(self, query, docs):\n        # Simplified relevance scoring\n        query_words = set(query.lower().split())\n        doc_scores = []\n        for doc in docs[:3]:\n            doc_words = set(doc.page_content.lower().split())\n            overlap = len(query_words.intersection(doc_words))\n            doc_scores.append(overlap / len(query_words))\n        return sum(doc_scores) / len(doc_scores)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Structured Output Enforcement",
+        "description": "Uses Pydantic models and output parsers to guarantee consistent formatting",
+        "code": "```python\nfrom langchain.output_parsers import PydanticOutputParser\nfrom pydantic import BaseModel, Field\nfrom langchain.prompts import PromptTemplate\n\nclass ToolCall(BaseModel):\n    name: str = Field(description=\"Tool name\")\n    args: dict = Field(description=\"Tool arguments as JSON\")\n\nclass StructuredAgent:\n    def __init__(self, llm):\n        self.parser = PydanticOutputParser(pydantic_object=ToolCall)\n        self.llm = llm\n        \n        prompt = PromptTemplate(\n            template=\"Answer in JSON format: {format_instructions}\\nQuery: {query}\",\n            input_variables=[\"query\"],\n            partial_variables={\"format_instructions\": self.parser.get_format_instructions()}\n        )\n        \n        self.chain = prompt | llm | self.parser\n    \n    def invoke(self, query):\n        try:\n            return self.chain.invoke({\"query\": query})\n        except Exception:\n            return ToolCall(name=\"fallback_reasoning\", args={})\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex automates drift detection by wrapping LangChain's chain.invoke() and agent_executor.invoke() calls with vex.verify(), providing real-time monitoring of output distributions, semantic drift, and behavioral anomalies without modifying core application logic. The platform establishes golden baselines from initial deployments and continuously tracks divergence using statistical process control and embedding drift detection, alerting teams when agent behavior statistically deviates from expected patterns.\n\nFor LangChain specifically, Vex captures intermediate chain states, tool call sequences, and retrieval metadata, enabling comprehensive drift analysis across RAG pipelines, agent loops, and conversational memory. Automated remediation workflows can trigger fallback chains, parameter adjustments, or human-in-the-loop review when drift exceeds configured thresholds, maintaining reliability at scale.\n\nIntegration requires only pip install vex-sdk and wrapping existing invoke calls, with full observability dashboards showing drift trends, failure modes, and automated fix success rates across all deployments.",
+      "code": "```python\nfrom vex import verify\nfrom langchain.agents import AgentExecutor\nfrom langchain.chains import RetrievalQA\n\n# Wrap agent executors\nagent_executor = AgentExecutor.from_agent_and_tools(...)\n\n@vex.verify(\n    drift_threshold=0.15,\n    failure_modes=['tool_loop', 'rag_hallucination'],\n    remediation='fallback_chain'\n)\ndef monitored_agent(query: str):\n    return agent_executor.invoke({\"input\": query})\n\n# Wrap RAG chains\nrag_chain = RetrievalQA.from_chain_type(...)\n\n@vex.verify(\n    metrics=['retrieval_relevance', 'answer_correctness'],\n    context_length_limit=12000\n)\ndef monitored_rag(query: str):\n    return rag_chain.invoke({\"query\": query})\n\n# Production usage\nresult = monitored_agent(\"What's the weather in NYC?\")\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK today and automatically monitor all your LangChain agents for drift with zero code changes."
+    }
+  }
+}

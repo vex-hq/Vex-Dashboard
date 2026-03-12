@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with DSPy + Vex Guardrails",
+    "description": "Learn how to build research agents with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy research agents",
+      "DSPy guardrails",
+      "research agents reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming LM-based Research Agents through composable, optimizable modules for multi-step web search, analysis, and synthesis. Guardrails are essential to prevent overfitting prompts, faulty chain-of-thought reasoning, and uncaught assertion failures that can produce misleading summaries. Vex integration ensures source verification, claim accuracy, recency, and bias detection for reliable outputs.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with DSPy",
+      "description": "DSPy Research Agents typically follow a multi-module pipeline: a SearchModule retrieves relevant web sources, a RetrieveModule extracts key claims, an AnalyzeModule performs chain-of-thought reasoning on evidence, and a SynthesizeModule generates final summaries. Modules are connected via signatures defining input/output formats, with DSPy's optimizer tuning prompts and weights across the pipeline. This modular approach allows end-to-end optimization but introduces risks in module composition and reasoning chains.\n\nThe agent iterates through search-refine-synthesize cycles, using assertions to validate intermediate outputs. Common patterns include ChainOfThought signatures for analysis and custom Retrieve modules wrapping search APIs. Vex verification wraps critical forward() calls to catch failures before propagation.",
+      "diagram": "SearchModule --> RetrieveModule --> AnalyzeModule --> SynthesizeModule\n   |                  |                 |                 |\n   +--[vex.verify()]--+--[vex.verify()]--+--[vex.verify()]--+--[Final Summary]\n   |                  |                 |\nWeb Sources    Claims            Reasoning         Assertions"
+    },
+    "risks": [
+      {
+        "name": "Optimized prompts overfitting to training examples",
+        "description": "DSPy optimization creates prompts too specific to synthetic training data, failing on real web queries",
+        "severity": "high",
+        "mitigation": "Wrap signature calls with Vex source verification and claim checks against live web data"
+      },
+      {
+        "name": "Chain-of-thought reasoning producing plausible but wrong logic",
+        "description": "AnalyzeModule generates convincing but factually incorrect reasoning chains",
+        "severity": "critical",
+        "mitigation": "Verify reasoning steps with Vex claim accuracy and recency assertions"
+      },
+      {
+        "name": "Assertion violations not caught at inference time",
+        "description": "DSPy assertions fail silently during optimized inference, propagating bad data",
+        "severity": "high",
+        "mitigation": "Use vex.verify() on module.forward() to enforce runtime assertions"
+      },
+      {
+        "name": "Module composition creating unexpected output distributions",
+        "description": "Search+Analyze pipeline produces hallucinated sources or biased summaries",
+        "severity": "medium",
+        "mitigation": "Apply Vex bias detection and source verification across module boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic DSPy Research Agent Signature",
+        "description": "Define core signatures for search, retrieval, and synthesis modules",
+        "code": "import dspy\n\nclass SearchSignature(dspy.Signature):\n    '''Search for relevant information.'''\n    query: str = dspy.InputField()\n    sources: list[str] = dspy.OutputField()\n\nclass AnalyzeSignature(dspy.Signature):\n    '''Analyze claims from sources.'''\n    sources: list[str] = dspy.InputField()\n    claims: list[str] = dspy.OutputField()\n    reasoning: str = dspy.OutputField()\n\nclass research_agent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.search = dspy.ChainOfThought(SearchSignature)\n        self.analyze = dspy.ChainOfThought(AnalyzeSignature)\n\n    def forward(self, query):\n        sources = self.search(query=query).sources\n        analysis = self.analyze(sources=sources)\n        return dspy.Prediction(sources=sources, claims=analysis.claims)",
+        "language": "python"
+      },
+      {
+        "title": "Web Search Integration Module",
+        "description": "Connect DSPy module to real web search API",
+        "code": "import dspy\nfrom typing import List\n\nclass WebSearchModule(dspy.Module):\n    def __init__(self, search_client):\n        super().__init__()\n        self.search_client = search_client\n        self.generate_search = dspy.ChainOfThought('query -> search_query: str')\n\n    def forward(self, topic: str) -> dspy.Prediction:\n        search_query = self.generate_search(topic=topic).search_query\n        raw_results = self.search_client.search(search_query, num_results=5)\n        sources = [r['snippet'] + '\\nURL: ' + r['url'] for r in raw_results]\n        return dspy.Prediction(sources=sources, query=search_query)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-step Optimization Setup",
+        "description": "Configure DSPy optimizer for end-to-end research pipeline",
+        "code": "from dspy.teleprompt import BootstrapFewShot\n\n# Define trainset with research examples\ntrainset = [\n    dspy.Example(query='AI safety trends', sources=['...'], claims=['...']).with_inputs('query')\n]\n\nagent = research_agent()\noptimizer = BootstrapFewShot(metric=research_metric)\noptimized_agent = optimizer.compile(agent, trainset=trainset)",
+        "language": "python"
+      },
+      {
+        "title": "Synthesis Module with Assertions",
+        "description": "Final synthesis module with DSPy assertions",
+        "code": "class SynthesizeSignature(dspy.Signature):\n    '''Synthesize unbiased summary from verified claims.'''\n    claims: list[str] = dspy.InputField()\n    sources: list[str] = dspy.InputField()\n    summary: str = dspy.OutputField(desc='Concise, factual summary')\n    confidence: float = dspy.OutputField(desc='0-1 confidence score')\n\nclass Synthesizer(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.synthesize = dspy.ChainOfThought(SynthesizeSignature)\n\n    def forward(self, claims, sources):\n        pred = self.synthesize(claims=claims, sources=sources)\n        # DSPy assertion\n        dspy.assertions.assert_confidence(pred, min_confidence=0.7), \\\n            'Low confidence synthesis requires human review'\n        return pred",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Module Calls with vex.verify()",
+        "description": "Protect core module forward() calls with comprehensive verification",
+        "code": "import vex\n\nfrom research_agent import research_agent\n\n@vex.verify([\n    vex.check.source_verification(min_sources=3, freshness_days=30),\n    vex.check.claim_accuracy(threshold=0.8),\n    vex.check.recency(days=90),\n    vex.check.bias_detection(max_bias_score=0.3)\n])\ndef verified_research(query: str) -> dict:\n    agent = research_agent()\n    result = agent.forward(query)  # Wraps the optimized forward call\n    return {\n        'query': query,\n        'sources': result.sources,\n        'claims': result.claims,\n        'verified': True\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Per-Module Verification Granularity",
+        "description": "Apply targeted checks to individual DSPy modules",
+        "code": "import vex\n\nclass VerifiedResearchAgent(research_agent):\n    def forward(self, query):\n        # Verify search results\n        search_result = vex.verify(\n            lambda: self.search(query=query),\n            checks=[vex.check.source_verification(min_sources=3)]\n        )\n        \n        # Verify analysis chain-of-thought\n        analysis_result = vex.verify(\n            lambda: self.analyze(sources=search_result.sources),\n            checks=[\n                vex.check.claim_accuracy(threshold=0.8),\n                vex.check.recency(days=90)\n            ]\n        )\n        \n        return dspy.Prediction(\n            sources=search_result.sources,\n            claims=analysis_result.claims\n        )",
+        "language": "python"
+      },
+      {
+        "title": "Production Inference with Vex Guardrails",
+        "description": "Complete production wrapper with fallback handling",
+        "code": "import vex\nfrom research_agent import research_agent\n\n@vex.workflow([\n    vex.step('search', checks=[vex.check.source_verification()]),\n    vex.step('analyze', checks=[vex.check.claim_accuracy(), vex.check.recency()]),\n    vex.step('synthesize', checks=[vex.check.bias_detection()]),\n    fallback='human_review'\n])\ndef production_research_agent(query: str, max_retries=3):\n    agent = research_agent()\n    \n    for attempt in range(max_retries):\n        try:\n            result = agent.forward(query)\n            verified_result = vex.verify_result(result)\n            return verified_result\n        except vex.VerificationError as e:\n            print(f'Verification failed (attempt {attempt+1}): {e}')\n            if attempt == max_retries - 1:\n                return {'status': 'human_review_needed', 'query': query, 'error': str(e)}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Research Agents",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your DSPy modules today for production-grade reliability."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in Google ADK Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "Google ADK latency-optimization",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, LLM Latency Optimization issues for AI agents manifest as excessive wait times during multi-agent delegation and tool calls, particularly when Gemini model invocations cascade across agent hierarchies. Circular dependencies in agent workflows amplify latency as requests loop indefinitely, while unoptimized session state management in long conversations forces redundant context recomputation. Tool response mismatches trigger costly retry loops, making real-time agent responsiveness unattainable.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation with circular dependencies",
+        "symptom": "Agents ping-pong requests between each other >5 seconds per cycle",
+        "impact": "30-60s total latency per user query, timeouts in production"
+      },
+      {
+        "scenario": "Gemini model switching mid-conversation",
+        "symptom": "Context window reset on model change causing 2-3x inference time",
+        "impact": "Inconsistent agent memory leading to repetitive questioning loops"
+      },
+      {
+        "scenario": "Unbatched tool calls in parallel agents",
+        "symptom": "Sequential Gemini API calls instead of batched execution",
+        "impact": "8-12s latency for 4+ tool calls that should complete in 2s"
+      },
+      {
+        "scenario": "Session state corruption forcing full context reloads",
+        "symptom": "State deserialization failures triggering 100% context resends",
+        "impact": "400%+ token usage and 15s+ latency spikes in long conversations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Delegation Latency Profiler",
+        "description": "Monitors cross-agent call chains and flags cycles >3s",
+        "code": "from google_adk import Agent\nfrom time import perf_counter\n\ndef latency_profiler(callback):\n    def wrapper(*args, **kwargs):\n        start = perf_counter()\n        result = callback(*args, **kwargs)\n        latency = perf_counter() - start\n        \n        if hasattr(result, 'agent_id'):\n            agent_chain = getattr(result, 'delegation_chain', [])\n            if len(agent_chain) > 3 and latency > 3.0:\n                print(f'🚨 HIGH LATENCY DELEGATION: {latency:.2f}s - {agent_chain}')\n        \n        return result\n    return wrapper\n\n# Usage\nagent.delegation_callback = latency_profiler(agent.delegation_callback)",
+        "language": "python"
+      },
+      {
+        "name": "Gemini Model Switch Detector",
+        "description": "Tracks model changes and measures context reload overhead",
+        "code": "from google_adk import SessionState\n\ndef model_switch_detector(session: SessionState):\n    prev_model = session.get('last_model', '')\n    current_model = session.config.model\n    \n    if prev_model and prev_model != current_model:\n        token_diff = session.token_count - session.get('prev_tokens', 0)\n        if token_diff > session.token_count * 0.3:\n            print(f'🚨 MODEL SWITCH OVERHEAD: {current_model} reloaded {token_diff} tokens')\n        \n    session['last_model'] = current_model\n    session['prev_tokens'] = session.token_count\n\n# Hook into session lifecycle\nsession.on_state_change(model_switch_detector)",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Batch Analyzer",
+        "description": "Detects sequential tool calls that should be batched",
+        "code": "from google_adk.tools import ToolCall\n\ndef batch_analyzer(tools: list[ToolCall]):\n    sequential_calls = []\n    for i, tool in enumerate(tools):\n        if tool.execution_time > 1.0 and not tool.batched:\n            sequential_calls.append({\n                'tool': tool.name,\n                'latency': tool.execution_time,\n                'parallelizable': tool.can_parallelize\n            })\n    \n    if len(sequential_calls) > 2:\n        total_latency = sum(t['latency'] for t in sequential_calls)\n        print(f'🚨 UNBATCHED TOOLS: {len(sequential_calls)} calls = {total_latency:.1f}s wasted')\n    \n    return tools\n\n# Register before tool execution\nagent.tool_pipeline = batch_analyzer",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Circuit Breaker for Agent Cycles",
+        "description": "Prevents circular delegation with TTL tracking",
+        "code": "from google_adk import Agent\nfrom typing import Dict, Set\n\nclass CycleBreaker:\n    def __init__(self):\n        self.active_chains: Dict[str, Set[str]] = {}\n    \n    def check_delegation(self, chain: list[str], ttl: int = 3) -> bool:\n        agent_id = chain[-1]\n        chain_key = '_'.join(chain[-ttl:])\n        \n        if chain_key in self.active_chains.get(agent_id, set()):\n            print(f'🚫 CIRCUIT BREAK: Loop detected in {chain[-ttl:]}')\n            return False\n        \n        self.active_chains.setdefault(agent_id, set()).add(chain_key)\n        return True\n\ncycle_breaker = CycleBreaker()\nagent.before_delegate = lambda chain: cycle_breaker.check_delegation(chain)",
+        "language": "python"
+      },
+      {
+        "name": "Lazy Context Batching",
+        "description": "Batches tool calls and defers non-critical context loads",
+        "code": "from google_adk.tools import batch_tools\nimport asyncio\n\nasync def batched_tool_executor(tools):\n    # Group parallelizable tools\n    parallel_tools = [t for t in tools if t.can_parallelize]\n    sequential_tools = [t for t in tools if not t.can_parallelize]\n    \n    # Execute in parallel where possible\n    if parallel_tools:\n        results = await asyncio.gather(*[t.execute() for t in parallel_tools], return_exceptions=True)\n        print(f'✅ BATCHED {len(parallel_tools)} tools in parallel')\n    \n    # Sequential fallback\n    seq_results = [await t.execute() for t in sequential_tools]\n    return results + seq_results\n\n# Replace default executor\nagent.tool_executor = batched_tool_executor",
+        "language": "python"
+      },
+      {
+        "name": "Model Sticky Sessions",
+        "description": "Locks model choice per session to prevent reloads",
+        "code": "from google_adk import SessionState\n\ndef sticky_model_policy(session: SessionState):\n    if not session.get('locked_model'):\n        session['locked_model'] = session.config.model\n        print(f'🔒 Model locked to {session[\"locked_model\"]} for session')\n    else:\n        session.config.model = session['locked_model']\n\n# Apply at session init\nsession.on_init(sticky_model_policy)\nagent.session_policies.append(sticky_model_policy)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex integrates as a before_agent_callback in Google ADK, automatically profiling all agent interactions for latency patterns without code changes. It detects circular delegations by tracing the full agent call graph, flags unbatched tool calls by analyzing execution parallelism, and identifies model switching overhead through session token deltas. \n\nVex's remediation engine applies circuit breakers, batching optimizations, and model sticky policies automatically, with zero-downtime deployment. The platform generates latency heatmaps showing exactly which agent-tool combinations cause 80% of delays, plus automated PRs with the exact fixes shown above. \n\nProduction monitoring includes alerting on latency regression (>20% increase) and continuous optimization as agent workflows evolve.",
+      "code": "from vex_sdk import Vex\nfrom google_adk import Agent\n\n# Install: pip install google-adk vex-sdk\n\nvex = Vex(\n    api_key=\"your-vex-key\",\n    patterns=[\n        \"llm-latency-agent-delegation\",\n        \"gemini-model-switching\",\n        \"unbatched-tool-calls\",\n        \"session-context-reload\"\n    ]\n)\n\n# Single line integration\nagent.before_agent_callback = vex.intercept\n\n# Vex auto-applies:\n# ✅ Circuit breakers\n# ✅ Tool batching\n# ✅ Model stickiness\n# ✅ Context compression\n\n# View dashboard at app.vex.ai/your-agent\nprint('Vex latency optimization active 🚀')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex integration to cut your Google ADK agent latency by 70% today."
+    }
+  }
+}

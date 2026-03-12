@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with BeeAI + Vex Guardrails",
+    "description": "Learn how to build code generation with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI code generation",
+      "BeeAI guardrails",
+      "code generation reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI enables robust Python-based AI agents for code generation with built-in memory, tools, and observability. Code generation use cases demand rigorous guardrails due to risks like malicious code injection, unbounded memory growth, and credential leakage. Vex integration provides runtime verification for safety, syntax, and sandbox execution.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with BeeAI",
+      "description": "The BeeAI code generation agent follows a ReAct loop: LLM generates code based on user specs, executes in a sandbox, validates tests, and iterates. BeeAI's Agent class manages memory and tool calls, with custom tools for sandbox execution (docker-py), AST parsing, and test runners (pytest). State persistence uses JSON serialization, vulnerable to format inconsistencies from Granite models.\n\nKey components include: CodeGenTool for LLM prompting, SandboxExecutor for isolated runs, TestValidator for pytest integration, and MemoryManager for session history. Vex listens to agent events (tool_start, tool_end, memory_update) to verify outputs against safety policies.\n\nThis architecture scales for iterative refinement but exposes risks in long sessions where memory balloons and tool inputs lack validation.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Prompt   │───▶│   BeeAI Agent    │\n│  (Code Spec)    │    │  (ReAct Loop)    │\n└─────────────────┘    │                   │\n                       │  ┌──────────────┐ │\n                       │  │ CodeGenTool  │ │\n                       │  └──────────────┘ │\n                       │  ┌──────────────┐ │ Vex\n                       │  │SandboxExec   │◀──┼─Events\n                       │  └──────────────┘ │ Listener\n                       │  ┌──────────────┐ │\n                       └─▶│ TestValidator│──┘\n                          └──────────────┘\n                               │\n                        ┌─────────────────┐\n                        │   Feedback     │\n                        │   Iteration    │\n                        └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious Code Injection",
+        "description": "LLM generates exec() calls or system commands bypassing sandbox",
+        "severity": "critical",
+        "mitigation": "Vex AST scanning + docker sandbox + network/FS restrictions"
+      },
+      {
+        "name": "Unbounded Memory Growth",
+        "description": "Long code refinement sessions accumulate massive conversation history",
+        "severity": "high",
+        "mitigation": "Vex memory size limits + summarization triggers"
+      },
+      {
+        "name": "Credential Leakage",
+        "description": "Generated code embeds API keys from agent memory or tools",
+        "severity": "critical",
+        "mitigation": "Vex regex scanning + secret redaction policies"
+      },
+      {
+        "name": "Dependency Injection",
+        "description": "Malicious pip installs or unsafe package imports",
+        "severity": "high",
+        "mitigation": "Vex allowlist + sandbox dependency scanning"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "BeeAI Agent with CodeGen Tools",
+        "description": "Core agent setup with sandbox execution and test validation tools",
+        "code": "from beeai import Agent, Tool\nfrom docker import DockerClient\n\nclass SandboxExecutor(Tool):\n    name = 'sandbox_exec'\n    description = 'Execute Python code in isolated Docker container'\n    \n    def execute(self, code: str) -> str:\n        client = DockerClient(base_url='unix://var/run/docker.sock')\n        container = client.containers.run(\n            'python:3.11-slim',\n            command=f'python -c \"\"\"{code}\"\"\"',\n            detach=True,\n            remove=True,\n            network_disabled=True,\n            mem_limit='256m'\n        )\n        return container.logs().decode()\n\nagent = Agent(\n    model='granite-code-3b',\n    tools=[SandboxExecutor()],\n    memory_limit='10mb'\n)",
+        "language": "python"
+      },
+      {
+        "title": "AST Syntax Validator Tool",
+        "description": "Validates generated code syntax before sandbox execution",
+        "code": "import ast\n\nclass SyntaxValidator(Tool):\n    name = 'validate_syntax'\n    description = 'Check Python code syntax validity'\n    \n    def execute(self, code: str) -> dict:\n        try:\n            ast.parse(code)\n            return {'valid': True, 'errors': []}\n        except SyntaxError as e:\n            return {'valid': False, 'errors': [str(e)]}\n\nclass SafetyScanner(Tool):\n    name = 'scan_safety'\n    DANGEROUS = ['exec(', 'eval(', 'open(', 'import os', '__import__']\n    \n    def execute(self, code: str) -> dict:\n        issues = [pat for pat in self.DANGEROUS if pat in code]\n        return {'safe': len(issues) == 0, 'issues': issues}",
+        "language": "python"
+      },
+      {
+        "title": "Test-Driven Refinement Loop",
+        "description": "Iterative code improvement based on pytest failures",
+        "code": "class TestValidator(Tool):\n    name = 'run_tests'\n    \n    def execute(self, code: str, tests: str) -> dict:\n        # Write code/tests to temp files\n        import tempfile, subprocess\n        with tempfile.TemporaryDirectory() as tmpdir:\n            with open(f'{tmpdir}/code.py', 'w') as f:\n                f.write(code)\n            with open(f'{tmpdir}/test.py', 'w') as f:\n                f.write(tests)\n            \n            result = subprocess.run(\n                ['pytest', f'{tmpdir}/test.py', '-v'],\n                capture_output=True, text=True\n            )\n            return {\n                'passed': result.returncode == 0,\n                'output': result.stdout,\n                'errors': result.stderr\n            }",
+        "language": "python"
+      },
+      {
+        "title": "Memory Management with Summarization",
+        "description": "Prevent unbounded growth during long refinement sessions",
+        "code": "def memory_summarizer(memory):\n    if len(str(memory)) > 10000:\n        # Use LLM to summarize conversation\n        summary_prompt = f'Summarize this agent session:\\n{memory[-5000:]}'\n        summary = agent.model.generate(summary_prompt)\n        memory.clear()\n        memory.append(summary)\n    return memory\n\nagent.add_event_listener('memory_update', memory_summarizer)\n\n# Usage\nresponse = agent.run('Write fibonacci function that passes these tests...')\nagent.memory = memory_summarizer(agent.memory)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Capture all agent events for verification with high-risk policies",
+        "code": "from vex_sdk import VexClient\n\nvex = VexClient(api_key='your-vex-key')\n\n@vex.policy('code-generation-high-risk')\ndef verify_code_safety(event):\n    if event.type == 'tool_call' and event.tool == 'sandbox_exec':\n        code = event.input['code']\n        # Vex scans for: exec/eval, file ops, network, secrets\n        verdict = vex.verify({\n            'code_safety': code,\n            'syntax_validity': True,\n            'no_secrets': True,\n            'sandboxed': True\n        })\n        if not verdict.approved:\n            raise ValueError(f'Blocked: {verdict.issues}')\n\n# Register with BeeAI\nagent.add_event_listener('tool_start', verify_code_safety)\nagent.add_event_listener('tool_end', verify_code_safety)\nagent.add_event_listener('memory_update', verify_code_safety)",
+        "language": "python"
+      },
+      {
+        "title": "Dependency Safety Verification",
+        "description": "Block malicious pip installs and unsafe imports",
+        "code": "@vex.policy('dependency-safety')\ndef verify_dependencies(event):\n    if 'import' in event.input.get('code', ''):\n        imports = extract_imports(event.input['code'])\n        allowed = {'numpy', 'pandas', 'pytest'}\n        risky = [imp for imp in imports if imp not in allowed]\n        \n        verdict = vex.verify({\n            'dependencies': risky,\n            'allowlist': list(allowed),\n            'network_access': False\n        })\n        return verdict.approved\n    return True\n\ndef extract_imports(code):\n    tree = ast.parse(code)\n    return {node.names[0].name for node in ast.walk(tree) \n            if isinstance(node, ast.ImportFrom) or isinstance(node, ast.Import)}",
+        "language": "python"
+      },
+      {
+        "title": "Secret Redaction and Memory Limits",
+        "description": "Detect and redact credentials, enforce memory bounds",
+        "code": "@vex.policy('memory-safety')\ndef verify_memory_state(event):\n    memory = event.data.get('memory', '')\n    \n    # Secret detection\n    secrets = vex.scan_secrets(memory)\n    if secrets:\n        event.data['memory'] = vex.redact(memory, secrets)\n        vex.log_alert('Secrets detected and redacted')\n    \n    # Memory size limit\n    if len(event.data['memory']) > 10_000_000:  # 10MB\n        event.data['memory'] = summarize_memory(event.data['memory'])\n        vex.log_metric('memory_truncated', size=len(event.data['memory']))\n    \n    return vex.approve(event.data)\n\nagent.add_event_listener('memory_update', verify_memory_state)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Code Generation",
+      "description": "Get started with Vex free tier at platform.vex.ai to protect your code generation agents today."
+    }
+  }
+}

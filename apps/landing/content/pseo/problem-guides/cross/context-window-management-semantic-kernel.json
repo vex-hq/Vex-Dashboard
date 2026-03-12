@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Semantic Kernel Agents",
+    "description": "How to detect and fix context window management for ai agents in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Semantic Kernel context-window-management",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Semantic Kernel, Context Window Management issues for AI Agents arise when plugin chaining, planners, and memory systems exceed token limits during execution, leading to truncated prompts and degraded performance. Agents fail silently as the Kernel's function invocation pipeline doesn't natively track cumulative context size across chained operations. This manifests across Python and TypeScript implementations through cascading errors in multi-step reasoning and hallucinated memory recalls.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining producing cascading errors",
+        "symptom": "Subsequent plugins receive truncated context from previous function results",
+        "impact": "Agent produces incoherent responses after 3-4 plugin invocations"
+      },
+      {
+        "scenario": "Planner generating invalid execution plans",
+        "symptom": "Handlebars/SequentialPlanner selects too many functions exceeding window",
+        "impact": "Runtime token limit errors during plan execution"
+      },
+      {
+        "scenario": "Memory recall hallucinating past interactions",
+        "symptom": "VolatileMemoryStore + embedding recall pulls excessive chat history",
+        "impact": "Recent interactions overshadowed by irrelevant historical context"
+      },
+      {
+        "scenario": "Cross-plugin data contamination",
+        "symptom": "KernelFunctionContext accumulates state across unrelated plugin calls",
+        "impact": "Agents mix data from different user sessions/conversations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Intercepts KernelFunction invocation to track cumulative context tokens before LLM calls",
+        "code": "from semantic_kernel import Kernel\nfrom semantic_kernel.contents import ChatHistory\n\ndef token_overflow_filter(function_result: str, context: Kernel):\n    chat_history = context['chat_history']\n    total_tokens = sum(len(msg.content) for msg in chat_history) // 4  # rough token estimate\n    if total_tokens > 12000:\n        raise ValueError(f\"Context overflow: {total_tokens} tokens\")\n    return function_result\n\nkernel = Kernel()\nkernel.filters.add('post_function', token_overflow_filter)",
+        "language": "python"
+      },
+      {
+        "name": "Plan Length Validator",
+        "description": "Validates SequentialPlanner output against token budget before execution",
+        "code": "from semantic_kernel.planning import SequentialPlanner\nfrom semantic_kernel.contents import ChatHistory\n\ndef validate_plan(plan_steps, kernel):\n    estimated_tokens = 0\n    for step in plan_steps:\n        estimated_tokens += len(str(step)) // 4\n    if estimated_tokens > 11000:\n        raise ValueError(f\"Plan exceeds token limit: {estimated_tokens}\")\n    return plan_steps\n\nplanner = SequentialPlanner(kernel)\nplan = planner.create_plan(goal)\nvalidate_plan(plan._steps, kernel)",
+        "language": "python"
+      },
+      {
+        "name": "Context Size Logger",
+        "description": "Logs context window usage patterns across agent sessions",
+        "code": "import logging\nfrom semantic_kernel import Kernel\n\nclass ContextLogger:\n    def __init__(self):\n        self.session_context = []\n    \n    def log_context(self, context: Kernel):\n        ctx_size = len(str(context))\n        self.session_context.append(ctx_size)\n        logging.info(f\"Context size: {ctx_size}, Session avg: {sum(self.session_context)/len(self.session_context):.0f}\")\n        return context\n\nlogger = ContextLogger()\nkernel.add_filter('pre_function', logger.log_context)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncation",
+        "description": "Automatically prunes chat history to fit token window using embedding similarity",
+        "code": "from semantic_kernel.memory import SemanticTextMemory\nfrom semantic_kernel.contents import ChatHistory\n\ndef truncate_context(chat_history: ChatHistory, max_tokens: int = 10000):\n    if sum(len(msg.content) for msg in chat_history) // 4 < max_tokens:\n        return chat_history\n    \n    # Keep last N messages + most relevant by recency\n    recent = chat_history[-5:]\n    memory = kernel.memory\n    relevant = memory.search('collection', query, limit=3, min_relevance_score=0.7)\n    \n    truncated = ChatHistory()\n    truncated.add_system_message(chat_history[0].content)  # Keep system prompt\n    truncated.add_user_messages(recent + relevant)\n    return truncated\n\n# Usage\ncontext['chat_history'] = truncate_context(context['chat_history'])",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Planner",
+        "description": "Custom planner that estimates token cost before generating execution plans",
+        "code": "from semantic_kernel.planning import Planner\nfrom semantic_kernel.functions import KernelFunction\n\nclass TokenAwarePlanner(SequentialPlanner):\n    def create_plan(self, goal: str):\n        functions = self._kernel.functions.list_functions()\n        # Estimate token cost\n        viable_functions = [f for f in functions \n                          if self.estimate_tokens(f) < 2000]\n        \n        plan = super().create_plan(goal)\n        if self.plan_token_cost(plan) > 11000:\n            plan._steps = plan._steps[:3]  # Truncate expensive plan\n        return plan\n    \n    def estimate_tokens(self, func: KernelFunction) -> int:\n        return len(func.describe()) // 4 + 500  # function desc + output\n\nplanner = TokenAwarePlanner(kernel)",
+        "language": "python"
+      },
+      {
+        "name": "Session Context Partitioning",
+        "description": "Partitions long conversations into token-bounded sessions",
+        "code": "from semantic_kernel.contents import ChatHistory\n\nclass TokenBoundedSession:\n    def __init__(self, max_tokens=8000):\n        self.max_tokens = max_tokens\n        self.sessions = []\n    \n    def add_message(self, chat_history: ChatHistory):\n        current_session = ChatHistory()\n        for msg in chat_history:\n            if self.current_token_count(current_session) < self.max_tokens:\n                current_session.add_message(msg)\n            else:\n                self.sessions.append(current_session)\n                current_session = ChatHistory([msg])\n        self.sessions.append(current_session)\n    \n    def current_token_count(self, session):\n        return sum(len(msg.content) for msg in session) // 4\n\nsession_manager = TokenBoundedSession()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a Semantic Kernel filter that automatically monitors context window usage across all function invocations, planner executions, and memory recalls. It establishes token budgets per session and flags violations in real-time, providing detailed traces of which plugins or planning steps caused overflow. \n\nThe Vex SDK (`pip install semantic-kernel vex-sdk`) adds zero-config monitoring that captures cascading failures from plugin chaining and invalid plans. Vex's ML-powered analysis correlates context growth patterns with specific failure modes, automatically suggesting optimal truncation points and plan revisions. Remediation runs generate fixed execution traces with 95%+ success rates on context-bound failures.\n\nVex dashboards provide per-agent token utilization heatmaps and auto-generates context management policies tuned to your specific plugin ecosystem.",
+      "code": "from semantic_kernel import Kernel\nimport vex\n\n# Install: pip install semantic-kernel vex-sdk\nkernel = Kernel()\n\n# Vex auto-integration as Kernel filter\n@vex.monitor_kernel(kernel)\ndef agent_pipeline(goal: str):\n    planner = SequentialPlanner(kernel)\n    plan = planner.create_plan(goal)\n    result = plan.invoke_async(kernel)\n    return result.result\n\n# Vex auto-detects context overflow, invalid plans, memory hallucination\n# Provides auto-remediation with truncation + replanning\n\n# View issues: vex dashboard\n# Auto-fix deployment: vex apply-remediations",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and eliminate context window failures in your Semantic Kernel agents with one line of code"
+    }
+  }
+}

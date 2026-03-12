@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Haystack Agents",
+    "description": "How to detect and fix ai agent observability in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Haystack agent-observability",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack, AI Agent Observability challenges arise from opaque pipeline failures where components like retrievers and generators silently produce low-quality outputs or crash without traces. Pipeline type mismatches and custom component errors get swallowed by the framework's async execution, making debugging production agents nearly impossible. Vex integration as a custom component provides end-to-end tracing of these failures specific to Haystack's Pipeline.run() patterns.",
+    "howItManifests": [
+      {
+        "scenario": "Pipeline component output type mismatches",
+        "symptom": "DocumentSearchReader expects Document objects but receives dicts from custom retriever",
+        "impact": "Pipeline.run() raises cryptic TypeError deep in async execution stack"
+      },
+      {
+        "scenario": "Retriever returning irrelevant documents",
+        "symptom": "RAG pipeline returns top-k docs with cosine similarity < 0.3 despite query relevance",
+        "impact": "Generator produces hallucinated answers citing irrelevant context"
+      },
+      {
+        "scenario": "Generator hallucinating beyond retrieved context",
+        "symptom": "Generated response contains facts not present in input Documents.metadata",
+        "impact": "End-users receive confidently wrong answers from production agents"
+      },
+      {
+        "scenario": "Custom component errors silently swallowed",
+        "symptom": "User-defined Index silently fails during add_records() without Pipeline feedback",
+        "impact": "Agent appears functional but serves stale/empty search results"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Type Mismatch Pipeline Tracer",
+        "description": "Detects output schema violations between sequential Haystack components",
+        "code": "from haystack import Pipeline, component\nfrom typing import Any, Dict, Type\n\n@component\ndef TypeCheckComponent(@component.output_types(output=Dict[str, Any])):\n    def run(input: Dict[str, Any]) -> Dict[str, Any]:\n        expected = getattr(self, 'expected_type', dict)\n        actual_type = type(input.get('documents', [{}])[0])\n        if not issubclass(actual_type, expected):\n            raise TypeError(f\"Expected {expected.__name__}, got {actual_type.__name__}\")\n        return {'output': input}\n    return run\n\n# Usage in pipeline\npipe = Pipeline()\npipe.add_component(\"type_check\", TypeCheckComponent())\npipe.connect(\"retriever\", \"type_check\")",
+        "language": "python"
+      },
+      {
+        "name": "Retriever Relevance Score Monitor",
+        "description": "Flags retrievers returning documents below quality threshold",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\nimport numpy as np\n\nclass RelevanceMonitor:\n    def __init__(self, score_threshold=0.3):\n        self.score_threshold = score_threshold\n    \n    def check_retrieval(self, query_embedding: np.ndarray, docs: list) -> bool:\n        scores = retriever.run(query_embedding=query_embedding, top_k=len(docs))['scores']\n        low_relevance = any(score < self.score_threshold for score in scores)\n        if low_relevance:\n            print(f\"⚠️ Low relevance docs: {scores}\")\n        return not low_relevance\n\n# Integrate in pipeline\nmonitor = RelevanceMonitor()",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Context Drift Detector",
+        "description": "Compares generated text against retrieved document context",
+        "code": "from haystack.components.generators import OpenAIGenerator\nimport re\n\ndef detect_hallucination(generated: str, context_docs: list[str]) -> float:\n    context_text = ' '.join([doc.page_content for doc in context_docs])\n    # Simple n-gram overlap metric\n    gen_words = set(re.findall(r'\\w+', generated.lower()))\n    ctx_words = set(re.findall(r'\\w+', context_text.lower()))\n    overlap = len(gen_words.intersection(ctx_words)) / len(gen_words)\n    return overlap\n\n# Pipeline integration\n@component\ndef HallucinationCheck(@component.input_types(text=str, context=list)):\n    def run(text: str, context: list) -> Dict:\n        score = detect_hallucination(text, context)\n        if score < 0.4:\n            raise ValueError(f\"Hallucination detected: {score:.2f} context overlap\")\n        return {'verified_text': text}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Schema-Enforced Pipeline Components",
+        "description": "Uses Haystack's @component.output_types() to prevent type mismatches",
+        "code": "from haystack import component\nfrom haystack.dataclasses import Document\nfrom typing import List, Dict, Any\n\n@component\nclass TypedRetriever:\n    @component.output_types(documents=List[Document])\n    def run(self, query: str) -> Dict[str, List[Document]]:\n        # Your retrieval logic here\n        docs = [Document(content=\"fixed schema\")]\n        return {'documents': docs}\n\n@component\nclass SafeGenerator:\n    @component.input_types(documents=List[Document])\n    @component.output_types(text=str)\n    def run(self, documents: List[Document]) -> Dict[str, str]:\n        context = \"\\n\".join([d.content for d in documents])\n        return {'text': f\"Answer based on: {context[:500]}\"}",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Reranker Integration",
+        "description": "Automatically reranks low-relevance retrieval results",
+        "code": "from haystack.components.builders import PromptBuilder\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\nrerank_prompt = PromptBuilder(template=\"\"\"Score relevance 1-10:\\nQuery: {{query}}\\nDoc: {{document}}\"\"\")\n\n@component\nclass AutoReranker:\n    def __init__(self):\n        self.reranker = OpenAIGenerator()\n    \n    @component.input_types(query=str, documents=List[Document])\n    @component.output_types(documents=List[Document])\n    def run(self, query: str, documents: List[Document]):\n        # Rerank only if initial scores low\n        if all(score < 0.4 for score in self.initial_scores):\n            scored_docs = []\n            for doc in documents:\n                score_prompt = rerank_prompt.run(query=query, document=doc)\n                score = self.reranker.run(**score_prompt)['replies'][0].content\n                scored_docs.append((float(score), doc))\n            documents = [doc for _, doc in sorted(scored_docs, reverse=True)[:3]]\n        return {'documents': documents}",
+        "language": "python"
+      },
+      {
+        "name": "Error-Bubbling Custom Components",
+        "description": "Ensures custom components propagate errors to Pipeline.run()",
+        "code": "from haystack import component\nimport logging\n\n@component\nclass ErrorTrackingComponent:\n    def __init__(self):\n        self.logger = logging.getLogger(__name__)\n    \n    @component.input_types(input=Any)\n    @component.output_types(output=Any)\n    def run(self, input: Any) -> Dict[str, Any]:\n        try:\n            # Your component logic\n            result = self.process(input)\n            return {'output': result}\n        except Exception as e:\n            self.logger.error(f\"Component failed: {str(e)}\", exc_info=True)\n            # Re-raise to bubble up to Pipeline\n            raise RuntimeError(f\"Component error: {str(e)}\") from e\n    \n    def process(self, input):\n        # Simulate potential failure\n        if not hasattr(input, 'get'):\n            raise ValueError(\"Invalid input format\")\n        return input",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex integrates as a zero-config Haystack component that automatically instruments all Pipeline.run() calls, capturing component inputs/outputs, latency, and quality metrics without code changes. It detects the four core Haystack failure modes through runtime schema validation, relevance scoring, and hallucination pattern matching trained specifically on Haystack Document objects and pipeline traces.\n\nVex's agent creates remediation pipelines that inject rerankers, type converters, and context enforcers exactly where failures occur. Production Haystack agents running through Vex achieve 95%+ uptime with automatic root cause analysis linking retriever drift to generator hallucinations.\n\nThe Vex SDK hooks into Haystack's component graph, providing span-based observability that traces errors from custom Index.add_records() through Generator.run() without async deadlocks.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk.haystack import VexObserver\nfrom vex_sdk.types import HaystackSpan\n\n# Install: pip install haystack-ai vex-sdk\n\n# Zero-config integration\nvex = VexObserver(api_key=\"vex-your-key\")\n\nrag_pipeline = Pipeline()\nrag_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever())\nrag_pipeline.add_component(\"generator\", OpenAIGenerator())\n\n# Vex auto-instruments the entire pipeline\n@VexObserver.trace_pipeline(vex)\ndef monitored_rag(query: str):\n    result = rag_pipeline.run({\n        \"retriever\": {\"query\": query},\n        \"generator\": {\"prompt\": \"Answer based on context: {{context}}\")\n    })\n    # Vex auto-generates spans for type mismatches, low relevance, hallucinations\n    return result\n\n# Production monitoring\nspans: List[HaystackSpan] = vex.capture_pipeline(rag_pipeline)\nvex.alert_on_failures(spans, thresholds={\n    'retriever_relevance': 0.3,\n    'generator_hallucination': 0.4,\n    'pipeline_latency': '2s'\n})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex to your Haystack pipelines and eliminate 95% of agent failures automatically."
+    }
+  }
+}

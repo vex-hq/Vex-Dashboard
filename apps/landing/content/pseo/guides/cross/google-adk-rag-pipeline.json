@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Google ADK + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK rag pipeline",
+      "Google ADK guardrails",
+      "rag pipeline reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG Pipeline with Google's Agent Development Kit (ADK) enables powerful document retrieval, vector search, and Gemini-powered synthesis for accurate responses. However, multi-agent delegation in ADK often leads to circular dependencies, model inconsistencies, and tool mismatches that undermine reliability. Vex provides essential guardrails to verify source faithfulness, detect hallucinations, and ensure citation accuracy in high-risk deployments.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Google ADK",
+      "description": "The RAG Pipeline in Google ADK typically features a Router Agent that receives user queries and delegates to specialized Retriever and Synthesizer Agents. The Retriever Agent performs vector search against a document corpus using embeddings, assembles relevant context chunks, and passes them to the Synthesizer Agent. The Synthesizer leverages Gemini models to generate responses with source attribution while maintaining conversation state across agents.\n\nAgents communicate via ADK's session-based protocol, with tools handling embedding generation, vector search (e.g., via Vertex AI Vector Search), and response formatting. Long conversations risk state corruption as context windows expand, and multi-agent handoffs create dependency loops if not carefully orchestrated. Vex integrates as a before_agent_callback to validate inputs/outputs at each delegation point.\n\nThis architecture excels for enterprise knowledge bases but requires rigorous verification of retrieval relevance, synthesis faithfulness, and citation integrity to maintain trust.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Router Agent    │───▶│ Retriever Agent  │\n│                 │    │ (Vex Callback)   │    │ (Vector Search)  │\n└─────────────────┘    └──────────────┬───┘    └──────────────┬───┘\n                                     │                      │\n                        ┌────────────▼───┐    ┌──────────────▼───┐\n                        │ Document Corpus │◀──▶│ Context Assembly │\n                        │   (Vector DB)   │    │                  │\n                        └────────────────┘    └──────────────┬───┘\n                                                           │\n                                           ┌────────────────▼─────────────┐\n                                     ┌─────▼──────────────┤ Synthesizer Agent │\n                                     │     │              │ (Gemini + Vex)    │\n                        ┌────────────▼─────▼──────────────┘               │\n                        │         Assembled Context                        │\n                        └──────────────────────────────────────────────────┘\n                                                           │\n                                     ┌───────────────────▼────────────────┐\n                                     │       Final Response w/ Citations    │\n                                     └──────────────────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Retriever Agent waiting for Synthesizer output while Synthesizer awaits refined retrieval creates infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex workflow validation prevents recursive agent calls and enforces delegation DAGs"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different agents using gemini-1.5-pro vs gemini-1.5-flash leads to format mismatches in citations",
+        "severity": "high",
+        "mitigation": "Vex standardizes response schemas and validates model-config consistency across agents"
+      },
+      {
+        "name": "Source faithfulness failures",
+        "description": "Synthesizer generates plausible but ungrounded claims not present in retrieved documents",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks between response claims and source chunks"
+      },
+      {
+        "name": "Citation accuracy drift",
+        "description": "Agents fabricate or mismatch document IDs in attribution metadata during context re-assembly",
+        "severity": "high",
+        "mitigation": "Vex citation tracing verifies source-document mappings through agent handoffs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "RAG Retriever Agent with Vector Search",
+        "description": "Implements document retrieval using Vertex AI embeddings and vector search, formatting results for downstream synthesis",
+        "code": "from google.adk.agents import Agent\nfrom google.cloud import aiplatform\n\nretriever_agent = Agent(\n    name=\"rag_retriever\",\n    model=\"gemini-1.5-flash\",\n    instruction=\"\"\"You are a document retriever. Given a query:\n    1. Generate embeddings using text-embedding-004\n    2. Query vector index for top-5 matches\n    3. Return JSON with source chunks and metadata\n    4. Include document_id, chunk_id, score, and content\n    Format: {'documents': [{'id': str, 'content': str, 'score': float}]}\"\"\",\n    tools=[\n        aiplatform.gapic.VectorSearchClient(),\n        aiplatform.gapic.PredictionServiceClient()\n    ]\n)\n\ndef vector_search_tool(query: str):\n    # Implementation using Vertex AI Vector Search\n    index_endpoint = aiplatform.VectorSearchIndexEndpoint('projects/.../locations/.../indexEndpoints/...')\n    results = index_endpoint.match(\n        deployed_index_id='...', \n        queries=[query], \n        num_neighbors=5\n    )\n    return [{\n        'id': r.id, \n        'content': r.data, \n        'score': r.distance\n    } for r in results[0]]",
+        "language": "python"
+      },
+      {
+        "title": "RAG Synthesizer Agent with Citation Tracking",
+        "description": "Synthesizes final response from retrieved context with source attribution and hallucination boundaries",
+        "code": "synthesizer_agent = Agent(\n    name=\"rag_synthesizer\",\n    model=\"gemini-1.5-pro\",\n    instruction=\"\"\"Synthesize answer using ONLY provided documents. Structure response:\n    {\n      'answer': 'Direct response grounded in sources',\n      'citations': [{'doc_id': str, 'chunk_id': str, 'quote': str, 'start_pos': int}],\n      'confidence': 'high|medium|low'\n    }\n    Never fabricate information. Flag gaps explicitly.\"\"\"\n)\n\ndef format_citations(response, documents):\n    citations = []\n    for cite in response.get('citations', []):\n        doc = next(d for d in documents if d['id'] == cite['doc_id'])\n        citations.append({\n            'document_id': cite['doc_id'],\n            'snippet': doc['content'][:200],\n            'relevance_score': doc['score']\n        })\n    return {'answer': response['answer'], 'citations': citations}",
+        "language": "python"
+      },
+      {
+        "title": "Router Agent for Multi-Agent Orchestration",
+        "description": "Coordinates query routing between retriever and synthesizer with session state management",
+        "code": "from google.adk.sessions import Session\n\nrouter_agent = Agent(\n    name=\"rag_router\",\n    model=\"gemini-1.5-flash\",\n    instruction=\"Coordinate RAG workflow:\n    1. New query → retriever_agent\n    2. Retrieved docs → synthesizer_agent\n    3. Maintain conversation history\n    Respond with: {'next_agent': 'retriever|synthesizer', 'context': {...}}\"\n)\n\ndef orchestrate_rag(session: Session, query: str):\n    history = session.get_state()\n    \n    if not history.get('retrieved_docs'):\n        return {'next_agent': 'retriever_agent', 'query': query}\n    \n    return {\n        'next_agent': 'synthesizer_agent',\n        'context': {\n            'query': query,\n            'documents': history['retrieved_docs'],\n            'conversation_history': history.get('messages', [])\n        }\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Session State Manager for Long Conversations",
+        "description": "Prevents context corruption by summarizing and pruning conversation history",
+        "code": "def manage_session_state(session: Session, max_tokens: int = 128000):\n    messages = session.get_messages()\n    current_tokens = sum(len(m.content) for m in messages)\n    \n    if current_tokens > max_tokens:\n        # Summarize oldest exchanges\n        summary_agent = Agent(name=\"summarizer\", model=\"gemini-1.5-flash\")\n        old_context = messages[:len(messages)//2]\n        summary = summary_agent.generate(\n            f\"Summarize this conversation (max 4k tokens): {old_context}\"\n        )\n        \n        # Replace old messages with summary\n        session.update_messages([\n            {'role': 'system', 'content': f'Prior context summary: {summary}'}\n        ] + messages[len(messages)//2:])\n    \n    return session.get_state()",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex before_agent_callback for Source Faithfulness",
+        "description": "Validates retrieved documents match query intent before synthesizer processing",
+        "code": "from vex_sdk import VexClient\n\nvex_client = VexClient(api_key=\"vex_...\")\n\ndef vex_before_agent_callback(session_data: dict, agent_name: str):\n    if agent_name == \"rag_synthesizer\":\n        documents = session_data.get('context', {}).get('documents', [])\n        query = session_data.get('query', '')\n        \n        # Verify source faithfulness\n        results = vex_client.verify({\n            'task': 'rag_source_faithfulness',\n            'query': query,\n            'documents': documents,\n            'threshold': 0.8  # Cosine similarity\n        })\n        \n        if not results['passes']:\n            return {\n                'block': True,\n                'reason': 'Documents insufficiently relevant to query',\n                'suggested_fix': 'Expand retrieval or refine query'\n            }\n    \n    return {'passes': True}",
+        "language": "python"
+      },
+      {
+        "title": "Hallucination Detection Wrapper",
+        "description": "Intercepts synthesizer outputs to detect and flag ungrounded claims",
+        "code": "def vex_hallucination_guard(output: dict, documents: list):\n    claims = extract_claims(output['answer'])  # Custom claim extraction\n    \n    verification_results = []\n    for claim in claims[:5]:  # Top 5 claims\n        result = vex_client.verify({\n            'task': 'hallucination_detection',\n            'claim': claim,\n            'ground_truth_docs': documents,\n            'model': 'gemini-1.5-pro',\n            'threshold': 0.7\n        })\n        verification_results.append(result)\n    \n    hallucination_score = sum(r['confidence_score'] for r in verification_results) / len(verification_results)\n    \n    if hallucination_score < 0.75:\n        output['vex_flags'] = {\n            'hallucination_risk': 'high',\n            'flagged_claims': [r['claim'] for r in verification_results if r['risk'] == 'high']\n        }\n    \n    return output",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy Validator",
+        "description": "Ensures all citations trace back to actual retrieved documents with correct metadata",
+        "code": "def vex_citation_validator(response: dict, session_documents: list):\n    cited_doc_ids = [c['document_id'] for c in response.get('citations', [])]\n    available_doc_ids = [d['id'] for d in session_documents]\n    \n    # Check for fabricated citations\n    missing_citations = set(cited_doc_ids) - set(available_doc_ids)\n    if missing_citations:\n        return {\n            'passes': False,\n            'error': f'Found {len(missing_citations)} fabricated citations: {missing_citations}',\n            'severity': 'critical'\n        }\n    \n    # Verify citation relevance\n    citation_results = vex_client.batch_verify([\n        {\n            'task': 'citation_relevance',\n            'query': response['answer'],\n            'citation': c,\n            'document': next(d for d in session_documents if d['id'] == c['document_id'])\n        }\n        for c in response['citations']\n    ])\n    \n    valid_citations = sum(1 for r in citation_results if r['passes'])\n    accuracy = valid_citations / len(response['citations'])\n    \n    return {\n        'passes': accuracy > 0.9,\n        'citation_accuracy': accuracy,\n        'metrics': citation_results\n    }",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK RAG Pipeline",
+      "description": "Deploy Vex guardrails today to achieve production-grade reliability for your enterprise RAG applications."
+    }
+  }
+}

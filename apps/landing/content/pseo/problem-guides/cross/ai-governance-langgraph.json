@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in LangGraph Agents",
+    "description": "How to detect and fix responsible ai governance for agents in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "LangGraph ai-governance",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in LangGraph manifests as uncontrolled state mutations, unauthorized tool calls, and unmonitored human-in-the-loop decisions that violate compliance policies. Cyclic workflows amplify risks by repeating harmful actions indefinitely, while parallel branches create conflicting audit trails. Without governance, LangGraph agents can execute biased decisions, leak PII through tools, or bypass safety checkpoints, making compliance impossible.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic approval workflow bypasses human review",
+        "symptom": "Conditional edges skip 'human_approval' node when `state.confidence > 0.8`",
+        "impact": "High-risk decisions auto-approved without audit trail"
+      },
+      {
+        "scenario": "Parallel research branches call unapproved external APIs",
+        "symptom": "Merge state contains conflicting PII from multiple tool calls",
+        "impact": "Data leakage through unauthorized web scraping tools"
+      },
+      {
+        "scenario": "State schema evolution breaks compliance checkpoints",
+        "symptom": "Checkpoint deserialization fails on `user_pii` field addition",
+        "impact": "Lost audit history, unable to prove compliance"
+      },
+      {
+        "scenario": "Tool selection lacks governance guardrails",
+        "symptom": "Agent calls `send_email` tool without recipient validation",
+        "impact": "Spam/phishing attacks via uncontrolled messaging"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cycle Detector for Unauthorized Loops",
+        "description": "Scans compiled graph for cycles bypassing governance nodes",
+        "code": "from langgraph.graph import StateGraph\nfrom typing import TypedDict\n\ndef detect_unauthorized_cycles(graph: StateGraph):\n    visited = set()\n    governance_nodes = {'human_review', 'compliance_check'}\n    \n    def dfs(node):\n        if node in visited:\n            return False\n        visited.add(node)\n        \n        neighbors = graph.edges.get(node, [])\n        for neighbor in neighbors:\n            if neighbor['target'] not in governance_nodes:\n                if neighbor['target'] in visited:\n                    return True  # Unauthorized cycle\n                if dfs(neighbor['target']):\n                    return True\n        return False\n    \n    for node in graph.nodes:\n        if dfs(node):\n            return {'issue': 'Unauthorized cycle bypassing governance', 'node': node}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "PII Leakage Scanner",
+        "description": "Inspects tool calls and state for PII patterns during execution",
+        "code": "import re\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\ndef scan_pii_leakage(state):\n    pii_patterns = [\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n        r'\\b\\d{16}\\b'  # Credit card\n    ]\n    \n    state_str = str(state)\n    leaks = []\n    for pattern in pii_patterns:\n        matches = re.findall(pattern, state_str)\n        if matches:\n            leaks.append({'pattern': pattern, 'matches': matches})\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "Human-in-the-Loop Bypass Monitor",
+        "description": "Tracks conditional routing that skips required human review",
+        "code": "from langgraph.graph.state import StateGraph\n\ndef monitor_hitl_bypass(graph_config, execution_trace):\n    required_governance = {'human_approval', 'compliance_gate'}\n    bypassed = []\n    \n    for step in execution_trace:\n        if step['type'] == 'edge':\n            source = step['source']\n            target = step['target']\n            \n            if source in required_governance and target not in required_governance:\n                bypassed.append({\n                    'bypassed_node': source,\n                    'routed_to': target,\n                    'condition': step.get('condition', 'unknown')\n                })\n    return bypassed",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Mandatory Governance Checkpoint",
+        "description": "Force all cycles through compliance node regardless of confidence",
+        "code": "from langgraph.graph import StateGraph, END\nfrom typing import TypedDict, Annotated\nimport operator\n\nclass AgentState(TypedDict):\n    messages: Annotated[list, operator.add]\n    compliance_approved: bool\n    confidence: float\n\ndef compliance_checkpoint(state: AgentState) -> AgentState:\n    \"\"\"Mandatory governance check - cannot be bypassed\"\"\"\n    if not state.get('compliance_approved', False):\n        return {\n            'messages': state['messages'] + [{'role': 'system', 'content': 'BLOCKED: Requires human approval'}],\n            'compliance_approved': False\n        }\n    return state\n\n# Add as mandatory node before END\nworkflow = StateGraph(AgentState)\nworkflow.add_node('compliance_checkpoint', compliance_checkpoint)\n\n# Force routing through compliance\nworkflow.add_edge('agent', 'compliance_checkpoint')\nworkflow.add_conditional_edges(\n    'compliance_checkpoint',\n    lambda state: 'approved' if state['compliance_approved'] else 'human_review',\n    {'approved': END, 'human_review': 'human_approval'}\n)",
+        "language": "python"
+      },
+      {
+        "name": "PII-Safe State Schema",
+        "description": "Encrypt sensitive fields and validate before persistence",
+        "code": "from cryptography.fernet import Fernet\nfrom typing import TypedDict, Any\n\nclass SafeAgentState(TypedDict):\n    messages: list\n    pii_encrypted: dict[str, str]  # Encrypted PII\n    pii_hash: str  # SHA256 for audit\n    \nclass PIIProtector:\n    def __init__(self):\n        self.cipher = Fernet(Fernet.generate_key())\n    \n    def sanitize_state(self, state: dict) -> SafeAgentState:\n        safe_state = state.copy()\n        pii_fields = {}\n        \n        # Encrypt PII\n        for key, value in state.items():\n            if self.contains_pii(str(value)):\n                pii_fields[key] = self.cipher.encrypt(str(value).encode()).decode()\n                safe_state[key] = '[PII_ENCRYPTED]'\n        \n        safe_state['pii_encrypted'] = pii_fields\n        safe_state['pii_hash'] = self.hash_state(safe_state)\n        return safe_state\n    \n    def contains_pii(self, text: str) -> bool:\n        import re\n        return bool(re.search(r'\\b\\d{3}-\\d{2}-\\d{4}|\\S+@\\S+\\.\\S+\\b', text))",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Governor",
+        "description": "Whitelist approved tools with rate limiting and logging",
+        "code": "from typing import TypedDict, List, Dict, Any\nfrom langgraph.prebuilt import ToolNode\n\nAPPROVED_TOOLS = {'search', 'calculator'}\nTOOL_CALL_LIMITS = {'send_email': 3, 'search': 10}\n\nclass GovernedToolNode(ToolNode):\n    def __init__(self, tools, call_limits: Dict[str, int] = None):\n        super().__init__(tools)\n        self.call_counts = {}\n        self.call_limits = call_limits or TOOL_CALL_LIMITS\n    \n    def _process_tool_calls(self, state):\n        tool_calls = state['next']\n        filtered_calls = []\n        \n        for tool_call in tool_calls:\n            tool_name = tool_call['name']\n            \n            if tool_name not in APPROVED_TOOLS:\n                state['messages'].append({\n                    'role': 'tool',\n                    'content': f'BLOCKED: {tool_name} not in approved toolset',\n                    'tool_call_id': tool_call['id']\n                })\n                continue\n            \n            self.call_counts[tool_name] = self.call_counts.get(tool_name, 0) + 1\n            if self.call_counts[tool_name] > self.call_limits.get(tool_name, 999):\n                state['messages'].append({\n                    'role': 'tool',\n                    'content': f'RATE LIMITED: {tool_name}',\n                    'tool_call_id': tool_call['id']\n                })\n                continue\n            \n            filtered_calls.append(tool_call)\n        \n        state['next'] = filtered_calls\n        return state",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex provides continuous governance monitoring by wrapping LangGraph's `invoke()` and `stream()` methods with `vex.verify()`, automatically detecting PII leakage, unauthorized tool calls, and governance bypasses in real-time. It maintains a tamper-proof audit trail of all state transitions and creates compliance reports for every execution. Vex's agent-specific policies enforce human-in-the-loop requirements, tool whitelisting, and cycle limits without modifying your core workflow logic.\n\nIntegration takes 3 lines of code and works with existing checkpoints. Vex automatically patches common failure modes like state corruption during parallel merges and injects governance nodes where conditional edges create compliance gaps. All detections include remediation code generation and one-click deployment.",
+      "code": "import vex\nfrom langgraph.graph import StateGraph\n\n# Install: pip install langgraph vex-sdk\n\n@vex.verify(\n    policies=[\n        'no-pii-leakage',\n        'human-in-loop-enforced',\n        'approved-tools-only',\n        'no-unauthorized-cycles'\n    ],\n    auto_fix=True\n)\ndef governed_workflow(inputs):\n    \"\"\"Vex automatically governs this LangGraph workflow\"\"\"\n    config = {'configurable': {'thread_id': 'governed-agent-1'}}\n    \n    result = workflow.invoke(inputs, config)\n    return result\n\n# Usage remains identical\nresponse = governed_workflow({\n    'messages': [{'role': 'user', 'content': 'Send spam to all customers'}]\n})\n\n# Vex audit report\nprint(vex.get_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and govern your LangGraph agents in 3 lines of code."
+    }
+  }
+}

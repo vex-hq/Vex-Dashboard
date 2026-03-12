@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Smolagents Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Smolagents hallucination-detection",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, AI agent hallucinations manifest as agents generating fabricated tool calls, unsafe code, or incorrect reasoning chains due to the framework's lightweight design and reliance on simple code-based agents. These issues are amplified by minimal error handling and the agent's tendency to misinterpret tool schemas during execution. Vex provides robust detection by wrapping agent runs to catch hallucinations before they cause real-world damage.",
+    "howItManifests": [
+      {
+        "scenario": "Code agent generating unsafe Python execution",
+        "symptom": "Agent outputs code with dangerous operations like `os.system('rm -rf /')` or infinite loops",
+        "impact": "Potential data loss, server crashes, or security breaches during execution"
+      },
+      {
+        "scenario": "Tool agent misinterpreting tool descriptions",
+        "symptom": "Agent calls non-existent tools or passes wrong parameter types to real tools",
+        "impact": "Runtime errors and failed task completion with cryptic error messages"
+      },
+      {
+        "scenario": "Multi-step reasoning errors compounding",
+        "symptom": "Early reasoning mistakes propagate through agent steps, leading to confidently wrong final answers",
+        "impact": "Users receive authoritative but incorrect results, eroding trust"
+      },
+      {
+        "scenario": "Minimal error handling in generated code",
+        "symptom": "Agent-generated code lacks try-catch blocks, causing unhandled exceptions",
+        "impact": "Silent failures or crashes that halt agent execution entirely"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Unsafe Code Pattern Scanner",
+        "description": "Detects dangerous Python patterns in agent-generated code before execution",
+        "code": "import re\n\ndef scan_unsafe_code(code: str) -> list[str]:\n    dangerous_patterns = [\n        r'os\\.(system|pop(?:en|en2))\\s*\\(\\s*[\"\\'][^\\)]*rm\\s*[\"\\']',\n        r'while\\s+True\\s*:',\n        r'__import__\\s*\\(\\s*[\"\\'](?:os|subprocess|shutil)[\"\\']',\n        r'eval\\s*\\(\\s*input',\n    ]\n    violations = []\n    for pattern in dangerous_patterns:\n        if re.search(pattern, code, re.IGNORECASE):\n            violations.append(f\"Dangerous pattern: {pattern}\")\n    return violations\n\n# Usage with Smolagents\nagent_code = agent.run(\"Write code to clean my disk\")\nprint(scan_unsafe_code(agent_code))",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Schema Validator",
+        "description": "Verifies agent tool calls match actual tool schemas before execution",
+        "code": "from smolagents import Agent, tool\nfrom typing import Any\n\ndef validate_tool_call(call: dict, tools: dict) -> bool:\n    tool_name = call.get('name')\n    if tool_name not in tools:\n        return False\n    \n    tool_schema = tools[tool_name]\n    params = call.get('arguments', {})\n    \n    for param_name, param_value in params.items():\n        if param_name not in tool_schema.get('parameters', {}):\n            print(f\"Unknown parameter: {param_name}\")\n            return False\n    return True\n\n# Usage\n@tool\ndef safe_tool(x: int) -> int:\n    return x * 2\n\ntools = {'safe_tool': {'parameters': {'x': {'type': 'integer'}}}}\n\nagent = Agent(tools=[safe_tool])\nresult = agent.run(\"Call safe_tool with string 'abc'\")\ncall = result.tool_calls[0] if result.tool_calls else {}\nprint(validate_tool_call(call, tools))",
+        "language": "python"
+      },
+      {
+        "name": "Reasoning Confidence Monitor",
+        "description": "Tracks confidence decay across multi-step agent reasoning",
+        "code": "from smolagents import Agent\n\nclass ConfidenceTracker:\n    def __init__(self):\n        self.confidence = 1.0\n        self.step_logs = []\n    \n    def update(self, step_output: str, confidence_score: float):\n        self.confidence *= confidence_score\n        self.step_logs.append({\n            'output': step_output,\n            'confidence': confidence_score,\n            'cumulative': self.confidence\n        })\n        return self.confidence < 0.3  # Hallucination threshold\n\n# Usage\ntracker = ConfidenceTracker()\nagent = Agent()\n\nfor step in range(5):\n    result = agent.run(f\"Step {step+1} of reasoning\")\n    # Mock confidence from LLM logits\n    conf = 0.8 if step < 2 else 0.6\n    if tracker.update(result, conf):\n        print(\"Hallucination detected!\")\n        break",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Sandbox Code Executor",
+        "description": "Execute agent code in isolated environment with strict permissions",
+        "code": "import subprocess\nimport tempfile\nimport os\nfrom smolagents import Agent\n\ndef safe_execute(code: str) -> dict:\n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    \n    try:\n        result = subprocess.run(\n            ['python', temp_file],\n            capture_output=True,\n            text=True,\n            timeout=5,\n            env={**os.environ, 'PYTHONPATH': ''}\n        )\n        return {\n            'success': result.returncode == 0,\n            'stdout': result.stdout,\n            'stderr': result.stderr\n        }\n    finally:\n        os.unlink(temp_file)\n\n# Usage\nagent = Agent()\ncode = agent.run(\"Write disk cleaning script\")\nprint(safe_execute(code))",
+        "language": "python"
+      },
+      {
+        "name": "Strict Tool Call Wrapper",
+        "description": "Enforce exact tool schema compliance with fallback behavior",
+        "code": "from smolagents import Agent, tool\nfrom typing import Literal\n\nclass SafeToolAgent(Agent):\n    def __init__(self, tools):\n        super().__init__(tools=tools)\n    \n    def validate_and_call(self, tool_call):\n        tool_name = tool_call['name']\n        args = tool_call['arguments']\n        \n        # Strict type checking\n        if tool_name == 'calculator' and not isinstance(args.get('x'), (int, float)):\n            return \"Error: calculator requires numeric input\"\n        \n        try:\n            return self.tools[tool_name](**args)\n        except Exception as e:\n            return f\"Tool error: {str(e)}\"\n\n@tool\ndef calculator(x: float, operation: Literal['add', 'multiply'] = 'add') -> float:\n    return x * 2 if operation == 'multiply' else x + 1\n\nsafe_agent = SafeToolAgent(tools=[calculator])",
+        "language": "python"
+      },
+      {
+        "name": "Error Recovery Middleware",
+        "description": "Automatically retry failed agent steps with corrected prompts",
+        "code": "from smolagents import Agent\nimport time\n\ndef resilient_agent_run(agent: Agent, task: str, max_retries: int = 3) -> str:\n    for attempt in range(max_retries):\n        try:\n            result = agent.run(task)\n            # Validate result isn't empty or error\n            if result and 'error' not in result.lower():\n                return result\n        except Exception as e:\n            error_msg = str(e)\n            task = f\"Previous attempt failed: {error_msg}. Try again: {task}\"\n            time.sleep(1)\n    \n    return \"Failed after all retries\"\n\n# Usage\nagent = Agent()\nresult = resilient_agent_run(agent, \"Solve 2+2\")\nprint(result)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex automates hallucination detection by wrapping Smolagents' `agent.run()` calls with `vex.verify()`, providing real-time monitoring of code generation, tool usage, and reasoning quality. It catches unsafe code patterns, validates tool schemas, and tracks reasoning confidence decay across multi-step execution. When hallucinations are detected, Vex automatically applies remediation strategies like sandboxing, schema enforcement, or task retry with corrected prompts.\n\nThe integration requires only `pip install smolagents vex-sdk` and a single line wrapper around your agent execution. Vex provides detailed violation reports with exact line numbers, confidence scores, and suggested fixes, enabling continuous improvement of agent reliability without manual code review.",
+      "code": "from smolagents import Agent, tool\nimport vex\n\n@tool\ndef search_web(query: str) -> str:\n    return f\"Results for '{query}'\"\n\n# Initialize agent\nagent = Agent(tools=[search_web])\n\n# Vex-wrapped execution with hallucination checks\nwith vex.verify(\n    checks=[\n        \"no-unsafe-code\",\n        \"valid-tool-calls\",\n        \"reasoning-confidence>0.7\"\n    ]\n) as verifier:\n    \n    result = agent.run(\"Clean my entire disk and search for cats\")\n    \n    # Vex auto-generates report\n    violations = verifier.violations()\n    if violations:\n        print(\"Hallucinations detected:\", violations)\n        # Auto-remediate\n        safe_result = verifier.remediate(result)\n        print(\"Fixed result:\", safe_result)\n    else:\n        print(\"Safe execution:\", result)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your Smolagents in 1 line to eliminate hallucinations."
+    }
+  }
+}

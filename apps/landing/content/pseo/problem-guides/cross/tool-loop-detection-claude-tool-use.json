@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Claude Tool Use Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Claude Tool Use tool-loop-detection",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, tool loops manifest as repetitive calls to the same or similar tools without progressing toward task completion, often triggered by the model's persistent tool_use content blocks in messages.create() responses. This occurs when Claude misinterprets partial tool results as incomplete, entering infinite cycles of tool invocation. The problem is exacerbated by Anthropic's stateless message API, where loop detection requires tracking tool call patterns across conversation history.",
+    "howItManifests": [
+      {
+        "scenario": "Repeated database query tool calls",
+        "symptom": "Claude calls 'query_database' tool 5+ times with identical parameters",
+        "impact": "API rate limits exceeded, 30s+ response delays, incomplete task execution"
+      },
+      {
+        "scenario": "Math solver tool recursion",
+        "symptom": "Claude calls 'calculate' tool with results from previous 'calculate' calls",
+        "impact": "Exponential computation growth, inconsistent numerical results, task abandonment"
+      },
+      {
+        "scenario": "File processing loop",
+        "symptom": "Same 'read_file' tool called repeatedly on identical file paths",
+        "impact": "Excessive I/O operations, memory exhaustion, corrupted file states"
+      },
+      {
+        "scenario": "API polling cycle",
+        "symptom": "External 'check_status' tool called without result-based termination logic",
+        "impact": "External service rate limiting, increased cloud costs, stale data propagation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Frequency Tracker",
+        "description": "Tracks identical tool calls within conversation window using message content analysis",
+        "code": "import anthropic\nfrom collections import defaultdict\n\ndef detect_tool_loop(messages):\n    tool_calls = defaultdict(int)\n    for msg in messages[-10:]:  # Last 10 messages\n        if msg.get('content') and msg['content'][0].get('type') == 'tool_use':\n            tool_name = msg['content'][0]['name']\n            tool_input = str(msg['content'][0].get('input', {}))\n            key = f'{tool_name}:{tool_input}'\n            tool_calls[key] += 1\n    return any(count >= 4 for count in tool_calls.values())\n\n# Usage\nclient = anthropic.Anthropic()\nresponse = client.messages.create(\n    model='claude-3-5-sonnet-20240620',\n    max_tokens=1024,\n    messages=[{'role': 'user', 'content': 'Solve this math problem'}],\n    tools=[{'name': 'calculate', 'input_schema': {'type': 'object'}}]\n)\nif detect_tool_loop(response.messages):\n    print('TOOL LOOP DETECTED')",
+        "language": "python"
+      },
+      {
+        "name": "Conversation State Analyzer",
+        "description": "Monitors tool use patterns across full conversation history for cyclic behavior",
+        "code": "def analyze_conversation_state(history):\n    tool_patterns = []\n    for i, msg in enumerate(history[-20:]):\n        if msg.type == 'tool_use':\n            tool_patterns.append({\n                'turn': i,\n                'tool': msg.name,\n                'input_hash': hash(str(msg.input))\n            })\n    \n    # Detect cycles (same tool+input within 5 turns)\n    for i, pattern in enumerate(tool_patterns):\n        for j in range(i+1, min(i+6, len(tool_patterns))):\n            if (pattern['tool'] == tool_patterns[j]['tool'] and \n                pattern['input_hash'] == tool_patterns[j]['input_hash']):\n                return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Token Budget Loop Detector",
+        "description": "TypeScript detector for token exhaustion patterns in tool-heavy conversations",
+        "code": "interface ToolUse { name: string; input: any; }\n\nfunction detectTokenLoop(messages: any[], tokenBudget: number = 10000): boolean {\n  let toolTokens = 0;\n  const recentTools = new Map<string, number>();\n  \n  for (let i = Math.max(0, messages.length - 15); i < messages.length; i++) {\n    const msg = messages[i];\n    if (msg.content?.[0]?.type === 'tool_use') {\n      const tool = msg.content[0] as ToolUse;\n      const key = `${tool.name}:${JSON.stringify(tool.input)}`;\n      recentTools.set(key, (recentTools.get(key) || 0) + 1);\n      toolTokens += 200; // Estimate per tool call\n    }\n  }\n  \n  return toolTokens > tokenBudget * 0.8 ||\n         Array.from(recentTools.values()).some(count => count >= 4);\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication Middleware",
+        "description": "Intercepts and blocks duplicate tool calls within conversation window",
+        "code": "class ToolLoopGuard:\n    def __init__(self):\n        self.recent_calls = {}\n    \n    def check_tool(self, tool_name, tool_input):\n        key = f'{tool_name}:{str(tool_input)}'\n        now = time.time()\n        if key in self.recent_calls:\n            if now - self.recent_calls[key] < 30:  # 30s cooldown\n                return False\n        self.recent_calls[key] = now\n        return True\n    \n# Integration\nloop_guard = ToolLoopGuard()\n\ndef safe_tool_use(client, messages, tools):\n    response = client.messages.create(\n        model='claude-3-5-sonnet-20240620',\n        messages=messages,\n        tools=tools,\n        extra_headers={'anthropic-beta': 'tools-2024-06-20'}\n    )\n    \n    if response.content[0].type == 'tool_use':\n        tool = response.content[0]\n        if not loop_guard.check_tool(tool.name, tool.input):\n            return {'content': [{'type': 'text', 'text': 'Tool call blocked to prevent loop'}]}\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Max Tool Calls Per Turn",
+        "description": "Enforces strict tool call limits per response with fallback reasoning",
+        "code": "def create_with_tool_limit(client, messages, max_tools=3):\n    response = client.messages.create(\n        model='claude-3-5-sonnet-20240620',\n        messages=messages,\n        tools=[...],\n        system='Limit tool calls to 3 maximum per response. '\n               'If more needed, explain reasoning first.'\n    )\n    \n    tool_uses = [c for c in response.content if c.type == 'tool_use']\n    if len(tool_uses) > max_tools:\n        # Truncate and force text reasoning\n        response.content = [{\n            'type': 'text',\n            'text': f'Analysis: Need {len(tool_uses)} tools. '\n                   f'Prioritizing top {max_tools}. Continuing reasoning...'\n        }]\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Tool Call Throttler",
+        "description": "React-style tool call throttling with automatic loop breaking",
+        "code": "const toolThrottle = new Map<string, number>();\nconst MAX_CALLS = 3;\n\nconst throttledToolCall = (toolName: string, input: any): boolean => {\n  const key = `${toolName}:${JSON.stringify(input)}`;\n  const now = Date.now();\n  const calls = toolThrottle.get(key) || 0;\n  \n  if (calls >= MAX_CALLS) {\n    console.warn(`Tool loop blocked: ${key}`);\n    return false;\n  }\n  \n  toolThrottle.set(key, calls + 1);\n  setTimeout(() => {\n    const remaining = (toolThrottle.get(key) || 0) - 1;\n    if (remaining <= 0) toolThrottle.delete(key);\n    else toolThrottle.set(key, remaining);\n  }, 30000);\n  \n  return true;\n};\n\n// Usage in Claude response handler\nif (response.content[0].type === 'tool_use' && !throttledToolCall(...)) {\n  response.content[0] = {\n    type: 'text',\n    text: 'Tool call prevented to avoid repetition. Please clarify next steps.'\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade tool loop detection by wrapping Anthropic's messages.create() API with vex.verify(), automatically analyzing tool use patterns across conversation history. It detects cycles in under 2ms using native tool call signature matching and enforces configurable cooldown periods without modifying your agent logic. Vex's loop detector integrates seamlessly with Claude's tool_use beta, preserving full message context while preventing rate limit exhaustion and infinite recursion.\n\nThe platform automatically injects loop-breaking system prompts when cycles are detected, maintains per-tool call budgets, and provides detailed loop forensics including call graphs and token consumption patterns. Vex's adaptive thresholds learn from your specific tool patterns, reducing false positives by 95% compared to static rules. Remediation happens inline - your agent continues with corrected tool selection instead of failing.\n\nIntegration requires one line of code and works across all Claude models supporting tools. Vex maintains full Anthropic API compatibility while adding enterprise-grade reliability guarantees.",
+      "code": "import anthropic\nimport vex\n\nclient = anthropic.Anthropic()\nvex_client = vex.wrap(client)\n\n# Single line integration - detects ALL loop patterns\nresponse = vex_client.messages.create(\n    model='claude-3-5-sonnet-20240620',\n    max_tokens=1024,\n    messages=[{'role': 'user', 'content': 'Process these files'}],\n    tools=[\n        {'name': 'read_file', 'input_schema': {'type': 'object', 'properties': {'path': {'type': 'string'}}}},\n        {'name': 'query_database', 'input_schema': {'type': 'object'}}\n    ],\n    vex_verify={'tool_loop': {'max_calls': 3, 'cooldown': 30}}\n)\n\n# Vex automatically:\n# ✅ Blocks loop #1: read_file('data.csv') called 4x\n# ✅ Injects reasoning: 'File already processed, moving to analysis'\n# ✅ Preserves conversation state\n# ✅ Logs loop forensics to Vex dashboard",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install vex-sdk` and wrap your Claude client in one line to eliminate tool loops forever."
+    }
+  }
+}

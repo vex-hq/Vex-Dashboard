@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Haystack Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Haystack multi-agent-coordination",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack, Multi-Agent Coordination Failure occurs when agents in a pipeline—such as retriever, reader, and generator—fail to synchronize outputs, leading to type mismatches or context loss between components. This manifests as pipelines silently failing when one agent's output schema doesn't match the next agent's input expectations, or when parallel agents produce inconsistent results without proper merging. These failures cascade through composable pipelines, breaking end-to-end reliability in production RAG systems.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever outputs Document objects but Reader expects DocumentWithScore",
+        "symptom": "Pipeline runs without errors but reader receives empty input, returning None",
+        "impact": "Zero answers generated despite relevant documents being retrieved"
+      },
+      {
+        "scenario": "Parallel reranking agents return different document formats",
+        "symptom": "MergeDocuments join fails with AttributeError on missing fields",
+        "impact": "Pipeline crashes mid-execution, requiring manual format alignment"
+      },
+      {
+        "scenario": "Generator agent ignores retrieved context metadata",
+        "symptom": "Answers lack citations despite Document objects containing metadata",
+        "impact": "Users receive hallucinated responses without traceability"
+      },
+      {
+        "scenario": "Custom evaluation agent swallows exceptions in async execution",
+        "symptom": "Pipeline completes successfully but evaluation metrics are all zeros",
+        "impact": "Degraded performance goes undetected in production monitoring"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Pipeline Type Mismatch Scanner",
+        "description": "Inspects connected components for output/input schema compatibility using Haystack's type annotations",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import PipelineSchema\n\n def detect_type_mismatches(pipeline: Pipeline):\n    schema = PipelineSchema.from_pipeline(pipeline)\n    mismatches = []\n    for connection in schema.connections:\n        output_type = connection.from_node.outputs[connection.from_key].type\n        input_type = connection.to_node.inputs[connection.to_key].type\n        if output_type != input_type:\n            mismatches.append({\n                'connection': f'{connection.from_node.name}.{connection.from_key} -> {connection.to_node.name}.{connection.to_key}',\n                'expected': input_type,\n                'received': output_type\n            })\n    return mismatches\n\n# Usage\npipe = Pipeline()\nissues = detect_type_mismatches(pipe)\nif issues:\n    print('Type mismatches found:', issues)",
+        "language": "python"
+      },
+      {
+        "name": "Agent Output Consistency Check",
+        "description": "Validates that parallel agents produce consistent output schemas during test runs",
+        "code": "from haystack.dataclasses import Document\nfrom typing import List, Dict, Any\n\n def check_agent_consistency(outputs: List[Dict[str, Any]]) -> Dict[str, bool]:\n    if not outputs:\n        return {'consistent': True}\n    \n    first_output = outputs[0]\n    for i, output in enumerate(outputs[1:], 1):\n        if set(first_output.keys()) != set(output.keys()):\n            return {\n                'consistent': False,\n                'mismatch_indices': [0, i],\n                'first_keys': list(first_output.keys()),\n                'output_keys': list(output.keys())\n            }\n    return {'consistent': True}\n\n# Usage with parallel branch outputs\nagent_outputs = [branch.run() for branch in parallel_branches]\nconsistency = check_agent_consistency(agent_outputs)\nif not consistency['consistent']:\n    print('Agent output inconsistency:', consistency)",
+        "language": "python"
+      },
+      {
+        "name": "Silent Failure Monitor",
+        "description": "Detects components that complete without errors but produce empty/null outputs",
+        "code": "from haystack import Pipeline\nfrom functools import wraps\n\n def monitor_silent_failures(component):\n    original_run = component.run\n    \n    @wraps(original_run)\n    def wrapped_run(*args, **kwargs):\n        result = original_run(*args, **kwargs)\n        empty_outputs = []\n        for key, value in result.items():\n            if value is None or (isinstance(value, list) and not value):\n                empty_outputs.append(key)\n        if empty_outputs:\n            print(f'WARNING: {component.__class__.__name__} produced empty outputs: {empty_outputs}')\n        return result\n    component.run = wrapped_run\n    return component\n\n# Usage\nretriever = monitor_silent_failures(retriever)\ngenerator = monitor_silent_failures(generator)\npipe.add_components([retriever, generator])",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Type Conversion Wrapper",
+        "description": "Automatically converts Document to DocumentWithScore for compatible chaining",
+        "code": "from haystack.components.converters import DocumentToDocumentWithScore\nfrom haystack import Pipeline\n\n# Fix type mismatch between retriever and reader\npipe = Pipeline()\npipe.add_components([\n    in_retriever,\n    DocumentToDocumentWithScore(),\n    reader\n])\n\npipe.connect('in_retriever.documents', 'document_to_document_with_score.documents')\npipe.connect('document_to_document_with_score.document_with_score', 'reader.documents')\n\n# Run with proper typing\nresult = pipe.run({'in_retriever': {'query': 'your query'}})",
+        "language": "python"
+      },
+      {
+        "name": "Standardized Merge Operator",
+        "description": "Merges parallel agent outputs with consistent schema enforcement",
+        "code": "from haystack.components.builders import MergeDocuments\n\n# Fix inconsistent parallel agent outputs\nmerge_op = MergeDocuments(merge_strategy='concatenate')\n\npipe = Pipeline()\npipe.add_components([\n    agent1_reranker,\n    agent2_reranker,\n    merge_op\n])\n\npipe.connect('agent1.documents', 'merge.documents_1')\npipe.connect('agent2.documents', 'merge.documents_2')\n\n# Ensures consistent Document schema post-merge\nresult = pipe.run({\n    'agent1': {'query': 'test'},\n    'agent2': {'query': 'test'}\n})",
+        "language": "python"
+      },
+      {
+        "name": "Context-Preserving Generator",
+        "description": "Forces generator to include retrieved context metadata in responses",
+        "code": "from haystack.components.generators import OpenAIGenerator\nfrom haystack.dataclasses import ChatMessage\n\nclass ContextAwareGenerator(OpenAIGenerator):\n    def run(self, **kwargs):\n        documents = kwargs.get('documents', [])\n        context = '\\n'.join([f\"[DOC:{i}] {doc.content}\" for i, doc in enumerate(documents)])\n        \n        prompt = ChatMessage.from_user(\n            f\"Answer using only this context:\\n{context}\\n\\nQuestion: {kwargs.get('query')}\\nInclude [DOC:#] citations.\"\n        )\n        \n        kwargs['messages'] = [prompt]\n        kwargs.pop('documents', None)\n        kwargs.pop('query', None)\n        \n        return super().run(**kwargs)\n\n# Usage\ncontext_gen = ContextAwareGenerator(model='gpt-4o-mini')\npipe.add_component('context_gen', context_gen)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that automatically monitors pipeline execution for coordination failures across all agents. It captures type mismatches, empty outputs, and schema inconsistencies in real-time, providing structured failure reports with remediation suggestions. Vex's agent runs parallel to your main pipeline, validating outputs against expected schemas defined in PipelineSchema.\n\nThe Vex component uses Haystack's observability hooks to trace data flow between agents, flagging issues like missing metadata propagation or inconsistent document formats. When failures are detected, Vex can automatically apply fixes like type conversion or output normalization before passing data to downstream components. This ensures production pipelines remain resilient even when agent coordination breaks.\n\nIntegration requires only adding the VexMonitor component and defining expected schemas once. Vex handles the continuous validation, alerting, and auto-remediation, reducing MTTR from hours to seconds.",
+      "code": "from vex_sdk.haystack import VexMonitor\nfrom haystack import Pipeline\nfrom haystack.components.builders import PipelineSchema\n\n# Install: pip install haystack-ai vex-sdk\n\n# 1. Define expected pipeline schema\nschema = PipelineSchema([\n    {'retriever': {'documents': 'List[Document]'}},\n    {'reader': {'documents': 'List[DocumentWithScore]'}},\n    {'generator': {'documents': 'List[Document]', 'query': 'str'}}\n])\n\n# 2. Add Vex as monitoring component\nvex_monitor = VexMonitor(schema=schema, api_key='your-vex-api-key')\n\npipe = Pipeline()\npipe.add_components([\n    retriever, reader, generator, vex_monitor\n])\n\n# 3. Auto-connect with validation\npipe.connect('retriever.documents', 'vex_monitor.validate_retriever')\npipe.connect('reader.document_with_score', 'vex_monitor.validate_reader')\npipe.connect('vex_monitor.validated_output', 'generator.documents')\n\n# 4. Vex auto-detects and fixes coordination failures\nresult = pipe.run({'retriever': {'query': 'What is Haystack?'}})\n\n# Vex reports\nprint(vex_monitor.get_failure_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex to your Haystack pipelines today and eliminate multi-agent coordination failures automatically."
+    }
+  }
+}

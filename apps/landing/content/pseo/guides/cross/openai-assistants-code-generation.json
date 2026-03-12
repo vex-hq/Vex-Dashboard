@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-assistants",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with OpenAI Assistants API + Vex Guardrails",
+    "description": "Learn how to build code generation with OpenAI Assistants API + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Assistants API code generation",
+      "OpenAI Assistants API guardrails",
+      "code generation reliability",
+      "Vex OpenAI Assistants API",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with OpenAI Assistants API enables powerful LLM-driven development workflows with built-in sandbox execution and iterative refinement. However, the high-risk nature of generating and executing arbitrary code demands robust guardrails to prevent unsafe operations, credential leaks, and syntax errors. Vex provides comprehensive verification to ensure code safety, validity, and sandbox compliance before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with OpenAI Assistants API",
+      "description": "The typical architecture starts with an Assistant configured with code interpreter and file search tools. User requests trigger a new Thread, and the Assistant generates code iteratively through Run cycles. Each code artifact is executed in OpenAI's sandbox, validated against tests, and refined based on execution feedback.\n\nRun completion events trigger Vex webhooks for verification, checking code safety, syntax, dependency risks, and credential exposure. Verified code passes to deployment pipelines while failed verifications trigger Assistant refinement loops.\n\nThis closed-loop system maintains context across iterations while Vex ensures each code generation step meets security and quality standards.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│ OpenAI Thread    │\n└─────────────────┘    │ + Assistant       │\n                       └────────┬──────────┘\n                                │ Run Complete\n                       ┌────────▼──────────┐    ┌──────────────┐\n                       │   Vex Webhook     │───▶│  Verify Code │\n                       │ (Safety/Syntax)   │    │ Safety/Tests │\n                       └────────┬──────────┘    └──────────────┘\n                                │ Pass/Fail             │\n                       ┌────────▼──────────┐    ┌────────▼──────┤\n                       │Refine or Deploy   │◀───│Deployment    │\n                       └──────────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Code interpreter executing unsafe operations in sandbox",
+        "description": "Assistant may generate code with syscalls, network requests, or file system modifications that violate sandbox policies",
+        "severity": "critical",
+        "mitigation": "Vex scans for dangerous APIs and enforces sandbox execution policies before code runs"
+      },
+      {
+        "name": "No credential leakage detection",
+        "description": "Generated code may embed API keys, passwords, or secrets from training data or context",
+        "severity": "critical",
+        "mitigation": "Vex performs regex and semantic analysis to detect and redact credentials"
+      },
+      {
+        "name": "Thread context growing beyond model limits silently",
+        "description": "Long-running threads accumulate code artifacts exceeding token limits without warning",
+        "severity": "high",
+        "mitigation": "Vex monitors thread token usage and triggers context summarization"
+      },
+      {
+        "name": "Function call arguments hallucinated outside valid schema",
+        "description": "Code interpreter tool calls use invalid parameters breaking execution flow",
+        "severity": "high",
+        "mitigation": "Vex validates tool call JSON against OpenAPI schemas before execution"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Create Code Generation Assistant",
+        "description": "Configure Assistant with code interpreter and persistent thread for iterative refinement",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\nassistant = client.beta.assistants.create(\n    name=\"Code Generator\",\n    instructions=\"You are a code generation expert. Generate, test, and refine code iteratively. Always validate syntax and safety.\",\n    model=\"gpt-4o\",\n    tools=[{\"type\": \"code_interpreter\"}],\n    tool_resources={\n        \"code_interpreter\": {\n            \"file_ids\": []  # Add test files here\n        }\n    }\n)\n\nthread = client.beta.threads.create()\n\n# Add initial user request\nclient.beta.threads.messages.create(\n    thread_id=thread.id,\n    role=\"user\",\n    content=\"Write a Python function to process CSV data with pandas\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Poll Run Status with Vex Webhook Prep",
+        "description": "Monitor run completion and prepare annotations for Vex verification",
+        "code": "import time\n\nrun = client.beta.threads.runs.create(\n    thread_id=thread.id,\n    assistant_id=assistant.id\n)\n\nwhile run.status != 'completed':\n    run = client.beta.threads.runs.retrieve(\n        thread_id=thread.id,\n        run_id=run.id\n    )\n    time.sleep(1)\n\n# Extract generated code for Vex\nmessages = client.beta.threads.messages.list(thread_id=thread.id)\ncode_artifacts = []\nfor msg in messages.data:\n    if msg.role == 'assistant' and hasattr(msg, 'content'):\n        for content in msg.content:\n            if content.type == 'text':\n                code_artifacts.append(content.text.value)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Assistant Setup",
+        "description": "Create code generation assistant using Node.js SDK",
+        "code": "import OpenAI from 'openai';\n\nconst openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });\n\nconst assistant = await openai.beta.assistants.create({\n  name: 'Code Generator TS',\n  instructions: 'Generate secure, tested Python/Node.js code with proper error handling',\n  model: 'gpt-4o',\n  tools: [{ type: 'code_interpreter' }],\n});\n\nconst thread = await openai.beta.threads.create();\n\nawait openai.beta.threads.messages.create(thread.id, {\n  role: 'user',\n  content: 'Create a secure API client with rate limiting and retry logic',\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Extract Code Artifacts (TS)",
+        "description": "Parse assistant responses for code verification",
+        "code": "const run = await openai.beta.threads.runs.create(thread.id, {\n  assistant_id: assistant.id\n});\n\nwhile (run.status !== 'completed') {\n  await new Promise(resolve => setTimeout(resolve, 1000));\n  const updatedRun = await openai.beta.threads.runs.retrieve(thread.id, run.id);\n  run.status = updatedRun.status;\n}\n\nconst messages = await openai.beta.threads.messages.list(thread.id);\nconst codeBlocks = messages.data\n  .filter(msg => msg.role === 'assistant')\n  .flatMap(msg => \n    msg.content?.filter(c => c.type === 'text')\n      ?.map(c => (c as any).text?.value) || []\n  ) || [];\n\nconsole.log('Code artifacts for Vex:', codeBlocks);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Webhook for Code Safety",
+        "description": "Verify code safety, syntax, and credential leakage on run completion",
+        "code": "from vex_sdk import VexClient\nfrom openai import OpenAI\nimport os\n\nvex = VexClient(api_key=os.getenv('VEX_API_KEY'))\nopenai_client = OpenAI()\n\ndef handle_run_complete(run_id: str, thread_id: str):\n    # Get latest code artifacts\n    messages = openai_client.beta.threads.messages.list(thread_id)\n    code_content = '\\n'.join([\n        content.text.value \n        for msg in messages.data \n        for content in msg.content \n        if content.type == 'text'\n    ])\n\n    # Vex verification suite for code generation\n    result = vex.verify({\n        'prompt': 'Verify generated code',\n        'output': code_content,\n        'tasks': [\n            {\n                'name': 'code_safety',\n                'type': 'code_safety',\n                'config': {\n                    'language': 'python',\n                    'block_network': True,\n                    'block_fs_write': True,\n                    'detect_credentials': True\n                }\n            },\n            {\n                'name': 'syntax_validity',\n                'type': 'syntax_check',\n                'config': {'language': 'python'}\n            }\n        ]\n    })\n\n    if result.passed:\n        print('✅ Code verified safe')\n    else:\n        print('❌ Vex blocked unsafe code:', result.failures)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Webhook Handler",
+        "description": "Express.js webhook endpoint for real-time Vex verification",
+        "code": "import express from 'express';\nimport { Vex } from '@vex/sdk';\nimport OpenAI from 'openai';\n\nconst app = express();\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\nconst openai = new OpenAI();\n\napp.use(express.json());\n\napp.post('/vex-webhook', async (req, res) => {\n  const { thread_id, run_id } = req.body;\n\n  try {\n    // Extract code from thread\n    const messages = await openai.beta.threads.messages.list(thread_id);\n    const code = messages.data\n      .flatMap(m => m.content?.map(c => (c as any).text?.value) || [])\n      .join('\\n');\n\n    const verification = await vex.verify({\n      prompt: 'Code generation verification',\n      output: code,\n      tasks: [\n        {\n          name: 'code_security',\n          type: 'code_security',\n          config: {\n            language: 'python',\n            sandbox: true,\n            credential_scan: true,\n            dependency_check: true\n          }\n        },\n        {\n          name: 'test_execution',\n          type: 'sandbox_execution',\n          config: {\n            timeout: 30,\n            memory_limit: '256MB'\n          }\n        }\n      ]\n    });\n\n    res.json({\n      passed: verification.passed,\n      score: verification.score,\n      issues: verification.issues\n    });\n\n  } catch (error) {\n    res.status(500).json({ error: error.message });\n  }\n});\n\napp.listen(3000);",
+        "language": "typescript"
+      },
+      {
+        "title": "Register Vex Webhook with OpenAI",
+        "description": "Configure Assistant to trigger Vex verification on every run completion",
+        "code": "from vex_sdk import VexClient\nimport openai\n\nvex = VexClient(api_key='your-vex-key')\nclient = openai.OpenAI()\n\n# Update assistant with webhook\nassistant = client.beta.assistants.update(\n    assistant_id='asst_your_id',\n    tool_resources={\n        'code_interpreter': {\n            'file_ids': ['test_suite.py']\n        }\n    },\n    # Note: Webhooks configured via OpenAI platform dashboard\n    # Point 'Run Completed' events to your Vex endpoint\n)\n\n# Vex monitors all threads automatically once webhook active\nverification_policy = vex.create_policy({\n    'name': 'code-generation-guardrails',\n    'rules': [\n        'no_network_access',\n        'no_file_writes',\n        'no_eval_exec',\n        'credential_free',\n        'syntax_valid',\n        'test_passing'\n    ],\n    'auto_block': True\n})\n\nprint(f'Policy ID: {verification_policy.id} - Active for all code gen threads')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Assistants API Code Generation",
+      "description": "Deploy Vex verification in 5 minutes to protect your code generation pipeline - start your free trial now."
+    }
+  }
+}

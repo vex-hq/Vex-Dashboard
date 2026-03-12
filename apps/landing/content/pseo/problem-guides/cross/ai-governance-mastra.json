@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in Mastra Agents",
+    "description": "How to detect and fix responsible ai governance for agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "Mastra ai-governance",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in Mastra manifests as unchecked workflow transitions, unvalidated tool outputs, and stale memory retrievals that lead to hallucinated responses and unsafe actions. Mastra's workflow-driven architecture amplifies these risks since agents chain multiple steps without built-in validation between transitions. Without governance, third-party integrations and knowledge retrieval introduce malformed data that propagates through the entire agent pipeline.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent proceeds to next workflow step with unvalidated partial data",
+        "impact": "Downstream steps hallucinate or produce unsafe actions based on incomplete context"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "External API returns unexpected JSON structure but agent continues processing",
+        "impact": "Agent generates incorrect responses or triggers wrong workflow branches"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent retrieves outdated conversation history from vector store",
+        "impact": "Agent references obsolete user preferences or conversation state"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Third-party sync (CRM/ERP) injects conflicting data mid-workflow",
+        "impact": "Agent makes contradictory decisions based on stale vs fresh integration data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Transition Validation Monitor",
+        "description": "Detects missing validation between Mastra workflow steps by tracing data schemas",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\nimport { trace } from '@vex_dev/sdk';\n\nconst detectWorkflowValidationGaps = (workflow: WorkflowRuntime) => {\n  const transitions = workflow.getTransitions();\n  return transitions.map(transition => {\n    const inputSchema = transition.inputStep.outputSchema;\n    const outputSchema = transition.outputStep.inputSchema;\n    const hasValidation = transition.hasValidator();\n    \n    return {\n      transitionId: transition.id,\n      validated: hasValidation,\n      schemaMismatch: !inputSchema.isCompatible(outputSchema),\n      riskScore: hasValidation ? 0 : (inputSchema.isCompatible(outputSchema) ? 3 : 8)\n    };\n  }).filter(t => t.riskScore > 2);\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Response Validator",
+        "description": "Monitors Mastra agent tool calls for malformed JSON responses",
+        "code": "import { AgentRuntime } from 'mastra/agents';\nimport { z } from 'zod';\n\nconst monitorToolCalls = async (agent: AgentRuntime) => {\n  const issues: any[] = [];\n  \n  agent.onToolCall(async (call) => {\n    try {\n      const result = await call.execute();\n      const expectedSchema = call.tool.schema;\n      const validation = expectedSchema.safeParse(result);\n      \n      if (!validation.success) {\n        issues.push({\n          toolId: call.tool.id,\n          malformed: true,\n          errors: validation.error.errors,\n          timestamp: new Date().toISOString()\n        });\n      }\n    } catch (error) {\n      issues.push({ toolId: call.tool.id, error: error.message });\n    }\n  });\n  \n  return issues;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Staleness Detector",
+        "description": "Identifies stale context injection from Mastra knowledge retrieval",
+        "code": "import { KnowledgeRuntime } from 'mastra/knowledge';\n\nconst detectStaleMemory = (knowledge: KnowledgeRuntime) => {\n  const recentCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);\n  const retrievals = knowledge.getRecentRetrievals();\n  \n  return retrievals.map(retrieval => {\n    const contextAge = new Date(retrieval.timestamp) - recentCutoff;\n    const isStale = contextAge > 0;\n    \n    return {\n      retrievalId: retrieval.id,\n      contextAgeHours: contextAge / (1000 * 60 * 60),\n      isStale,\n      riskScore: isStale ? Math.min(contextAge / (1000 * 60 * 60), 10) : 0,\n      usedInWorkflow: retrieval.workflowId\n    };\n  }).filter(r => r.riskScore > 2);\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add Vex Middleware to Workflow Transitions",
+        "description": "Injects automatic validation between all Mastra workflow steps",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst secureWorkflow = (workflow: WorkflowRuntime) => {\n  const vex = new VexMiddleware({\n    rules: ['validate_schema', 'prevent_hallucination', 'check_staleness']\n  });\n  \n  workflow.useMiddleware(vex);\n  \n  workflow.onTransition(async (transition) => {\n    const input = transition.inputData;\n    const validation = await vex.validate(input, transition.outputSchema);\n    \n    if (!validation.valid) {\n      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);\n    }\n    \n    return transition.proceed();\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Agent Tool Calls",
+        "description": "Wraps Mastra agent tools with automatic response validation",
+        "code": "import { AgentRuntime } from 'mastra/agents';\nimport { VexGuard } from '@vex_dev/sdk';\n\nconst secureAgentTools = (agent: AgentRuntime) => {\n  const vexGuard = new VexGuard();\n  \n  agent.tools.forEach(tool => {\n    const originalExecute = tool.execute;\n    tool.execute = async (...args) => {\n      const result = await originalExecute(...args);\n      const validated = await vexGuard.validateToolResponse(\n        tool.schema,\n        result\n      );\n      \n      if (!validated.valid) {\n        console.warn('Tool response rejected:', validated.errors);\n        return { error: 'Invalid tool response format' };\n      }\n      \n      return validated.data;\n    };\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Freshness-Aware Memory Retrieval",
+        "description": "Filters Mastra knowledge retrieval by configurable freshness windows",
+        "code": "import { KnowledgeRuntime } from 'mastra/knowledge';\nimport { VexContextFilter } from '@vex_dev/sdk';\n\nconst secureKnowledge = (knowledge: KnowledgeRuntime) => {\n  const vexFilter = new VexContextFilter({\n    maxAgeHours: 24,\n    stalePenalty: 0.8\n  });\n  \n  knowledge.setRetrievalFilter(async (query, contexts) => {\n    const filtered = await vexFilter.filterContexts(contexts, {\n      query,\n      maxAge: 24 * 60 * 60 * 1000\n    });\n    \n    return filtered.validContexts;\n  });\n  \n  knowledge.onRetrieval(async (retrieval) => {\n    const freshnessScore = await vexFilter.assessFreshness(retrieval.contexts);\n    if (freshnessScore < 0.5) {\n      console.warn('Stale context detected, score:', freshnessScore);\n    }\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex integrates as middleware directly into Mastra's agent pipeline, automatically tracing every workflow transition, tool call, and memory retrieval. It applies governance rules without requiring code changes, scoring each operation for compliance and blocking unsafe actions before they propagate. The platform provides real-time dashboards showing governance coverage across all Mastra agents, with one-click remediation for detected issues.\n\nVex's Mastra integration automatically instruments workflows during deployment, capturing schema mismatches, staleness violations, and malformed responses. Machine learning models continuously adapt governance rules based on your specific agent patterns, reducing false positives while catching novel failure modes. Teams get instant alerts and automated fixes through GitHub PRs with precise code changes.\n\nThe Vex SDK provides TypeScript-native APIs that hook into Mastra's runtime without disrupting existing workflows. Configuration is declarative, allowing security teams to enforce governance policies independently from agent developers.",
+      "code": "import { MastraApp } from 'mastra/core';\nimport { Vex } from '@vex_dev/sdk';\n\nconst app = new MastraApp();\n\n// Initialize Vex governance for entire Mastra app\nconst vex = new Vex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  rules: {\n    workflowValidation: 'strict',\n    toolResponse: 'schema_enforced',\n    memoryFreshness: '24h',\n    integrationSync: 'atomic'\n  }\n});\n\n// Auto-instrument all Mastra components\napp.use(vex.middleware());\n\n// Governance runs automatically on every:\n// - workflow transition\n// - agent tool call  \n// - knowledge retrieval\n// - integration sync\n\nvex.onViolation(async (violation) => {\n  console.error('Governance violation:', violation);\n  // Auto-block unsafe actions\n  violation.block();\n  \n  // Auto-generate fix PR\n  await violation.createFixPR();\n});\n\napp.start();",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in your Mastra agents today and eliminate governance failures automatically."
+    }
+  }
+}

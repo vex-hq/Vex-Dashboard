@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in AG2 Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "AG2 latency-optimization",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, LLM Latency Optimization for AI Agents manifests as delayed speaker transitions and sluggish group chat consensus due to high token latencies in multi-agent conversations. The framework's enhanced group chat capabilities amplify latency issues, causing agents to miss conversation turns and produce off-topic spirals. Vex integration via message hooks enables precise latency monitoring across AG2's speaker selection and conversation APIs.",
+    "howItManifests": [
+      {
+        "scenario": "Group chat with 5+ agents using `llm_config` with GPT-4",
+        "symptom": "Speaker selection hangs >3s between `select_speaker()` calls",
+        "impact": "Agents timeout and conversation derails into off-topic loops"
+      },
+      {
+        "scenario": "Sequential agent workflow with `register_for_llm()`",
+        "symptom": "`generate_reply()` takes 8-15s per agent response",
+        "impact": "Total workflow latency exceeds 60s, users abandon sessions"
+      },
+      {
+        "scenario": "Dynamic speaker selection in `GroupChatManager`",
+        "symptom": "High variance in `speaker_selection_method='auto'` latency",
+        "impact": "Incorrect speaker bias favors slower models, consensus fails"
+      },
+      {
+        "scenario": "Code execution agents with `tool_calling` enabled",
+        "symptom": "`execute_code()` blocked by LLM streaming latency >5s",
+        "impact": "Harmful code outputs due to rushed incomplete generations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Message Hook Latency Profiler",
+        "description": "Registers Vex hook on AG2 agents to measure `on_message()` latency distribution",
+        "code": "from ag2 import GroupChat, Agent\nfrom vex_sdk import VexMonitor\n\ndef latency_hook(message, agent):\n    start = time.perf_counter()\n    result = agent.generate_reply(message)\n    latency = time.perf_counter() - start\n    VexMonitor.record('ag2_llm_latency', latency, tags={'agent': agent.name})\n    return result\n\nchat = GroupChat(agents=[agent1, agent2])\nchat.register_message_hook(latency_hook)",
+        "language": "python"
+      },
+      {
+        "name": "Speaker Selection Bottleneck Detector",
+        "description": "Monitors `select_speaker()` latency spikes in group chats",
+        "code": "import time\nfrom ag2 import GroupChatManager\n\nclass LatencyDetector:\n    def __init__(self):\n        self.speaker_latencies = []\n    \n    def select_speaker(self, last_speaker, states):\n        start = time.perf_counter()\n        speaker = self._auto_select(last_speaker, states)\n        latency = time.perf_counter() - start\n        if latency > 2.0:\n            print(f'🚨 Speaker selection bottleneck: {latency:.2f}s')\n        return speaker\n    \nmanager = GroupChatManager(..., speaker_selection_method=LatencyDetector())",
+        "language": "python"
+      },
+      {
+        "name": "Token Rate Monitor",
+        "description": "Calculates tokens/second during AG2 streaming responses",
+        "code": "from ag2.core.utils import get_buffer_string\n\ndef stream_latency_monitor(agent):\n    start_time = time.time()\n    token_count = 0\n    \n    for chunk in agent.stream_response(message):\n        tokens = len(chunk['delta'].split())\n        token_count += tokens\n        elapsed = time.time() - start_time\n        rate = token_count / elapsed if elapsed > 0 else 0\n        \n        if rate < 20:  # tokens/sec threshold\n            print(f'⚠️ Low token rate: {rate:.1f} t/s')\n    \nagent.register_stream_hook(stream_latency_monitor)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Model Quantization + Fast Cache",
+        "description": "Uses 4-bit quantized models with AG2's `fast_llm_config`",
+        "code": "from ag2 import llm_config\n\nfast_config = llm_config({\n    'config_list': [{\n        'model': 'gpt-4o-mini',\n        'api_key': os.getenv('OPENAI_API_KEY'),\n        'quantization': '4bit',\n        'cache_seed': 42  # deterministic caching\n    }],\n    'temperature': 0.1,\n    'max_tokens': 2048,\n    'stream': True\n})\n\nagent = AssistantAgent(\n    name='coder',\n    llm_config=fast_config,\n    system_message='Respond concisely.'\n)",
+        "language": "python"
+      },
+      {
+        "name": "Concurrent Speaker Prefetch",
+        "description": "Pre-generates next 2 speakers to mask selection latency",
+        "code": "from ag2 import GroupChat\nfrom concurrent.futures import ThreadPoolExecutor\n\nclass FastGroupChat(GroupChat):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.prefetch_pool = ThreadPoolExecutor(max_workers=2)\n        self.response_cache = {}\n    \n    def select_speaker(self, last_speaker):\n        # Pre-generate next candidates\n        futures = []\n        for agent in self.agents[:2]:\n            if agent != last_speaker:\n                future = self.prefetch_pool.submit(agent.generate_reply, self.messages[-1])\n                futures.append((agent, future))\n        \n        speaker = super().select_speaker(last_speaker)\n        self.response_cache[speaker.name] = next(f.result() for a,f in futures if a==speaker)\n        return speaker",
+        "language": "python"
+      },
+      {
+        "name": "Prompt Compression Middleware",
+        "description": "Compresses conversation history before LLM calls",
+        "code": "from ag2 import UserProxyAgent\nimport tiktoken\n\nclass CompressedAgent(UserProxyAgent):\n    def generate_reply(self, messages):\n        # Compress to <8k tokens\n        encoder = tiktoken.get_encoding('cl100k_base')\n        compressed = self.compress_history(messages[-10:])\n        \n        if len(encoder.encode(str(compressed))) > 8000:\n            compressed = self.messages[-4:]  # Last 4 exchanges\n        \n        return super().generate_reply(compressed)\n    \n    def compress_history(self, messages):\n        return ' '.join([m['content'][-200:] for m in messages if 'content' in m])\n\nproxy = CompressedAgent(name='user', max_consecutive_auto_reply=3)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly with AG2 via `register_message_hook()`, automatically capturing LLM latency metrics across all agent conversations. The SDK profiles token rates, speaker selection delays, and streaming performance in real-time, flagging conversations where latency exceeds 3s per turn. Vex's anomaly detection identifies slow model configurations and speaker biases, while automated remediation suggests optimal `llm_config` settings and enables one-click model switching. For group chats, Vex monitors consensus drift caused by latency imbalances and auto-deploys prefetching optimizations. The platform maintains historical baselines, alerting teams when regressions occur after model updates or traffic spikes.",
+      "code": "from ag2 import GroupChat, AssistantAgent\nfrom vex_sdk import VexAgentMonitor\n\n# Auto-instrument all AG2 agents\nmonitor = VexAgentMonitor(\n    project='ag2-latency',\n    thresholds={'llm_latency_p95': 2.5, 'token_rate_p10': 25}\n)\n\n# Agents auto-register with Vex\ncoder = AssistantAgent(\n    name='coder',\n    llm_config={'model': 'gpt-4o-mini'},\n    vex_monitor=monitor  # Auto-hooks all messages\n)\n\nplanner = AssistantAgent(name='planner', vex_monitor=monitor)\n\n# Vex auto-fixes detected issues\ngroupchat = GroupChat(agents=[coder, planner], vex_monitor=monitor)\n\n@monitor.on_latency_violation\ndef auto_optimize_llm(config):\n    if config['model'] == 'gpt-4o':\n        return {'model': 'gpt-4o-mini', 'quantization': '4bit'}\n    return config\n\nmonitor.start()  # Begin automated monitoring/remediation",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install ag2 vex-sdk` and eliminate LLM latency issues in your AG2 agents within minutes."
+    }
+  }
+}

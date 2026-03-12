@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Mastra Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Mastra data-leakage",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, sensitive data leakage often occurs when workflow step outputs containing PII or secrets are passed unvalidated between transitions, exposing data in logs or downstream tools. Agent tool calls can return malformed responses with embedded credentials due to poor input sanitization, while memory retrieval injects stale context carrying sensitive historical data into current sessions. Sync integrations exacerbate this by pulling unfiltered external data, causing agents to inadvertently leak it in responses.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "PII from user profiles appears in subsequent workflow logs",
+        "impact": "Compliance violations and data exposure in audit trails"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "API keys visible in tool response payloads",
+        "impact": "Credentials compromised through agent conversation history"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Old credit card numbers appear in current conversation context",
+        "impact": "Historical sensitive data contaminates fresh interactions"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Customer database records leaked in agent responses",
+        "impact": "Massive data exposure through third-party sync failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Output PII Scanner",
+        "description": "Intercepts Mastra workflow step outputs and scans for common PII patterns using regex",
+        "code": "import { WorkflowContext, StepOutput } from 'mastra/workflows';\n\nconst piiPatterns = [\n  /\\b\\d{3}-\\d{2}-\\d{4}\\b/g, // SSN\n  /\\b4[0-9]{12}(?:[0-9]{3})?\\b/g, // Visa\n  /\\b5[1-5][0-9]{14}\\b/g, // Mastercard\n  /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g // Email\n];\n\nexport async function scanWorkflowOutput(ctx: WorkflowContext, output: StepOutput): Promise<boolean> {\n  const outputString = JSON.stringify(output);\n  return piiPatterns.some(pattern => pattern.test(outputString));\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Validator",
+        "description": "Validates Mastra agent tool call responses for embedded secrets and API keys",
+        "code": "import { AgentToolCall, ToolResponse } from 'mastra/agents';\n\nconst secretPatterns = [\n  /(?i)(api[-_]?key|secret|token|password|bearer)\\s*[:=]\\s*[\\'\\\"]?[a-zA-Z0-9]{16,}/,\n  /sk[-_][a-zA-Z0-9]{48}/, // OpenAI secret\n  /ak[-_][a-zA-Z0-9]{20}/ // AWS access key\n];\n\nexport function validateToolResponse(response: ToolResponse): { clean: boolean; matches: string[] } {\n  const content = JSON.stringify(response.content);\n  const matches = secretPatterns.filter(pattern => pattern.test(content));\n  return { clean: matches.length === 0, matches: matches.map(m => m.source) };\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Auditor",
+        "description": "Audits Mastra memory retrievals for stale sensitive data injection",
+        "code": "import { MemoryContext, RetrievedMemory } from 'mastra/memory';\n\nexport function auditMemoryRetrieval(memories: RetrievedMemory[]): boolean {\n  const sensitiveIndicators = ['ssn', 'credit card', 'api key', 'password', 'secret'];\n  \n  return memories.some(memory => {\n    const lowerContent = memory.content.toLowerCase();\n    return sensitiveIndicators.some(indicator => \n      lowerContent.includes(indicator) ||\n      lowerContent.match(/\\d{3}-\\d{2}-\\d{4}/) ||\n      lowerContent.match(/\\b4[0-9]{12}(?:[0-9]{3})?\\b/)\n    );\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Workflow Output Sanitizer Middleware",
+        "description": "Mastra workflow middleware that redacts PII before step transitions",
+        "code": "import { WorkflowMiddleware } from 'mastra/workflows';\n\nimport { redactPII } from './pii-redactor';\n\nexport const sanitizingMiddleware: WorkflowMiddleware = async (ctx, next) => {\n  const originalOutput = ctx.stepOutput;\n  \n  // Redact PII from output before transition\n  ctx.stepOutput = redactPII(originalOutput);\n  \n  // Log detection\n  if (originalOutput !== ctx.stepOutput) {\n    console.warn('PII detected and redacted in workflow output');\n  }\n  \n  await next();\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Response Wrapper",
+        "description": "Wraps Mastra agent tools to sanitize responses before returning to LLM",
+        "code": "import { AgentTool } from 'mastra/agents';\n\nimport { sanitizeSecrets } from './secret-sanitizer';\n\nexport function createSafeTool<T extends AgentTool>(tool: T): T {\n  return {\n    ...tool,\n    execute: async (input) => {\n      const rawResult = await tool.execute(input);\n      const sanitized = sanitizeSecrets(rawResult);\n      \n      // Log sanitization events\n      if (rawResult !== sanitized) {\n        console.warn('Secrets removed from tool response:', tool.name);\n      }\n      \n      return sanitized;\n    }\n  } as T;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Filtered Memory Retrieval",
+        "description": "Mastra memory hook that filters sensitive data from retrieved context",
+        "code": "import { MemoryHook } from 'mastra/memory';\n\nexport const safeMemoryHook: MemoryHook = {\n  async onRetrieve(memories, query) {\n    return memories.filter(memory => {\n      const hasSensitiveData = detectSensitiveData(memory.content);\n      if (hasSensitiveData) {\n        console.warn('Blocked sensitive memory retrieval:', memory.id);\n      }\n      return !hasSensitiveData;\n    });\n  }\n};\n\nfunction detectSensitiveData(content: string): boolean {\n  const patterns = [/\\d{3}-\\d{2}-\\d{4}/, /4[0-9]{12}/, /api[-_]?key/i];\n  return patterns.some(p => p.test(content));\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as middleware in the Mastra agent pipeline, automatically scanning all workflow transitions, tool responses, memory retrievals, and sync integrations for PII and secrets. Using real-time regex pattern matching and ML-based entity recognition, Vex flags violations before data reaches the LLM or external systems, providing detailed remediation traces.\n\nVex's Mastra integration captures the full context of leakage events - including workflow step lineage, tool call parameters, and memory retrieval metadata - enabling precise root cause analysis. Automated remediation rules can instantly apply sanitization, block risky transitions, or trigger human review workflows.\n\nThe Vex SDK provides TypeScript-native hooks for Mastra's workflow, agent, and memory systems, with zero-config setup via npm install mastra @vex_dev/sdk. Detection rules are customizable and shareable across teams, ensuring consistent security posture across all Mastra deployments.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { MastraAgent, WorkflowConfig } from 'mastra';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\n// Initialize Mastra agent with Vex middleware\nexport const agent = new MastraAgent({\n  workflowConfig: {\n    middleware: [\n      vex.middleware.piiScanner({\n        patterns: ['ssn', 'credit-card', 'api-key'],\n        blockOnMatch: true\n      }),\n      vex.middleware.toolResponseValidator(),\n      vex.middleware.memorySanitizer()\n    ]\n  }\n});\n\n// Vex auto-instruments all Mastra components\nvex.monitorMastra(agent, {\n  alertOn: ['pii-leak', 'secret-exposure'],\n  autoRemediate: true\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex middleware in your Mastra agents today to prevent sensitive data leakage with zero code changes"
+    }
+  }
+}

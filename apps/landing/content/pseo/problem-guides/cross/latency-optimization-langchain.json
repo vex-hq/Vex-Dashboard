@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "latency-optimization",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LLM Latency Optimization for AI Agents in LangChain Agents",
+    "description": "How to detect and fix llm latency optimization for ai agents in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "llm-latency-optimization-for-ai-agents",
+      "LangChain latency-optimization",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangChain agents, LLM latency optimization issues manifest as excessive delays in agent executors due to inefficient tool calling loops, oversized context windows from accumulating conversation history, and redundant chain invocations without caching. These problems are exacerbated by LangChain's sequential execution patterns and lack of built-in latency monitoring, causing agents to timeout or deliver poor user experiences. Vex integration via chain.invoke() wrapping provides precise latency observability across agent reasoning steps.",
+    "howItManifests": [
+      {
+        "scenario": "Tool call loops in ReAct agents",
+        "symptom": "Agent executor repeatedly calls the same tool >5 times per query",
+        "impact": "Latency spikes from 2s to 45s+ per agent invocation"
+      },
+      {
+        "scenario": "Context window overflow in conversational chains",
+        "symptom": "ConversationSummaryMemory grows >128k tokens after 10 exchanges",
+        "impact": "LLM calls timeout or return truncated responses"
+      },
+      {
+        "scenario": "Uncached RAG retrieval chains",
+        "symptom": "Vectorstore similarity search executes on every chain step",
+        "impact": "3x latency multiplier for repeated queries"
+      },
+      {
+        "scenario": "Sequential chain execution without parallelism",
+        "symptom": "Multi-step chains process LLM calls one-by-one",
+        "impact": "Total latency = N × single LLM call time"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Loop Latency Monitor",
+        "description": "Detects tool call loops by measuring executor runtime vs expected single-pass time",
+        "code": "from langchain.agents import AgentExecutor\nfrom vex import verify\n\ndef monitored_agent_executor(agent, tools):\n    def wrapped_invoke(input):\n        start = time.time()\n        tool_calls = 0\n        \n        def count_tools(output):\n            nonlocal tool_calls\n            if 'tool_calls' in output:\n                tool_calls += len(output['tool_calls'])\n            return output\n        \n        result = verify(\n            lambda: agent_executor.invoke(input),\n            timeout=30,\n            metadata={'agent_tool_calls': tool_calls}\n        )\n        latency = time.time() - start\n        if latency > 15 and tool_calls > 3:\n            print(f'🚨 LOOP DETECTED: {latency}s, {tool_calls} tool calls')\n        return result\n    return wrapped_invoke",
+        "language": "python"
+      },
+      {
+        "name": "Context Window Profiler",
+        "description": "Tracks token count growth in conversation memory across chain invocations",
+        "code": "from langchain.memory import ConversationSummaryMemory\nfrom tiktoken import get_encoding\n\ntokenizer = get_encoding('cl100k_base')\n\ndef profile_memory_growth(chain):\n    memory = chain.memory\n    def wrapped_invoke(inputs):\n        tokens_before = len(tokenizer.encode(memory.buffer))\n        result = verify(lambda: chain.invoke(inputs))\n        tokens_after = len(tokenizer.encode(memory.buffer))\n        \n        if tokens_after > 100000:\n            print(f'🚨 CONTEXT OVERFLOW: {tokens_after/1000:.0f}k tokens')\n        return result\n    return wrapped_invoke",
+        "language": "python"
+      },
+      {
+        "name": "Chain Step Timer",
+        "description": "Measures individual Runnable step latencies to identify slow components",
+        "code": "from langchain.schema.runnable import RunnablePassthrough\nfrom vex import verify\n\ndef latency_profile_chain(chain):\n    def instrumented_invoke(input):\n        steps = []\n        \n        def timed_step(step_name, fn):\n            start = time.time()\n            result = verify(fn)\n            steps.append({'step': step_name, 'latency': time.time() - start})\n            return result\n        \n        result = chain.invoke(input, config={\n            'step_metrics': steps\n        })\n        \n        slow_steps = [s for s in steps if s['latency'] > 5]\n        if slow_steps:\n            print(f'🚨 SLOW STEPS: {slow_steps}')\n        return result\n    return instrumented_invoke",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Async Tool Call Parallelization",
+        "description": "Converts sequential tool calls to concurrent execution using LangChain's RunnableParallel",
+        "code": "from langchain_core.runnables import RunnableParallel\nfrom langchain.agents import create_react_agent\n\nasync def parallel_agent(tools):\n    tool_map = {tool.name: tool for tool in tools}\n    \n    parallel_tools = RunnableParallel({\n        **{tool.name: tool_map[tool.name] for tool_name in tool_map}\n    })\n    \n    agent = create_react_agent(llm, tools)\n    agent_executor = AgentExecutor(\n        agent=agent,\n        tools=tools,\n        max_iterations=3,  # Prevent loops\n        handle_parsing_errors=True\n    )\n    \n    async def optimized_invoke(input):\n        return await verify(lambda: agent_executor.invoke(input))\n    \n    return optimized_invoke",
+        "language": "python"
+      },
+      {
+        "name": "Token-Efficient Conversation Memory",
+        "description": "Implements sliding window + summarization to cap context at 32k tokens",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\nfrom langchain.prompts import ChatPromptTemplate\n\nmemory = ConversationSummaryBufferMemory(\n    llm=llm,\n    max_token_limit=32000,\n    return_messages=True\n)\n\nconversation = ChatPromptTemplate.from_messages([\n    ('system', 'You are helpful. Keep responses concise.'),\n    ('placeholder', '{history}'),\n    ('human', '{input}')\n])\n\nchain = conversation | llm | StrOutputParser()\nchain_with_memory = RunnablePassthrough.assign(\n    history=lambda x: memory.load_memory_variables({})['history']\n) | chain\n\n# Auto-save after each interaction\nchain_with_memory = chain_with_memory.with_config({\n    'tags': ['low-latency']\n})",
+        "language": "python"
+      },
+      {
+        "name": "Retrieval Cache Layer",
+        "description": "Adds in-memory caching for repeated vectorstore similarity searches",
+        "code": "from functools import lru_cache\nimport hashlib\n\nfrom langchain.vectorstores import Chroma\n\n@lru_cache(maxsize=1000)\ndef cached_retrieve(query_hash, k=4):\n    query = hashlib.sha256(query_hash.encode()).hexdigest()\n    return vectorstore.similarity_search(query_hash, k=k)\n\ndef hash_query(query):\n    return hashlib.md5(query.encode()).hexdigest()\n\nretriever = lambda query: verify(\n    lambda: cached_retrieve(hash_query(query))\n)\n\nrag_chain = (\n    {'context': retriever, 'question': RunnablePassthrough()}\n    | prompt_template\n    | llm\n    | StrOutputParser()\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating LLM Latency Optimization for AI Agents Detection with Vex",
+      "description": "Vex automatically instruments LangChain chains and agents with zero-code changes via the verify() wrapper, capturing p99 latency, tool call counts, token usage, and memory growth across all executions. It establishes dynamic baselines from your production traffic and alerts when agent latency exceeds 3σ from normal, correlating slow performance with specific tool loops or context bloat. \n\nRemediation workflows trigger automatically: Vex applies parallel tool execution, memory truncation, and retrieval caching when violations are detected, with fallback to verified low-latency chain variants. The platform maintains 99.9% uptime guarantees by routing traffic through optimized paths while A/B testing latency improvements in shadow mode.\n\nIntegration takes 2 lines of code and works across Python/TypeScript LangChain deployments, supporting LCEL, agents, and RAG patterns with framework-aware latency models.",
+      "code": "from langchain.agents import AgentExecutor, create_react_agent\nfrom vex import verify\n\n# Zero-config integration\n@verify(thresholds={\n    'p99_latency': '5s',\n    'tool_calls': 3,\n    'tokens_in': 32000\n})\ndef production_agent(query: str):\n    agent = create_react_agent(llm, tools)\n    executor = AgentExecutor(agent=agent, tools=tools, max_iterations=3)\n    return executor.invoke({'input': query})\n\n# Vex auto-applies these fixes:\n# ✅ Parallel tool execution\n# ✅ Context window truncation\n# ✅ Retrieval caching\n# ✅ Loop detection & termination",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install vex-sdk` and wrap your LangChain chains to eliminate agent latency issues permanently."
+    }
+  }
+}

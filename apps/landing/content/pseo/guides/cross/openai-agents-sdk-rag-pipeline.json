@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK rag pipeline",
+      "OpenAI Agents SDK guardrails",
+      "rag pipeline reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG pipeline with OpenAI Agents SDK enables multi-agent orchestration for document retrieval, context assembly, and LLM synthesis with seamless handoffs. Guardrails are essential to prevent agent loops, prompt injections, unvalidated tool outputs, and tracing gaps that plague production systems. Vex integrates as output guardrails to ensure source faithfulness, hallucination detection, context relevance, and citation accuracy in high-risk scenarios.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with OpenAI Agents SDK",
+      "description": "The RAG pipeline leverages OpenAI Agents SDK's multi-agent capabilities: a Router Agent triages queries, a Retrieval Agent performs vector search on document embeddings, a Context Assembler Agent chunks and ranks relevant passages, and a Synthesizer Agent generates responses with source attribution. Agents hand off via the SDK's structured handoff protocol, with built-in tracing for observability. This modular design scales but introduces risks in inter-agent communication and tool output validation.\n\nVector search uses embeddings from OpenAI models stored in a vector DB like Pinecone. Retrieved chunks are validated for relevance before synthesis, where the final agent cites sources using metadata. Vex guardrails wrap each agent's output to enforce RAG-specific verifications before handoffs or final response.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Router Agent    │───▶│ Retrieval Agent  │\n└─────────────────┘    │ (Triage)         │    │ (Vector Search)  │\n                       └──────────┬───────┘    └──────────┬───────┘\n                                  │                      │\n                       ┌──────────▼───────┐    ┌──────────▼───────┐\n                       │ Context Assembler│◀──▶│   Vector DB      │\n                       │   (Rank/Chunks)  │    │ (Pinecone/FAISS) │\n                       └──────────┬───────┘    └──────────────────┘\n                                  │\n                       ┌──────────▼───────┐\n                       │ Synthesizer Agent│\n                       │ (Response + Cite)│\n                       └──────────────────┘\n                              │   ^  Vex\n                              │   │  Guardrails\n                              ▼   │\n                          Final Response"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Router endlessly hands off between Retrieval and Context Assembler due to poor termination conditions",
+        "severity": "critical",
+        "mitigation": "Vex max_iterations guardrail on agent runs"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious queries injected into RAG pipeline bypass retrieval limits or force hallucinated citations",
+        "severity": "high",
+        "mitigation": "Vex input sanitization + output faithfulness checks"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "Retrieval Agent returns irrelevant chunks that poison Synthesizer Agent's context",
+        "severity": "high",
+        "mitigation": "Vex context_relevance guardrail on tool outputs"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Lost visibility into which agent introduced hallucination or citation error",
+        "severity": "medium",
+        "mitigation": "Vex structured tracing with agent span correlation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG Agents Setup",
+        "description": "Initialize OpenAI Agents with Router, Retrieval, and Synthesizer for core pipeline",
+        "code": "from agents import Agent, Runner\nfrom openai import OpenAI\n\nrouter = Agent(\n    name=\"Router\",\n    instructions=\"Triage to retrieval or direct synthesis\",\n    model=\"gpt-4o\",\n    handoffs=[retrieval_agent, synthesizer_agent]\n)\n\nretrieval_agent = Agent(\n    name=\"Retriever\",\n    instructions=\"Search vector DB for relevant docs\",\n    tools=[vector_search_tool]\n)\n\nsynthesizer_agent = Agent(\n    name=\"Synthesizer\",\n    instructions=\"Synthesize answer with source citations\"\n)\n\nrunner = Runner(agents=[router])",
+        "language": "python"
+      },
+      {
+        "title": "Vector Search Tool Implementation",
+        "description": "Pinecone vector search tool for Retrieval Agent with metadata extraction",
+        "code": "import pinecone\nfrom typing import List, Dict\n\ndef vector_search_tool(query: str, top_k: int = 5) -> str:\n    query_embedding = openai_client.embeddings.create(\n        input=query, model=\"text-embedding-3-small\"\n    ).data[0].embedding\n    \n    results = pinecone_index.query(\n        vector=query_embedding,\n        top_k=top_k,\n        include_metadata=True\n    )\n    \n    docs = []\n    for match in results.matches:\n        docs.append({\n            'content': match.metadata['text'],\n            'source': match.metadata['source'],\n            'score': match.score\n        })\n    return str(docs)",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly Agent",
+        "description": "Agent ranks and chunks retrieved documents for optimal synthesis context",
+        "code": "context_assembler = Agent(\n    name=\"Context Assembler\",\n    instructions=\"\"\"Rank docs by relevance score. Chunk to < 4000 tokens.\n    Format as: SOURCES: [{source, score, chunk}]\\n\\nCONTEXT: {assembled}\"\"\",\n    model=\"gpt-4o-mini\",\n    handoffs=[synthesizer_agent]\n)\n\ndef rank_chunks_tool(docs: List[Dict]) -> str:\n    # LLM reranking logic\n    ranked = llm_rerank(docs)\n    context = assemble_context(ranked[:3])\n    return context",
+        "language": "python"
+      },
+      {
+        "title": "Synthesizer with Citation Format",
+        "description": "Final agent generates response with inline citations referencing source metadata",
+        "code": "synthesizer_agent = Agent(\n    name=\"Synthesizer\",\n    instructions=\"\"\"Answer using only provided CONTEXT. Cite sources inline as [1], [2].\n    At end: SOURCES:\\n[1] source1 (score)\\n[2] source2 (score)\"\"\")\n\nasync def run_rag_pipeline(query: str):\n    result = await runner.run(query)\n    return result.final_output",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Retrieval Agent",
+        "description": "Validate tool outputs for context relevance before handoff to assembler",
+        "code": "from vex import Guardrail, RunContext\n\nretrieval_guardrail = Guardrail(\n    name=\"context_relevance\",\n    verifications=[\n        \"context_relevance>0.7\",\n        \"no_prompt_injection\"\n    ]\n)\n\n@retrieval_guardrail.wrap\nasync def safe_retrieval(ctx: RunContext, query: str):\n    docs = await vector_search_tool(query)\n    # Vex validates before returning to agent\n    return docs\n\nretrieval_agent = Agent(\n    tools=[safe_retrieval]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Guardrail on Synthesizer",
+        "description": "Ensure final response faithfully uses cited sources without hallucination",
+        "code": "synthesis_guardrail = Guardrail(\n    name=\"rag_faithfulness\",\n    verifications=[\n        \"source_faithfulness>0.9\",\n        \"hallucination_score<0.1\",\n        \"citation_accuracy\"\n    ],\n    risk_profile=\"high\"\n)\n\n@synthesis_guardrail.wrap\nasync def safe_synthesis(ctx: RunContext, context: str, query: str):\n    response = await synthesizer_agent.run(f\"{context}\\n\\nQuery: {query}\")\n    return response\n\nrunner = Runner(guardrails=[retrieval_guardrail, synthesis_guardrail])",
+        "language": "python"
+      },
+      {
+        "title": "Handoff Loop Prevention Guardrail",
+        "description": "Prevent infinite agent handoffs with iteration limits and loop detection",
+        "code": "loop_guardrail = Guardrail(\n    name=\"handoff_loop_prevention\",\n    verifications=[\n        \"max_iterations<5\",\n        \"no_loop_detected\"\n    ],\n    tracing_enabled=True\n)\n\nrouter = Agent(\n    name=\"Router\",\n    guardrails=[loop_guardrail],\n    handoffs=[retrieval_agent, context_assembler]\n)\n\n# Full pipeline with Vex tracing\nasync def secure_rag(query: str):\n    with loop_guardrail.trace() as span:\n        result = await runner.run(query)\n        span.set_tags({\n            'rag_sources': len(result.context.sources),\n            'citations': result.citations\n        })\n    return result",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK RAG Pipeline",
+      "description": "Add Vex guardrails today to eliminate RAG failures and ensure production reliability."
+    }
+  }
+}

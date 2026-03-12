@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Flowise Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Flowise data-leakage",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, sensitive data leakage in AI agents commonly occurs when chatflows process user inputs containing PII through unvalidated LLM nodes or custom tools that echo back raw data without sanitization. Drag-and-drop RAG pipelines often retrieve and expose sensitive documents from vector stores without access controls, while multi-agent handoffs lose sanitization context between nodes. This creates silent leakage paths that are difficult to trace in the low-code environment.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains producing unvalidated intermediate outputs",
+        "symptom": "LLM Response Parser node outputs raw user PII in debug logs",
+        "impact": "Customer emails and phone numbers exposed in Flowise logs and chat history"
+      },
+      {
+        "scenario": "Vector store retrieval returning low-relevance documents",
+        "symptom": "Document Retriever node returns internal employee records for customer queries",
+        "impact": "Proprietary data mixed into customer responses without filtering"
+      },
+      {
+        "scenario": "Custom tool nodes failing silently without error propagation",
+        "symptom": "Database query tool returns unredacted user records without validation",
+        "impact": "Direct PII exposure through tool responses passed to final LLM"
+      },
+      {
+        "scenario": "Multi-agent sequential flow losing context between agent handoffs",
+        "symptom": "Agent 1 extracts PII → Agent 2 receives raw data without sanitization flags",
+        "impact": "Cascading leakage across agent boundaries in sequential flows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "PII Regex Scanner for Chatflow Outputs",
+        "description": "Scan all node outputs for common PII patterns using regex across chatflow execution",
+        "code": "```typescript\nimport { ChatFlow } from 'flowise/dist';\n\nconst PII_PATTERNS = [\n  /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n  /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g,\n  /\\b\\d{16}\\b/g\n];\n\nfunction scanChatflowOutputs(flow: ChatFlow, executionData: any): string[] {\n  const leaks: string[] = [];\n  \n  // Scan all node outputs\n  Object.values(executionData.nodes || {}).forEach((nodeData: any) => {\n    if (nodeData.output) {\n      PII_PATTERNS.forEach(pattern => {\n        const matches = nodeData.output.match(pattern);\n        if (matches) {\n          leaks.push(`Node ${nodeData.id}: ${matches.join(', ')}`);\n        }\n      });\n    }\n  });\n  \n  return leaks;\n}\n\n// Usage in Flowise callback\nconst result = scanChatflowOutputs(flow, chatflowResult);\nif (result.length > 0) {\n  console.error('PII Leaks Detected:', result);\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Store Document Leak Detector",
+        "description": "Monitor Document Retriever nodes for sensitive document retrieval using metadata tags",
+        "code": "```typescript\nimport { VectorStoreRetriever } from 'flowise/dist';\n\nfunction detectSensitiveDocs(retrievedDocs: any[]): boolean {\n  const SENSITIVE_TAGS = ['internal', 'confidential', 'employee', 'pii'];\n  \n  return retrievedDocs.some(doc => \n    doc.metadata?.tags?.some((tag: string) => SENSITIVE_TAGS.includes(tag)) ||\n    doc.pageContent.match(/employee|ssn|confidential/i)\n  );\n}\n\n// Hook into Document Retriever node\nclass SafeRetriever extends VectorStoreRetriever {\n  async retrieve(query: string) {\n    const docs = await super.retrieve(query);\n    if (detectSensitiveDocs(docs)) {\n      throw new Error('Sensitive documents detected in retrieval');\n    }\n    return docs;\n  }\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Handoff Context Leak Monitor",
+        "description": "Track PII propagation between sequential agent nodes in multi-agent flows",
+        "code": "```typescript\ntype AgentContext = { input: string; output: string; piiDetected: boolean };\n\nconst agentContexts: AgentContext[] = [];\n\nfunction trackAgentHandoff(flowExecution: any) {\n  const handoffs = flowExecution.edges?.filter((edge: any) => \n    edge.source.includes('agent') && edge.target.includes('agent')\n  ) || [];\n  \n  handoffs.forEach((handoff: any) => {\n    const sourceOutput = flowExecution.nodes[handoff.source]?.output;\n    const piiInSource = PII_PATTERNS.some(pattern => sourceOutput?.match(pattern));\n    \n    agentContexts.push({\n      input: sourceOutput,\n      output: flowExecution.nodes[handoff.target]?.input,\n      piiDetected: piiInSource\n    });\n  });\n  \n  // Alert if PII flows between agents\n  const leaks = agentContexts.filter(ctx => ctx.piiDetected && ctx.output?.includes(ctx.input?.slice(0, 50)));\n  if (leaks.length > 0) {\n    console.error('Agent handoff PII leak:', leaks);\n  }\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Middleware for All Nodes",
+        "description": "Universal redaction filter that wraps all chatflow node outputs before downstream processing",
+        "code": "```typescript\nimport { ChatFlow } from 'flowise/dist';\n\nconst PII_REDACTOR = {\n  email: '[EMAIL]',\n  phone: '[PHONE]',\n  ssn: '[SSN]'\n};\n\nfunction redactPII(text: string): string {\n  let cleaned = text;\n  cleaned = cleaned.replace(/\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g, PII_REDACTOR.email);\n  cleaned = cleaned.replace(/\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g, PII_REDACTOR.phone);\n  cleaned = cleaned.replace(/\\b\\d{3}-\\d{2}-\\d{4}\\b/g, PII_REDACTOR.ssn);\n  return cleaned;\n}\n\n// Global output wrapper\nclass SafeChatFlow extends ChatFlow {\n  async run(inputs: any) {\n    const result = await super.run(inputs);\n    result.output = redactPII(result.output);\n    return result;\n  }\n}\n\n// Apply to flow configuration\nchatflowConfig.nodes.forEach(node => {\n  node.outputParser = (output: string) => redactPII(output);\n});\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Store Access Control Filter",
+        "description": "Filter retrieved documents by sensitivity metadata before LLM processing",
+        "code": "```typescript\nimport { DocumentRetriever } from 'flowise/dist';\n\nclass SafeDocumentRetriever extends DocumentRetriever {\n  async retrieve(query: string, filter?: any) {\n    const docs = await super.retrieve(query, filter);\n    \n    // Filter out sensitive docs\n    const safeDocs = docs.filter(doc => {\n      const metadata = doc.metadata || {};\n      return !metadata.sensitive && !metadata.internal;\n    });\n    \n    if (safeDocs.length === 0 && docs.length > 0) {\n      console.warn('All retrieved docs filtered as sensitive, using empty context');\n    }\n    \n    return safeDocs;\n  }\n}\n\n// Update flow configuration\nconst retrieverNode = chatflowConfig.nodes.find(n => n.type === 'DocumentRetriever');\nif (retrieverNode) {\n  retrieverNode.retriever = new SafeDocumentRetriever();\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Context Sanitizer for Handoffs",
+        "description": "Clean PII from agent outputs before passing to next agent in sequence",
+        "code": "```typescript\nclass SanitizedAgentNode {\n  sanitizeContext(context: any): any {\n    return {\n      ...context,\n      memory: this.redactPII(context.memory),\n      output: this.redactPII(context.output),\n      session: this.redactPII(context.session)\n    };\n  }\n\n  private redactPII(data: string): string {\n    return data.replace(/\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g, '[EMAIL]')\n               .replace(/\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g, '[PHONE]');\n  }\n}\n\n// Wrap agent nodes\nchatflowConfig.nodes\n  .filter(node => node.type.includes('Agent'))\n  .forEach(agentNode => {\n    const originalExecute = agentNode.execute;\n    agentNode.execute = async (...args: any[]) => {\n      const result = await originalExecute.apply(agentNode, args);\n      const sanitizer = new SanitizedAgentNode();\n      return sanitizer.sanitizeContext(result);\n    };\n  });\n```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a callback handler in Flowise chatflow configuration, automatically scanning every node execution for PII patterns, vector store sensitivity violations, and agent handoff leaks. It provides real-time blocking of leaky flows and generates remediation reports with exact node locations and leakage paths. The platform learns from your specific data patterns to reduce false positives over time while maintaining zero-trust validation of all AI agent outputs.\n\nWith a single npm install and callback registration, Vex monitors production chatflows without code changes. It captures full execution traces including intermediate node outputs that Flowise logs miss, providing complete visibility into leakage vectors. Automated remediation includes dynamic flow rewrites that inject sanitization nodes exactly where needed.",
+      "code": "```typescript\nimport { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise/dist';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  project: 'flowise-pii-protection'\n});\n\n// Add Vex as Flowise callback handler\nclass VexProtectedChatFlow extends ChatFlow {\n  async run(inputs: any) {\n    // Vex pre-execution validation\n    await vex.validateFlow(this.config, {\n      rules: ['no-pii-leakage', 'vector-store-safety', 'agent-handoff-security']\n    });\n    \n    const result = await super.run(inputs);\n    \n    // Vex post-execution validation\n    const issues = await vex.scanExecution({\n      flowConfig: this.config,\n      executionData: result,\n      detectors: ['pii-regex', 'sensitive-docs', 'context-leak']\n    });\n    \n    if (issues.length > 0) {\n      throw new Error(`Vex blocked unsafe execution: ${issues.map(i => i.type).join(', ')}`);\n    }\n    \n    return result;\n  }\n}\n\n// Install: npm install flowise @vex_dev/sdk\nexport { VexProtectedChatFlow as ChatFlow };\n```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one callback handler to protect all your Flowise agents from sensitive data leakage forever."
+    }
+  }
+}

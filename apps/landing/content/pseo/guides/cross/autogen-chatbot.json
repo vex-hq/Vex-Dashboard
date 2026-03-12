@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with AutoGen + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen ai chatbot",
+      "AutoGen guardrails",
+      "ai chatbot reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with AutoGen enables sophisticated multi-agent conversations with retrieval-augmented generation and intent handling, powering dynamic user interactions. However, multi-agent systems risk infinite loops, unsafe outputs, hallucinations, and excessive token usage, which can degrade performance and incur high costs. Vex provides essential guardrails to verify response accuracy, ensure safety, and maintain coherence in these high-risk deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with AutoGen",
+      "description": "The AutoGen-powered AI chatbot features a multi-agent setup with specialized agents: an IntentClassifierAgent for routing user queries, a RetrievalAgent for RAG-based context fetching, a ResponseGeneratorAgent for crafting replies, and a MemoryManagerAgent for multi-turn state. User input flows through the orchestrator, which delegates to agents via group chats, incorporating tools for database retrieval and external APIs. This modular design supports human-in-the-loop interventions while maintaining conversational memory via persistent state.\n\nKey components include LLM backends (e.g., GPT-4), vector stores for RAG (e.g., FAISS), and safety layers. Agents communicate via structured messages with content, role, and metadata, enabling complex reasoning chains. Failure modes emerge from unmonitored agent interactions, necessitating runtime verification.\n\nVex integrates as a reply filter to catch issues pre-response, ensuring PII protection, hallucination detection, and loop prevention without disrupting agent autonomy.",
+      "diagram": "User Input\n    |\n[Orchestrator] --> [IntentClassifierAgent]\n    |                    |\n    |                    v\n[MemoryManager] <-- [RetrievalAgent] --> [Vector DB]\n    |                                 |\n    v                                 v\n[ResponseGenerator] --> [Vex Guardrails] --> Final Reply\n    ^\n    | (Multi-turn loop)"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents enter repetitive exchanges without termination conditions, exhausting tokens and compute.",
+        "severity": "critical",
+        "mitigation": "Vex monitors conversation depth and detects cyclic patterns via state tracking."
+      },
+      {
+        "name": "Code execution producing unsafe outputs",
+        "description": "Tool-calling agents execute unverified code, risking data leaks or malicious actions.",
+        "severity": "critical",
+        "mitigation": "Vex sandboxes and scans code outputs for safety before agent propagation."
+      },
+      {
+        "name": "Agents agreeing on incorrect conclusions",
+        "description": "Group consensus forms on hallucinated facts due to poor inter-agent verification.",
+        "severity": "high",
+        "mitigation": "Vex cross-validates responses against RAG sources and external knowledge."
+      },
+      {
+        "name": "Uncontrolled token spending in multi-turn debates",
+        "description": "Verbose agent debates exceed budgets without convergence mechanisms.",
+        "severity": "high",
+        "mitigation": "Vex enforces token budgets and summarizes divergent threads."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set up AutoGen Agents for Chatbot",
+        "description": "Initialize core agents with RAG tools and memory configuration for the chatbot workflow.",
+        "code": "from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager\nimport vex\n\nllm_config = {\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": os.getenv(\"OPENAI_API_KEY\")}]}\n\nintent_agent = AssistantAgent(\n    name=\"IntentClassifier\",\n    llm_config=llm_config,\n    system_message=\"Classify user intent: query, task, or casual chat.\"\n)\nretrieval_agent = AssistantAgent(\n    name=\"Retriever\",\n    llm_config=llm_config,\n    system_message=\"Fetch relevant docs from vector store using semantic search.\"\n)\nresponse_agent = AssistantAgent(\n    name=\"Responder\",\n    llm_config=llm_config,\n    system_message=\"Generate accurate, safe responses using retrieved context.\"\n)\ngroupchat = GroupChat(agents=[intent_agent, retrieval_agent, response_agent], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)",
+        "language": "python"
+      },
+      {
+        "title": "Implement RAG Retrieval Tool",
+        "description": "Create a retrieval function for the RetrievalAgent to pull context from vector store.",
+        "code": "import faiss\n\nvector_store = faiss.read_index(\"chatbot_index.faiss\")\n\ndef retrieve_context(query: str, top_k: int = 3) -> str:\n    query_embedding = embed_query(query)  # Using sentence-transformers\n    distances, indices = vector_store.search(query_embedding.reshape(1, -1), top_k)\n    contexts = [docs[idx] for idx in indices[0]]\n    return \"\\n\".join(contexts)\n\nretrieval_agent.register_for_llm(name=\"rag_retrieve\", description=\"Retrieve context\")(retrieve_context)",
+        "language": "python"
+      },
+      {
+        "title": "Add Conversation Memory",
+        "description": "MemoryManager tracks multi-turn history to maintain coherence across interactions.",
+        "code": "memory = []\n\ndef update_memory(message: str, role: str):\n    memory.append({\"role\": role, \"content\": message})\n    if len(memory) > 10:\n        memory.pop(0)  # Limit history\n\nmemory_agent = AssistantAgent(\n    name=\"MemoryManager\",\n    llm_config=llm_config,\n    system_message=\"Summarize and inject relevant conversation history.\"\n)\ndef get_context() -> str:\n    return \"\\n\".join([f\"{m['role']}: {m['content']}\" for m in memory[-5:]])\nmemory_agent.register_for_llm(name=\"get_history\")(get_context)",
+        "language": "python"
+      },
+      {
+        "title": "Orchestrate Group Chat",
+        "description": "Run the multi-agent group chat for processing user input end-to-end.",
+        "code": "user_proxy = UserProxyAgent(name=\"User\", human_input_mode=\"NEVER\")\n\ndef chatbot_response(message: str):\n    update_memory(message, \"user\")\n    user_proxy.initiate_chat(manager, message=message)\n    final_msg = groupchat.messages[-1][\"content\"]\n    update_memory(final_msg, \"assistant\")\n    return final_msg\n\nresponse = chatbot_response(\"What's the capital of France?\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as Reply Filter",
+        "description": "Configure Vex SDK as a reply function filter to intercept all agent responses for verification.",
+        "code": "import vex\n\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n@vex_client.register_filter(\n    verifications=[\n        \"response-accuracy\",\n        \"conversation-coherence\",\n        \"safety-filtering\",\n        \"pii-protection\",\n        \"hallucination-detection\"\n    ],\n    risk_profile=\"high\"\n)\ndef verify_agent_reply(reply: str, context: dict) -> bool:\n    result = vex_client.verify(\n        text=reply,\n        context={\"conversation_history\": context[\"history\"], \"retrieved_docs\": context[\"rag\"]},\n        max_retries=2\n    )\n    return result.is_valid\n\n# Apply to agents\nresponse_agent.register_reply_filter(verify_agent_reply, context_provider=get_chat_context)",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Infinite Loops with Vex",
+        "description": "Use Vex to detect and terminate cyclic conversations by tracking message patterns.",
+        "code": "conversation_state = []\n\ndef loop_protection_filter(reply: str, context: dict) -> bool:\n    conversation_state.append(reply)\n    if len(conversation_state) > 20:\n        cycle_score = vex_client.verify_loop_detection(conversation_state[-10:])\n        if cycle_score > 0.8:\n            return False  # Block reply\n    return True\n\nmanager.register_reply_filter(loop_protection_filter)\nretrieval_agent.register_reply_filter(loop_protection_filter)",
+        "language": "python"
+      },
+      {
+        "title": "PII and Safety Verification",
+        "description": "Enforce PII redaction and safety checks on all outputs before user delivery.",
+        "code": "@vex_client.register_filter(verifications=[\"pii-protection\", \"safety-filtering\"])\ndef safety_filter(reply: str, context: dict) -> str:\n    verification = vex_client.verify(\n        text=reply,\n        rules={\n            \"no_pii\": True,\n            \"no_harmful_content\": True,\n            \"no_hallucinations\": {\"ground_truth\": context[\"retrieved_docs\"]}\n        }\n    )\n    if verification.is_valid:\n        return reply\n    else:\n        return \"Sorry, I can't respond to that due to safety guidelines.\"  # Fallback\n\nresponse_agent.reply_filter = safety_filter\n\n# In chatbot loop\nsafe_reply = safety_filter(final_msg, {\"retrieved_docs\": retrieved_context})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen AI Chatbot",
+      "description": "Integrate Vex today to protect your multi-agent chatbot from critical failures - start with our free tier at vex.ai."
+    }
+  }
+}

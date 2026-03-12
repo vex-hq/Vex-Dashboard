@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with AG2 + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with AG2 + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AG2 rag pipeline",
+      "AG2 guardrails",
+      "rag pipeline reliability",
+      "Vex AG2",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building a RAG Pipeline with AG2 enables multi-agent collaboration for document retrieval, context assembly, and LLM synthesis with source attribution. Guardrails are essential due to AG2's complex group chat dynamics, where agents can spiral off-topic, reach consensus on incorrect facts, or produce hallucinated outputs. Vex integration as a message hook provides real-time verification for source faithfulness and hallucination detection in high-risk scenarios.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with AG2",
+      "description": "The RAG Pipeline in AG2 uses a multi-agent group chat: a Retriever Agent performs vector search on documents, a Context Assembler Agent aggregates relevant chunks with metadata, a Synthesizer Agent generates responses with citations, and a Verifier Agent checks outputs. Agents communicate via AG2's enhanced group chat, with speaker selection and termination conditions managing flow. Vex hooks into message events to verify retrieval relevance, context usage, and citation accuracy before final synthesis.\n\nKey components include FAISS or Pinecone for vector search, sentence transformers for embeddings, and AG2's GroupChatManager for orchestration. The pipeline handles high document volumes by parallelizing retrieval across agents, but risks emerge from inter-agent miscommunication or biased speaker selection leading to irrelevant context injection.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Retriever Agent │───▶│ Context Assembler│\n└─────────────────┘    │ (Vector Search)  │    │   (Chunk Merge)  │\n                       └──────────────────┘    └──────────────────┘\n                                 │                       │\n                       ┌──────────────────┐    ┌──────────────────┐\n                       │   Vex Hook       │◀──▶│   Vex Hook       │\n                       │ (Relevance Check)│    │ (Faithfulness)   │\n                       └──────────────────┘    └──────────────────┘\n                                 │                       │\n                       ┌──────────────────┐    ┌──────────────────┐\n                       │ Synthesizer Agent│◀──▶│  Verifier Agent  │\n                       │   (LLM Response) │    │ (Citation Check) │\n                       └──────────────────┘    └──────────────────┘\n                                 │\n                       ┌──────────────────┐\n                       │    Final Output  │\n                       │  w/ Sources      │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent conversation spiraling off-topic",
+        "description": "Retriever Agent fetches irrelevant documents due to query drift in group chat",
+        "severity": "high",
+        "mitigation": "Vex message hook enforces context relevance scoring before context assembly"
+      },
+      {
+        "name": "Group chat consensus on incorrect facts",
+        "description": "Agents agree on hallucinated facts from low-relevance retrieved chunks",
+        "severity": "critical",
+        "mitigation": "Vex verifies source faithfulness across all agent messages"
+      },
+      {
+        "name": "Hallucination in synthesis",
+        "description": "Synthesizer Agent generates answers not grounded in provided context",
+        "severity": "critical",
+        "mitigation": "Vex hallucination detection on final synthesis output"
+      },
+      {
+        "name": "Citation accuracy failures",
+        "description": "Incorrect or missing source attribution in final response",
+        "severity": "high",
+        "mitigation": "Vex citation verification ensures all claims map to valid sources"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Setup AG2 RAG Agents",
+        "description": "Initialize Retriever, Assembler, and Synthesizer agents with group chat manager",
+        "code": "from ag2 import AssistantAgent, GroupChat, GroupChatManager\nfrom vex import VexClient\n\nvex_client = VexClient(api_key=\"your-vex-key\")\n\nretriever = AssistantAgent(\n    name=\"Retriever\",\n    llm_config={\"model\": \"gpt-4\"},\n    hooks=[vex_client.message_hook]\n)\nassembler = AssistantAgent(name=\"Assembler\", llm_config={\"model\": \"gpt-4\"})\nsynthesizer = AssistantAgent(name=\"Synthesizer\", llm_config={\"model\": \"gpt-4\"})\n\ngroupchat = GroupChat(agents=[retriever, assembler, synthesizer], messages=[], max_round=10)\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"model\": \"gpt-4\"})",
+        "language": "python"
+      },
+      {
+        "title": "Vector Search Implementation",
+        "description": "Retriever agent performs FAISS vector search on document embeddings",
+        "code": "import faiss\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\nfaiss_index = faiss.IndexFlatL2(384)  # dimension of MiniLM\n\ndocuments = [\"doc1 text\", \"doc2 text\"]  # your docs\nembeddings = model.encode(documents)\nfaiss_index.add(np.array(embeddings))\n\ndef retrieve_docs(query, k=5):\n    query_emb = model.encode([query])\n    scores, indices = faiss_index.search(query_emb, k)\n    return [documents[i] for i in indices[0]]",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly with Metadata",
+        "description": "Assembler combines retrieved chunks with source metadata for traceability",
+        "code": "def assemble_context(retrieved_docs, query):\n    context = []\n    for i, doc in enumerate(retrieved_docs):\n        context.append({\n            'content': doc,\n            'source_id': f'doc_{i}',\n            'score': 0.95,  # from retrieval scores\n            'metadata': {'page': i+1, 'section': 'relevant'}\n        })\n    return {'query': query, 'context': context, 'instructions': 'Use only provided context'}",
+        "language": "python"
+      },
+      {
+        "title": "Synthesis with Citation Tracking",
+        "description": "Synthesizer generates response with inline citations from context",
+        "code": "def generate_with_citations(context, query):\n    prompt = f\"\"\"Answer using ONLY this context:\n{context}\n\nQuery: {query}\n\nUse format: Answer [1][2] for citations.\"\"\"\n    response = synthesizer.generate_reply(messages=[{\"role\": \"user\", \"content\": prompt}])\n    return response",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Message Hook",
+        "description": "Attach Vex to all agents for real-time message verification",
+        "code": "from vex import VexClient, GuardrailConfig\n\nvex = VexClient(api_key=\"vex_123\")\nrag_config = GuardrailConfig(\n    verifications=[\n        \"source_faithfulness\",\n        \"hallucination_detection\", \n        \"context_relevance\",\n        \"citation_accuracy\"\n    ],\n    risk_profile=\"high\"\n)\n\n# Register on all agents\nfor agent in [retriever, assembler, synthesizer]:\n    agent.register_hook(vex.message_hook(rag_config))",
+        "language": "python"
+      },
+      {
+        "title": "Context Relevance Verification",
+        "description": "Vex scores retrieved documents against query before assembly",
+        "code": "from vex.verifications import ContextRelevance\n\n@vex_client.hook(\"context_relevance\")\ndef verify_retrieval(query, retrieved_docs):\n    results = []\n    for doc in retrieved_docs:\n        score = ContextRelevance().score(query, doc['content'])\n        results.append({'doc_id': doc['source_id'], 'relevance_score': score})\n    \n    # Block if average relevance < 0.7\n    avg_score = np.mean([r['relevance_score'] for r in results])\n    if avg_score < 0.7:\n        raise ValueError(\"Low context relevance detected\")\n    return results",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness + Citation Check",
+        "description": "Final verification ensures response grounded in sources with accurate citations",
+        "code": "@vex_client.hook([\"source_faithfulness\", \"citation_accuracy\"])\ndef verify_final_output(response, context):\n    faithfulness_score = 0.92  # Vex computes\n    citation_score = 0.88      # Vex computes\n    \n    if faithfulness_score < 0.85:\n        return {'status': 'fail', 'reason': 'Hallucination detected'}\n    if citation_score < 0.90:\n        return {'status': 'fail', 'reason': 'Citation mismatch'}\n    \n    return {'status': 'pass', 'scores': {'faithfulness': faithfulness_score, 'citations': citation_score}}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AG2 RAG Pipeline",
+      "description": "Install Vex today with `pip install ag2 vex-sdk` and register message hooks to protect your production RAG deployments."
+    }
+  }
+}

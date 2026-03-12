@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Vercel AI SDK Agents",
+    "description": "How to detect and fix ai agent memory management in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Vercel AI SDK memory-management",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK, AI Agent Memory Management issues arise when agents fail to properly persist and retrieve conversation history across streaming interactions, leading to context loss in long-running tasks. This manifests as agents repeating information, forgetting prior tool calls, or hallucinating due to incomplete memory state in `generateText` or `streamText` calls. Without structured memory handling, agents built with `useChat` or core SDK functions exhibit degraded performance in multi-turn conversations common in React Server Components.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn chat with useChat hook",
+        "symptom": "Agent ignores previous messages after page refresh or stream interruption",
+        "impact": "User repeats queries, increasing latency and frustration; hallucinations from context loss"
+      },
+      {
+        "scenario": "Streaming agent with tool calls via streamText",
+        "symptom": "Memory buffer overflows, dropping early conversation turns during long sessions",
+        "impact": "Inconsistent tool call validation; agent calls same tools repeatedly without learning from results"
+      },
+      {
+        "scenario": "Server-side agent in RSC with generateText",
+        "symptom": "No persistent storage between requests, causing stateless responses",
+        "impact": "Edge function timeouts on complex tasks requiring conversation history recall"
+      },
+      {
+        "scenario": "Structured output agents with partial streams",
+        "symptom": "Memory not parsed correctly from partial JSON streams, leading to invalid state",
+        "impact": "Broken UI updates and cascading errors in agent reasoning chains"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Context Loss Detector",
+        "description": "Logs message history length across streamText calls to detect drops in conversation context",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nasync function detectMemoryLoss(messages: any[]) {\n  const historyLength = messages.length;\n  const response = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n  });\n  \n  // Detect if context shrinks unexpectedly\n  const stream = await response.toAIStreamResponse();\n  console.log(`History length: ${historyLength}`);\n  \n  let contextTokens = 0;\n  for await (const chunk of stream.textStream) {\n    contextTokens += chunk.length;\n  }\n  \n  if (contextTokens < historyLength * 10) {\n    console.warn('🚨 Memory context loss detected');\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Repetition Monitor",
+        "description": "Tracks repeated tool calls in agent memory to identify forgotten prior executions",
+        "code": "import { generateText } from 'ai';\n\nfunction trackToolRepetition(messages: any[]) {\n  const toolCalls = messages\n    .filter((m: any) => m.role === 'assistant' && m.tool_calls)\n    .flatMap((m: any) => m.tool_calls.map((tc: any) => tc.function.name));\n  \n  const uniqueTools = new Set(toolCalls);\n  const repetitionRate = (toolCalls.length - uniqueTools.size) / toolCalls.length;\n  \n  if (repetitionRate > 0.3) {\n    console.error(`🔄 Tool repetition detected: ${repetitionRate.toFixed(2)}`);\n    return false;\n  }\n  return true;\n}\n\n// Usage\nawait generateText({ model: openai('gpt-4o'), messages, tools: [...] });",
+        "language": "typescript"
+      },
+      {
+        "name": "Stream Buffer Overflow Check",
+        "description": "Monitors message history growth during streaming to catch memory overflow before truncation",
+        "code": "import { useChat } from 'ai/react';\n\nfunction MemoryOverflowDetector({ messages }: { messages: any[] }) {\n  const totalTokens = messages.reduce((sum, msg) => sum + msg.content.length, 0);\n  \n  if (totalTokens > 128000) {\n    console.error('💥 Memory buffer approaching limit:', totalTokens);\n    // Trim oldest messages\n    return messages.slice(-20);\n  }\n  \n  const { messages: chatMessages, append } = useChat();\n  return null;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Persistent Memory Store with Vercel KV",
+        "description": "Implement durable conversation memory using Vercel KV for cross-request persistence",
+        "code": "import { kv } from '@vercel/kv';\nimport { streamText } from 'ai';\n\nimport { openai } from '@ai-sdk/openai';\n\nasync function agentWithMemory(sessionId: string, newMessage: string) {\n  // Load persistent memory\n  const history = await kv.lrange(`chat:${sessionId}`, 0, -1) as any[];\n  const messages = [...history, { role: 'user', content: newMessage }];\n  \n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n    maxTokens: 4000,\n  });\n  \n  // Persist updated history\n  await kv.lpush(`chat:${sessionId}`, ...messages.slice(-50));\n  await kv.ltrim(`chat:${sessionId}`, 0, 49);\n  \n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Sliding Window Memory Trimmer",
+        "description": "Automatically trim conversation history to prevent token limit overflow",
+        "code": "function trimMemory(messages: any[], maxTokens = 120000): any[] {\n  let totalTokens = 0;\n  const trimmed: any[] = [];\n  \n  // Keep last 10 messages + summarize older ones\n  for (let i = Math.max(0, messages.length - 10); i < messages.length; i++) {\n    const msg = messages[i];\n    const msgTokens = msg.content.length / 4 + 100;\n    \n    if (totalTokens + msgTokens > maxTokens) {\n      // Summarize overflow\n      trimmed.unshift({\n        role: 'system',\n        content: `Previous conversation summary: ${totalTokens} tokens compressed`\n      });\n      break;\n    }\n    \n    trimmed.push(msg);\n    totalTokens += msgTokens;\n  }\n  \n  return [{ role: 'system', content: 'Use conversation history context.' }, ...trimmed];\n}\n\n// Use in generateText/streamText\nawait streamText({ model, messages: trimMemory(messages) });",
+        "language": "typescript"
+      },
+      {
+        "name": "useChat Memory Enhancer Hook",
+        "description": "Custom hook extending useChat with automatic memory management",
+        "code": "import { useChat } from 'ai/react';\nimport { kv } from '@vercel/kv';\n\nfunction useMemoryChat(sessionId: string) {\n  const { messages, append, ...rest } = useChat();\n  \n  // Sync to KV on message append\n  const appendWithMemory = async (msg: any) => {\n    await append(msg);\n    await kv.lpush(`chat:${sessionId}`, msg);\n    await kv.ltrim(`chat:${sessionId}`, 0, 49);\n  };\n  \n  // Load on mount\n  React.useEffect(() => {\n    kv.lrange(`chat:${sessionId}`, 0, -1).then(history => {\n      history.forEach(msg => append(msg as any, false));\n    });\n  }, []);\n  \n  return { messages, append: appendWithMemory, ...rest };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex middleware integrates seamlessly with Vercel AI SDK's `generateText` and `streamText` functions, automatically detecting memory management issues like context loss, buffer overflows, and tool call repetition in real-time. By wrapping SDK calls, Vex captures message histories, token counts, and stream patterns, flagging issues before they impact user experience. \n\nThe middleware generates remediation suggestions including optimal memory window sizes, KV persistence strategies, and provider-specific token limits. Vex also validates structured memory outputs across providers, ensuring consistent agent behavior. \n\nInstallation is simple: `npm install ai @vex_dev/sdk`, then add the middleware to your AI calls for immediate protection against memory-related failures common in streaming UIs.",
+      "code": "import { generateText, streamText } from 'ai';\nimport { VexMiddleware } from '@vex_dev/sdk';\n\nconst vex = new VexMiddleware({\n  projectId: 'your-vex-project',\n  detectors: ['memory-loss', 'token-overflow', 'tool-repetition'],\n});\n\n// Wrap all AI calls\napp.post('/chat', vex.middleware(async (req) => {\n  const { messages } = await req.json();\n  \n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n    tools,\n  });\n  \n  // Vex auto-generates fix: persistent KV store\n  return result.toAIStreamResponse();\n}));\n\n// Vex detects and suggests:\n// ✅ Add KV persistence\n// ✅ Implement 120k token window\n// ✅ Validate tool call memory",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to your Vercel AI SDK in 2 lines and eliminate memory management failures forever."
+    }
+  }
+}

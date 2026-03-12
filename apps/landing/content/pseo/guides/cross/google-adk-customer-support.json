@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Google ADK + Vex Guardrails",
+    "description": "Learn how to build customer support with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK customer support",
+      "Google ADK guardrails",
+      "customer support reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Google's Agent Development Kit (ADK) enables sophisticated multi-agent systems powered by Gemini models, handling RAG, CRM integration, and tool-calling for tickets and orders. However, multi-agent delegation, model inconsistencies, and session state issues can lead to circular dependencies, inaccurate responses, or PII leaks in high-stakes interactions. Vex provides essential guardrails to verify response accuracy, filter PII, ensure tone consistency, and trigger escalations before issues escalate.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Google ADK",
+      "description": "The typical Google ADK customer support architecture features a Router Agent that delegates to specialized sub-agents: RAG Agent for knowledge base retrieval, CRM Agent for order lookup via APIs, and Ticket Agent for creating support tickets. These agents collaborate in a session-based workflow, with Gemini models handling reasoning and tool calls. Long conversations maintain state across agents, but this introduces risks like circular delegation loops and format mismatches between tool responses.\n\nThe RAG Agent retrieves from vector stores using customer queries, while CRM integration pulls order history via APIs like Salesforce or Zendesk. Tool-calling enables actions like 'create_ticket' or 'lookup_order', orchestrated through ADK's agent execution graph. Session state tracks conversation history to maintain context, but corruption can occur in extended interactions.\n\nVex integrates as a before_agent_callback to inspect agent inputs/outputs, applying verifications for accuracy, PII, tone, policy, and escalation before execution proceeds.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐\n│   User Query    │───▶│ Router Agent  │\n└─────────────────┘    │   (Gemini)    │\n                       └──────┬───────┘\n                              │\n                ┌─────────────▼───────┐\n                │ Vex Guardrails      │\n                │ (before_agent_cb)   │\n                └─────────────┬───────┘\n                              │\n              ┌───────────────▼────────┐ ┌──────────────┐ ┌──────────────┐\n              │ RAG Agent     │ │ CRM Agent     │ │ Ticket Agent  │\n              │ (Know. Base)  │ │ (Order Lookup)│ │ (Create Tkt)  │\n              └───────────────┘ └──────────────┘ └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Router Agent endlessly delegates between RAG and CRM agents without resolution",
+        "severity": "critical",
+        "mitigation": "Vex detects delegation loops via session state analysis and forces termination/escalation"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different Gemini variants (1.5 Pro/Flash) produce varying tones or formats in ticket creation",
+        "severity": "high",
+        "mitigation": "Vex enforces tone consistency and response format validation across model switches"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Conversation history truncation or mutation leads to context loss in multi-turn support flows",
+        "severity": "high",
+        "mitigation": "Vex validates session integrity and conversation continuity before agent execution"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "CRM API returns vary from expected Pydantic schemas, breaking ticket creation workflows",
+        "severity": "medium",
+        "mitigation": "Vex normalizes tool outputs and validates against unified schemas before delegation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic ADK Customer Support Router Agent",
+        "description": "Core router agent that delegates to RAG, CRM, and Ticket specialists using ADK's execution graph.",
+        "code": "from google_adk.agents import RouterAgent, Agent\nfrom google_adk.tools import Tool\n\nrag_agent = Agent(name='RAG', model='gemini-1.5-pro')\n crm_agent = Agent(name='CRM', model='gemini-1.5-flash')\nticket_agent = Agent(name='Ticket', model='gemini-1.5-pro')\n\n@rag_agent.tool()\ndef search_knowledge_base(query: str) -> str:\n    # Vector store retrieval\n    return 'Found 3 relevant articles...'\n\n@crm_agent.tool()\ndef lookup_order(order_id: str) -> dict:\n    return {'status': 'shipped', 'eta': '2024-12-15'}\n\n@ticket_agent.tool()\ndef create_ticket(customer_id: str, issue: str) -> str:\n    return f'Ticket #{random.randint(1000,9999)} created'\n\nrouter = RouterAgent(\n    name='SupportRouter',\n    agents=[rag_agent, crm_agent, ticket_agent],\n    model='gemini-1.5-pro',\n    instructions='Delegate to correct specialist for customer support'\n)",
+        "language": "python"
+      },
+      {
+        "title": "Session-Based Multi-Turn Conversation",
+        "description": "Maintains conversation state across agent handoffs for complex support scenarios.",
+        "code": "from google_adk.sessions import Session\n\nsession = Session(agent=router)\n\n# Multi-turn conversation\nresponse1 = session.run('My order #12345 is late')\nprint(response1)  # 'Checking order status...'\n\nresponse2 = session.run('Can you create a ticket?')\nprint(response2)  # 'Creating ticket for you...'\n\n# Session state persists across turns\nassert len(session.history) == 2",
+        "language": "python"
+      },
+      {
+        "title": "CRM Tool Integration with Pydantic Validation",
+        "description": "Structured CRM order lookup with schema validation for reliable data handling.",
+        "code": "from pydantic import BaseModel\nfrom typing import Optional\n\nclass OrderInfo(BaseModel):\n    order_id: str\n    status: str\n    eta: Optional[str] = None\n\n@crm_agent.tool()\ndef lookup_order(order_id: str) -> OrderInfo:\n    # Mock CRM API\n    data = {\n        'order_id': order_id,\n        'status': 'shipped',\n        'eta': '2024-12-15'\n    }\n    return OrderInfo(**data)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Knowledge Base Retrieval",
+        "description": "Vector store integration for retrieving relevant support articles.",
+        "code": "import chromadb\n\nclient = chromadb.Client()\ncollection = client.get_or_create_collection('support_kb')\n\n@rag_agent.tool()\ndef search_knowledge_base(query: str, top_k: int = 3) -> list:\n    results = collection.query(\n        query_texts=[query],\n        n_results=top_k\n    )\n    return [\n        {'title': doc.metadata['title'], 'content': doc.text}\n        for doc in results['documents'][0]\n    ]",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex before_agent_callback Setup",
+        "description": "Install Vex and register as callback to inspect all agent executions.",
+        "code": "import vex\n\nfrom google_adk.agents import Agent\nfrom vex.guardrails import Guardrail\n\n# Initialize Vex client\nvex_client = vex.Client(api_key='vex_your_key')\n\n# Define Customer Support guardrails\nguardrails = [\n    Guardrail.ResponseAccuracy(),\n    Guardrail.PIIFilter(),\n    Guardrail.ToneConsistency('professional, empathetic'),\n    Guardrail.PolicyCompliance(),\n    Guardrail.EscalationTriggers([\n        'refund request', 'chargeback', 'legal issue'\n    ])\n]\n\n@vex_client.guardrail_set('customer_support')\ndef support_guardrails(ctx):\n    for guardrail in guardrails:\n        result = guardrail.verify(ctx)\n        if not result.valid:\n            return {'action': 'block', 'reason': result.reason}\n    return {'action': 'allow'}\n\n# Register with ADK\nrouter.before_agent_callback = support_guardrails.predict",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering for Customer Data",
+        "description": "Blocks PII leakage in agent responses and tool calls.",
+        "code": "@vex_client.guardrail('pii_filter')\ndef filter_pii(ctx):\n    pii_patterns = [\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n        r'\\b\\d{16}\\b',              # Credit card\n        r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+'  # Email\n    ]\n    \n    for field in ['input', 'output', 'tools']:\n        content = ctx.get(field, '')\n        for pattern in pii_patterns:\n            if re.search(pattern, content):\n                return {\n                    'action': 'block',\n                    'reason': f'PII detected in {field}',\n                    'redacted': re.sub(pattern, '[REDACTED]', content)\n                }\n    return {'action': 'allow'}",
+        "language": "python"
+      },
+      {
+        "title": "Circular Dependency Detection",
+        "description": "Prevents infinite delegation loops in multi-agent workflows.",
+        "code": "@vex_client.guardrail('loop_detection')\ndef detect_circular_delegation(ctx):\n    session = ctx.get('session', {})\n    recent_actions = session.get('recent_actions', [])[-5:]\n    \n    # Detect loops: same agent called >3 times consecutively\n    if len(recent_actions) >= 3:\n        last_agents = [action['agent'] for action in recent_actions[-3:]]\n        if len(set(last_agents)) == 1:\n            return {\n                'action': 'escalate',\n                'reason': f'Circular delegation detected: {last_agents[0]} x3',\n                'metadata': {'loop_length': len(recent_actions)}\n            }\n    return {'action': 'allow'}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Customer Support",
+      "description": "Get started with Vex free tier at vex.ai to protect your customer support agents today."
+    }
+  }
+}

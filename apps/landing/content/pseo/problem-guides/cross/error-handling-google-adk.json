@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Google ADK Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Google ADK error-handling",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, AI Agent Error Handling Patterns manifest as cascading failures in multi-agent workflows where unhandled errors in tool calls, delegation loops, and model inconsistencies disrupt session state and produce unreliable outputs. Common issues arise from Gemini model switching between agents, leading to format mismatches, and circular delegation in agent hierarchies that exhaust resources without resolution. These patterns are exacerbated by ADK's session-based state management, where long conversations corrupt shared context without robust error boundaries.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation creating circular dependencies",
+        "symptom": "Agents endlessly delegate tasks between each other without progress, consuming API quota",
+        "impact": "Infinite loops crash workflows, exhaust Gemini rate limits, and return timeout errors"
+      },
+      {
+        "scenario": "Gemini model switching causing output inconsistency",
+        "symptom": "Different agents using gemini-1.5-pro vs gemini-1.5-flash produce incompatible JSON schemas",
+        "impact": "Tool response parsing fails across agent boundaries, breaking workflow execution"
+      },
+      {
+        "scenario": "Session state corruption in long conversations",
+        "symptom": "Shared session.state accumulates malformed tool responses from failed agent calls",
+        "impact": "Subsequent agent turns receive corrupted context, producing hallucinated or irrelevant responses"
+      },
+      {
+        "scenario": "Tool response format mismatches across agents",
+        "symptom": "One agent returns plain text while another expects structured JSON tool results",
+        "impact": "Downstream agents fail to parse responses, causing workflow orchestration to halt"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Circular Delegation Detector",
+        "description": "Monitors agent invocation traces for repeated delegation patterns exceeding threshold",
+        "code": "from google_adk import Agent, trace\nfrom collections import defaultdict\n\ndef detect_circular_delegation(callback, agent):\n    traces = trace.get_session_traces(agent.session_id)\n    delegation_graph = defaultdict(list)\n    \n    for step in traces[-50:]:  # Last 50 steps\n        if step.type == 'DELEGATION':\n            delegation_graph[step.from_agent].append(step.to_agent)\n    \n    # Detect cycles\n    visited = set()\n    def has_cycle(agent_id):\n        if agent_id in visited:\n            return True\n        visited.add(agent_id)\n        for delegate in delegation_graph[agent_id]:\n            if has_cycle(delegate):\n                return True\n        visited.remove(agent_id)\n        return False\n    \n    recent_agents = {step.from_agent for step in traces[-10:]}\n    for agent_id in recent_agents:\n        if has_cycle(agent_id):\n            raise Exception(f'Circular delegation detected: {agent_id}')"
+      },
+      {
+        "name": "Model Consistency Checker",
+        "description": "Validates all agents in workflow use identical Gemini model versions",
+        "code": "from google_adk import get_workflow\n\ndef check_model_consistency(workflow):\n    agent_models = {}\n    for agent in workflow.agents.values():\n        model = agent.llm.model_name\n        if model not in agent_models:\n            agent_models[model] = []\n        agent_models[model].append(agent.name)\n    \n    if len(agent_models) > 1:\n        error = f'Model inconsistency detected: {agent_models}'\n        raise ValueError(error)\n    \n    print('✅ All agents use consistent model:', list(agent_models.keys())[0])"
+      },
+      {
+        "name": "Session State Validator",
+        "description": "Scans session state for corrupted tool response accumulations",
+        "code": "def validate_session_state(session):\n    state = session.state\n    tool_responses = state.get('tool_responses', [])\n    \n    corrupted = 0\n    for response in tool_responses[-20:]:  # Last 20 responses\n        if not isinstance(response, dict) or 'content' not in response:\n            corrupted += 1\n            print(f'Corrupted tool response: {response}')\n    \n    if corrupted > 3:\n        raise Exception(f'Session state corrupted: {corrupted}/20 malformed tool responses')\n    \n    print(f'✅ Session state healthy: {corrupted} minor issues')"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Delegation Circuit Breaker",
+        "description": "Implements max-delegation-depth limit with fallback routing",
+        "code": "from google_adk import Agent, before_agent_callback\n\n@before_agent_callback\ndef delegation_circuit_breaker(ctx, agent):\n    session = ctx.session\n    delegation_count = session.state.get('delegation_depth', 0)\n    \n    if delegation_count > 5:\n        # Fallback to root agent\n        ctx.redirect_to('root_agent')\n        session.state['delegation_depth'] = 0\n        return\n    \n    session.state['delegation_depth'] = delegation_count + 1"
+      },
+      {
+        "name": "Unified Response Normalizer",
+        "description": "Standardizes tool responses across all agents to consistent JSON schema",
+        "code": "def normalize_tool_response(response):\n    if isinstance(response, str):\n        return {'content': response, 'type': 'text'}\n    elif isinstance(response, dict) and 'content' in response:\n        return response\n    else:\n        return {'content': str(response), 'type': 'unknown', 'error': 'format_mismatch'}"
+      },
+      {
+        "name": "State Reset on Critical Error",
+        "description": "Resets corrupted session state while preserving conversation history",
+        "code": "def safe_state_reset(session):\n    if session.state.get('corruption_detected', False):\n        # Preserve only conversation history\n        history = session.state.get('conversation_history', [])\n        session.state = {\n            'conversation_history': history[-10:],  # Last 10 turns\n            'tool_responses': [],\n            'delegation_depth': 0,\n            'reset_count': session.state.get('reset_count', 0) + 1\n        }"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates seamlessly as a before_agent_callback in Google ADK workflows, automatically detecting circular delegations, model inconsistencies, and state corruption in real-time. It captures agent traces, validates response schemas across the multi-agent hierarchy, and enforces delegation depth limits without modifying core agent logic. When issues are detected, Vex can trigger automatic remediation like state resets or fallback routing while generating detailed observability reports.\n\nThe Vex SDK provides production-grade error boundaries that wrap ADK's native execution, catching failures that would otherwise cascade through agent delegation chains. Configuration is simple - just add the Vex callback and define your error thresholds. Vex's ML-powered anomaly detection learns your workflow's normal behavior and flags deviations before they impact users.",
+      "code": "from vex_sdk import Vex\nfrom google_adk import Agent, Workflow, before_agent_callback\n\n# Install: pip install google-adk vex-sdk\nvex = Vex(api_key='your-vex-api-key')\n\n@vex.monitor_errors(\n    patterns=['circular_delegation', 'model_inconsistency', 'state_corruption'],\n    max_delegations=5,\n    auto_remediate=True\n)\n@before_agent_callback\ndef vex_adk_guardrail(ctx, agent):\n    # Vex automatically detects:\n    # 1. Circular delegation loops\n    # 2. Gemini model version mismatches\n    # 3. Malformed tool responses\n    # 4. Session state bloat\n    \n    issues = vex.scan_session(ctx.session_id)\n    if issues:\n        vex.log_alert(ctx.session_id, issues)\n        if issues.get('circular_delegation'):\n            ctx.redirect_to('fallback_agent')\n        \n# Usage in your ADK workflow\nworkflow = Workflow(agents={\n    'root': root_agent,\n    'research': research_agent,\n    'analyzer': analyzer_agent\n}, callbacks=[vex_adk_guardrail])"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex to your Google ADK workflows in 3 lines of code to eliminate agent error cascades forever."
+    }
+  }
+}

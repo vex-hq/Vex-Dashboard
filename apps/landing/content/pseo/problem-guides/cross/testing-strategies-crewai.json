@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in CrewAI Agents",
+    "description": "How to detect and fix ai agent testing strategies in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "CrewAI testing-strategies",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, AI Agent Testing Strategies challenges arise from multi-agent collaboration where agents delegate tasks, share tool outputs, and reinterpret objectives, leading to failures like infinite loops and inconsistent results. These issues manifest uniquely through CrewAI's task delegation patterns and agent-crew orchestration APIs. Without robust testing, crews produce unreliable outputs, making it critical to detect and mitigate these failure modes early.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly pass the same task back and forth without progress",
+        "impact": "Infinite loops crash the crew execution, wasting tokens and time"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agents fabricate tool responses and propagate false data through the crew",
+        "impact": "Downstream agents make decisions based on invalid information, producing garbage outputs"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Agents deviate from original task descriptions during delegation",
+        "impact": "Crew delivers results misaligned with user intent"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Different agents produce varying levels of detail and accuracy for similar tasks",
+        "impact": "Final crew output lacks coherence and reliability"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Detect Delegation Loops",
+        "description": "Monitor task delegation history to identify cyclic handoffs between agents",
+        "code": "from collections import defaultdict\ndef detect_loops(crew_execution):\n    delegation_graph = defaultdict(list)\n    for step in crew_execution.steps:\n        if step.delegate_to:\n            delegation_graph[step.agent_id].append(step.delegate_to)\n    \n    visited = set()\n    def has_cycle(node):\n        if node in visited:\n            return False\n        visited.add(node)\n        for neighbor in delegation_graph[node]:\n            if neighbor in visited or has_cycle(neighbor):\n                return True\n        visited.remove(node)\n        return False\n    \n    for agent_id in delegation_graph:\n        if has_cycle(agent_id):\n            return {'issue': 'DELEGATION_LOOP', 'agent': agent_id}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Detect Hallucinated Tool Outputs",
+        "description": "Flag tool calls with implausible outputs or missing validation",
+        "code": "import re\ndef detect_hallucinated_tools(task_output):\n    tool_calls = task_output.get('tools_used', [])\n    hallucinations = []\n    \n    for tool_call in tool_calls:\n        output = tool_call.get('output', '')\n        # Common hallucination patterns\n        if len(output) < 10 and tool_call['tool_name'] != 'search':\n            hallucinations.append({\n                'tool': tool_call['tool_name'],\n                'reason': 'Output too short for tool'\n            })\n        elif re.search(r'\\b(error|failed|not found)\\b', output, re.IGNORECASE):\n            hallucinations.append({\n                'tool': tool_call['tool_name'],\n                'reason': 'Tool reported failure but was passed downstream'\n            })\n    return {'issue': 'HALLUCINATED_TOOLS', 'count': len(hallucinations)} if hallucinations else None",
+        "language": "python"
+      },
+      {
+        "name": "Detect Task Drift",
+        "description": "Compare original task description with agent interpretations",
+        "code": "from difflib import SequenceMatcher\ndef detect_task_drift(original_task, agent_interpretation):\n    original_desc = original_task.description.lower()\n    agent_desc = agent_interpretation.lower()\n    \n    similarity = SequenceMatcher(None, original_desc, agent_desc).ratio()\n    key_terms = ['research', 'analyze', 'write', 'summarize']\n    drift_score = 0\n    \n    if similarity < 0.6:\n        drift_score += 1\n    \n    # Check if key objectives preserved\n    preserved_terms = sum(1 for term in key_terms if term in original_desc and term in agent_desc)\n    if preserved_terms < len([t for t in key_terms if t in original_desc]) * 0.5:\n        drift_score += 1\n        \n    return {'issue': 'TASK_DRIFT', 'drift_score': drift_score, 'similarity': similarity} if drift_score > 0 else None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Implement Delegation Limits",
+        "description": "Add max delegation depth to prevent loops in CrewAI agents",
+        "code": "from crewai import Agent, Task\n\nclass LoopProtectedAgent(Agent):\n    def __init__(self, *args, max_delegations=3, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.delegation_count = 0\n        self.max_delegations = max_delegations\n    \n    def should_delegate(self, task):\n        if self.delegation_count >= self.max_delegations:\n            return False, \"Max delegation limit reached\"\n        self.delegation_count += 1\n        return super().should_delegate(task)\n\n# Usage\nresearcher = LoopProtectedAgent(\n    role='Researcher',\n    goal='Research topics',\n    backstory='Expert researcher',\n    max_delegations=2\n)\n\ntask = Task(\n    description='Research AI testing',\n    agent=researcher\n)",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validation Middleware",
+        "description": "Validate tool outputs before passing between CrewAI agents",
+        "code": "from crewai import Task\n\ndef validate_tool_output(tool_name, output):\n    validators = {\n        'search': lambda x: len(x) > 20 and 'result' in x.lower(),\n        'calculator': lambda x: x.replace('.', '').isdigit(),\n        'file_read': lambda x: len(x) > 0\n    }\n    return validators.get(tool_name, lambda x: True)(output)\n\nclass ValidatedTask(Task):\n    def execute(self):\n        result = super().execute()\n        if hasattr(result, 'tools_used'):\n            valid_tools = []\n            for tool in result.tools_used:\n                if validate_tool_output(tool['tool_name'], tool['output']):\n                    valid_tools.append(tool)\n                else:\n                    print(f\"⚠️ Invalid tool output: {tool['tool_name']}\")\n                    tool['output'] = \"[VALIDATION FAILED]\"\n            result.tools_used = valid_tools\n        return result\n\n# Usage\nvalidated_task = ValidatedTask(\n    description=\"Use tools safely\",\n    expected_output=\"Validated results\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Task Context Preservation",
+        "description": "Enforce original objectives across CrewAI crew delegation",
+        "code": "from crewai import Crew, Task\n\ndef create_preserved_crew():\n    # Original objective\n    master_objective = \"Create comprehensive AI testing guide\"\n    \n    tasks = [\n        Task(\n            description=f\"{master_objective}. Research testing strategies.\",\n            context=[master_objective],\n            expected_output=\"Testing strategies research\"\n        ),\n        Task(\n            description=f\"{master_objective}. NEVER reinterpret - write based on research.\",\n            context=[master_objective],\n            expected_output=\"Draft document\"\n        )\n    ]\n    \n    crew = Crew(\n        agents=[researcher, writer],\n        tasks=tasks,\n        verbose=True,\n        context=[master_objective]  # Shared across all agents\n    )\n    return crew\n\ncrew = create_preserved_crew()\nresult = crew.kickoff()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates seamlessly with CrewAI as a task callback, automatically detecting delegation loops, hallucinated outputs, task drift, and quality inconsistencies across your multi-agent crews. By monitoring CrewAI's execution traces at the task level, Vex captures agent interactions, tool calls, and delegation patterns in real-time, providing immediate feedback on failure modes before they cascade through your crew.\n\nThe Vex SDK hooks into CrewAI's task execution pipeline using simple callbacks, requiring only pip install crewai vex-sdk and a single line of integration per task. Vex applies the detection logic shown above automatically, surfacing issues with precise traces back to specific agents and tasks. Remediation templates are generated contextually, allowing one-click fixes for common CrewAI patterns.\n\nFor production crews, Vex provides observability dashboards showing failure rates by agent role, delegation depth analytics, and tool reliability scores, enabling continuous improvement of your multi-agent systems.",
+      "code": "import vex\nfrom crewai import Agent, Task, Crew\n\n# Install: pip install crewai vex-sdk\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-key\")\n\nresearcher = Agent(\n    role=\"Researcher\",\n    goal=\"Research AI testing strategies\",\n    backstory=\"Expert in AI reliability\"\n)\n\n# Vex integration - single line per task\ntask = Task(\n    description=\"Research CrewAI testing patterns\",\n    agent=researcher,\n    callback=vex_client.track_task(  # Vex callback\n        detectors=[\n            \"crewai:delegation-loops\",\n            \"crewai:hallucinated-tools\", \n            \"crewai:task-drift\"\n        ],\n        auto_fix=True\n    )\n)\n\ncrew = Crew(agents=[researcher], tasks=[task])\n\n# Vex automatically detects issues and suggests fixes\nresult = crew.kickoff()\n\n# View Vex report\nprint(vex_client.get_report(crew_id=crew.id))",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate CrewAI agent failures with one line of code: pip install vex-sdk"
+    }
+  }
+}

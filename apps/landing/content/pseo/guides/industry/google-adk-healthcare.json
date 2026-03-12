@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "industry": "healthcare",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Google ADK Guardrails for Healthcare",
+    "description": "Compliance guide for Google ADK agents in healthcare. Meet HIPAA, FDA 21 CFR Part 11 requirements with Vex guardrails.",
+    "keywords": [
+      "Google ADK healthcare",
+      "healthcare AI compliance",
+      "Google ADK guardrails",
+      "healthcare AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Healthcare teams using Google ADK to build multi-agent systems for patient triage, diagnostics, or care coordination face immense compliance risks due to handling PHI and making auditable decisions. Common ADK failure modes like multi-agent circular dependencies and Gemini model inconsistencies can lead to data leaks or untraceable decisions, violating HIPAA and FDA 21 CFR Part 11. Vex provides essential guardrails through before_agent_callback integration to ensure PHI de-identification, audit trails, and consistent outputs before agent execution.",
+    "complianceRequirements": [
+      {
+        "regulation": "HIPAA",
+        "description": "Requires protection of PHI with strict controls on data access, transmission, and processing; patient data cannot leave secure environments.",
+        "howVexHelps": "Intercepts agent inputs via before_agent_callback to enforce PHI de-identification using NER models and blocks transmission to external Gemini APIs."
+      },
+      {
+        "regulation": "FDA 21 CFR Part 11",
+        "description": "Mandates electronic records and signatures be trustworthy, reliable, and auditable for AI-assisted medical decisions.",
+        "howVexHelps": "Captures complete agent execution traces including inputs, tool calls, and model outputs for immutable audit logging."
+      },
+      {
+        "regulation": "HITECH Act",
+        "description": "Strengthens HIPAA with breach notification requirements and higher penalties for PHI mishandling.",
+        "howVexHelps": "Real-time validation prevents common ADK failures like session corruption that could expose PHI during long conversations."
+      },
+      {
+        "regulation": "SOC 2 Type II",
+        "description": "Requires demonstrated controls for security, availability, and confidentiality over 6+ months.",
+        "howVexHelps": "Monitors multi-agent delegation patterns to prevent circular dependencies and ensures consistent tool response formats."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "PHI Exposure via Undetected PII",
+        "description": "Patient names, SSNs, or medical record numbers pass through to Gemini models without de-identification.",
+        "severity": "critical",
+        "example": "Triage agent receives 'John Doe, SSN 123-45-6789 needs urgent cardiac eval' and forwards raw text to analysis agent."
+      },
+      {
+        "name": "Un-auditable Decision Chains",
+        "description": "Multi-agent handoffs create opaque decision paths impossible to reconstruct for regulatory audits.",
+        "severity": "critical",
+        "example": "Diagnostic agent delegates to pharmacy agent which calls billing agent, creating circular dependency loops."
+      },
+      {
+        "name": "Model Switching Inconsistency",
+        "description": "Gemini model variants produce conflicting treatment recommendations across agent conversations.",
+        "severity": "high",
+        "example": "Gemini 1.5 Pro suggests antibiotics while Gemini 1.5 Flash recommends observation for same patient symptoms."
+      },
+      {
+        "name": "Session State PHI Corruption",
+        "description": "Long conversations accumulate PHI in corrupted session state, risking exposure on state restoration.",
+        "severity": "high",
+        "example": "24-hour monitoring conversation state contains 50+ patient records after memory overflow."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "PHI De-identification Before Agent Execution",
+        "description": "Install Vex and register before_agent_callback to scrub PHI using spaCy NER before any ADK agent processes patient data.",
+        "code": "import vex\nfrom google.adk import Agent, Runner\n\n@vex.guardrail(before_agent_callback=True)\ndef scrub_phi_before_agent(inputs: dict) -> dict:\n    from spacy import load\n    nlp = load('en_core_web_sm')\n    \n    if 'message' in inputs:\n        doc = nlp(inputs['message'])\n        phi_entities = ['PERSON', 'DATE', 'ORG']\n        cleaned = inputs['message']\n        for ent in doc.ents:\n            if ent.label_ in phi_entities:\n                cleaned = cleaned.replace(ent.text, f\"[PHI_{ent.label_}]\\\")\n        inputs['message'] = cleaned\n    \n    vex.log.audit(f\"PHI scrubbed: {len([e for e in doc.ents if e.label_ in phi_entities])} entities masked\")\n    return inputs\n\n# Register with ADK\nagent = Agent(..., callbacks=[scrub_phi_before_agent])",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Multi-agent Circular Dependencies",
+        "description": "Track agent delegation graphs to block circular handoffs that create untraceable decision paths.",
+        "code": "import vex\nfrom typing import Set, Dict\n\nclass DelegationTracker:\n    def __init__(self):\n        self.call_stack: Dict[str, Set[str]] = {}\n    \n    @vex.guardrail(before_agent_callback=True)\n    def prevent_circular_delegation(self, inputs: dict, agent_id: str) -> dict:\n        current_stack = self.call_stack.get(inputs.get('session_id', 'default'), set())\n        \n        if agent_id in current_stack:\n            raise vex.ViolationError(f\"Circular dependency detected: {agent_id} called recursively\")\n        \n        current_stack.add(agent_id)\n        self.call_stack[inputs.get('session_id', 'default')] = current_stack\n        \n        vex.log.audit(f\"Delegation trace: {' -> '.join(list(current_stack))}\")\n        return inputs\n\ntracker = DelegationTracker()\ntriage_agent = Agent(callbacks=[tracker.prevent_circular_delegation])",
+        "language": "python"
+      },
+      {
+        "title": "Enforce Consistent Tool Response Formats",
+        "description": "Validate all tool responses match expected schemas before agent processing to prevent cascading errors.",
+        "code": "import vex\nimport json\nfrom google.adk.tools import ToolResponse\n\n@vex.guardrail(before_agent_callback=True)\ndef validate_tool_responses(self, inputs: dict) -> dict:\n    if 'tool_results' in inputs:\n        expected_schema = {\n            \"diagnosis\": \"str\",\n            \"confidence\": \"float between 0-1\",\n            \"recommendations\": \"list[str]\"\n        }\n        \n        for i, result in enumerate(inputs['tool_results']):\n            try:\n                parsed = json.loads(result)\n                if not isinstance(parsed.get('confidence'), float) or not 0 <= parsed['confidence'] <= 1:\n                    raise ValueError(f\"Invalid confidence score in tool {i}\")\n                vex.log.metric('tool_validation', {'valid': True, 'tool_id': i})\n            except Exception as e:\n                vex.block(f\"Tool {i} format violation: {e}\")\n                inputs['tool_results'][i] = json.dumps({\"error\": \"format_validation_failed\"})\n    return inputs\n\nlab_agent = Agent(callbacks=[validate_tool_responses])",
+        "language": "python"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Google ADK in Healthcare: A Scenario",
+      "scenario": "Regional Health Network deploys a Google ADK multi-agent system for emergency department triage. The Triage Agent receives patient intake data containing PHI, delegates to Diagnostic Agent (Gemini 1.5 Pro) for analysis, which calls Lab Results Agent and Pharmacy Interaction Agent. During 12-hour shifts, session state accumulates PHI from 200+ patients while model switching between Gemini variants creates inconsistent antibiotic recommendations. A circular delegation loop between Diagnostic and Pharmacy agents causes the system to hang during a mass casualty incident, blocking all triage for 45 minutes.",
+      "outcome": "After implementing Vex before_agent_callbacks, PHI is automatically de-identified (reducing PII detection from 98% to 0.2%). Circular dependencies are blocked in real-time with full audit trails showing delegation paths. Tool responses are validated against clinical schemas, ensuring consistent 95% confidence scoring. During the next mass casualty event, the system processed 180 patients/hour with complete auditability, avoiding $2.3M in potential HIPAA fines and maintaining uninterrupted care delivery."
+    },
+    "cta": {
+      "heading": "Comply with Healthcare Regulations Using Vex",
+      "description": "Install Vex today with `pip install vex-sdk` and add before_agent_callback to your Google ADK agents for immediate HIPAA and FDA 21 CFR Part 11 compliance."
+    }
+  }
+}

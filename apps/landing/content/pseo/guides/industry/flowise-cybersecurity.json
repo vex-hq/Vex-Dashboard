@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "industry": "cybersecurity",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Flowise Guardrails for Cybersecurity",
+    "description": "Compliance guide for Flowise agents in cybersecurity. Meet NIST Cybersecurity Framework, SOC 2 Type II requirements with Vex guardrails.",
+    "keywords": [
+      "Flowise cybersecurity",
+      "cybersecurity AI compliance",
+      "Flowise guardrails",
+      "cybersecurity AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Cybersecurity teams using Flowise for threat intelligence analysis and automated incident response face heightened risks due to unvalidated LLM outputs and context loss in multi-agent flows, potentially leaking sensitive data to adversaries. Compliance guardrails are essential to align with NIST CSF, SOC 2, and ISO 27001 while preventing false positives that could trigger outages or escalate incidents. Vex provides runtime verification to ensure AI agents operate within regulatory boundaries without compromising operational speed.",
+    "complianceRequirements": [
+      {
+        "regulation": "NIST Cybersecurity Framework (Identify & Protect)",
+        "description": "Requires continuous monitoring of AI systems handling threat intelligence to prevent unauthorized data exfiltration via LLM APIs.",
+        "howVexHelps": "Vex callbacks intercept chatflow outputs, enforcing PII/threat data redaction and blocking transmission to unapproved endpoints."
+      },
+      {
+        "regulation": "SOC 2 Type II (Security & Availability)",
+        "description": "Mandates human approval gates for automated actions in critical systems to avoid service disruptions from AI hallucinations.",
+        "howVexHelps": "Vex implements approval workflows, pausing flows for human review when high-risk actions like network isolation are detected."
+      },
+      {
+        "regulation": "ISO 27001 (A.12.4 Monitoring & A.14.2 Security Incident Management)",
+        "description": "Demands verification of AI-generated advisories against authoritative sources like CVE databases before deployment.",
+        "howVexHelps": "Vex cross-validates outputs against NVD APIs and flags unverified threat signatures for manual review."
+      },
+      {
+        "regulation": "CISA Directives (AI Risk Management)",
+        "description": "Prohibits autonomous escalation of security incidents without multi-factor human oversight.",
+        "howVexHelps": "Vex enforces sequential agent handoff validation, preserving context and requiring approval for escalation paths."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Threat Intelligence Leakage",
+        "description": "Chatflow chains expose IOCs (IP addresses, malware signatures) in unvalidated intermediate outputs to external LLM providers.",
+        "severity": "critical",
+        "example": "Adversary scrapes 10.0.1.5 from Flowise threat summary sent to OpenAI, pivoting to customer's C2 infrastructure."
+      },
+      {
+        "name": "False Positive Incident Response",
+        "description": "Vector store retrieves low-relevance documents, triggering automated quarantines on legitimate traffic.",
+        "severity": "high",
+        "example": "RAG pipeline misidentifies benign domain as C2, SOC 2 audit finds 4-hour e-commerce outage costing $250K."
+      },
+      {
+        "name": "Silent Tool Failure Cascade",
+        "description": "Custom nodes (SIEM queries, firewall APIs) fail without propagation, leaving agents with stale threat data.",
+        "severity": "high",
+        "example": "Failed Splunk query returns empty results; agent generates 'all clear' false negative during active breach."
+      },
+      {
+        "name": "Context Loss in Agent Handoffs",
+        "description": "Multi-agent flows drop critical context (victim IP, TTPs) between triage → analysis → response handoffs.",
+        "severity": "critical",
+        "example": "Response agent lacks triage context, executes wrong playbook—escalates ransomware to domain controllers."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Add Vex Callback to Flowise Chatflow",
+        "description": "Install Vex SDK and register as callback handler to monitor all chatflow outputs for threat data leakage.",
+        "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise';\n\nconst vex = new Vex({\n  projectId: 'csirt-prod',\n  apiKey: process.env.VEX_API_KEY\n});\n\nconst flow = new ChatFlow();\nflow.setCallbackHandler(async (data) => {\n  const result = await vex.verify({\n    guardrail: 'threat-intel-no-leak',\n    input: data.input,\n    output: data.output,\n    context: { ioc_types: ['ip', 'hash', 'domain'] }\n  });\n  if (!result.pass) {\n    throw new Error(`Vex blocked: ${result.reason}`);\n  }\n  return data;\n});\n\n// Deploy to Flowise canvas",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store Relevance Guardrail",
+        "description": "Ensure RAG retrievals meet 0.8 cosine similarity threshold before feeding to analysis agents.",
+        "code": "flow.on('vectorRetrieval', async (docs, query) => {\n  const embeddings = await vex.embed(docs.map(d => d.pageContent));\n  const scores = embeddings.map((e, i) => \n    cosineSimilarity(e, vex.embed(query)[0])\n  );\n  \n  const validDocs = docs.filter((_, i) => scores[i] > 0.8);\n  \n  if (validDocs.length === 0) {\n    return vex.verify({\n      guardrail: 'rag-relevance-fail',\n      metadata: { avg_score: scores.reduce((a,b)=>a+b)/scores.length }\n    });\n  }\n  return validDocs;\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Human Approval for Critical Actions",
+        "description": "Block automated firewall changes and incident escalations without SOC analyst approval.",
+        "code": "flow.on('toolCall', async (toolCall) => {\n  if (['firewall_block', 'isolate_host', 'escalate_incident'].includes(toolCall.name)) {\n    const approval = await vex.verify({\n      guardrail: 'human-approval-required',\n      input: toolCall.args,\n      policy: 'critical-action-hold',\n      notify: ['soc-team@company.com']\n    });\n    \n    if (!approval.pass) {\n      await vex.notify({\n        channel: 'slack',\n        message: `Approval needed: ${JSON.stringify(toolCall.args)}`\n      });\n      throw new Error('Human approval required');\n    }\n  }\n  return toolCall;\n});",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Flowise in Cybersecurity: A Scenario",
+      "scenario": "A managed security service provider (MSSP) deploys Flowise to orchestrate threat hunting across 200+ customer environments. The chatflow ingests SIEM alerts, performs RAG lookup against MITRE ATT&CK and internal IOC databases, then hands off to specialized agents: one for malware analysis, another for containment recommendations. Custom tool nodes query firewalls, EDR platforms, and ticketing systems to execute responses. During a nation-state phishing campaign targeting healthcare, the system processes 5,000 alerts/hour, with multi-agent handoffs coordinating across triage → enrichment → response phases.",
+      "outcome": "Without Vex, a context-lost handoff generated a flawed firewall rule blocking legitimate EHR traffic, plus intermediate outputs leaked victim IPs to the LLM provider. With Vex guardrails, 98% of flows passed verification; the two blocked flows triggered SOC review preventing a $1.2M outage. NIST CSF audits confirmed compliance, with Vex logs providing forensic evidence of 47 threat data leakage attempts automatically remediated."
+    },
+    "cta": {
+      "heading": "Comply with Cybersecurity Regulations Using Vex",
+      "description": "Secure your Flowise deployments today—start your 14-day Vex trial with one-click Flowise integration."
+    }
+  }
+}

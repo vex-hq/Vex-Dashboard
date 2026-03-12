@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "problem": "output-consistency",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Ensuring Output Consistency in AI Agents in AG2 Agents",
+    "description": "How to detect and fix ensuring output consistency in ai agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ensuring-output-consistency-in-ai-agents",
+      "AG2 output-consistency",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, ensuring output consistency in AI agents is critical due to its enhanced group chat capabilities where agents engage in dynamic multi-turn conversations. Problems manifest as agents spiraling off-topic during extended discussions, group chats reaching consensus on incorrect facts, speaker selection biases leading to unbalanced participation, and code execution agents producing inconsistent or harmful outputs. These issues undermine the reliability of multi-agent systems built with AG2's conversational patterns.",
+    "howItManifests": [
+      {
+        "scenario": "Agent conversation spiraling off-topic",
+        "symptom": "Agents in SequentialChat or GroupChat deviate from initial task instructions after 5+ turns",
+        "impact": "Complete task failure as agents pursue irrelevant tangents, wasting tokens and compute"
+      },
+      {
+        "scenario": "Group chat consensus on incorrect facts",
+        "symptom": "Multiple agents in GroupChatManager agree on hallucinated information despite contradictory evidence",
+        "impact": "Downstream decision-making based on false consensus corrupts entire workflow"
+      },
+      {
+        "scenario": "Speaker selection bias in multi-agent groups",
+        "symptom": "GroupChatManager consistently selects same agent (e.g., 'coder' dominates), others remain silent",
+        "impact": "Loss of diverse perspectives leads to suboptimal solutions and groupthink"
+      },
+      {
+        "scenario": "Code execution agents producing harmful outputs",
+        "symptom": "CodeAgent generates unsafe code (file deletion, network calls) despite safety constraints",
+        "impact": "Security vulnerabilities and potential infrastructure damage from unvetted code execution"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Topic Drift Detector",
+        "description": "Monitors conversation turns for semantic drift from initial task using AG2 message history",
+        "code": "from ag2 import GroupChat, GroupChatManager\nfrom sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\ndef detect_topic_drift(chat_history, initial_prompt, threshold=0.7):\n    \"\"\"Detect if conversation has drifted from initial topic\"\"\"\n    from sentence_transformers import SentenceTransformer\n    \n    model = SentenceTransformer('all-MiniLM-L6-v2')\n    initial_emb = model.encode(initial_prompt)\n    \n    recent_turns = chat_history[-5:]  # Last 5 turns\n    recent_embs = model.encode([msg.content for msg in recent_turns])\n    \n    similarities = cosine_similarity([initial_emb], recent_embs)[0]\n    drift_score = np.mean(similarities)\n    \n    return drift_score < threshold, drift_score\n\n# Usage in AG2\ngroupchat = GroupChat(agents=[agent1, agent2], messages=[])\nmanager = GroupChatManager(groupchat)\n\nis_drift, score = detect_topic_drift(groupchat.messages, 'Solve math problem step by step')\nif is_drift:\n    print(f'Topic drift detected: {score:.2f}')"
+      },
+      {
+        "name": "Consensus Fact Check",
+        "description": "Validates group consensus against external knowledge sources in AG2 GroupChat",
+        "code": "import requests\nfrom ag2 import GroupChat\n\ndef check_group_consensus_facts(groupchat, threshold_agreement=0.8):\n    \"\"\"Check if group consensus matches verifiable facts\"\"\"\n    messages = [m for m in groupchat.messages if 'fact' in m.content.lower() or '?' in m.content]\n    \n    consensus_facts = {}\n    for msg in messages[-10:]:  # Last 10 factual messages\n        fact = msg.content.strip('.?!')\n        sender = msg.sender\n        consensus_facts.setdefault(fact, []).append(sender)\n    \n    risky_consensus = []\n    for fact, supporters in consensus_facts.items():\n        agreement_ratio = len(supporters) / len(groupchat.agents)\n        if agreement_ratio > threshold_agreement:\n            # Verify with simple knowledge check\n            if 'earth' in fact.lower() and 'flat' in fact.lower():\n                risky_consensus.append((fact, agreement_ratio))\n    \n    return len(risky_consensus) > 0, risky_consensus\n\n# Usage\ngroupchat = GroupChat(agents=agents, messages=chat_history)\nhas_bad_consensus, facts = check_group_consensus_facts(groupchat)"
+      },
+      {
+        "name": "Speaker Balance Monitor",
+        "description": "Tracks speaker distribution in AG2 GroupChatManager to detect selection bias",
+        "code": "from collections import Counter\nfrom ag2 import GroupChatManager\n\ndef detect_speaker_bias(groupchat, max_dominance=0.6):\n    \"\"\"Detect if single speaker dominates AG2 group chat\"\"\"\n    speakers = [msg.sender for msg in groupchat.messages if hasattr(msg, 'sender')]\n    speaker_counts = Counter(speakers)\n    total_messages = len(speakers)\n    \n    if total_messages == 0:\n        return False, {}\n    \n    dominance_ratios = {speaker: count/total_messages for speaker, count in speaker_counts.items()}\n    max_dominance = max(dominance_ratios.values())\n    \n    dominant_speakers = [s for s, r in dominance_ratios.items() if r > max_dominance]\n    \n    return max_dominance > max_dominance, {\n        'dominance_ratio': max_dominance,\n        'dominant_speakers': dominant_speakers,\n        'speaker_distribution': dict(speaker_counts)\n    }\n\n# Usage\nbias_detected, metrics = detect_speaker_bias(groupchat)\nif bias_detected:\n    print(f'Speaker bias: {metrics['dominant_speakers']} dominate with {metrics['dominance_ratio']:.1%}')"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Topic Enforcement Middleware",
+        "description": "AG2 message hook that re-aligns agents to original task context",
+        "code": "from ag2 import register_message_hook\n\nclass TopicEnforcer:\n    def __init__(self, original_task):\n        self.original_task = original_task\n        self.drift_count = 0\n    \n    def __call__(self, message, agent, groupchat):\n        # Check for drift every 3 messages\n        if len(groupchat.messages) % 3 == 0:\n            drift, score = detect_topic_drift(groupchat.messages, self.original_task)\n            if drift:\n                self.drift_count += 1\n                if self.drift_count <= 2:  # Max 2 corrections\n                    correction = f\"\\n\\n*** REMINDER: Focus on original task: '{self.original_task}' ***\\n\"\n                    message.content = correction + message.content\n        return message\n\n# Register with AG2\ndef create_consistent_groupchat():\n    enforcer = TopicEnforcer('Solve the quadratic equation step-by-step')\n    register_message_hook(enforcer)\n    return GroupChat(agents=agents)"
+      },
+      {
+        "name": "Fair Speaker Selector",
+        "description": "Custom GroupChatManager that enforces balanced participation",
+        "code": "from ag2 import GroupChatManager\nfrom collections import deque, Counter\n\nclass FairGroupChatManager(GroupChatManager):\n    def __init__(self, groupchat, recent_speakers_limit=3):\n        super().__init__(groupchat)\n        self.recent_speakers = deque(maxlen=recent_speakers_limit)\n        self.speaker_counts = Counter()\n    \n    def select_speaker(self, last_speaker):\n        # Avoid same speaker repeating\n        available_agents = [a for a in self.groupchat.agents \n                          if a != last_speaker and a != self.recent_speakers[-1]]\n        \n        if not available_agents:\n            available_agents = self.groupchat.agents\n        \n        # Select least recent speaker\n        least_spoken = min(available_agents, key=lambda a: self.speaker_counts[a.name])\n        \n        self.recent_speakers.append(least_spoken)\n        self.speaker_counts[least_spoken.name] += 1\n        \n        return least_spoken\n\n# Usage\nfair_manager = FairGroupChatManager(groupchat)\ngroupchat.manager = fair_manager"
+      },
+      {
+        "name": "Safe Code Executor",
+        "description": "Sandbox for AG2 CodeAgents preventing harmful operations",
+        "code": "import ast\nimport re\nfrom ag2 import CodeAgent\n\nclass SafeCodeValidator:\n    DANGEROUS_PATTERNS = [\n        r'open\\(\\s*[\"\\'](/|\\\\)',  # Root file access\n        r'os\\.(remove|rmdir|unlink|system|pop\\d*)\\s*\\(\\s*[\"\\'][^,]',\n        r'subprocess\\.(run|call|check_call|check_output)',\n        r'exec\\(|eval\\(',\n        r'__import__\\s*\\(\\s*[\"\\'](?:os|subprocess|sys)',\n    ]\n    \n    @staticmethod\n    def is_safe(code):\n        # Parse AST for dangerous constructs\n        try:\n            tree = ast.parse(code)\n            for node in ast.walk(tree):\n                if isinstance(node, ast.Call):\n                    func_name = ast.unparse(node.func)\n                    for pattern in SafeCodeValidator.DANGEROUS_PATTERNS:\n                        if re.search(pattern, func_name, re.IGNORECASE):\n                            return False\n        except:\n            pass\n        \n        # Regex check for dangerous strings\n        for pattern in SafeCodeValidator.DANGEROUS_PATTERNS:\n            if re.search(pattern, code, re.IGNORECASE):\n                return False\n        \n        return True\n\n# Wrap AG2 CodeAgent\nclass SafeCodeAgent(CodeAgent):\n    def generate_code(self, task):\n        code = super().generate_code(task)\n        if not SafeCodeValidator.is_safe(code):\n            return \"# CODE REJECTED: Contains unsafe operations\"\n        return code"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Ensuring Output Consistency in AG2 Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a message hook in AG2 using its register_message_hook API, automatically monitoring all agent conversations for the four key consistency failure modes. It runs the detection methods above in real-time, scoring conversations and triggering automated fixes when thresholds are breached. Vex maintains conversation state across sessions, learning optimal intervention thresholds for your specific agent configurations.\n\nThe Vex SDK (`pip install vex-sdk`) provides pre-built detectors for AG2's GroupChatManager patterns and automatically applies remediations using the fix patterns shown above. Configuration is simple JSON, with zero-code deployment across all your AG2 deployments. Vex also generates compliance reports showing consistency metrics over time, helping teams iterate on agent prompts and configurations.\n\nIntegration takes <5 minutes and works with existing AG2 SequentialChat, GroupChat, and custom manager patterns without code changes.",
+      "code": "from vex_sdk import VexMonitor\nfrom ag2 import GroupChat, register_message_hook\n\n# Install: pip install ag2 vex-sdk\n\n# 1. Initialize Vex monitor for AG2\nvex = VexMonitor(\n    framework='ag2',\n    detectors=[\n        'topic_drift',\n        'speaker_bias',\n        'consensus_facts',\n        'code_safety'\n    ],\n    auto_fix=True,\n    thresholds={\n        'topic_drift': 0.75,\n        'speaker_dominance': 0.6,\n        'consensus_agreement': 0.8\n    }\n)\n\n# 2. Register Vex as AG2 message hook (automatic)\nregister_message_hook(vex.message_hook)\n\n# 3. Use normally - Vex monitors everything\ngroupchat = GroupChat(\n    agents=[coder, critic, planner],\n    messages=[],\n    max_round=20\n)\nmanager = GroupChatManager(groupchat)\n\n# Vex auto-generates report\nprint(vex.get_consistency_report())\n\n# Output:\n# {\n#   'overall_score': 0.87,\n#   'issues_fixed': 3,\n#   'drift_events': 2,\n#   'speaker_balance': 0.92\n# }",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AG2 consistency failures with one line of code: `pip install vex-sdk`"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with Haystack + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack rag pipeline",
+      "Haystack guardrails",
+      "rag pipeline reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with Haystack enables modular, production-ready LLM applications through composable components for retrieval, context assembly, and generation. Guardrails are essential to mitigate common failures like irrelevant retrievals, hallucinations, and type mismatches that erode reliability in high-stakes document synthesis use cases. Vex integration provides runtime verification for source faithfulness, context relevance, and citation accuracy.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with Haystack",
+      "description": "A typical Haystack RAG pipeline starts with a Retriever (e.g., InMemoryBM25Retriever or EmbeddingRetriever) that fetches relevant documents from a DocumentStore based on user queries. Retrieved documents pass through a PromptBuilder or custom component to assemble context, followed by a Generator (e.g., OpenAIChatGenerator) that synthesizes answers with source attribution. This modular flow supports vector search via embedding models and scales to production with async execution and error handling.\n\nKey components include indexing pipelines for document embedding storage and inference pipelines for query-time retrieval-generation. Custom components can inject Vex verification between retrieval and generation to check context relevance and faithfulness before LLM synthesis, preventing downstream hallucinations.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Retriever      │───▶│   PromptBuilder  │\n└─────────────────┘    │(BM25/Embedding)  │    │ (Context + Query)│\n                       └──────────────────┘    └──────────────────┘\n                                                    │\n                       ┌──────────────────┐    ┌──────────────────┐\n                       │  DocumentStore   │◀───┤   Vex Guard     │\n                       │ (InMemory/FAISS) │    │(Faithfulness...) │\n                       └──────────────────┘    └──────────────────┘\n                                                    │\n                                               ┌──────────────────┐\n                                               │   Generator      │\n                                               │ (OpenAIGPT/...)  │─▶ Answer w/ Citations\n                                               └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever outputs non-Document objects or Generator expects different schema, causing pipeline crashes.",
+        "severity": "critical",
+        "mitigation": "Vex schema validation component enforces type contracts between components."
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Embedding drift or poor query representation leads to low-relevance context fed to LLM.",
+        "severity": "high",
+        "mitigation": "Vex context relevance scoring filters documents by cosine similarity thresholds."
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM fabricates information not grounded in provided retrieval context.",
+        "severity": "critical",
+        "mitigation": "Vex faithfulness checks ensure generated text semantically matches source documents."
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "Haystack pipeline continues despite component failures, producing unreliable outputs.",
+        "severity": "high",
+        "mitigation": "Vex observability captures and surfaces all component errors with structured traces."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG Pipeline Setup",
+        "description": "Initialize core Haystack components for document indexing and query pipeline.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIChatGenerator\nfrom haystack.utils import ComponentDevice\n\nindexing = Pipeline()\nindexing.add_component(\"retriever\", InMemoryEmbeddingRetriever())\n\nquery_pipe = Pipeline()\nquery_pipe.add_component(\"retriever\", InMemoryEmbeddingRetriever())\nquery_pipe.add_component(\"generator\", OpenAIChatGenerator(api_key=\"your-key\"))\nquery_pipe.connect(\"retriever\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Document Indexing with Embeddings",
+        "description": "Embed and store documents for vector search using SentenceTransformers.",
+        "code": "from haystack.components.embedders import SentenceTransformersDocumentEmbedder, SentenceTransformersTextEmbedder\nfrom haystack.document_stores.in_memory import InMemoryDocumentStore\n\ndoc_store = InMemoryDocumentStore()\nindexing.add_component(\"text_embedder\", SentenceTransformersTextEmbedder(model=\"all-MiniLM-L6-v2\"))\nindexing.add_component(\"doc_embedder\", SentenceTransformersDocumentEmbedder(model=\"all-MiniLM-L6-v2\"))\nindexing.connect(\"text_embedder\", \"doc_embedder\")\nindexing.connect(\"doc_embedder\", \"document_store.writer\")",
+        "language": "python"
+      },
+      {
+        "title": "Query-Time Retrieval and Generation",
+        "description": "Connect retriever to generator with similarity top-k filtering.",
+        "code": "from haystack.components.builders import PromptBuilder\n\nquery_pipe.add_component(\"prompt_builder\", PromptBuilder(template=\"Answer based on context: {{documents}} Query: {{query}}\"))\nquery_pipe.connect(\"retriever.documents\", \"prompt_builder.documents\")\nquery_pipe.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Run Pipeline with Documents",
+        "description": "Execute indexing and query pipelines with sample data.",
+        "code": "docs = [Document(content=\"Haystack is a framework for LLM pipelines.\")]\nindexing.run({\"text_embedder\": {\"text\": [doc.content for doc in docs]}, \"document_store\": {\"documents\": docs}})\n\nresult = query_pipe.run({\"retriever\": {\"query\": \"What is Haystack?\", \"top_k\": 3}, \"generator\": {\"generation_kwargs\": {\"max_tokens\": 100}}})\nprint(result[\"generator\"][\"replies\"][0].content)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Custom Component for Context Relevance",
+        "description": "Add Vex guard after retriever to filter irrelevant documents by embedding similarity.",
+        "code": "from vex_sdk import Vex\nfrom haystack import component\n\n@component\nclass VexContextGuard:\n    def __init__(self):\n        self.vex = Vex(api_key=\"your-vex-key\")\n    \n    @component.output_types(documents=list)\n    def run(self, query: str, documents: list):\n        results = self.vex.verify({\n            \"type\": \"context_relevance\",\n            \"query\": query,\n            \"documents\": [d.content for d in documents],\n            \"threshold\": 0.7\n        })\n        filtered = [d for i, d in enumerate(documents) if results[\"scores\"][i] > 0.7]\n        return {\"documents\": filtered}\n\nquery_pipe.add_component(\"vex_guard\", VexContextGuard())\nquery_pipe.connect(\"retriever.documents\", \"vex_guard.documents\")\nquery_pipe.connect(\"vex_guard.documents\", \"prompt_builder.documents\")",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Verify generated response stays faithful to retrieved context before returning.",
+        "code": "query_pipe.add_component(\"vex_faithfulness\", VexFaithfulnessGuard())\nquery_pipe.connect(\"generator.replies\", \"vex_faithfulness.replies\")\nquery_pipe.connect(\"prompt_builder.documents\", \"vex_faithfulness.documents\")\n\n@component\nclass VexFaithfulnessGuard:\n    def __init__(self):\n        self.vex = Vex(api_key=\"your-vex-key\")\n    \n    @component.output_types(replies=list)\n    def run(self, replies: list, documents: list):\n        verdict = self.vex.verify({\n            \"type\": \"source_faithfulness\",\n            \"response\": replies[0].content,\n            \"sources\": [d.content for d in documents]\n        })\n        if verdict[\"passed\"]:\n            return {\"replies\": replies}\n        raise ValueError(\"Faithfulness check failed\")",
+        "language": "python"
+      },
+      {
+        "title": "Citation Accuracy with Vex Tracing",
+        "description": "Add structured tracing and citation validation to track source attribution.",
+        "code": "from vex_sdk import VexTrace\n\nclass TracedGenerator(OpenAIChatGenerator):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.vex = Vex(api_key=\"your-vex-key\")\n        self.trace = VexTrace(\"rag-pipeline\")\n    \n    def _generate(self, prompt, **kwargs):\n        response = super()._generate(prompt, **kwargs)\n        trace_id = self.trace.start(\n            inputs={\"prompt\": prompt},\n            metadata=kwargs.get(\"metadata\", {})\n        )\n        citation_check = self.vex.verify({\n            \"type\": \"citation_accuracy\",\n            \"response\": response.content,\n            \"citations\": response.meta.get(\"citations\", [])\n        })\n        self.trace.end(trace_id, {\"citations_valid\": citation_check[\"passed\"]})\n        return response\n\nquery_pipe.add_component(\"generator\", TracedGenerator(api_key=\"your-key\"))",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack RAG Pipeline",
+      "description": "Install Vex SDK today and add production-grade verification to eliminate RAG failures: pip install vex-sdk"
+    }
+  }
+}

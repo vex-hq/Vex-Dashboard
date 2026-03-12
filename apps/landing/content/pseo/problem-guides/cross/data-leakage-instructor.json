@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Instructor Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Instructor data-leakage",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor-powered AI agents, sensitive data leakage occurs when structured output extraction fails to fully validate Pydantic models, allowing raw LLM responses containing secrets to escape into agent memory or logs. Common failure modes like validation retries exhaustion and partial field extraction create gaps where unfiltered model outputs bypass schema enforcement. This is particularly dangerous in agentic workflows where Instructor's patching of client.chat.completions.create() handles retries automatically but doesn't inherently scrub sensitive data from intermediate responses.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor exhausts max_retries and falls back to raw LLM response containing API keys",
+        "impact": "Secrets logged to agent observability systems and stored in conversation history"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Instructor returns partial Pydantic model with raw_text field containing unparsed secrets",
+        "impact": "Agents forward incomplete responses with embedded credentials to downstream tools"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "Instructor accepts hallucinated 'enum' values that contain base64-encoded secrets",
+        "impact": "Malicious enum values bypass validation and reach external APIs"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Deeply nested Pydantic objects contain raw LLM text with secrets in unvalidated leaf nodes",
+        "impact": "Secrets persist in agent state across multiple tool calls"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Secret Detection",
+        "description": "Detect when Instructor's validation retries fail and raw response contains secrets",
+        "code": "from instructor import from_openai\nimport re\n\nclient = from_openai(OpenAI())\n\nclass UserResponse(BaseModel):\n    name: str\n    email: str\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=UserResponse,\n    messages=[{\"role\": \"user\", \"content\": \"Extract user info: api_key=sk-12345 user=john@example.com\"}],\n    max_retries=1\n)\n\n# Detection\nsecret_pattern = re.compile(r'sk-\\w+|AKIA[\\w]{16}')\nraw_response = response.model_dump_json()\nif secret_pattern.search(raw_response):\n    print('🚨 SENSITIVE DATA LEAK DETECTED in raw response')\n",
+        "language": "python"
+      },
+      {
+        "name": "Partial Model Secret Scanner",
+        "description": "Scan Instructor's partial Pydantic models for embedded secrets in optional fields",
+        "code": "import json\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass PartialUser(BaseModel):\n    name: str\n    email: Optional[str] = None\n    raw_text: Optional[str] = Field(default=None, description=\"Raw LLM extraction\")\n\n# Simulate partial extraction\npartial_model = PartialUser(\n    name=\"John Doe\",\n    raw_text=\"email: john@example.com, token: Bearer eyJhbGciOiJIUzI1NiIs\\\"incomplete parsing\\\"\"\n)\n\n# Detection\nfor field_value in partial_model.model_dump().values():\n    if isinstance(field_value, str) and 'Bearer ' in field_value:\n        print(f'🚨 TOKEN LEAK in field: {field_value[:50]}...')\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Object Leak Detector",
+        "description": "Recursively scan Instructor's nested Pydantic models for secrets",
+        "code": "def scan_model_for_secrets(model: BaseModel, path: str = '') -> list:\n    leaks = []\n    data = model.model_dump()\n    \n    for key, value in data.items():\n        current_path = f'{path}.{key}' if path else key\n        \n        if isinstance(value, str) and any(pattern in value for pattern in ['sk-', 'Bearer ', 'AKIA']):\n            leaks.append({'path': current_path, 'value': value[:20] + '...'})\n        elif isinstance(value, dict):\n            leaks.extend(scan_model_for_secrets(BaseModel.model_validate(value), current_path))\n        elif isinstance(value, list):\n            for i, item in enumerate(value):\n                if isinstance(item, (str, dict)):\n                    leaks.extend(scan_model_for_secrets(BaseModel.model_validate(item) if isinstance(item, dict) else item, f'{current_path}[{i}]'))\n    \n    return leaks\n\n# Usage with Instructor response\nleaks = scan_model_for_secrets(response)\nif leaks:\n    print('🚨 NESTED LEAKS:', leaks)\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Pre-Validation Secret Scrubbing",
+        "description": "Scrub secrets from prompt before Instructor processing",
+        "code": "from instructor import from_openai\nimport re\nfrom openai import OpenAI\n\nSECRET_PATTERNS = [\n    r'sk-\\w{48}',\n    r'Bearer\\s+[A-Za-z0-9-_]+\\\\?.+[A-Za-z0-9-_]*',\n    r'AKIA[\\w]{16}'\n]\n\ndef scrub_secrets(text: str) -> str:\n    for pattern in SECRET_PATTERNS:\n        text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)\n    return text\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=UserResponse,\n    messages=[{\n        \"role\": \"user\", \n        \"content\": scrub_secrets(\"Extract: api_key=sk-12345 user=john@example.com\")\n    }],\n    max_retries=3\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Custom Instructor Validator",
+        "description": "Extend Instructor with secret-aware Pydantic validation",
+        "code": "from pydantic import BaseModel, field_validator\nfrom instructor import from_openai\nfrom typing import Any\n\nclass SafeUserResponse(BaseModel):\n    name: str\n    email: str\n    \n    @field_validator('*', mode='before')\n    @classmethod\n    def check_secrets(cls, v: Any) -> Any:\n        if isinstance(v, str):\n            patterns = ['sk-', 'Bearer ', 'AKIA']\n            if any(pattern in v for pattern in patterns):\n                raise ValueError(f'Sensitive data detected: {patterns}')\n        return v\n\nclient = from_openai(OpenAI())\n\n# Now Instructor will fail validation on secrets\nresponse = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=SafeUserResponse,\n    messages=[{\"role\": \"user\", \"content\": \"Extract user: sk-12345 john@example.com\"}],\n    max_retries=2\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Response Wrapper with Leak Prevention",
+        "description": "Wrap Instructor responses with automatic secret redaction",
+        "code": "from functools import wraps\nimport json\n\nfrom instructor import from_openai\n\nclass LeakProofClient:\n    def __init__(self, client):\n        self.client = client\n    \n    def chat_completions_create(self, **kwargs):\n        response = self.client.chat_completions_create(**kwargs)\n        \n        # Redact secrets from choices\n        for choice in response.choices:\n            if choice.message.content:\n                choice.message.content = self._redact_secrets(choice.message.content)\n        \n        return response\n    \n    def _redact_secrets(self, text: str) -> str:\n        patterns = [r'sk-\\w{48}', r'Bearer\\s+[^\\s]+']\n        for pattern in patterns:\n            text = re.sub(pattern, '[SECRET_REDACTED]', text, flags=re.IGNORECASE)\n        return text\n\nsafe_client = LeakProofClient(from_openai(OpenAI()))\nresponse = safe_client.chat_completions_create(\n    model=\"gpt-4o\",\n    response_model=UserResponse,\n    messages=[{\"role\": \"user\", \"content\": \"test\"}]\n)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly with Instructor by wrapping client.chat.completions.create() calls, automatically detecting sensitive data leakage across all four common failure modes. When validation retries exhaust or partial extractions occur, Vex intercepts both raw LLM responses and partial Pydantic models, scanning for secrets using regex patterns and semantic analysis before they reach agent state or logs.\n\nVex provides remediation through dynamic response patching - automatically redacting detected secrets while preserving structured output integrity. For nested object leaks, Vex recursively validates the entire Pydantic object graph. The platform maintains zero-downtime enforcement with configurable thresholds and integrates with existing Instructor retry logic.\n\nDeployment requires only pip install vex-sdk and wrapping your Instructor client - Vex handles the rest including alerting, dashboards, and automatic fixes.",
+      "code": "from vex import verify\nfrom instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Install: pip install instructor vex-sdk\n\nclass UserResponse(BaseModel):\n    name: str\n    email: str\n\nclient = from_openai(OpenAI())\n\n# Vex automatically detects leakage in all Instructor failure modes\n@verify()\ndef extract_user_info(text: str) -> UserResponse:\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=UserResponse,\n        messages=[{\"role\": \"user\", \"content\": f\"Extract: {text}\"}],  # May contain sk-12345\n        max_retries=2\n    )\n\n# Vex will:\n# ✅ Block secrets in retry exhaustion fallback\n# ✅ Scan partial model extractions\n# ✅ Validate nested objects recursively\n# ✅ Alert on hallucinated enum secrets\n\nresult = extract_user_info(\"api_key=sk-xyz123 user=john@example.com\")\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Instructor calls in @verify() to eliminate sensitive data leakage instantly."
+    }
+  }
+}

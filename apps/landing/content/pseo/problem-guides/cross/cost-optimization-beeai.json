@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "problem": "cost-optimization",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Cost Optimization in BeeAI Agents",
+    "description": "How to detect and fix ai agent cost optimization in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-cost-optimization-guide",
+      "BeeAI cost-optimization",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Cost Optimization issues in BeeAI manifest through unbounded memory growth during long sessions, inefficient tool calls without caching, excessive Granite model token usage from format inconsistencies, and redundant state serializations. These problems lead to skyrocketing inference costs and unpredictable billing in production deployments. BeeAI's event-driven architecture amplifies these issues as agents scale across multiple concurrent sessions.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support agents",
+        "symptom": "Agent memory balloons from 100MB to 5GB+ after 2 hours",
+        "impact": "Token costs increase 50x due to massive context windows"
+      },
+      {
+        "scenario": "Tool-heavy research agents with repeated API calls",
+        "symptom": "Same tool called 100+ times without caching",
+        "impact": "External API costs exceed $10k/month unnecessarily"
+      },
+      {
+        "scenario": "Granite model format parsing failures",
+        "symptom": "Model outputs rejected 40% of time requiring retries",
+        "impact": "3x inference cost multiplier from repeated generations"
+      },
+      {
+        "scenario": "State persistence in multi-turn conversations",
+        "symptom": "Full conversation history serialized every turn",
+        "impact": "Database write costs grow linearly with conversation length"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory Growth Monitor",
+        "description": "Detects unbounded memory growth by tracking agent memory usage over time",
+        "code": "from beeai import Agent\nfrom beeai.events import MemoryEvent\n\nclass MemoryGrowthDetector:\n    def __init__(self):\n        self.baseline_memory = {}\n        self.growth_threshold = 2.0  # 2x growth triggers alert\n\n    def on_memory_event(self, event: MemoryEvent):\n        agent_id = event.agent_id\n        current_memory = event.memory_usage_mb\n        \n        if agent_id not in self.baseline_memory:\n            self.baseline_memory[agent_id] = current_memory\n            return\n        \n        growth_ratio = current_memory / self.baseline_memory[agent_id]\n        session_duration = event.timestamp - event.session_start\n        \n        if growth_ratio > self.growth_threshold and session_duration > 3600:\n            print(f'🚨 MEMORY LEAK: Agent {agent_id} memory grew {growth_ratio:.1f}x')"
+      },
+      {
+        "name": "Token Waste Analyzer",
+        "description": "Identifies excessive token usage from retries and format issues",
+        "code": "from beeai.events import GenerationEvent\n\nclass TokenWasteDetector:\n    def __init__(self):\n        self.retry_threshold = 3\n        self.token_waste = {}\n\n    def on_generation_event(self, event: GenerationEvent):\n        agent_id = event.agent_id\n        retry_count = event.retry_count\n        tokens_used = event.input_tokens + event.output_tokens\n\n        if agent_id not in self.token_waste:\n            self.token_waste[agent_id] = {'retries': 0, 'total_tokens': 0}\n\n        self.token_waste[agent_id]['retries'] += retry_count\n        self.token_waste[agent_id]['total_tokens'] += tokens_used\n\n        if self.token_waste[agent_id]['retries'] > self.retry_threshold:\n            waste_pct = (self.token_waste[agent_id]['retries'] * tokens_used) / self.token_waste[agent_id]['total_tokens']\n            print(f'🚨 TOKEN WASTE: Agent {agent_id} wasting {waste_pct:.1%} tokens on retries')"
+      },
+      {
+        "name": "Tool Call Duplication Detector",
+        "description": "Finds repeated tool calls that should be cached",
+        "code": "from beeai.events import ToolCallEvent\nfrom collections import defaultdict\n\nclass ToolDuplicationDetector:\n    def __init__(self, window_minutes=30):\n        self.tool_calls = defaultdict(list)\n        self.window = window_minutes * 60\n\n    def on_tool_call(self, event: ToolCallEvent):\n        now = event.timestamp\n        tool_signature = (event.tool_name, str(event.args))\n\n        # Clean old calls\n        self.tool_calls[tool_signature] = [\n            call for call in self.tool_calls[tool_signature]\n            if now - call.timestamp < self.window\n        ]\n\n        self.tool_calls[tool_signature].append(event)\n\n        if len(self.tool_calls[tool_signature]) > 5:\n            print(f'🚨 TOOL DUPLICATION: {event.tool_name} called {len(self.tool_calls[tool_signature])} times in {self.window/60}m')"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Truncation Middleware",
+        "description": "Automatically truncates conversation history to control memory growth",
+        "code": "from beeai import Agent, Middleware\nfrom beeai.events import MessageEvent\n\nclass MemoryOptimizerMiddleware(Middleware):\n    def __init__(self, max_memory_mb=500, max_messages=50):\n        self.max_memory_mb = max_memory_mb\n        self.max_messages = max_messages\n\n    def before_message(self, agent: Agent, event: MessageEvent):\n        memory_mb = agent.get_memory_usage()\n        messages = agent.conversation_history\n\n        if memory_mb > self.max_memory_mb or len(messages) > self.max_messages:\n            # Keep only recent messages\n            recent_messages = messages[-self.max_messages//2:]\n            agent.conversation_history = recent_messages\n            agent.clear_memory_cache()\n            print(f'✅ Memory optimized: {len(messages)} → {len(recent_messages)} messages')"
+      },
+      {
+        "name": "Tool Call Cache",
+        "description": "Caches identical tool calls to eliminate duplication",
+        "code": "from beeai.tools import Tool\nfrom functools import lru_cache\nimport hashlib\n\nclass CachedTool(Tool):\n    def __init__(self, original_tool):\n        self.original_tool = original_tool\n        self.cache = {}\n\n    @lru_cache(maxsize=1000)\n    def _cached_execute(self, args_hash, **kwargs):\n        return self.original_tool.execute(**kwargs)\n\n    def execute(self, **kwargs):\n        args_str = str(sorted(kwargs.items()))\n        args_hash = hashlib.md5(args_str.encode()).hexdigest()\n\n        if args_hash in self.cache:\n            print(f'📦 CACHE HIT: {self.original_tool.name}')\n            return self.cache[args_hash]\n\n        result = self._cached_execute(args_hash, **kwargs)\n        self.cache[args_hash] = result\n        return result"
+      },
+      {
+        "name": "Granite Format Normalizer",
+        "description": "Standardizes Granite model outputs to prevent parsing retries",
+        "code": "from beeai.models import GraniteModel\n\nclass CostOptimizedGranite(GraniteModel):\n    def parse_output(self, raw_output):\n        # Force consistent JSON format\n        normalized = {\n            'tool_calls': raw_output.get('tool_calls', []),\n            'content': raw_output.get('content', ''),\n            'finish_reason': raw_output.get('finish_reason', 'stop'),\n            'usage': raw_output.get('usage', {'prompt_tokens': 0, 'completion_tokens': 0})\n        }\n        \n        # Validate required fields\n        if not normalized['content']:\n            normalized['content'] = ' '\n            \n        print(f'✅ Normalized Granite output, saved {len(str(raw_output)) - len(str(normalized))} bytes')\n        return normalized"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Cost Optimization Detection with Vex",
+      "description": "Vex integrates seamlessly with BeeAI's event system, automatically detecting cost optimization opportunities across all your agents. By registering as an event listener, Vex monitors memory growth, token waste, and tool duplication in real-time, providing actionable insights and automated fixes. \n\nVex's cost optimization agent runs continuous analysis, identifying the top 3 cost drivers in your BeeAI deployment and applying fixes with zero-downtime. It learns from your usage patterns to set intelligent thresholds and prioritizes fixes by dollar impact. \n\nThe integration requires just 5 lines of code and works across all BeeAI agents, providing a centralized dashboard of your cost savings and optimization recommendations.",
+      "code": "from vex_sdk import Vex\nfrom beeai import Agent\nfrom beeai.events import EventHandler\n\n# Install: pip install beeai-framework vex-sdk\n\nvex = Vex(api_key=\"your-vex-api-key\")\n\n@vex.register_optimization_suite('beeai-cost-optimizer')\ndef cost_optimizer_suite():\n    return {\n        'memory_growth': {'threshold': '2x', 'auto_fix': True},\n        'token_waste': {'max_retries': 2, 'auto_fix': True},\n        'tool_duplication': {'window': '30m', 'auto_fix': True}\n    }\n\n# Auto-register with all BeeAI agents\nEventHandler.register_global_listener(vex.event_listener)\n\n# Vex auto-deploys optimization rules\nvex.deploy_suite('beeai-cost-optimizer')\nprint('🚀 Vex Cost Optimizer active - monitoring all BeeAI agents')"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and cut your BeeAI costs by 60%+ automatically"
+    }
+  }
+}

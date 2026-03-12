@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Mastra Agents",
+    "description": "How to detect and fix context window management for ai agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Mastra context-window-management",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra, Context Window Management issues for AI agents arise when workflow steps accumulate excessive state data, memory retrievals inject irrelevant historical context, and tool outputs exceed token limits without truncation. Agents often hallucinate or fail mid-conversation due to context overflow in Mastra's workflow transitions and agent memory systems. These problems are exacerbated by Mastra's flexible state management which doesn't enforce token limits by default.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent receives full conversation history plus unfiltered tool outputs exceeding 128k token limit",
+        "impact": "LLM returns 400 errors or truncated responses, breaking workflow continuity"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Mastra's agentMemory.retrieve() pulls 50+ previous conversations into current context",
+        "impact": "Agent confuses user identities and conversation topics across sessions"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "Third-party tool responses contain binary data or excessive JSON payloads",
+        "impact": "Context window overflows during tool result processing in workflow nodes"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Real-time data feeds continuously append to agent context without summarization",
+        "impact": "Agent fixates on latest data point, ignoring user intent and conversation flow"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Exceeded Monitor",
+        "description": "Intercepts Mastra workflow transitions to measure context length before LLM calls",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\nimport { countTokens } from 'vex_dev/sdk';\n\nconst tokenMonitor = async (ctx: WorkflowRuntime.Context) => {\n  const currentContext = ctx.state.conversationHistory + ctx.state.lastToolOutput;\n  const tokenCount = await countTokens(currentContext);\n  \n  if (tokenCount > 120000) {\n    console.error(`⚠️ Context overflow: ${tokenCount} tokens`);\n    throw new Error('Context window exceeded safe limit');\n  }\n  \n  return ctx;\n};\n\n// Add to Mastra workflow\nworkflow.useMiddleware(tokenMonitor);",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Injection Validator",
+        "description": "Validates Mastra agentMemory retrievals for relevance and staleness",
+        "code": "import { AgentRuntime } from 'mastra/agents';\nimport { semanticSimilarity } from 'vex_dev/sdk';\n\nconst memoryValidator = async (ctx: AgentRuntime.Context) => {\n  const retrievedMemory = await ctx.agentMemory.retrieve(ctx.sessionId, 10);\n  const currentQueryTokens = await countTokens(ctx.userMessage);\n  \n  for (const memoryItem of retrievedMemory) {\n    const relevance = await semanticSimilarity(ctx.userMessage, memoryItem.content);\n    if (relevance < 0.3 || (Date.now() - memoryItem.timestamp) > 24 * 60 * 60 * 1000) {\n      console.warn('🗑️ Stale/irrelevant memory filtered:', memoryItem.id);\n      ctx.state.filteredMemory.push(memoryItem);\n    }\n  }\n  \n  ctx.state.memoryContext = retrievedMemory.filter(item => !ctx.state.filteredMemory.includes(item));\n  return ctx;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Output Size Checker",
+        "description": "Scans Mastra tool call results for oversized payloads before context injection",
+        "code": "import { ToolRuntime } from 'mastra/tools';\n\nconst toolSizeChecker = async (toolResult: ToolRuntime.Result) => {\n  const resultTokens = await countTokens(JSON.stringify(toolResult.output));\n  \n  if (resultTokens > 8000) {\n    console.error(`🛑 Tool output too large: ${resultTokens} tokens`);\n    toolResult.output = {\n      summary: await summarizeContent(toolResult.output),\n      truncated: true,\n      originalSize: resultTokens\n    };\n  }\n  \n  return toolResult;\n};\n\n// Register with Mastra tools\ntoolRegistry.usePostProcessor(toolSizeChecker);",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncator",
+        "description": "Automatically summarizes and prioritizes Mastra workflow context to fit token limits",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\nimport { summarize, prioritizeContext } from 'vex_dev/sdk';\n\nconst contextTruncator = async (ctx: WorkflowRuntime.Context) => {\n  const fullContext = ctx.state.getFullContext();\n  const tokenCount = await countTokens(fullContext);\n  \n  if (tokenCount > 110000) {\n    // Prioritize recent + relevant context\n    const prioritized = await prioritizeContext(fullContext, ctx.userMessage);\n    const summary = await summarize(prioritized, { maxTokens: 2000 });\n    \n    ctx.state.contextPayload = {\n      activeContext: prioritized.slice(0, 80000),\n      summary,\n      truncationInfo: `Reduced from ${tokenCount} to ${await countTokens(ctx.state.contextPayload)} tokens`\n    };\n  }\n  \n  return ctx;\n};\n\nworkflow.useMiddleware(contextTruncator);",
+        "language": "typescript"
+      },
+      {
+        "name": "Smart Memory Filter",
+        "description": "Filters Mastra agent memory by recency, relevance, and conversation boundaries",
+        "code": "import { AgentRuntime } from 'mastra/agents';\n\nconst smartMemoryFilter = async (ctx: AgentRuntime.Context) => {\n  const allMemory = await ctx.agentMemory.retrieve(ctx.sessionId, 50);\n  const filteredMemory = allMemory\n    .filter(memory => {\n      const ageHours = (Date.now() - memory.timestamp) / (1000 * 60 * 60);\n      const relevance = semanticSimilarity(ctx.userMessage, memory.content);\n      return ageHours < 24 && relevance > 0.4;\n    })\n    .slice(0, 15) // Max 15 recent relevant memories\n    .sort((a, b) => b.timestamp - a.timestamp);\n  \n  ctx.state.relevantMemory = filteredMemory;\n  console.log(`📦 Memory filtered: ${allMemory.length} → ${filteredMemory.length}`);\n  \n  return ctx;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Result Compressor",
+        "description": "Compresses large Mastra tool outputs with structured summaries",
+        "code": "import { ToolRuntime } from 'mastra/tools';\n\nconst toolCompressor = async (toolResult: ToolRuntime.Result) => {\n  if (await countTokens(JSON.stringify(toolResult.output)) > 4000) {\n    const compressed = await compressToolOutput(toolResult.output);\n    \n    toolResult.output = {\n      $schema: 'vex/tool-compressed',\n      summary: compressed.summary,\n      keyFacts: compressed.facts,\n      dataShape: analyzeDataShape(toolResult.output),\n      rawSize: await countTokens(JSON.stringify(toolResult.output)),\n      compressedSize: await countTokens(JSON.stringify(compressed))\n    };\n  }\n  \n  return toolResult;\n};\n\nfunction compressToolOutput(rawOutput: any) {\n  return {\n    summary: `Key insights from ${Object.keys(rawOutput).length} records`,\n    facts: extractKeyFacts(rawOutput),\n    stats: computeDataStats(rawOutput)\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates directly into Mastra's middleware pipeline as a zero-config observability layer, automatically detecting context window violations across workflows, agents, and tools. It provides real-time token counting, relevance scoring, and automatic truncation with full audit trails. Vex's Mastra integration captures every context injection point - workflow transitions, memory retrievals, tool results - and applies ML-powered filtering to maintain optimal context hygiene.\n\nThe Vex SDK hooks into Mastra's runtime without code changes, providing instant dashboards showing context bloat patterns, top memory offenders, and tool output culprits. Automated remediation rules trigger summarization, filtering, or workflow rerouting when thresholds are hit, ensuring agents stay within token limits 99.9% of the time. Teams get Slack/Teams alerts with one-click fixes and historical trend analysis for capacity planning.",
+      "code": "import { MastraVexClient } from '@vex_dev/sdk/mastra';\nimport { createWorkflow } from 'mastra/workflows';\n\n// Zero-config Vex integration\nconst vex = new MastraVexClient({\n  apiKey: process.env.VEX_API_KEY,\n  autoRemediate: true,\n  rules: {\n    maxContextTokens: 110000,\n    memoryRelevanceThreshold: 0.4,\n    toolOutputMaxTokens: 4000\n  }\n});\n\n// Vex auto-instruments all Mastra components\nconst workflow = createWorkflow({\n  name: 'customer-support-agent',\n  // Vex automatically wraps:\n  // - workflow transitions\n  // - agent memory calls  \n  // - tool executions\n  // - LLM prompts\n});\n\n// Enable with one line\nvex.monitor(workflow);\n\n// Vex auto-generates detection rules:\n// ✅ Context window alerts\n// ✅ Memory staleness warnings\n// ✅ Tool output compression\n// ✅ Auto-remediation",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `npm install @vex_dev/sdk` and one line of code to eliminate context window failures forever."
+    }
+  }
+}

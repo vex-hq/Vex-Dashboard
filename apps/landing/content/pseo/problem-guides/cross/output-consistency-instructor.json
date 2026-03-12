@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "output-consistency",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Ensuring Output Consistency in AI Agents in Instructor Agents",
+    "description": "How to detect and fix ensuring output consistency in ai agents in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ensuring-output-consistency-in-ai-agents",
+      "Instructor output-consistency",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor, ensuring output consistency in AI agents fails when the patched client.chat.completions.create() cannot enforce Pydantic schema validation despite retries. Agents produce inconsistent structured outputs due to model hallucinations of invalid enum values, partial field extraction, or malformed nested objects. These failures exhaust Instructor's validation retries, causing unhandled exceptions and breaking agent workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor raises ValidationError after max_retries despite partial_match_strategy='drop' or 'keep'",
+        "impact": "Agent crashes with unrecoverable BindError, halting entire workflow"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Pydantic model returns with None values for required fields despite mode='json'",
+        "impact": "Downstream agent logic fails due to missing critical data"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "Instructor extracts invalid enum values like 'INVALID_STATUS' when schema defines ['pending', 'completed']",
+        "impact": "Silent failures where data passes validation but breaks business logic"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Nested Pydantic models return inconsistent structures across calls (sometimes missing sub-objects)",
+        "impact": "Agent state becomes corrupted, causing cascading failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's validation retries are exhausted by catching BindError with retry metadata",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel\n\nclass User(BaseModel):\n    name: str\n    age: int\n\nclient = Instructor(client=OpenAI())\n\ntry:\n    user = client.messages.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=User,\n        messages=[{'role': 'user', 'content': 'Extract user info'}],\n        max_retries=3\n    )\nexcept instructor.exceptions.BindError as e:\n    if hasattr(e, 'response') and e.response.usage.total_tokens > 1000:\n        print(f'Retry exhaustion detected: {e}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Hallucination Detector",
+        "description": "Validates extracted enum values against schema to catch hallucinations",
+        "code": "from enum import Enum\nfrom pydantic import BaseModel, validator\n\nclass StatusEnum(str, Enum):\n    PENDING = 'pending'\n    COMPLETED = 'completed'\n\nclass Task(BaseModel):\n    status: StatusEnum\n\n    @validator('status')\n    def validate_status(cls, v):\n        if v not in StatusEnum:\n            raise ValueError(f'Hallucinated enum: {v}')\n        return v\n\n# Usage\ntry:\n    task = Task(status='INVALID')\nexcept ValueError as e:\n    print(f'Enum hallucination: {e}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Structure Consistency Check",
+        "description": "Verifies nested Pydantic objects have consistent depth across multiple calls",
+        "code": "from typing import List\nfrom pydantic import BaseModel\n\nclass NestedData(BaseModel):\n    items: List[dict]\n\n    def is_consistent(self, other: 'NestedData') -> bool:\n        return (len(self.items) == len(other.items) and \n                all(len(item) == len(other.items[i]) for i, item in enumerate(self.items)))\n\n# Detect inconsistency\nresults = []\nfor _ in range(3):\n    result = client.messages.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=NestedData,\n        messages=[{'role': 'user', 'content': 'Extract nested data'}]\n    )\n    results.append(result)\n\nconsistent = all(results[0].is_consistent(r) for r in results[1:])\nif not consistent:\n    print('Nested structure inconsistency detected')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Robust Retry with Fallback Schema",
+        "description": "Uses partial=True and custom error handling to prevent retry exhaustion",
+        "code": "from instructor import Instructor\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass User(BaseModel):\n    name: str = Field(..., description='User full name')\n    age: Optional[int] = Field(None, ge=0)\n\nclient = Instructor(client=OpenAI())\n\n@client.retry_on(failure_type=ValueError, max_retries=2)\ndef safe_extract():\n    return client.messages.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=User,\n        messages=[{'role': 'user', 'content': 'Extract: John, 30 years old'}],\n        partial=True,\n        mode='json',\n        temperature=0.1\n    )\n",
+        "language": "python"
+      },
+      {
+        "name": "Strict Enum Coercion",
+        "description": "Forces model to respect enum values using constrained prompt and validation",
+        "code": "from enum import Enum\nfrom pydantic import BaseModel, Field\n\nclass Status(str, Enum):\n    PENDING = 'pending'\n    COMPLETED = 'completed'\n\nclass Task(BaseModel):\n    status: Status = Field(..., description=\"Must be 'pending' or 'completed'\")\n\nresponse = client.messages.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=Task,\n    messages=[\n        {'role': 'system', 'content': \"Status must be exactly 'pending' or 'completed'. No other values.\"},\n        {'role': 'user', 'content': 'Task is pending completion'}\n    ],\n    temperature=0,\n    max_retries=1\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Validation with Default Structure",
+        "description": "Provides default nested structure to ensure consistent depth",
+        "code": "from typing import List, Dict, Any\nfrom pydantic import BaseModel, Field\n\nclass NestedItem(BaseModel):\n    id: str\n    value: str\n\nclass ConsistentResponse(BaseModel):\n    items: List[NestedItem] = Field(default_factory=list, max_items=10)\n    metadata: Dict[str, Any] = Field(default_factory=dict)\n\nresponse = client.messages.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=ConsistentResponse,\n    messages=[\n        {'role': 'system', 'content': 'Always return items as array of objects with id and value fields.'},\n        {'role': 'user', 'content': 'Extract structured data'}\n    ],\n    partial=True\n)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Ensuring Output Consistency in AI Agents Detection with Vex",
+      "description": "Vex automatically wraps Instructor's client.chat.completions.create() calls with vex.verify(), providing runtime monitoring of validation failures, retry exhaustion, and schema violations. It captures detailed telemetry on Pydantic validation errors, tracks hallucinated enum values, and measures nested structure consistency across agent runs. Vex generates automated test cases from failure patterns and suggests optimal Instructor configuration parameters like max_retries, temperature, and partial_match_strategy.\n\nThe platform maintains a failure baseline for your Instructor agents, alerting on regression in output consistency. When issues are detected, Vex applies progressive fixes - from prompt engineering to schema coercion - and validates remediation through A/B testing. Integration requires wrapping your existing Instructor client with a single vex.verify() decorator.",
+      "code": "from vex import verify\nfrom instructor import Instructor\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Install: pip install instructor vex-sdk\nclient = Instructor(client=OpenAI())\n\n@verify(test_name='instructor-consistency-check')\ndef extract_user_data(prompt: str):\n    return client.messages.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=User,\n        messages=[{'role': 'user', 'content': prompt}],\n        max_retries=3,\n        temperature=0.1\n    )\n\n# Vex automatically detects:\n# - Validation retry exhaustion\n# - Enum hallucinations\n# - Partial field extraction\n# - Nested structure inconsistency\n\nresult = extract_user_data('Extract user: John Doe, age 30')\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Instructor calls to eliminate output consistency failures in 5 minutes."
+    }
+  }
+}

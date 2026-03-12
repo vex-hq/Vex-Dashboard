@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in CrewAI Agents",
+    "description": "How to detect and fix ai agent memory management in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "CrewAI memory-management",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, AI Agent Memory Management issues arise when agents fail to maintain consistent state across collaborative tasks, leading to delegation loops, hallucinated data propagation, and task drift. Agents in a crew share memory through task outputs and agent memory stores, but without proper management, short-term task memories conflict with long-term agent memories, causing inconsistent decision-making. This manifests uniquely in CrewAI's task delegation patterns and memory APIs, amplifying failures in multi-agent workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly delegate the same task back and forth due to incomplete memory retention of prior delegation states",
+        "impact": "Infinite loops that consume API credits and timeout workflows"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agent A hallucinates tool output which Agent B treats as factual memory and propagates to Agent C",
+        "impact": "Cascade of incorrect decisions throughout the entire crew workflow"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Each agent reinterprets the shared objective slightly differently, diverging from original task memory",
+        "impact": "Final output doesn't match user expectations despite individual task completion"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Agents forget role-specific memory context, producing generic responses instead of specialized outputs",
+        "impact": "Reduced overall crew performance and unreliable deliverables"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Delegation Loop Detector",
+        "description": "Monitors task delegation patterns to detect circular references in agent memory states",
+        "code": "from crewai import Agent, Task, Crew\nfrom collections import defaultdict\n\ndef detect_delegation_loops(crew):\n    delegation_graph = defaultdict(list)\n    for task in crew.tasks:\n        if task.assignee and task.context:\n            # Track who delegated to whom\n            delegation_graph[task.assignee.name].append(task.description[:50])\n    \n    # Detect cycles\n    visited = set()\n    rec_stack = set()\n    \n    def has_cycle(node):\n        visited.add(node)\n        rec_stack.add(node)\n        for neighbor in delegation_graph[node]:\n            if neighbor not in visited:\n                if has_cycle(neighbor):\n                    return True\n            elif neighbor in rec_stack:\n                return True\n        rec_stack.remove(node)\n        return False\n    \n    for agent in delegation_graph:\n        if agent not in visited:\n            if has_cycle(agent):\n                return {'issue': 'DELEGATION_LOOP', 'agents': list(delegation_graph.keys())}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Memory Drift Monitor",
+        "description": "Compares agent memory state against original task objectives to detect semantic drift",
+        "code": "import re\nfrom crewai import Task\n\ndef detect_memory_drift(task: Task, agent_memory: str):\n    original_objective = task.description\n    memory_keywords = set(re.findall(r'\\b\\w+\\b', original_objective.lower()))\n    memory_words = set(re.findall(r'\\b\\w+\\b', agent_memory.lower()))\n    \n    # Calculate drift score (Jaccard similarity)\n    intersection = len(memory_keywords.intersection(memory_words))\n    union = len(memory_keywords.union(memory_words))\n    drift_score = 1 - (intersection / union if union else 0)\n    \n    if drift_score > 0.7:\n        return {\n            'issue': 'TASK_DRIFT',\n            'drift_score': drift_score,\n            'original': original_objective,\n            'current': agent_memory[:200]\n        }\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Propagation Tracer",
+        "description": "Tracks tool output confidence scores across agent handoffs to detect hallucinated data flow",
+        "code": "from crewai_tools import BaseTool\nimport json\n\ndef trace_hallucination_propagation(task_output: str, tool_calls: list):\n    hallucination_chain = []\n    confidence_threshold = 0.3\n    \n    for tool_call in tool_calls:\n        if hasattr(tool_call, 'confidence') and tool_call.confidence < confidence_threshold:\n            hallucination_chain.append({\n                'tool': tool_call.__class__.__name__,\n                'confidence': tool_call.confidence,\n                'output_snippet': str(tool_call.output)[:100]\n            })\n    \n    if hallucination_chain:\n        return {\n            'issue': 'HALLUCINATED_PROPAGATION',\n            'chain_length': len(hallucination_chain),\n            'tools': hallucination_chain\n        }\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Shared Memory Context Manager",
+        "description": "Implement centralized memory store accessible by all crew agents to prevent state divergence",
+        "code": "from crewai import Agent, Task, Crew\nfrom typing import Dict, Any\n\nclass SharedMemory:\n    def __init__(self):\n        self.state: Dict[str, Any] = {}\n        self.delegation_history = []\n    \n    def update(self, key: str, value: Any):\n        self.state[key] = value\n    \n    def get(self, key: str, default=None):\n        return self.state.get(key, default)\n    \n    def record_delegation(self, from_agent: str, to_agent: str, task: str):\n        self.delegation_history.append({'from': from_agent, 'to': to_agent, 'task': task})\n\n# Usage in CrewAI\nshared_memory = SharedMemory()\n\nresearcher = Agent(\n    role='Researcher',\n    goal='Research using {shared_memory.get(\"context\", \"\")}',\n    memory=True,\n    context=[lambda: shared_memory.get('research_context')]\n)\n\n# Update memory after each task\nshared_memory.update('research_context', researcher_output)",
+        "language": "python"
+      },
+      {
+        "name": "Task Memory Validator",
+        "description": "Add validation step to each task that verifies memory consistency before delegation",
+        "code": "from crewai import Task\n\ndef create_validated_task(description: str, expected_memory_keys: list, agent):\n    def validate_memory(context):\n        missing_keys = [k for k in expected_memory_keys if k not in context]\n        if missing_keys:\n            raise ValueError(f'Missing memory keys: {missing_keys}')\n        return context\n    \n    return Task(\n        description=f\"\"\"{description}\n        Validate you have required context: {expected_memory_keys}\n        Current memory keys: {{list(context.keys())}}\"\"\",\n        expected_output='Validated task completion with consistent memory',\n        agent=agent,\n        context=[validate_memory],\n        max_iterations=3  # Prevent loops\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Role-Specific Memory Templates",
+        "description": "Enforce role-specific memory retention patterns to maintain output quality consistency",
+        "code": "from crewai import Agent\n\nROLE_MEMORY_TEMPLATES = {\n    'researcher': 'Research findings: {data}\\nSources: {sources}\\nStatus: {status}',\n    'writer': 'Objective: {objective}\\nKey findings: {research}\\nTone: {tone}\\nLength: {length}',\n    'editor': 'Previous draft: {draft}\\nIssues found: {issues}\\nStyle guide: {style}'\n}\n\ndef create_role_agent(role: str, llm):\n    return Agent(\n        role=role.capitalize(),\n        goal=f'Complete {role} tasks while maintaining role memory format',\n        backstory=f'You are a specialist {role} who always structures memory using the standard template',\n        memory=True,\n        llm=llm,\n        memory_template=ROLE_MEMORY_TEMPLATES.get(role, 'Standard memory format')\n    )",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates directly into CrewAI workflows as a task callback, automatically detecting memory management issues in real-time across all agent interactions. It monitors delegation patterns, memory drift, and hallucination propagation using CrewAI's native task and agent APIs, providing instant alerts and automated remediation suggestions. \n\nThe Vex SDK hooks into CrewAI's task execution lifecycle, capturing memory states at each delegation point and validating against predefined consistency rules. When issues are detected, Vex can automatically inject memory correction tasks or reroute delegations to prevent cascade failures. \n\nThis integration eliminates manual monitoring while preserving CrewAI's autonomous agent patterns, ensuring memory consistency scales with crew complexity.",
+      "code": "from crewai import Agent, Task, Crew\nfrom vex_sdk import VexMonitor\n\n# Install: pip install crewai vex-sdk\n\n# Initialize Vex monitor for CrewAI\nvex = VexMonitor(\n    project='crewai-memory',\n    detectors=['delegation_loops', 'memory_drift', 'hallucination_propagation']\n)\n\n# Create agents with Vex callbacks\nresearcher = Agent(\n    role='Researcher',\n    goal='Research topics thoroughly',\n    llm=llm,\n    memory=True,\n    callbacks=[vex.on_task_start, vex.on_task_complete]\n)\n\nwriter = Agent(\n    role='Writer',\n    goal='Write clear reports',\n    memory=True,\n    callbacks=[vex.on_task_start, vex.on_task_complete]\n)\n\n# Vex automatically monitors the entire crew\ncrew = Crew(\n    agents=[researcher, writer],\n    tasks=[research_task, write_task],\n    verbose=True,\n    callbacks=[vex.on_crew_start, vex.on_crew_complete]\n)\n\nresult = crew.kickoff()  # Vex detects & fixes memory issues automatically",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and eliminate CrewAI memory issues in one line of code."
+    }
+  }
+}

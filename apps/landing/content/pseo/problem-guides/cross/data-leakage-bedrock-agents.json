@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Amazon Bedrock Agents data-leakage",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Sensitive Data Leakage in Amazon Bedrock Agents occurs when PII, API keys, or proprietary data from knowledge bases or action groups gets exposed in agent responses. This manifests through malformed Lambda action responses, unfiltered knowledge base retrievals, and guardrails failing to catch domain-specific leaks. Bedrock's multi-turn session state can also propagate leaked data across conversations, amplifying exposure in enterprise deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Action group Lambda functions returning malformed responses",
+        "symptom": "Lambda returns raw database records with PII in action group output",
+        "impact": "Customer SSNs, emails exposed in agent final response"
+      },
+      {
+        "scenario": "Knowledge base retrieval missing relevant documents due to chunking",
+        "symptom": "Agent pulls irrelevant docs containing sensitive employee data",
+        "impact": "Internal HR data leaked to external users"
+      },
+      {
+        "scenario": "Agent guardrails not catching domain-specific policy violations",
+        "symptom": "Guardrails block generic profanity but miss API keys in responses",
+        "impact": "Live AWS credentials exposed to end users"
+      },
+      {
+        "scenario": "Session state loss between multi-turn agent invocations",
+        "symptom": "Previous turn's leaked PII cached in sessionAttributes",
+        "impact": "Data compounds across conversations, violating GDPR"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Scan Agent Responses for PII Patterns",
+        "description": "Detects SSNs, emails, and credit cards in Bedrock agent output using regex patterns",
+        "code": "import re\n\nimport boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\nPII_PATTERNS = [\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n    r'\\b\\d{4}-\\d{4}-\\d{4}-\\d{4}\\b'  # Credit Card\n]\n\ndef scan_agent_response(response_text):\n    for pattern in PII_PATTERNS:\n        if re.search(pattern, response_text):\n            return {'leak_detected': True, 'pattern': pattern}\n    return {'leak_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Monitor Lambda Action Group Outputs",
+        "description": "Intercepts action group responses for raw sensitive data before agent processing",
+        "code": "from botocore.exceptions import ClientError\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef invoke_agent_with_pii_monitor(agent_id, session_id, input_text):\n    try:\n        response = bedrock.invoke_agent(\n            agentId=agent_id,\n            agentAliasId='latest',\n            sessionId=session_id,\n            inputText=input_text\n        )\n        \n        # Check action group results in trace\n        trace = response['completion']\n        if 'actionGroups' in response['trace']:\n            for action in response['trace']['actionGroups']:\n                if 'observation' in action and len(action['observation']) > 500:\n                    print('⚠️  Potential raw data leak in action group')\n        return response\n    except ClientError as e:\n        print(f'Agent invocation failed: {e}')\n        return None",
+        "language": "python"
+      },
+      {
+        "name": "Session State PII Auditor",
+        "description": "Scans Bedrock sessionAttributes for accumulated sensitive data across turns",
+        "code": "import json\nimport boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef audit_session_state(session_id):\n    # Get session state\n    response = bedrock.get_agent_session(\n        agentId='YOUR_AGENT_ID',\n        agentAliasId='latest',\n        sessionId=session_id\n    )\n    \n    session_attrs = json.loads(response['sessionState']['sessionAttributes'])\n    \n    risky_keys = ['customer_data', 'pii', 'credentials']\n    leaks = []\n    \n    for key, value in session_attrs.items():\n        if any(risky in key.lower() for risky in risky_keys):\n            leaks.append({'key': key, 'value_preview': str(value)[:100]})\n    \n    return {'leaks_found': len(leaks), 'details': leaks}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Lambda Action Group PII Filter",
+        "description": "Sanitizes Lambda responses before returning to Bedrock agent",
+        "code": "import json\nimport re\n\ndef lambda_handler(event, context):\n    # Your business logic\n    db_result = query_customer_data(event['customerId'])\n    \n    # PII Sanitization\n    sanitized = sanitize_pii(db_result)\n    \n    return {\n        'response': {\n            'actionGroup': 'CustomerActions',\n            'apiPath': event['apiPath'],\n            'httpStatusCode': 200,\n            'completionMessage': json.dumps(sanitized)\n        }\n    }\n\ndef sanitize_pii(data):\n    # Replace PII patterns\n    data['customer_ssn'] = '***-**-****'\n    data['email'] = data['email'].split('@')[0] + '@redacted.com'\n    return data",
+        "language": "python"
+      },
+      {
+        "name": "Knowledge Base Response Filter",
+        "description": "Post-processes KB retrievals to strip sensitive chunks",
+        "code": "import boto3\n\nbedrock_kb = boto3.client('bedrock-agent-runtime')\n\nFORBIDDEN_DOMAINS = ['hr.internal', 'confidential']\n\ndef filter_kb_response(kb_response):\n    filtered_chunks = []\n    for chunk in kb_response['retrievalResults']:\n        content = chunk['content']['text']\n        # Skip chunks from internal domains\n        if not any(domain in content for domain in FORBIDDEN_DOMAINS):\n            filtered_chunks.append(chunk)\n    return {'retrievalResults': filtered_chunks}",
+        "language": "python"
+      },
+      {
+        "name": "Custom Bedrock Guardrail Config",
+        "description": "Configures domain-specific content filters beyond default guardrails",
+        "code": "import boto3\n\nbedrock = boto3.client('bedrock')\n\nguardrail_config = {\n    'name': 'pii-blocker-guardrail',\n    'description': 'Blocks PII and credentials',\n    'blockedInputMessaging': 'Sensitive information detected',\n    'blockedOutputsMessaging': 'Cannot share sensitive data',\n    'contentPolicyConfig': {\n        'filtersConfig': {\n            'harmCategories': [],\n            'customRegexes': [\n                {\n                    'name': 'API_KEY',\n                    'description': 'AWS API Keys',\n                    'pattern': 'AKIA[\\w]{16}'\n                },\n                {\n                    'name': 'SSN',\n                    'pattern': '\\b\\d{3}-\\d{2}-\\d{4}\\b'\n                }\n            ]\n        }\n    }\n}\n\nbedrock.create_guardrail(**guardrail_config)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides continuous runtime verification of Bedrock Agents by wrapping invoke_agent() calls with vex.verify(). The platform automatically detects PII leakage, malformed action responses, and session state violations using pre-built detectors trained on Bedrock trace patterns. \n\nWhen leakage is detected, Vex applies remediation policies like response redaction, session termination, and automatic guardrail updates. Integration takes <5 minutes and provides enterprise-grade observability across all agent deployments.\n\nVex's Bedrock-specific detectors catch the unique failure modes like action group response parsing errors and knowledge base chunk leakage that generic monitoring misses.",
+      "code": "import vex\nimport boto3\n\n# Install: pip install boto3 vex-sdk\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n    detectors=[\n        'pii-leakage',\n        'bedrock-action-group-malformed',\n        'session-pii-accumulation',\n        'kb-sensitive-retrieval'\n    ],\n    remediation='redact-and-log',\n    policy='block-on-leak'\n)\ndef safe_agent_invoke(agent_id, session_id, input_text):\n    '''Vex-wrapped Bedrock agent invocation'''\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId='latest',\n        sessionId=session_id,\n        inputText=input_text\n    )\n    \n    # Vex automatically scans response.trace, sessionState, and completion\n    return response\n\n# Usage\nresult = safe_agent_invoke('YOUR_AGENT_ID', 'sess-123', 'Show me customer data')\n\n# Vex returns:\n# {\n#   'verified': True/False,\n#   'issues': [...],\n#   'redacted_response': {...},\n#   'policy_action': 'allowed/blocked'\n# }",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one decorator to secure all your Bedrock Agents against data leakage - start your free trial at vex.com/bedrock"
+    }
+  }
+}

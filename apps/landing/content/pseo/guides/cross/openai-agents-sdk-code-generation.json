@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build code generation with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK code generation",
+      "OpenAI Agents SDK guardrails",
+      "code generation reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with OpenAI's Agents SDK enables powerful iterative development workflows where LLMs generate, test, and refine code in sandboxes. However, the high-risk nature of executing generated code demands robust guardrails to prevent security vulnerabilities, infinite loops, and credential leaks. Vex integration provides runtime verification that ensures safe code execution and validated agent handoffs.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with OpenAI Agents SDK",
+      "description": "The typical architecture features a Planner Agent that decomposes coding tasks, a CodeGenerator Agent that produces Python code, an Executor Agent that runs code in a sandbox, and a Validator Agent that checks test results and safety. Agents hand off via the SDK's structured messaging, with tracing for debugging multi-step workflows. This creates tight feedback loops for iterative refinement but exposes risks in unvalidated handoffs and execution.\n\nKey components include the Runner orchestrating agent execution, custom tools for sandboxing (e.g., E2B or Docker), and guardrails at each handoff point. Vex integrates as output parsers to validate agent responses before consumption by downstream agents.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Task     │───▶│  Planner Agent   │───▶│CodeGenerator Agt│\n└─────────────────┘    └──────────┬──────────┘    └──────────┬────────┘\n                                 │                          │\n                    ┌────────────▼────────────┐    ┌────────▼────────┐\n                    │     Vex Guardrail       │    │   Vex Guardrail  │\n                    └────────────┬────────────┘    └────────┬────────┘\n                                 │                          │\n                    ┌────────────▼────────────┐    ┌────────▼────────┐\n                    │   Sandbox Executor      │◀───│   Test Validator │\n                    └──────────────────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "Planner and CodeGenerator agents enter infinite refinement cycles without convergence criteria",
+        "severity": "critical",
+        "mitigation": "Vex convergence checks on agent outputs before handoff"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious user inputs trick code generator into producing dangerous syscalls or credential exfiltration",
+        "severity": "critical",
+        "mitigation": "Vex input sanitization and output content policy enforcement"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "Executor returns malformed test results that confuse Validator agent",
+        "severity": "high",
+        "mitigation": "Vex schema validation on all tool outputs"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Failed handoffs between sandbox executor and validator lose context",
+        "severity": "high",
+        "mitigation": "Vex structured tracing spans across agent boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Agent Setup",
+        "description": "Initialize OpenAI Agents SDK with code generation and sandbox execution tools",
+        "code": "from agents import Agent, Runner, function_tool\nfrom openai import OpenAI\n\nclient = OpenAI()\n\n@function_tool\nasync def execute_code(code: str) -> str:\n    # Sandbox execution (E2B/Docker)\n    result = sandbox.run(code)\n    return f\"Output: {result.stdout}\\nError: {result.stderr}\"\n\ncode_agent = Agent(\n    name=\"Code Generator\",\n    instructions=\"Generate Python code that solves the task. Include tests.\",\n    model=\"gpt-4o\",\n    tools=[execute_code]\n)\n\nrunner = Runner(agents=[code_agent])",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Handoff Chain",
+        "description": "Create planner → generator → executor workflow with handoffs",
+        "code": "planner = Agent(\n    name=\"Task Planner\",\n    instructions=\"Break down coding task into code generation + testing steps\",\n    model=\"gpt-4o\",\n    handoffs_to=[code_agent]\n)\n\nvalidator = Agent(\n    name=\"Test Validator\",\n    instructions=\"Check if tests pass and code is safe. Request fixes if needed\",\n    model=\"gpt-4o\",\n    handoffs_to=[code_agent]\n)\n\nmulti_agent_runner = Runner(agents=[planner, code_agent, validator])",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Tool with Dependency Control",
+        "description": "Secure execution environment with whitelisted dependencies",
+        "code": "@function_tool\ndef safe_execute(code: str) -> dict:\n    allowed_deps = {'numpy', 'pandas', 'matplotlib'}\n    \n    # Parse imports and validate\n    imports = extract_imports(code)\n    invalid_deps = imports - allowed_deps\n    \n    if invalid_deps:\n        return {\"error\": f\"Blocked deps: {invalid_deps}\"}\n    \n    # Execute in isolated sandbox\n    result = docker_sandbox.run(code, timeout=30)\n    return {\n        'success': result.exit_code == 0,\n        'output': result.stdout,\n        'tests_passed': parse_test_results(result.stdout)\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Refinement Loop",
+        "description": "Run agents until validation succeeds or max iterations reached",
+        "code": "async def generate_code(task: str, max_iterations: int = 5):\n    result = await multi_agent_runner.run(task)\n    \n    for i in range(max_iterations):\n        if result.final_output.get('tests_passed', False):\n            return result.final_output\n        \n        # Trigger refinement\n        feedback = result.final_output['feedback']\n        result = await multi_agent_runner.run(f\"Fix: {feedback}\")\n    \n    return result.final_output",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on Code Agent",
+        "description": "Validate generated code for safety and syntax before executor consumption",
+        "code": "from vex import Guardrail, Policy\n\ncode_safety_guardrail = Guardrail(\n    name=\"code-safety\",\n    policies=[\n        Policy.CodeSafety(),\n        Policy.NoCredentials(),\n        Policy.SyntaxValid(language=\"python\"),\n        Policy.NoExecCalls()\n    ]\n)\n\ncode_agent = Agent(\n    name=\"Code Generator\",\n    instructions=\"...\",\n    output_guardrails=[code_safety_guardrail],\n    model=\"gpt-4o\",\n    tools=[execute_code]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Handoff Validation Between Agents",
+        "description": "Ensure structured data flows correctly between planner and generator",
+        "code": "handoff_guardrail = Guardrail(\n    name=\"agent-handoff\",\n    policies=[\n        Policy.ConvergenceCheck(max_iterations=5),\n        Policy.SchemaValid(schema={\n            \"type\": \"object\",\n            \"properties\": {\n                \"code\": {\"type\": \"string\"},\n                \"tests\": {\"type\": \"array\"}\n            }\n        }),\n        Policy.NoPromptInjection()\n    ]\n)\n\nplanner = Agent(\n    name=\"Task Planner\",\n    output_guardrails=[handoff_guardrail],\n    handoffs_to=[code_agent]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Tracing for Multi-Agent Workflows",
+        "description": "Complete visibility across agent handoffs and tool calls",
+        "code": "import vex\n\n# Initialize Vex tracing\nvex.init(project=\"code-gen-agents\")\n\nasync def traced_workflow(task: str):\n    with vex.span(\"full-code-generation\"):\n        with vex.span(\"planner\"):\n            plan_result = await planner.run(task)\n        \n        with vex.span(\"code-gen\"):\n            code_result = await code_agent.run(plan_result)\n            \n        with vex.span(\"validation\"):\n            final = await validator.run(code_result)\n            \n        vex.span.set_attribute(\"tests_passed\", final.get('tests_passed', False))\n        return final\n\n# Auto-instruments all agent calls",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK Code Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your code generation pipeline from production failures."
+    }
+  }
+}

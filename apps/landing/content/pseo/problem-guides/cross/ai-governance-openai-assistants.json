@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix responsible ai governance for agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "OpenAI Assistants API ai-governance",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in OpenAI Assistants API manifests as uncontrolled execution in the managed runtime where code interpreter runs unsafe operations, file search exposes irrelevant data, thread context balloons silently beyond limits, and function calls hallucinate invalid arguments. These issues arise from the API's black-box agent orchestration lacking built-in governance, making agents prone to security breaches, data leaks, and unreliable outputs. Without explicit verification, assistants can execute malicious code, retrieve sensitive files, or generate malformed API calls that cascade failures.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter executing unsafe operations in sandbox",
+        "symptom": "Assistant runs `import os; os.system('rm -rf /')` despite sandboxing claims",
+        "impact": "Potential data loss or sandbox escape exploiting OpenAI runtime vulnerabilities"
+      },
+      {
+        "scenario": "File search retrieving irrelevant or outdated documents",
+        "symptom": "Assistant returns 15-year-old pricing docs for current customer query",
+        "impact": "Misinformation leading to incorrect business decisions or compliance violations"
+      },
+      {
+        "scenario": "Thread context growing beyond model limits silently",
+        "symptom": "Thread exceeds 128K token limit but API continues without truncation warning",
+        "impact": "Hallucinated responses or complete output failure after expensive token burn"
+      },
+      {
+        "scenario": "Function call arguments hallucinated outside valid schema",
+        "symptom": "Assistant calls `send_email(recipient='all@company.com', attach='nuclear_plans.pdf')`",
+        "impact": "Security breaches from unauthorized data access or mass spam incidents"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Code Interpreter Safety Violations",
+        "description": "Scans run steps for dangerous code patterns in code interpreter executions",
+        "code": "```python\nimport re\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef detect_unsafe_code(thread_id):\n    run = client.beta.threads.runs.retrieve(thread_id=thread_id)\n    \n    unsafe_patterns = [\n        r'rm\\s+-rf',\n        r'del\\s+/f\\s+/q',\n        r'exec\\(',\n        r'eval\\(',\n        r'__import__\\s*\\(\\s*[\"\\']os[\"\\']',\n        r'open\\s*\\(\\s*[\"\\']/etc/passwd',\n    ]\n    \n    for step in client.beta.threads.runs.steps.list(thread_id=thread_id, run_id=run.id):\n        if step.type == 'tool_calls' and any('code_interpreter' in tc.type for tc in step.tool_calls):\n            for tool_call in step.tool_calls:\n                if tool_call.type == 'code_interpreter':\n                    code = tool_call.code_interpreter.input\n                    for pattern in unsafe_patterns:\n                        if re.search(pattern, code, re.IGNORECASE):\n                            return {'violation': 'UNSAFE_CODE', 'code_snippet': code[:100]}\n    return None```",
+        "language": "python"
+      },
+      {
+        "name": "Thread Token Limit Exceeded",
+        "description": "Calculates total thread token usage and detects silent overflow",
+        "code": "```python\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef detect_token_overflow(thread_id):\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    total_tokens = 0\n    \n    for msg in messages.data:\n        # Rough token estimation: 4 chars per token\n        total_tokens += len(msg.content[0].text.value) // 4 if msg.content else 0\n        \n    MAX_TOKENS = 128000\n    if total_tokens > MAX_TOKENS:\n        return {\n            'violation': 'TOKEN_OVERFLOW',\n            'estimated_tokens': total_tokens,\n            'max_allowed': MAX_TOKENS,\n            'overflow_by': total_tokens - MAX_TOKENS\n        }\n    return None```",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Schema Violations",
+        "description": "Validates function call arguments against declared JSON schema",
+        "code": "```typescript\nimport OpenAI from 'openai';\n\nconst openai = new OpenAI();\n\ntype SchemaViolation = {\n  violation: 'SCHEMA_MISMATCH';\n  function_name: string;\n  invalid_args: any;\n  expected_schema: any;\n};\n\nexport async function detectSchemaViolations(\n  threadId: string,\n  runId: string\n): Promise<SchemaViolation | null> {\n  const steps = await openai.beta.threads.runs.steps.list(threadId, runId);\n  \n  for (const step of steps.data) {\n    if (step.type === 'tool_calls') {\n      for (const toolCall of step.tool_calls!) {\n        if (toolCall.type === 'function') {\n          const args = JSON.parse(toolCall.function!.arguments);\n          // Validate against expected schema (from your function definitions)\n          const expectedSchema = getFunctionSchema(toolCall.function!.name!);\n          \n          if (!validateAgainstSchema(args, expectedSchema)) {\n            return {\n              violation: 'SCHEMA_MISMATCH',\n              function_name: toolCall.function!.name!,\n              invalid_args: args,\n              expected_schema: expectedSchema\n            };\n          }\n        }\n      }\n    }\n  }\n  return null;\n}\n\nfunction validateAgainstSchema(data: any, schema: any): boolean {\n  // Simplified JSON schema validation\n  return true; // Replace with ajv or similar\n}```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Safe Code Interpreter Wrapper",
+        "description": "Intercepts and rewrites dangerous code before execution",
+        "code": "```python\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef safe_code_interpreter(thread_id, run_id):\n    steps = client.beta.threads.runs.steps.list(\n        thread_id=thread_id, run_id=run_id\n    )\n    \n    banned_patterns = [r'rm\\s+-rf', r'exec\\(', r'eval\\(']\n    \n    for step in steps.data:\n        if step.type == 'tool_calls':\n            for tool_call in step.tool_calls:\n                if (tool_call.type == 'code_interpreter' and \n                    any(re.search(p, tool_call.code_interpreter.input) \n                        for p in banned_patterns)):\n                    # Submit safe alternative\n                    safe_code = \"print('Unsafe code blocked by governance layer')\"\n                    client.beta.threads.runs.submit_tool_outputs(\n                        thread_id=thread_id,\n                        run_id=run_id,\n                        tool_outputs=[{\n                            'tool_call_id': tool_call.id,\n                            'output': safe_code\n                        }]\n                    )\n                    return 'blocked'```",
+        "language": "python"
+      },
+      {
+        "name": "Thread Context Truncation",
+        "description": "Automatically prunes old messages when approaching token limits",
+        "code": "```python\nimport tiktoken\n\nclient = OpenAI()\nencoding = tiktoken.get_encoding('cl100k_base')\n\ndef prune_thread_context(thread_id, max_tokens=100000):\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    total_tokens = sum(len(encoding.encode(msg.content[0].text.value)) \n                      for msg in messages.data)\n    \n    if total_tokens > max_tokens:\n        # Delete oldest messages until under limit\n        messages_to_delete = []\n        current_tokens = total_tokens\n        \n        for msg in reversed(messages.data):  # Newest first\n            msg_tokens = len(encoding.encode(msg.content[0].text.value))\n            if current_tokens > max_tokens:\n                messages_to_delete.append(msg.id)\n                current_tokens -= msg_tokens\n            else:\n                break\n        \n        for msg_id in messages_to_delete:\n            client.beta.threads.messages.delete(thread_id, msg_id)\n        \n        return f'Pruned {len(messages_to_delete)} messages'```",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Argument Sanitization",
+        "description": "Strips dangerous parameters before tool execution",
+        "code": "```typescript\nimport OpenAI from 'openai';\n\nconst openai = new OpenAI();\n\nconst DANGEROUS_PARAMS = ['all@', 'nuclear', 'root', 'admin'];\n\nexport async function sanitizeFunctionCalls(\n  threadId: string,\n  runId: string\n): Promise<void> {\n  const steps = await openai.beta.threads.runs.steps.list(threadId, runId);\n  \n  for (const step of steps.data) {\n    if (step.type === 'tool_calls') {\n      for (const toolCall of step.tool_calls!) {\n        if (toolCall.type === 'function') {\n          const args = JSON.parse(toolCall.function!.arguments);\n          \n          // Sanitize dangerous patterns\n          const sanitizedArgs = sanitizeArgs(args);\n          \n          if (JSON.stringify(sanitizedArgs) !== toolCall.function!.arguments) {\n            await openai.beta.threads.runs.submit_tool_outputs(threadId, runId, [{\n              type: 'function',\n              tool_call_id: toolCall.id!,\n              output: JSON.stringify(sanitizedArgs)\n            }]);\n          }\n        }\n      }\n    }\n  }\n}\n\nfunction sanitizeArgs(args: any): any {\n  const sanitized = { ...args };\n  for (const key in sanitized) {\n    if (typeof sanitized[key] === 'string') {\n      DANGEROUS_PARAMS.forEach(pattern => {\n        sanitized[key] = sanitized[key].replace(new RegExp(pattern, 'gi'), '[REDACTED]');\n      });\n    }\n  }\n  return sanitized;\n}```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex provides continuous, production-grade verification for OpenAI Assistants by integrating as a webhook on run completion events. When an assistant run finishes (status='completed' or 'failed'), Vex automatically receives the full thread context, run steps, tool calls, and outputs via webhook payload. It then applies specialized verifiers for code interpreter safety, token limits, schema validation, and retrieval relevance, scoring each run and blocking problematic executions before they impact users.\n\nThe platform maintains verification histories, generates compliance reports, and auto-remediates issues through safe fallbacks or corrected outputs. Teams get real-time dashboards showing governance coverage across all assistants, with drill-down into specific violations and one-click fixes. Vex's agent-aware verifiers understand OpenAI's runtime patterns, catching issues that generic monitoring misses.",
+      "code": "```python\nfrom vex import Vex\nfrom openai import OpenAI\n\nvex = Vex(api_key=\"your-vex-key\")\nclient = OpenAI()\n\n# Install: pip install openai vex-sdk\n\n@vex.webhook(path=\"/openai-assistants\")\ndef verify_assistant_run(payload: dict):\n    thread_id = payload['data']['object']['thread_id']\n    run_id = payload['data']['object']['id']\n    \n    # Vex's built-in OpenAI verifiers\n    results = vex.verify({\n        \"type\": \"openai-assistants\",\n        \"thread_id\": thread_id,\n        \"run_id\": run_id,\n        \"checks\": [\n            \"code_interpreter_safety\",\n            \"token_limit_exceeded\",\n            \"function_schema_violation\",\n            \"file_search_relevance\"\n        ]\n    })\n    \n    violations = [r for r in results if r['status'] == 'fail']\n    \n    if violations:\n        # Auto-remediate\n        for violation in violations:\n            if violation['type'] == 'code_interpreter_safety':\n                client.beta.threads.runs.submit_tool_outputs(\n                    thread_id=thread_id,\n                    run_id=run_id,\n                    tool_outputs=[{\n                        'tool_call_id': violation['tool_call_id'],\n                        'output': 'Code execution blocked: safety violation'\n                    }]\n                )\n        \n        return {'status': 'blocked', 'violations': violations}\n    \n    return {'status': 'approved'}\n\n# Register webhook with OpenAI (via dashboard or API)\nvex.integrations.openai_assistants.setup_webhook(\n    assistant_ids=[\"asst_123\"],\n    webhook_url=\"https://your-vex-instance.com/openai-assistants\"\n)\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get production-grade Responsible AI Governance for your OpenAI Assistants in 5 minutes - start your free trial now."
+    }
+  }
+}

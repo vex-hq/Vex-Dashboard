@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "industry": "ecommerce",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "LangGraph Guardrails for E-Commerce",
+    "description": "Compliance guide for LangGraph agents in e-commerce. Meet FTC advertising guidelines, CCPA/GDPR requirements with Vex guardrails.",
+    "keywords": [
+      "LangGraph e-commerce",
+      "e-commerce AI compliance",
+      "LangGraph guardrails",
+      "e-commerce AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "E-Commerce teams using LangGraph build complex agent workflows for personalized recommendations, dynamic pricing, and customer support, but common failure modes like cyclic executions and state corruption can lead to inaccurate product claims, pricing errors, or policy misrepresentations. These issues risk FTC enforcement, CCPA/GDPR violations, PCI DSS non-compliance, and ADA accessibility failures. Vex provides essential guardrails by verifying state integrity and outputs against compliance rules at every graph transition.",
+    "complianceRequirements": [
+      {
+        "regulation": "FTC Advertising Guidelines",
+        "description": "Product claims in recommendations or ads must be substantiated with evidence, avoiding deceptive marketing practices.",
+        "howVexHelps": "Vex verifies recommendation outputs against a knowledge base of substantiated claims, blocking unsubstantiated suggestions before customer exposure."
+      },
+      {
+        "regulation": "CCPA/GDPR",
+        "description": "Customer data processing in personalization workflows must respect consent and provide opt-out mechanisms.",
+        "howVexHelps": "Vex enforces data minimization by validating state transitions only include consented data fields, preventing unauthorized PII propagation."
+      },
+      {
+        "regulation": "PCI DSS for Payments",
+        "description": "Payment workflows must securely handle card data without logging sensitive information in checkpoints.",
+        "howVexHelps": "Vex scans graph state for PCI-sensitive data leakage and redacts it from checkpoints and logs automatically."
+      },
+      {
+        "regulation": "ADA Accessibility",
+        "description": "Dynamic content generation must produce accessible HTML compliant with WCAG 2.1 standards.",
+        "howVexHelps": "Vex validates generated product descriptions and emails against accessibility rules, ensuring screen-reader compatibility."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Cyclic Pricing Updates",
+        "description": "Infinite loops in dynamic pricing graphs cause runaway price changes, violating accurate pricing regulations.",
+        "severity": "critical",
+        "example": "Pricing agent cycles between discount and surge logic, displaying $99 → $199 → $49 prices to customers."
+      },
+      {
+        "name": "State Corruption in Cart Merge",
+        "description": "Parallel recommendation branches overwrite discount codes, leading to refund disputes.",
+        "severity": "high",
+        "example": "Guest cart merges with loyalty cart, losing 20% discount code and overcharging returning customers."
+      },
+      {
+        "name": "Checkpoint Schema Drift",
+        "description": "Deserialization failures after adding GDPR consent fields crash personalization workflows.",
+        "severity": "high",
+        "example": "Post-update, old checkpoints fail to load, serving generic recommendations instead of personalized ones."
+      },
+      {
+        "name": "Bypassed Refund Policy Check",
+        "description": "Conditional edges skip human-in-loop verification, misrepresenting return policies.",
+        "severity": "medium",
+        "example": "Automated agent promises 90-day returns instead of 30-day policy, triggering FTC complaints."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Wrap graph.invoke() with Vex Verification",
+        "description": "Protect against cyclic execution and state corruption by verifying inputs/outputs on every invocation.",
+        "code": "import vex\nfrom langgraph.graph import StateGraph\n\n# Your LangGraph state\ndef check_pricing_accuracy(state):\n    if state['price'] < 0 or state['price'] > 10000:\n        raise ValueError('Invalid pricing')\n    return state\n\n# Vex verification\ndef verify_ecommerce_state(state):\n    with vex.verify(policy='ecommerce-pricing') as v:\n        v.expect(state['product_claims']).to_be_substantiated()\n        v.expect(state['price']).to_be_accurate()\n        v.expect(state['refund_policy']).to_match('30_days')\n    return state\n\n# Wrap invocation\ngraph = StateGraph(...)  # your graph\nresult = vex.verify(graph.invoke)({\"user_id\": \"123\", \"cart\": [...]},\n                   policy=\"ecommerce-workflow\")",
+        "language": "python"
+      },
+      {
+        "title": "Add Vex as a Graph Node for Continuous Monitoring",
+        "description": "Embed Vex checkpoints after parallel branches and before human-in-loop to catch merge conflicts.",
+        "code": "from langgraph.graph import END\nfrom vex import PolicyVerifier\n\nvex_node = PolicyVerifier(policy=\"ecommerce-compliance\")\n\ndef merge_cart_state(state):\n    # Parallel branches might corrupt state here\n    return vex_node(state)\n\nclass EcommerceGraph(StateGraph):\n    def __init__(self):\n        super().__init__(...)\n        self.add_node(\"recommendations\", self.recommendations_node)\n        self.add_node(\"pricing\", self.pricing_node)\n        self.add_node(\"vex_check\", merge_cart_state)  # After parallel merge\n        self.add_edge(\"recommendations\", \"vex_check\")\n        self.add_edge(\"pricing\", \"vex_check\")\n        self.add_edge(\"vex_check\", \"human_review\" if needs_review else END)\n\n    def compile(self):\n        return self._compile(checkpointer=MemorySaver())\n\ngraph = EcommerceGraph().compile()",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Schema Drift with Vex State Validators",
+        "description": "Validate checkpoint schema evolution to avoid deserialization errors after adding compliance fields.",
+        "code": "import vex\nfrom langgraph.checkpoint.memory import MemorySaver\nfrom typing import TypedDict\n\nclass CompliantCartState(TypedDict):\n    cart_items: list\n    price: float\n    gdpr_consent: bool  # New field\n    ada_compliant: bool\n\n@vex.policy(name=\"cart-schema-v2\")\ndef validate_cart_schema(state: CompliantCartState):\n    vex.expect('gdpr_consent' in state).to_be(True, reason=\"GDPR consent required\")\n    vex.expect(state['ada_compliant']).to_be(True)\n    vex.expect(len(state['cart_items']) > 0).to_be(True)\n\n# Use with checkpointer\ngraph = StateGraph(CompliantCartState).compile(checkpointer=MemorySaver())\n\n# Vex automatically validates on load\nthread = {\"configurable\": {\"thread_id\": \"cart-123\"}}\nresult = graph.invoke({\"action\": \"add_item\"}, thread)\n# Raises if old checkpoint lacks new compliance fields",
+        "language": "python"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "LangGraph in E-Commerce: A Scenario",
+      "scenario": "FashionCo deployed LangGraph to power their intelligent shopping assistant, handling recommendation → pricing → checkout flows. The graph used parallel branches for personalized styling suggestions and dynamic pricing based on inventory and demand. Human-in-loop review was implemented for high-value carts (> $500), with conditional edges bypassing review for low-risk transactions. However, during Black Friday, cyclic execution in the pricing node caused runaway discounts (50% → 75% → 90%), while parallel recommendation branches corrupted state by overwriting customer loyalty discount codes with promotional ones.",
+      "outcome": "After integrating Vex as a verification node after parallel merges and wrapping graph.invoke(), cyclic pricing was blocked at 75% discount with FTC substantiation checks. State corruption was prevented by validating discount code precedence, reducing refund disputes by 92%. Schema changes for GDPR consent fields were safely rolled out with Vex checkpoint validation, avoiding workflow crashes. The result: $2.3M in protected revenue and zero FTC complaints during peak season."
+    },
+    "cta": {
+      "heading": "Comply with E-Commerce Regulations Using Vex",
+      "description": "Install Vex today with `pip install vex-sdk langgraph` and protect your LangGraph workflows from compliance failures."
+    }
+  }
+}

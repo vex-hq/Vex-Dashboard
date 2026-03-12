@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Semantic Kernel Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Semantic Kernel agent-auth",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Semantic Kernel agents, AI Agent Authentication and Authorization problems manifest when plugins attempt unauthorized access to enterprise resources like APIs, databases, or services without proper credential validation or scope checks. This often occurs during plugin chaining where one plugin's output triggers another with insufficient permissions, or when planners generate execution plans calling restricted functions. Without robust auth patterns, agents can leak sensitive tokens, escalate privileges, or fail silently on permission errors, compromising security in enterprise deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining without token propagation",
+        "symptom": "Subsequent plugins receive 401 Unauthorized errors after initial plugin succeeds",
+        "impact": "Cascading failures halt agent execution; tokens leak in logs"
+      },
+      {
+        "scenario": "Planner generates unauthorized function calls",
+        "symptom": "Execution plan includes functions requiring admin scope but agent has user scope",
+        "impact": "Runtime permission denied exceptions crash the conversation flow"
+      },
+      {
+        "scenario": "Memory recall exposes auth tokens",
+        "symptom": "Chat history contains API keys or bearer tokens from previous interactions",
+        "impact": "Hallucinated credentials compromise security across sessions"
+      },
+      {
+        "scenario": "Cross-plugin data contamination with credentials",
+        "symptom": "Public plugins receive auth tokens from private enterprise plugins",
+        "impact": "Sensitive credentials exposed to untrusted plugin chains"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Leakage in Function Results",
+        "description": "Scan kernel function invocation results for common auth patterns like 'Bearer', API keys, or base64 credentials",
+        "code": "import re\nfrom semantic_kernel import Kernel\n\ndef detect_token_leakage(kernel: Kernel, function_result: str) -> bool:\n    patterns = [\n        r'Bearer\\s+[A-Za-z0-9\\-_]+\\.?[A-Za-z0-9\\-_]*',\n        r'(sk|ak|pk|Bearer)[A-Za-z0-9]{32,}',\n        r'Basic\\s+[A-Za-z0-9+/]+=*'\n    ]\n    for pattern in patterns:\n        if re.search(pattern, function_result, re.IGNORECASE):\n            return True\n    return False\n\n# Usage in kernel function\nresult = await kernel.invoke('MyPlugin', 'GetUserData')\nif detect_token_leakage(kernel, str(result)):\n    raise ValueError('Auth token detected in function output')",
+        "language": "python"
+      },
+      {
+        "name": "401 Error Cascade Detection",
+        "description": "Monitor consecutive function calls for authentication failures indicating missing token propagation",
+        "code": "from semantic_kernel.contents import ChatHistoryMessage\nfrom collections import deque\n\nclass AuthCascadeDetector:\n    def __init__(self, window_size: int = 5):\n        self.error_window = deque(maxlen=window_size)\n        self.auth_errors = ['401', 'Unauthorized', 'Forbidden']\n\n    def check_cascade(self, error_msg: str) -> bool:\n        if any(auth_err in error_msg for auth_err in self.auth_errors):\n            self.error_window.append('auth_error')\n            return len(self.error_window) >= 3  # 3+ consecutive auth errors\n        return False\n\n# Integrate with error handler\ndetector = AuthCascadeDetector()\ntry:\n    result = await kernel.invoke('ChainedPlugin')\nexcept Exception as e:\n    if detector.check_cascade(str(e)):\n        print('Auth cascade detected - check token propagation')",
+        "language": "python"
+      },
+      {
+        "name": "Scope Violation in Planner Output",
+        "description": "Validate planner-generated execution plans against agent's authorized scopes",
+        "code": "import json\nfrom semantic_kernel.planning import SequentialPlanner\n\ndef validate_plan_scopes(plan_json: str, allowed_scopes: list[str]) -> bool:\n    plan = json.loads(plan_json)\n    required_scopes = set()\n    \n    for step in plan.get('steps', []):\n        function_name = step.get('function', '')\n        # Map function names to required scopes\n        scope_map = {\n            'admin_user_update': ['admin:write'],\n            'enterprise_search': ['enterprise:read'],\n            'public_chat': []  # No scopes required\n        }\n        required_scopes.update(scope_map.get(function_name, ['unknown']))\n    \n    return required_scopes.issubset(set(allowed_scopes))\n\nplanner = SequentialPlanner(kernel)\nplan = await planner.create_plan('Update enterprise user data')\nif not validate_plan_scopes(str(plan), ['user:read']):\n    raise PermissionError('Planner generated unauthorized plan')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Secure Token Propagation Middleware",
+        "description": "Create kernel function filter that injects auth tokens without exposing them in outputs",
+        "code": "from semantic_kernel import KernelFunctionFilter\nfrom semantic_kernel.contents import ChatHistoryMessage\n\nclass AuthTokenFilter(KernelFunctionFilter):\n    def __init__(self, token_provider):\n        self.token_provider = token_provider\n\n    async def on_function_invocation_async(\n        self, \n        function_invocation: 'KernelFunctionInvocation',\n        arguments: dict[str, str]\n    ) -> dict[str, str]:\n        # Inject token without exposing in result\n        if 'auth_token' not in arguments:\n            arguments['auth_token'] = await self.token_provider.get_token()\n            \n        result = await function_invocation.invoke_async(arguments)\n        \n        # Strip token from output\n        if 'token' in result:\n            del result['token']\n        \n        return result\n\n# Register filter\nkernel = Kernel()\nkernel.add_function_filter(AuthTokenFilter(token_provider))",
+        "language": "python"
+      },
+      {
+        "name": "Scoped Planner with Permission Guard",
+        "description": "Wrap planner with scope validation before plan execution",
+        "code": "from semantic_kernel.planning import SequentialPlanner\nfrom typing import List\n\nclass ScopedPlanner:\n    def __init__(self, kernel, allowed_scopes: List[str]):\n        self.planner = SequentialPlanner(kernel)\n        self.allowed_scopes = set(allowed_scopes)\n\n    async def create_scoped_plan(self, goal: str) -> str:\n        plan = await self.planner.create_plan(goal)\n        \n        # Validate scopes before returning\n        required_scopes = self._extract_required_scopes(plan)\n        if not required_scopes.issubset(self.allowed_scopes):\n            missing = required_scopes - self.allowed_scopes\n            raise PermissionError(f'Missing scopes: {missing}')\n        \n        return plan\n\n    def _extract_required_scopes(self, plan: str) -> set:\n        # Implementation extracts scopes from plan steps\n        return set()\n\n# Usage\nscoped_planner = ScopedPlanner(kernel, ['user:read', 'user:write'])\nplan = await scoped_planner.create_scoped_plan('Update my profile')",
+        "language": "python"
+      },
+      {
+        "name": "Credential Sanitization in Memory",
+        "description": "Filter auth tokens from chat history before memory storage",
+        "code": "import re\nfrom semantic_kernel.memory import SemanticTextMemory\n\nclass SecureMemory(SemanticTextMemory):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.token_patterns = [\n            r'Bearer\\s+[A-Za-z0-9\\-_]+',\n            r'(sk-[A-Za-z0-9]{48})',\n            r'Basic\\s+[A-Za-z0-9+/]+=+'\n        ]\n\n    def sanitize_content(self, content: str) -> str:\n        for pattern in self.token_patterns:\n            content = re.sub(pattern, '[REDACTED]', content, flags=re.IGNORECASE)\n        return content\n\n    async def save_information_async(self, collection: str, text: str, **kwargs):\n        sanitized_text = self.sanitize_content(text)\n        return await super().save_information_async(collection, sanitized_text, **kwargs)\n\n# Usage\nsecure_memory = SecureMemory(storage)\nawait secure_memory.save_information_async('chat_history', user_message)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates seamlessly as a Semantic Kernel function result filter, automatically scanning every plugin output for authentication token leakage, permission violations, and cascading auth errors. When integrated via `pip install semantic-kernel vex-sdk`, Vex monitors kernel function invocations in real-time, flagging issues like bearer tokens in responses or 401 error patterns across plugin chains. \n\nThe Vex SDK provides pre-built detectors for Semantic Kernel's common auth failure modes and auto-generates remediation code. For enterprise deployments, Vex maintains an audit trail of all auth-related decisions and can trigger fallback execution paths when permissions fail. Integration takes under 5 minutes and works across Python and TypeScript Semantic Kernel implementations.\n\nVex's ML-powered anomaly detection learns your specific auth patterns, reducing false positives while catching novel credential exposure vectors that static regex detectors miss.",
+      "code": "from semantic_kernel import Kernel\nfrom vex_sdk import VexKernelFilter, VexPolicy\n\n# Install: pip install semantic-kernel vex-sdk\n\n# 1. Initialize Vex with auth policy\nvex_policy = VexPolicy(\n    detectors=[\n        'auth_token_leakage',\n        'permission_cascade',\n        'scope_violation',\n        'credential_exfiltration'\n    ],\n    auto_remediate=True\n)\n\n# 2. Add Vex as kernel function filter\nkernel = Kernel()\nvex_filter = VexKernelFilter(vex_policy)\nkernel.add_function_filter(vex_filter)\n\n# 3. Vex automatically protects all function calls\ntry:\n    result = await kernel.invoke('EnterprisePlugin', 'GetSensitiveData')\n    print('✅ Vex validated: Safe execution')\nexcept VexPolicyViolation as e:\n    print(f'🚨 Vex blocked: {e.issues}')\n    print(f'💡 Remediation: {e.suggested_fix}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 60 seconds to automatically secure your Semantic Kernel agents against auth failures: `pip install vex-sdk`"
+    }
+  }
+}

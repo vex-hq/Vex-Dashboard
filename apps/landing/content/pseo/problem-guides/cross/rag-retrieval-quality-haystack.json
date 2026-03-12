@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in Haystack Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "Haystack rag-retrieval-quality",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, RAG Retrieval Quality Optimization issues manifest as retrievers returning irrelevant documents due to poor query embedding alignment or index quality, leading to hallucinated generations that diverge from provided context. Pipeline component mismatches between retriever and generator expected formats silently degrade output relevance, while custom dense retrievers fail without clear error surfacing. These problems cascade through composable pipelines, making production RAG systems unreliable without systematic quality checks.",
+    "howItManifests": [
+      {
+        "scenario": "Sparse retriever returns keyword-matched but semantically irrelevant docs",
+        "symptom": "BM25 scores high but documents lack semantic overlap with query",
+        "impact": "Generator fabricates answers from unrelated context, eroding trust"
+      },
+      {
+        "scenario": "Dense retriever embedding drift from index updates",
+        "symptom": "Cosine similarity scores drop below 0.7 threshold consistently",
+        "impact": "Pipeline latency increases as reranking fails to filter noise"
+      },
+      {
+        "scenario": "Document store schema changes break retriever output format",
+        "symptom": "Generator receives NoneType instead of Document objects",
+        "impact": "Silent failures produce empty or malformed responses"
+      },
+      {
+        "scenario": "Custom embedding model returns inconsistent vector dimensions",
+        "symptom": "Pipeline validation passes but retrieval scores are NaN",
+        "impact": "All retrieved documents score identically, breaking ranking"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retriever Relevance Score Monitoring",
+        "description": "Extracts cosine similarity scores from DensePassageRetriever and flags pipelines where >30% of documents fall below 0.6 threshold",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers import InMemoryEmbeddingRetriever\nimport numpy as np\n\ndef check_retrieval_quality(pipeline: Pipeline, test_queries: list[str], threshold: float = 0.6) -> dict:\n    results = []\n    for query in test_queries:\n        output = pipeline.run(query=query)\n        docs = output.get('documents', [])\n        scores = [doc.meta.get('score', 0) for doc in docs[:5]]\n        low_relevance = sum(1 for s in scores if s < threshold) / max(len(scores), 1)\n        results.append({'query': query, 'low_relevance_ratio': low_relevance})\n    avg_degradation = np.mean([r['low_relevance_ratio'] for r in results])\n    return {'degraded': avg_degradation > 0.3, 'metric': avg_degradation}",
+        "language": "python"
+      },
+      {
+        "name": "Document Context Overlap Check",
+        "description": "Measures semantic overlap between query and top-3 retrieved documents using sentence transformers",
+        "code": "from sentence_transformers import SentenceTransformer, util\nimport numpy as np\n\ndef measure_context_overlap(query: str, documents: list, model_name='all-MiniLM-L6-v2') -> float:\n    model = SentenceTransformer(model_name)\n    query_emb = model.encode(query)\n    doc_texts = [doc.content for doc in documents[:3]]\n    doc_embs = model.encode(doc_texts)\n    similarities = util.cos_sim(query_emb, doc_embs)[0]\n    return float(np.mean(similarities))",
+        "language": "python"
+      },
+      {
+        "name": "Pipeline Type Safety Validator",
+        "description": "Verifies retriever outputs Document objects expected by downstream rankers/generators",
+        "code": "from haystack.dataclasses import Document\nfrom typing import Any\n\ndef validate_retriever_output(pipeline_output: dict[str, Any]) -> bool:\n    docs = pipeline_output.get('documents')\n    if not docs:\n        return False\n    return all(isinstance(doc, Document) for doc in docs[:10]) and all(hasattr(doc, 'content') for doc in docs[:10])",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retriever with Reranking",
+        "description": "Combines BM25 sparse + dense retrieval with cross-encoder reranking for improved precision",
+        "code": "from haystack.components.retrievers import BM25Retriever, EmbeddingRetriever\nfrom haystack.components.rankers import SentenceTransformersCrossEncoder\n\nhybrid_pipe = Pipeline()\nhybrid_pipe.add_component(\"sparse\", BM25Retriever())\nhybrid_pipe.add_component(\"dense\", EmbeddingRetriever())\nhybrid_pipe.add_component(\"reranker\", SentenceTransformersCrossEncoder(model=\"cross-encoder/ms-marco-MiniLM-L-6-v2\"))\nhybrid_pipe.connect(\"sparse.documents\", \"reranker.documents\")\nhybrid_pipe.connect(\"dense.documents\", \"reranker.documents\")",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Embedding Model Switching",
+        "description": "Fallback to domain-specific embeddings when default retriever degrades",
+        "code": "from haystack.components.embedders import SentenceTransformersDocumentEmbedder, SentenceTransformersTextEmbedder\n\n# Primary embedding\nprimary_embedder = SentenceTransformersTextEmbedder(model=\"all-MiniLM-L6-v2\")\n\n# Fallback for technical domains\nfallback_embedder = SentenceTransformersTextEmbedder(model=\"sentence-transformers/all-mpnet-base-v2\")\n\nretriever = EmbeddingRetriever(\n    document_store=doc_store,\n    embedding_model=primary_embedder,\n    fallback_embedding_model=fallback_embedder\n)",
+        "language": "python"
+      },
+      {
+        "name": "Context-Aware Generator Guardrails",
+        "description": "Forces generator to cite retrieved context or admit knowledge gaps",
+        "code": "from haystack.components.generators import OpenAIGenerator\n\ngenerator = OpenAIGenerator(\n    model=\"gpt-4\",\n    system_prompt=\"\"\"You are a helpful assistant. ONLY answer based on the provided context.\nIf the context doesn't contain the answer, say 'I don't have sufficient context to answer this.'\nAlways cite specific passages from the context using [1], [2] etc.\"\"\",\n    generation_kwargs={\"temperature\": 0.1, \"max_tokens\": 512}\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that continuously monitors retrieval quality across all pipeline runs, automatically detecting embedding drift, relevance degradation, and component mismatches. It maintains rolling baselines of cosine similarity scores and context overlap metrics, flagging pipelines when performance drops >15% from golden datasets. Vex's agentic remediation automatically swaps embedding models, adjusts retriever thresholds, or injects reranking components without pipeline redeployment.\n\nThe VexGuard component wraps existing retrievers, extracting metrics at runtime and triggering automated fixes through Haystack's dynamic pipeline reconfiguration. Production teams gain observability into RAG health with zero instrumentation overhead, while Vex's ML-based anomaly detection catches subtle quality regressions before they impact end users. Integration takes <5 minutes via pip install and pipeline.add_component().",
+      "code": "from vex_sdk.haystack import VexGuard\nfrom haystack import Pipeline\n\n# Install: pip install haystack-ai vex-sdk\nrag_pipeline = Pipeline()\n\n# Add Vex as first component for full observability\nrag_pipeline.add_component(\"vex_guard\", VexGuard(monitor=['retrieval_quality', 'context_overlap']))\nrag_pipeline.add_component(\"retriever\", EmbeddingRetriever(document_store=doc_store))\nrag_pipeline.add_component(\"generator\", OpenAIGenerator(model=\"gpt-4\"))\n\nrag_pipeline.connect(\"vex_guard.documents\", \"retriever.query\")\nrag_pipeline.connect(\"retriever.documents\", \"generator.documents\")\n\n# Vex auto-generates eval datasets and baselines\nresult = rag_pipeline.run(query=\"What is RAG?\", vex_evaluate=True)\n\n# Access automated insights\nprint(result['vex_guard']['quality_score'])  # 0.87\nprint(result['vex_guard']['recommended_fix'])  # 'Add reranker component'",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of code to monitor and auto-fix RAG quality issues in production Haystack pipelines today."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in Mastra Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "Mastra rag-retrieval-quality",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, RAG Retrieval Quality Optimization issues manifest as poor context relevance during workflow execution, where knowledge retrieval returns mismatched or incomplete documents that confuse agent decision-making. This commonly occurs due to unvalidated retrieval outputs between workflow steps and stale memory context injection. The result is agents generating incorrect responses or looping indefinitely in malformed reasoning paths.",
+    "howItManifests": [
+      {
+        "scenario": "Unvalidated knowledge retrieval in workflow transitions",
+        "symptom": "Agent receives irrelevant documents from Mastra's knowledge base",
+        "impact": "Workflow derails into incorrect tool calls or hallucinated responses"
+      },
+      {
+        "scenario": "Stale memory context overriding fresh retrievals",
+        "symptom": "Mastra memory service injects outdated conversation history",
+        "impact": "Agent ignores current query context, repeats old answers"
+      },
+      {
+        "scenario": "Malformed vector embeddings from sync integrations",
+        "symptom": "Third-party data causes embedding drift in knowledge index",
+        "impact": "Retrieval returns semantically distant documents"
+      },
+      {
+        "scenario": "Missing relevance scoring in multi-tool workflows",
+        "symptom": "Agent selects lowest-confidence retrievals without validation",
+        "impact": "Cascading errors through downstream workflow nodes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Score Monitor",
+        "description": "Logs cosine similarity scores from Mastra knowledge retrievals to detect low-quality matches",
+        "code": "import { WorkflowContext, KnowledgeRetrievalNode } from 'mastra';\n\n// Add to your Mastra workflow node\nconst detectRetrievalQuality = async (ctx: WorkflowContext) => {\n  const retrievalNode = ctx.getNode('knowledge_retrieval') as KnowledgeRetrievalNode;\n  const results = await retrievalNode.retrieve(ctx.input);\n  \n  const avgScore = results.reduce((sum, doc) => sum + (doc.metadata?.score || 0), 0) / results.length;\n  \n  if (avgScore < 0.75) {\n    console.warn('LOW RETRIEVAL QUALITY', { avgScore, query: ctx.input });\n    ctx.setFlag('poor_retrieval', true);\n  }\n  \n  return { ...ctx.input, retrievals: results };\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Staleness Check",
+        "description": "Compares memory retrieval timestamps against query freshness in Mastra agents",
+        "code": "import { AgentMemory, WorkflowStep } from 'mastra';\n\nconst checkMemoryStaleness = async (memory: AgentMemory, queryTime: Date) => {\n  const staleThreshold = 24 * 60 * 60 * 1000; // 24 hours\n  const memoryEntries = await memory.getRecent();\n  \n  const staleCount = memoryEntries.filter(entry => \n    (queryTime.getTime() - new Date(entry.timestamp).getTime()) > staleThreshold\n  ).length;\n  \n  if (staleCount > memoryEntries.length * 0.5) {\n    throw new Error(`Stale memory detected: ${staleCount}/${memoryEntries.length} entries`);\n  }\n  \n  return memoryEntries;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Embedding Drift Detector",
+        "description": "Monitors vector embedding quality from Mastra sync integrations",
+        "code": "import { KnowledgeBase, VectorDocument } from 'mastra';\n\nconst detectEmbeddingDrift = async (kb: KnowledgeBase, sampleQuery: string) => {\n  const testEmbedding = await kb.embed(sampleQuery);\n  const similarDocs = await kb.similaritySearch(sampleQuery, 5);\n  \n  const relevanceScores = similarDocs.map(doc => doc.score);\n  const stdDev = Math.sqrt(relevanceScores.reduce((sum, s, i) => \n    sum + Math.pow(s - relevanceScores.reduce((a, b) => a + b) / relevanceScores.length, 2), 0) / relevanceScores.length\n  );\n  \n  if (stdDev > 0.15) {\n    console.error('Embedding drift detected', { stdDev, scores: relevanceScores });\n    return false;\n  }\n  \n  return true;\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Relevance Threshold Guardrail",
+        "description": "Blocks low-confidence retrievals in Mastra workflows with fallback reranking",
+        "code": "import { WorkflowNode, KnowledgeRetrievalNode } from 'mastra';\n\nconst safeRetrievalNode: WorkflowNode = {\n  name: 'safe_knowledge_retrieval',\n  execute: async (ctx) => {\n    const retriever = ctx.getService('knowledge') as KnowledgeRetrievalNode;\n    let results = await retriever.retrieve(ctx.input, { limit: 10 });\n    \n    // Filter by relevance threshold\n    results = results.filter(doc => (doc.metadata?.score || 0) > 0.8);\n    \n    if (results.length === 0) {\n      // Fallback: expand search and rerank\n      results = await retriever.retrieve(ctx.input, { limit: 20 });\n      results = await rerankResults(results, ctx.input);\n    }\n    \n    ctx.output.retrievals = results.slice(0, 5);\n    return ctx;\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Freshness-Aware Memory Fusion",
+        "description": "Prioritizes recent context over stale memory in Mastra agents",
+        "code": "import { AgentMemory, ContextFusionStrategy } from 'mastra';\n\nconst freshContextFusion: ContextFusionStrategy = {\n  fuse: async (memory: AgentMemory[], retrievals: any[], query: string) => {\n    const now = Date.now();\n    const freshnessWeight = 0.7;\n    \n    const weightedContexts = [\n      ...retrievals.map(doc => ({ ...doc, weight: doc.metadata?.score || 0.5 })),\n      ...memory\n        .filter(mem => (now - new Date(mem.timestamp).getTime()) < 12 * 60 * 60 * 1000)\n        .map(mem => ({ ...mem, weight: freshnessWeight }))\n    ];\n    \n    return weightedContexts\n      .sort((a, b) => b.weight - a.weight)\n      .slice(0, 8);\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Dynamic Chunking Optimization",
+        "description": "Adapts retrieval chunk sizes based on query complexity in Mastra",
+        "code": "import { KnowledgeBase } from 'mastra';\n\nconst adaptiveChunking = async (kb: KnowledgeBase, query: string) => {\n  const queryComplexity = query.split(' ').length + (query.match(/technical|code|api/g) || []).length;\n  let chunkSize = queryComplexity > 15 ? 2048 : 1024;\n  let overlap = chunkSize / 8;\n  \n  // Test retrieval quality and adjust\n  let results = await kb.retrieve(query, { chunkSize, overlap });\n  let avgScore = results.reduce((sum, r) => sum + (r.score || 0), 0) / results.length;\n  \n  if (avgScore < 0.75) {\n    chunkSize *= 0.8;\n    overlap *= 1.2;\n    results = await kb.retrieve(query, { chunkSize, overlap });\n  }\n  \n  return { chunkSize, overlap, results };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex integrates as middleware in Mastra's agent pipeline, automatically intercepting all knowledge retrievals and memory operations to compute real-time quality metrics. It establishes baselines for retrieval relevance, memory freshness, and embedding consistency during agent warm-up, then flags deviations with precise remediation recommendations. Vex's observability layer captures full context traces, enabling one-click fixes like threshold adjustments or reindexing workflows directly from the dashboard.\n\nThe platform continuously learns your Mastra agent's optimal retrieval patterns, auto-tuning chunk sizes and reranking strategies based on historical performance. When quality drops below configured thresholds, Vex can trigger self-healing actions like cache invalidation or fallback to alternative knowledge sources, maintaining >95% retrieval accuracy without manual intervention. Integration takes <5 minutes via a single middleware hook in your Mastra workflow configuration.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { MastraAgent, WorkflowContext } from 'mastra';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  agentId: 'mastra-rag-agent'\n});\n\nconst mastraAgent = new MastraAgent({\n  // your config\n});\n\n// Vex middleware integration\nmastraAgent.useMiddleware(async (ctx: WorkflowContext, next) => {\n  // Capture retrieval metrics\n  if (ctx.currentNode?.type === 'KNOWLEDGE_RETRIEVAL') {\n    const start = Date.now();\n    const results = ctx.currentNode.output;\n    \n    vex.captureRetrieval({\n      query: ctx.input,\n      results,\n      avgScore: results.reduce((sum, r) => sum + r.score, 0) / results.length,\n      latency: Date.now() - start\n    });\n  }\n  \n  // Auto-remediate low quality\n  if (ctx.flags?.poor_retrieval) {\n    vex.triggerRemediation('RAG_QUALITY_DROP', {\n      agentId: mastraAgent.id,\n      fix: 'increase_chunk_size',\n      threshold: 0.8\n    });\n  }\n  \n  return next(ctx);\n});\n\n// Vex auto-configures optimal thresholds\nvex.autoOptimizeRAG(mastraAgent, {\n  minRelevance: 0.8,\n  maxStaleness: '24h',\n  embeddingDriftThreshold: 0.15\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to your Mastra agents in 5 minutes and eliminate RAG quality issues forever."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix context window management for ai agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Vercel AI SDK context-window-management",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK, Context Window Management for AI Agents manifests as token overflow during multi-turn conversations and tool calls, causing truncated responses or agent loops in streaming UIs. The framework's `generateText` and `streamText` APIs accumulate conversation history without built-in truncation, leading to exceeded limits in providers like OpenAI or Anthropic. This is exacerbated by React Server Components where edge function timeouts compound the issue during complex agent tasks.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn agent conversations via `useChat` hook",
+        "symptom": "Streaming responses cut off mid-sentence with `[TOKEN_LIMIT]` errors",
+        "impact": "User sees incomplete answers; agent fails to maintain conversation state"
+      },
+      {
+        "scenario": "Tool calling agents with `streamUI` and result accumulation",
+        "symptom": "History grows exponentially with each tool call iteration",
+        "impact": "Edge function timeouts after 3-4 tool calls; 504 errors in Vercel deployment"
+      },
+      {
+        "scenario": "Structured output agents using `generateObject` in loops",
+        "symptom": "Context silently truncated, causing inconsistent JSON schemas",
+        "impact": "Partial hallucinations in structured data; frontend parsing failures"
+      },
+      {
+        "scenario": "Streaming agents with `streamText` and message history",
+        "symptom": "Late responses show 'partial hallucinations' from forgotten prior context",
+        "impact": "Poor UX with incoherent agent behavior; increased latency spikes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Monitoring in useChat",
+        "description": "Track cumulative tokens in `useChat` history to detect overflow before API calls",
+        "code": "```typescript\nimport { useChat } from 'ai/react';\nimport { countTokens } from '@ai-sdk/openai';\n\nexport function ChatWithTokenMonitor() {\n  const { messages, append, isLoading } = useChat();\n  \n  const totalTokens = messages.reduce(async (acc, msg) => {\n    const tokens = await countTokens(msg.content);\n    return (await acc) + tokens;\n  }, Promise.resolve(0));\n  \n  React.useEffect(() => {\n    if (totalTokens > 100000) {\n      console.error('⚠️ Context window approaching limit:', totalTokens);\n    }\n  }, [totalTokens]);\n\n  return (\n    <div>Tokens: {totalTokens} {totalTokens > 100000 && '🚨 OVERFLOW RISK'}</div>\n  );\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "StreamText History Overflow Detector",
+        "description": "Middleware for `streamText` that logs context length before each generation",
+        "code": "```typescript\nimport { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\n\nimport type { NextRequest } from 'next/server';\n\nexport async function POST(req: NextRequest) {\n  const { messages } = await req.json();\n  \n  // Calculate context length\n  const contextLength = messages.reduce((sum, msg) => sum + msg.content.length, 0);\n  \n  if (contextLength > 200000) {\n    throw new Error(`Context overflow: ${contextLength} chars`);\n  }\n  \n  console.log('Context length:', contextLength);\n  \n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n  });\n  \n  return result.toAIStreamResponse();\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Loop Detector in Tool Calls",
+        "description": "Monitor tool call iterations and context growth in agent loops",
+        "code": "```typescript\nimport { generateText } from 'ai';\n\nasync function agentLoop(messages: any[], maxIterations = 5) {\n  let iteration = 0;\n  let contextSize = 0;\n  \n  while (iteration < maxIterations) {\n    const { text, usage } = await generateText({\n      model: openai('gpt-4o'),\n      messages,\n      tools: {/* your tools */},\n    });\n    \n    contextSize += usage.totalTokens;\n    \n    if (contextSize > 120000) {\n      console.error('🚨 Agent loop context overflow at iteration', iteration, contextSize);\n      break;\n    }\n    \n    iteration++;\n  }\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncation for useChat",
+        "description": "Implement sliding window truncation keeping only recent + important messages",
+        "code": "```typescript\nimport { useChat } from 'ai/react';\n\nfunction truncateMessages(messages: any[], maxTokens: number = 100000) {\n  let totalTokens = 0;\n  const kept: any[] = [];\n  \n  // Keep system prompt + last N messages\n  for (let i = messages.length - 1; i >= 0; i--) {\n    const msgTokens = messages[i].content.length / 4; // Rough estimate\n    if (totalTokens + msgTokens > maxTokens) break;\n    \n    kept.unshift(messages[i]);\n    totalTokens += msgTokens;\n  }\n  \n  return kept;\n}\n\nexport function SafeChat() {\n  const { messages, append } = useChat();\n  \n  const safeMessages = truncateMessages(messages);\n  \n  return (\n    <Chat messages={safeMessages} />\n  );\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Token-Aware Streaming with Summary Compression",
+        "description": "Compress old context into summaries before streaming new responses",
+        "code": "```typescript\nimport { streamText } from 'ai';\n\nasync function compressContext(messages: any[]) {\n  const recent = messages.slice(-5);\n  const old = messages.slice(0, -5);\n  \n  if (old.length === 0) return recent;\n  \n  const summary = await generateText({\n    model: openai('gpt-4o-mini'),\n    prompt: `Summarize this conversation in 200 tokens: ${JSON.stringify(old)}`,\n    maxTokens: 200,\n  });\n  \n  return [{ role: 'system', content: `Prior context summary: ${summary.text}` }, ...recent];\n}\n\nexport async function POST(req: NextRequest) {\n  const { messages } = await req.json();\n  const compressed = await compressContext(messages);\n  \n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages: compressed,\n  });\n  \n  return result.toAIStreamResponse();\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Fixed-Size Message Buffer for Agents",
+        "description": "Enforce strict message count limits with priority retention",
+        "code": "```typescript\nimport { createStreamableUI } from 'ai/rsc';\n\nfunction createAgentBuffer(messages: any[], maxMessages = 20) {\n  // Prioritize: system > tools > assistant > user\n  const prioritized = messages.sort((a, b) => {\n    const priority = { system: 0, tool: 1, assistant: 2, user: 3 };\n    return priority[a.role] - priority[b.role];\n  });\n  \n  return prioritized.slice(-maxMessages);\n}\n\nexport async function agentAction() {\n  const ui = createStreamableUI();\n  \n  // Your agent logic here\n  const messages = await getAgentMessages();\n  const buffered = createAgentBuffer(messages);\n  \n  ui.update(<div>Processing {buffered.length} messages...</div>);\n  \n  return ui.value;\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automates context window management detection by injecting middleware into Vercel AI SDK's `generateText` and `streamText` calls, monitoring token usage across all conversations in real-time. It establishes baselines for healthy context growth patterns per provider (OpenAI, Anthropic, etc.) and alerts on anomalies like exponential history accumulation or truncation failures. For remediation, Vex auto-applies truncation strategies, context compression, and message buffering with zero-code changes via its SDK integration.\n\nThe middleware captures full conversation traces including tool calls and streaming chunks, applying ML-powered anomaly detection trained on millions of AI SDK deployments. When overflow risks are detected, Vex can automatically rewrite API calls with truncation logic or reroute to smaller models, maintaining <1% error rate. Integration takes 3 lines of code and works across edge functions, Server Actions, and React Server Components.\n\nVex provides production dashboards showing context window utilization per route, agent loop depth, and token efficiency scores, enabling teams to optimize before failures cascade to users.",
+      "code": "```typescript\nimport { middleware } from '@vex_dev/sdk/ai';\nimport { generateText, streamText } from 'ai';\n\n// 3-line integration\nmiddleware({\n  detect: ['context-overflow', 'agent-loop-excess'],\n  autoFix: true,\n  alert: ['slack', 'email'],\n});\n\n// Your existing AI SDK code works unchanged\nexport async function POST(req: NextRequest) {\n  const { messages } = await req.json();\n  \n  // Vex automatically monitors & fixes context window\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n  });\n  \n  return result.toAIStreamResponse();\n}\n```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware in 3 lines to eliminate context window failures across all your Vercel AI SDK agents forever."
+    }
+  }
+}

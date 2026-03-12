@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Flowise + Vex Guardrails",
+    "description": "Learn how to build research agents with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise research agents",
+      "Flowise guardrails",
+      "research agents reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of Research Agents through its drag-and-drop interface for multi-step web search, retrieval, and synthesis pipelines. These agents excel at gathering and summarizing information but are prone to issues like unvalidated outputs, irrelevant retrievals, and context loss in agent handoffs. Vex provides essential guardrails to verify source accuracy, claim validity, recency, and bias in real-time, ensuring reliable research outputs.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Flowise",
+      "description": "Flowise Research Agents typically start with a user query triggering a Web Search Tool node that fetches results from search APIs like Tavily or Google. These results feed into a Vector Store Retriever (e.g., Pinecone or Weaviate) for RAG augmentation, followed by an LLM Chain for initial analysis. A multi-agent supervisor then orchestrates synthesis agents that cross-verify claims, check recency, and detect bias before final summarization.\n\nThe drag-and-drop canvas connects these nodes sequentially: Query → Search → Embed & Retrieve → Analyze → Verify → Summarize. Custom tool nodes handle specialized tasks like fact-checking APIs or bias scoring. Context flows through memory buffers, but handoffs between agents often lose critical intermediate state.\n\nVex integrates as a callback handler at key checkpoints: after retrieval, post-LLM generation, and before final output, enabling verification without disrupting the low-code workflow.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Web Search     │───▶│ Vector Store     │\n│                 │    │   (Tavily/Serper) │    │   Retrieval      │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                   │                       │\n                                   ▼                       ▼\n                          ┌──────────────────┐    ┌──────────────────┐\n                          │   LLM Analysis   │◀──▶│  Vex Verification │\n                          │   Chain Node     │    │ (Source/Claims)   │\n                          └──────────────────┘    └──────────────────┘\n                                   │\n                                   ▼\n                          ┌──────────────────┐\n                          │ Synthesis Agent  │───▶│   Final Output   │\n                          │   + Vex Guard    │    │   (Verified)     │\n                          └──────────────────┘    └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Chatflow chains producing unvalidated intermediate outputs",
+        "description": "LLM nodes generate analysis without source verification, leading to hallucinated claims propagating through the pipeline",
+        "severity": "high",
+        "mitigation": "Vex source verification callbacks after every LLM generation node"
+      },
+      {
+        "name": "Vector store retrieval returning low-relevance documents",
+        "description": "RAG retrievers return outdated or off-topic documents due to embedding drift or poor chunking",
+        "severity": "medium",
+        "mitigation": "Vex semantic relevance scoring and recency checks on retrieved chunks"
+      },
+      {
+        "name": "Custom tool nodes failing silently without error propagation",
+        "description": "Web search or fact-check tools timeout or return empty results without triggering flow errors",
+        "severity": "high",
+        "mitigation": "Vex tool result validation with fallback routing"
+      },
+      {
+        "name": "Multi-agent sequential flow losing context between agent handoffs",
+        "description": "Supervisor-agent handoffs drop critical verification metadata and source trails",
+        "severity": "medium",
+        "mitigation": "Vex context preservation middleware in memory buffers"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Flowise Research Agent Setup",
+        "description": "Core chatflow with web search, RAG, and synthesis for research tasks",
+        "code": "import { ChatFlowise } from 'flowise';\nimport { TavilySearchTool } from 'langchain/tools/tavily';\n\nconst researchFlow = new ChatFlowise({\n  nodes: {\n    search: new TavilySearchTool({\n      maxResults: 10,\n      searchDepth: 'advanced'\n    }),\n    embedder: new OpenAIEmbeddings(),\n    vectorStore: new PineconeStore(),\n    llm: new ChatOpenAI({ model: 'gpt-4o-mini' }),\n    synthesizer: new LLMChain({\n      llm: new ChatOpenAI({ model: 'gpt-4o' }),\n      prompt: researchSynthesisPrompt\n    })\n  },\n  edges: [\n    { from: 'query', to: 'search' },\n    { from: 'search', to: 'embedder' },\n    { from: 'embedder', to: 'vectorStore' },\n    { from: 'vectorStore', to: 'llm' },\n    { from: 'llm', to: 'synthesizer' }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Agent Supervisor Pattern",
+        "description": "Supervisor orchestrates verification, analysis, and synthesis agents",
+        "code": "import { AgentExecutor, createReactAgent } from 'langchain/agents';\n\nconst supervisor = createReactAgent({\n  llm: chatOpenAI,\n  tools: [searchTool, factCheckTool, biasDetector],\n  prompt: `You are research supervisor. Route to:\n- verification_agent for source/claim checks\n- analysis_agent for data synthesis\n- bias_agent for perspective detection`\n});\n\nconst verificationAgent = new AgentExecutor({\n  agent: createReactAgent({ llm, tools: [sourceVerifier] }),\n  tools: [sourceVerifier]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Research Tool Nodes",
+        "description": "Specialized tools for recency and bias detection",
+        "code": "class RecencyCheckerTool extends BaseTool {\n  name = 'recency_checker';\n  description = 'Check if sources are recent (last 6 months)';\n\n  async _call(input: string) {\n    const docs = await this.vectorStore.similaritySearch(input);\n    return docs.map(doc => ({\n      content: doc.pageContent,\n      recency: this.checkDate(doc.metadata.date),\n      score: this.semanticScore(doc, input)\n    }));\n  }\n}\n\nclass BiasDetectorTool extends BaseTool {\n  async _call(text: string) {\n    const analysis = await this.llm.call([\n      new HumanMessage({\n        content: `Rate bias in this research text (1-10): ${text}`\n      })\n    ]);\n    return { biasScore: parseFloat(analysis.content), flagged: score > 7 };\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Buffer for Agent Handoffs",
+        "description": "Persistent context across multi-agent flows",
+        "code": "import { BufferWindowMemory } from 'langchain/memory';\n\nconst researchMemory = new BufferWindowMemory({\n  k: 20,\n  returnMessages: true,\n  memoryKey: 'research_chat_history',\n  inputKey: 'input',\n  outputKey: 'output'\n});\n\nconst agentWithMemory = new AgentExecutor({\n  agent,\n  tools,\n  memory: researchMemory,\n  verbose: true,\n  maxIterations: 5\n});\n\n// Persist verification metadata\nresearchMemory.chatHistory.addMessages([\n  new SystemMessage('Preserve all source URLs and verification status')\n]);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Callback Handler Setup",
+        "description": "Add Vex as global callback in Flowise chatflow config",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  project: 'flowise-research-agent'\n});\n\nconst flowiseConfig = {\n  callbacks: [{\n    type: 'afterLLM',\n    callback: async (output, metadata) => {\n      const verified = await vex.verify({\n        text: output,\n        useCase: 'research_agent',\n        checks: ['source_verification', 'claim_accuracy']\n      });\n      if (!verified.pass) {\n        throw new Error(`Vex blocked: ${verified.issues.join(', ')}`);\n      }\n      return { ...output, vexMetadata: verified };\n    }\n  }]\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Retrieval Relevance Guardrail",
+        "description": "Verify vector store results before LLM augmentation",
+        "code": "const retrievalCallback = async (retrievedDocs, query) => {\n  const results = await vex.verify({\n    text: retrievedDocs.map(d => d.pageContent).join('\\n'),\n    context: { query },\n    useCase: 'rag_retrieval',\n    checks: ['semantic_relevance', 'recency_check'],\n    threshold: { relevance: 0.75, recency_days: 180 }\n  });\n\n  if (results.score.relevance < 0.75) {\n    console.warn('Low relevance docs filtered:', results.flagged_docs);\n    return retrievedDocs.filter(doc => results.passed_docs.includes(doc.id));\n  }\n\n  return retrievedDocs;\n};\n\n// Attach to vector store node\nvectorStoreRetriever.callbackManager = {\n  handleRetrieverEnd: retrievalCallback\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Agent Handoff Context Guardrail",
+        "description": "Preserve verification metadata across agent boundaries",
+        "code": "const handoffGuardrail = async (input, agentName, context) => {\n  const preserved = await vex.preserveContext({\n    currentInput: input,\n    agent: agentName,\n    priorContext: context,\n    useCase: 'multi_agent_handoff',\n    checks: ['context_loss_detection', 'bias_propagation']\n  });\n\n  return {\n    ...input,\n    vexContext: preserved.metadata,\n    sourceTrail: preserved.verifiedSources,\n    warning: preserved.biasDetected ? 'Review for bias' : null\n  };\n};\n\n// Global supervisor hook\nsupervisor.beforeAgentExecution = handoffGuardrail;\n\n// Research memory integration\nresearchMemory.saveContext = async (input, output) => {\n  const verified = await vex.verify({ text: output });\n  await researchMemory.saveContext(input, verified.output);\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Research Agents",
+      "description": "Add Vex guardrails today to eliminate hallucinations and ensure trustworthy research outputs - start with our free tier."
+    }
+  }
+}

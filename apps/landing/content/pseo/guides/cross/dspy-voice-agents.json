@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with DSPy + Vex Guardrails",
+    "description": "Learn how to build voice agents with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy voice agents",
+      "DSPy guardrails",
+      "voice agents reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "DSPy enables programming voice agents by composing optimizable LM modules for speech-to-text, reasoning, and text-to-speech pipelines. Guardrails are essential due to real-time latency demands and risks like incoherent conversations or unsafe responses from optimized prompts. Vex provides runtime verification to catch assertion violations and ensure sub-second performance.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with DSPy",
+      "description": "Voice agents process real-time audio through a pipeline: speech-to-text (STT) transcribes input, DSPy modules handle reasoning and response generation, and text-to-speech (TTS) synthesizes output. DSPy signatures define structured LM calls (e.g., 'question -> answer') optimized via teleprompters like BootstrapFewShot. Latency budgets require <300ms end-to-end, with DSPy modules wrapped for verification.\n\nDSPy programs chain modules like ChainOfThought or ReAct for conversational reasoning, but composition can produce unexpected outputs. Vex verifies response appropriateness, coherence across turns, and safety before TTS. STT/TTS use low-latency models like Whisper-Tiny and Piper TTS.",
+      "diagram": "Audio Input → [STT: Whisper] → [DSPy Reasoning: CoT/ReAct] → [Vex Verify] → [TTS: Piper] → Audio Output\n                  ↓\n             [Latency: <300ms]    [Safety/Coherence Checks]"
+    },
+    "risks": [
+      {
+        "name": "Optimized prompts overfitting",
+        "description": "DSPy teleprompters generate prompts that memorize training examples but fail on novel voice queries",
+        "severity": "critical",
+        "mitigation": "Vex verifies generalization with diverse test cases at inference time"
+      },
+      {
+        "name": "Chain-of-thought logic errors",
+        "description": "CoT modules produce plausible reasoning steps leading to wrong conversational responses",
+        "severity": "high",
+        "mitigation": "Vex checks reasoning validity against conversation history assertions"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "DSPy module inference exceeds 300ms, breaking real-time voice interaction",
+        "severity": "critical",
+        "mitigation": "Vex enforces strict timing assertions on forward() calls"
+      },
+      {
+        "name": "Safety filter bypasses",
+        "description": "Optimized modules generate harmful content slipping through basic filters",
+        "severity": "critical",
+        "mitigation": "Vex applies multi-layer safety verification before TTS"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "DSPy Signature for Voice Reasoning",
+        "description": "Define typed signatures for conversational reasoning with conversation history context.",
+        "code": "import dspy\nclass VoiceReasoner(dspy.Signature):\n    \"\"\"Respond appropriately to voice conversation.\"\"\"\n    conversation_history: str = dspy.InputField()\n    user_query: str = dspy.InputField()\n    appropriate_response: str = dspy.OutputField(desc='Safe, coherent response <100 words')\n\nreason_module = dspy.ChainOfThought(VoiceReasoner)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Voice Pipeline",
+        "description": "Orchestrate STT → DSPy → TTS with latency tracking using Whisper and Piper.",
+        "code": "import time\nimport dspy\nfrom vosk import Model, KaldiRecognizer  # or Whisper\n\ndef voice_pipeline(audio_chunk, history=''):\n    start = time.time()\n    transcript = stt_transcribe(audio_chunk)  # <100ms\n    pred = reason_module(conversation_history=history, user_query=transcript)\n    response = pred.appropriate_response\n    audio_out = tts_synthesize(response)  # <150ms\n    latency = time.time() - start\n    assert latency < 0.3, f'Latency violation: {latency}s'\n    return audio_out, response",
+        "language": "python"
+      },
+      {
+        "title": "DSPy Optimization for Voice",
+        "description": "BootstrapFewShot optimization with voice-specific examples for low-latency inference.",
+        "code": "from dspy.teleprompt import BootstrapFewShot\n\nvoice_examples = [\n    dspy.Example(conversation_history='Hi', user_query='Weather?', appropriate_response='Sunny, 72°F').with_inputs('conversation_history', 'user_query')\n]\nteleprompter = BootstrapFewShot(metric=lambda ex, pred, trace: 1.0 if 'safe' in pred.appropriate_response else 0)\noptimized_reasoner = teleprompter.compile(reason_module, trainset=voice_examples)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation State Management",
+        "description": "Maintain coherence across turns with DSPy example caching and history truncation.",
+        "code": "class VoiceAgent(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.reason = dspy.ChainOfThought(VoiceReasoner)\n        self.history = []\n    \n    def forward(self, audio):\n        transcript = stt(audio)\n        context = '\\n'.join(self.history[-3:])  # Last 3 turns\n        pred = self.reason(conversation_history=context, user_query=transcript)\n        self.history.append(f'User: {transcript} | Bot: {pred.appropriate_response}')\n        return pred.appropriate_response",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap DSPy forward() with Vex Verify",
+        "description": "Catch assertion violations and overfitting by verifying module outputs at inference time.",
+        "code": "import vex\n\n@vex.verify([\n    vex.assertion('response_safe', 'no harm|violence|illegal', weight=1.0),\n    vex.assertion('latency_budget', lambda ctx: ctx.latency < 0.3, weight=1.0)\n])\ndef verified_voice_pipeline(audio, history):\n    start = time.time()\n    transcript = stt(audio)\n    pred = optimized_reasoner(conversation_history=history, user_query=transcript)\n    return {'response': pred.appropriate_response, 'latency': time.time() - start}",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Coherence Verification",
+        "description": "Ensure responses maintain context across multiple turns with history-aware assertions.",
+        "code": "@vex.verify([\n    vex.assertion('coherent_response', lambda ctx: any(word in ctx.response for word in ctx.transcript.split()) if ctx.transcript else True),\n    vex.assertion('length_appropriate', lambda ctx: 10 < len(ctx.response) < 100)\n])\ndef coherent_reasoning(transcript, history):\n    pred = reason_module(conversation_history=history, user_query=transcript)\n    return {'response': pred.appropriate_response, 'transcript': transcript, 'history': history}",
+        "language": "python"
+      },
+      {
+        "title": "Multi-layer Safety Pipeline",
+        "description": "Cascade Vex verifications for high-risk voice agents with fallback responses.",
+        "code": "@vex.verify([\n    vex.assertion('no_hate_speech', 'hate|discriminate|slur', weight=1.0),\n    vex.assertion('no_pii', 'ssn|credit card|address', weight=1.0),\n    vex.assertion('family_friendly', lambda ctx: all(score < 0.1 for score in safety_scores(ctx.response)))\n], fallback='I cannot assist with that request.')\ndef safe_voice_response(audio):\n    transcript = stt(audio)\n    response = voice_agent(audio)\n    return tts(response)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy Voice Agents",
+      "description": "Integrate Vex today to achieve production-grade reliability for real-time conversational AI."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Claude Tool Use Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Claude Tool Use agent-auth",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, AI Agent Authentication and Authorization problems manifest when agents attempt unauthorized tool calls, such as accessing protected APIs or resources without valid credentials, leading to cascading failures in tool chains. These issues often appear as 401/403 errors in tool responses that propagate through multi-step reasoning, causing inconsistent final outputs or complete agent halts. Without proper auth guards, Claude's parallel tool execution can amplify the problem by triggering multiple conflicting unauthorized calls simultaneously.",
+    "howItManifests": [
+      {
+        "scenario": "Sequential tool chain calling authenticated database API",
+        "symptom": "First tool returns 401 Unauthorized, subsequent tools receive malformed error objects",
+        "impact": "Cascading errors halt agent execution mid-chain, producing 'reasoning inconsistent with final output'"
+      },
+      {
+        "scenario": "Parallel tool calls to user-specific endpoints without session tokens",
+        "symptom": "Mixed responses: some tools succeed, others return 403 Forbidden with no resolution logic",
+        "impact": "Conflicting results without resolution, agent outputs incorrect blended data"
+      },
+      {
+        "scenario": "Extended thinking phase planning auth-dependent actions",
+        "symptom": "Reasoning mentions valid auth flow but final tool call omits API key",
+        "impact": "Inconsistent reasoning vs. output, agent appears 'confused' about auth state"
+      },
+      {
+        "scenario": "Computer use agent interacting with auth-gated desktop apps",
+        "symptom": "Clicks login button but fails to input credentials from tool response",
+        "impact": "Performs unintended actions on error modals instead of retrying auth"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Tool Response Status Codes",
+        "description": "Detect auth failures by parsing HTTP status codes in Claude tool responses",
+        "code": "import anthropic\n\nclient = anthropic.Anthropic()\n\nmessage = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    max_tokens=1024,\n    tools=[...],\n    messages=[...]\n)\n\nfor block in message.content:\n    if block.type == 'tool_use':\n        tool_input = block.input\n        if 'status_code' in tool_input and tool_input['status_code'] in [401, 403]:\n            print(f\"Auth failure detected: {tool_input.get('error', 'Unknown')}\")\n",
+        "language": "python"
+      },
+      {
+        "name": "Trace Auth Token Presence",
+        "description": "Verify API keys and tokens are included in tool call headers",
+        "code": "def check_auth_tokens(tool_calls):\n    auth_errors = []\n    for tool_call in tool_calls:\n        headers = tool_call.get('headers', {})\n        if 'Authorization' not in headers and 'api-key' not in headers:\n            auth_errors.append({\n                'tool': tool_call['name'],\n                'missing': 'Authorization header'\n            })\n    return auth_errors\n\n# Usage with Claude response\nerrors = check_auth_tokens(message.content)",
+        "language": "python"
+      },
+      {
+        "name": "Runtime Token Validation",
+        "description": "Validate JWT tokens in tool calls before execution",
+        "code": "import jwt\nimport re\n\ndef validate_tool_auth(tool_input):\n    headers = tool_input.get('headers', {})\n    auth_header = headers.get('Authorization')\n    if auth_header and auth_header.startswith('Bearer '):\n        token = auth_header.split(' ')[1]\n        try:\n            jwt.decode(token, options={'verify_signature': False})\n            return True\n        except jwt.InvalidTokenError:\n            return False\n    return False\n\n# Check Claude tool response\nis_valid = validate_tool_auth(block.input)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Credential Injection Middleware",
+        "description": "Automatically inject auth tokens into Claude tool calls",
+        "code": "import os\nimport anthropic\n\nAPI_KEY = os.getenv('DATABASE_API_KEY')\n\nclass AuthMiddleware:\n    def __init__(self):\n        self.api_key = API_KEY\n    \n    def inject_auth(self, tool_call):\n        if tool_call['name'] in ['query_db', 'user_profile']:\n            tool_call['headers'] = tool_call.get('headers', {})\n            tool_call['headers']['Authorization'] = f'Bearer {self.api_key}'\n        return tool_call\n\nmiddleware = AuthMiddleware()\n\n# Wrap Claude tool response\nfor block in message.content:\n    if block.type == 'tool_use':\n        fixed_tool = middleware.inject_auth(block.input)\n        # Execute with auth\n",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Auth Retry Logic",
+        "description": "Retry tool calls with progressive auth escalation",
+        "code": "def execute_with_auth_retry(client, tool_call, max_retries=3):\n    for attempt in range(max_retries):\n        try:\n            if attempt == 0:\n                # Try without auth\n                pass\n            elif attempt == 1:\n                tool_call['headers']['X-API-Key'] = os.getenv('API_KEY')\n            else:\n                tool_call['headers']['Authorization'] = f'Bearer {os.getenv(\"BEARER_TOKEN\")}'\n            \n            result = client.tools.call(tool_call)\n            if result.get('status_code') in [401, 403]:\n                raise Exception('Auth failed')\n            return result\n        except Exception:\n            if attempt == max_retries - 1:\n                raise\n    return None\n\n# Use with Claude agent loop",
+        "language": "python"
+      },
+      {
+        "name": "Role-Based Tool Access Control",
+        "description": "Restrict tool access based on agent role/capabilities",
+        "code": "AGENT_ROLES = {\n    'readonly': ['get_user_info'],\n    'admin': ['query_db', 'update_user']\n}\n\ndef authorize_tool_call(agent_role, tool_name):\n    return tool_name in AGENT_ROLES.get(agent_role, [])\n\ndef filter_claude_tools(message, agent_role):\n    filtered_content = []\n    for block in message.content:\n        if block.type == 'tool_use':\n            if authorize_tool_call(agent_role, block.name):\n                filtered_content.append(block)\n            else:\n                filtered_content.append({\n                    'type': 'text',\n                    'text': f'Access denied to {block.name}'\n                })\n        else:\n            filtered_content.append(block)\n    return filtered_content\n\nmessage = filter_claude_tools(message, 'readonly')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex provides runtime verification for Claude Tool Use agents by wrapping messages.create() calls with vex.verify(), automatically detecting authentication failures across tool chains. It captures 401/403 responses, token validation errors, and inconsistent auth flows in extended reasoning, providing structured error reports with remediation suggestions. For parallel tool calls, Vex correlates conflicting auth states and flags missing credential patterns.\n\nThe platform integrates seamlessly with Anthropic's API, monitoring tool_use blocks in real-time and validating headers against expected auth patterns. When failures are detected, Vex can automatically inject credentials from secure vaults or trigger fallback auth flows, ensuring agent reliability without manual intervention. This eliminates cascading auth errors that plague production Claude agents.",
+      "code": "from vex_sdk import verify\nimport anthropic\nimport os\n\nclient = anthropic.Anthropic()\n\n@vex.verify(\n    check=['auth_status_codes', 'token_validation'],\n    auto_fix=['inject_api_key'],\n    alert_on=['401', '403']\n)\ndef safe_claude_agent(messages, tools):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        tools=tools,\n        messages=messages\n    )\n    \n    # Vex auto-validates tool responses for auth issues\n    for block in response.content:\n        if block.type == 'tool_use':\n            verify_tool_auth(block.input)\n    \n    return response\n\n# Usage\nresult = safe_claude_agent(messages, tools)\n\n# Vex auto-generates report\nprint(vex.get_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today to eliminate authentication failures in your Claude agents with one line of code."
+    }
+  }
+}

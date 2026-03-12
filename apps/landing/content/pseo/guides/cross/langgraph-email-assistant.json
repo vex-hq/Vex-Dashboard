@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langgraph",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with LangGraph + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with LangGraph + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangGraph ai email assistant",
+      "LangGraph guardrails",
+      "ai email assistant reliability",
+      "Vex LangGraph",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with LangGraph enables sophisticated workflows for intent detection, draft generation, attachment handling, and approval processes. However, complex cyclical graphs introduce risks like infinite loops, state corruption, and bypassed human-in-the-loop safeguards. Vex provides essential verification to ensure PII filtering, tone appropriateness, recipient validation, content accuracy, and confidentiality enforcement in high-risk email operations.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with LangGraph",
+      "description": "The AI Email Assistant uses LangGraph to orchestrate a stateful workflow processing incoming emails. Nodes handle intent classification (reply/forward/draft), content analysis for PII and tone, draft generation with LLM calls, attachment extraction, and recipient validation. Conditional edges route based on intent and risk scores, with human-in-the-loop breakpoints for send approval.\n\nParallel branches process content safety checks and attachment scanning simultaneously, merging results before final approval. Checkpoints persist state across interruptions, enabling recovery from failures. The graph cycles back for iterative draft refinement if verification fails.\n\nState schema includes email metadata, processed content, draft text, attachments, and verification results, ensuring traceability through the workflow.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Incoming      │───▶│  Intent Detection │\n│     Email       │    │     (classify)    │\n└──────────┬──────┘    └──────┬──────────────┘\n           │                  │\n           ▼                  ▼\n┌──────────┴──────┐    ┌──────┴──────────────┐\n│ Parallel Branch │    │  Content Analysis    │\n│   (Attachments) │◀──▶│ (PII/Tone/Accuracy)  │\n└──────────┬──────┘    └──────┬──────────────┘\n           │                  │\n           ▼                  ▼\n       ┌──┴──┐         ┌──────┴──────┐\n       │ Vex │         │   Draft Gen  │\n       │Verify│◀───────▶│   (LLM)     │\n       └──┬──┘         └──────┬──────┘\n          │                    │\n          └────────┬───────────┘\n                   │\n              ┌────┴────┐\n              │ Human   │───(approved)───▶│ Send Email │\n              │Approval │                  └────────────┘\n              └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Cyclic graph execution causing infinite state transitions",
+        "description": "Intent detection misclassifies emails, triggering endless draft refinement loops without exit conditions",
+        "severity": "critical",
+        "mitigation": "Wrap iterative nodes with Vex cycle detection and max_iterations guardrail"
+      },
+      {
+        "name": "State corruption when parallel branches merge conflicting data",
+        "description": "Attachment handler and PII scanner update conflicting recipient lists during merge",
+        "severity": "high",
+        "mitigation": "Use Vex state validation at merge points to reconcile and prioritize safety data"
+      },
+      {
+        "name": "Checkpoint deserialization errors after schema changes",
+        "description": "Adding new verification fields breaks recovery from persisted email states",
+        "severity": "high",
+        "mitigation": "Implement Vex schema migration validation on checkpoint load"
+      },
+      {
+        "name": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "description": "Low-risk drafts skip approval when tone analysis confidence exceeds threshold",
+        "severity": "critical",
+        "mitigation": "Vex enforces mandatory human review for all external send operations"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Core Email Processing Graph Setup",
+        "description": "Define the LangGraph workflow with state schema for email processing including verification results",
+        "code": "from typing import TypedDict, Annotated, Sequence\nfrom langgraph.graph import StateGraph, END\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\nclass EmailState(TypedDict):\n    email_content: str\n    intent: str\n    draft: str\n    attachments: list[str]\n    recipients: list[str]\n    pii_detected: bool\n    tone_score: float\n    verification_passed: bool\n    human_approved: bool\n\n    def update_recipients(self, new_recipients: list[str]) -> 'EmailState':\n        self['recipients'] = new_recipients\n        return self\n\nmemory = SqliteSaver.from_conn_string(':memory:')\nworkflow = StateGraph(state_schema=EmailState)",
+        "language": "python"
+      },
+      {
+        "title": "Intent Detection and Routing Node",
+        "description": "Classify email intent and route to appropriate processing paths",
+        "code": "from langchain_openai import ChatOpenAI\n\nllm = ChatOpenAI(model='gpt-4o-mini', temperature=0)\n\ndef detect_intent(state: EmailState) -> EmailState:\n    prompt = f\"\"\"Classify this email intent: {state['email_content']}\n    Respond only with: 'reply', 'forward', or 'draft'\"\"\"\n    response = llm.invoke(prompt)\n    state['intent'] = response.content.strip().lower()\n    return state\n\nworkflow.add_node('intent_detection', detect_intent)\nworkflow.set_entry_point('intent_detection')\n\n# Conditional routing\ndef route_by_intent(state: EmailState) -> str:\n    intent = state['intent']\n    if intent == 'reply':\n        return 'content_analysis'\n    elif intent == 'forward':\n        return 'recipient_validation'\n    return 'draft_generation'",
+        "language": "python"
+      },
+      {
+        "title": "Parallel Content Analysis Nodes",
+        "description": "Run PII detection, tone analysis, and accuracy checks concurrently",
+        "code": "def pii_detection(state: EmailState) -> EmailState:\n    # Simulated PII scan\n    sensitive_patterns = ['SSN', 'credit card', 'password']\n    state['pii_detected'] = any(pattern in state['email_content'] for pattern in sensitive_patterns)\n    return state\n\ndef tone_analysis(state: EmailState) -> EmailState:\n    prompt = f\"Rate tone appropriateness (0-10) for professional email: {state['email_content']}\"\n    response = llm.invoke(prompt)\n    state['tone_score'] = float(response.content)\n    return state\n\ndef accuracy_check(state: EmailState) -> EmailState:\n    # Validate facts/content accuracy\n    state['verification_passed'] = True  # Placeholder\n    return state\n\nworkflow.add_node('pii_detection', pii_detection)\nworkflow.add_node('tone_analysis', tone_analysis)\nworkflow.add_node('accuracy_check', accuracy_check)",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation and Human Approval",
+        "description": "Generate email draft and require human approval before sending",
+        "code": "def generate_draft(state: EmailState) -> EmailState:\n    if state.get('pii_detected') or state['tone_score'] < 7:\n        state['draft'] = \"Draft rejected by safety checks\"\n        return {'next': 'human_review'}\n    \n    prompt = f\"Write professional {state['intent']} email: {state['email_content']}\"\n    response = llm.invoke(prompt)\n    state['draft'] = response.content\n    return state\n\ndef human_review(state: EmailState) -> str:\n    # Human-in-the-loop breakpoint\n    print(f\"Review draft: {state['draft']}\\nApprove? (y/n)\")\n    approval = input().lower() == 'y'\n    state['human_approved'] = approval\n    return 'send_email' if approval else END\n\nworkflow.add_node('draft_generation', generate_draft)\nworkflow.add_node('human_review', human_review)\napp = workflow.compile(checkpointer=memory)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Graph Invocation with Vex.verify()",
+        "description": "Protect entire graph execution with comprehensive email safety verification",
+        "code": "from vex import verify\n\n@pip install vex-sdk\n\nasync def process_email_safely(email_content: str):\n    initial_state = {\n        'email_content': email_content,\n        'intent': '',\n        'draft': '',\n        'recipients': [],\n        'pii_detected': False,\n        'tone_score': 0,\n        'verification_passed': False,\n        'human_approved': False\n    }\n    \n    verified_state = await verify(\n        app.invoke,\n        initial_state,\n        guards=[\n            'no-pii-leakage',\n            'professional-tone',\n            'valid-recipients',\n            'content-accuracy',\n            'confidentiality-enforced',\n            'no-infinite-cycles',\n            'human-review-required'\n        ],\n        max_iterations=5\n    )\n    return verified_state\n\n# Usage\nresult = await process_email_safely(\"User email with SSN: 123-45-6789\")",
+        "language": "python"
+      },
+      {
+        "title": "Vex Node for Pre-Send Validation",
+        "description": "Add Vex as dedicated verification node before email transmission",
+        "code": "from vex import Guardrail\n\nasync def vex_email_verification(state: EmailState) -> EmailState:\n    guards = Guardrail('email-safety-suite')\n    \n    verification_results = await guards.run([\n        {\n            'name': 'pii_filtering',\n            'input': state['draft'],\n            'rules': ['no-ssn', 'no-credit-cards', 'no-personal-identifiers']\n        },\n        {\n            'name': 'tone_appropriateness',\n            'input': state['draft'],\n            'threshold': 8.0,\n            'category': 'professional'\n        },\n        {\n            'name': 'recipient_validation',\n            'input': state['recipients'],\n            'rules': ['valid-email-format', 'no-external-unless-approved']\n        }\n    ])\n    \n    state['verification_passed'] = all(result.passed for result in verification_results)\n    \n    if not state['verification_passed']:\n        state['draft'] = \"Email blocked by Vex safety checks\"\n        return {'next': 'human_review'}\n    \n    return state\n\nworkflow.add_node('vex_verification', vex_email_verification)\n\n# Route to Vex before final send\ndef should_verify(state: EmailState) -> str:\n    return 'vex_verification' if state['human_approved'] else 'human_review'",
+        "language": "python"
+      },
+      {
+        "title": "State Schema Validation at Checkpoints",
+        "description": "Prevent deserialization errors with Vex checkpoint validation",
+        "code": "from vex import SchemaValidator\n\nimport vex\n\nclass EmailStateValidator(SchemaValidator):\n    required_fields = ['email_content', 'intent', 'draft', 'recipients']\n    pii_fields = ['email_content', 'draft']\n    max_draft_length = 10000\n    \n    async def validate_checkpoint(self, state: EmailState) -> bool:\n        # Schema integrity\n        for field in self.required_fields:\n            if field not in state:\n                return False\n        \n        # PII pre-filtering\n        for field in self.pii_fields:\n            if await self.detect_pii(state[field]):\n                return False\n        \n        # Size limits\n        if len(state['draft']) > self.max_draft_length:\n            return False\n        \n        return True\n\n# Custom checkpointer with Vex validation\nclass VexCheckpointer(SqliteSaver):\n    def __init__(self, *args, validator: EmailStateValidator = None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.validator = validator or EmailStateValidator()\n    \n    async def get(self, config):\n        state = await super().get(config)\n        if state and not await self.validator.validate_checkpoint(state):\n            raise ValueError('Checkpoint validation failed')\n        return state\n\nmemory = VexCheckpointer.from_conn_string(':memory:')\napp = workflow.compile(checkpointer=memory)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangGraph AI Email Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your email workflows from critical safety failures."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Mastra Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Mastra tool-loop-detection",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, Tool Loops manifest as infinite cycles where agents repeatedly invoke the same tool sequence due to unvalidated workflow transitions and malformed tool outputs. This is exacerbated by Mastra's workflow step system where outputs flow directly to next steps without validation, causing agents to misinterpret results and re-trigger identical tool calls. Memory retrieval of stale context further entrenches these loops, making detection critical for production reliability.",
+    "howItManifests": [
+      {
+        "scenario": "Unvalidated workflow transitions between tool calls",
+        "symptom": "Agent repeatedly calls `searchTool` → `parseTool` → `searchTool` without progress",
+        "impact": "100% CPU usage, API rate limits exceeded, $50+ in unnecessary tool costs per hour"
+      },
+      {
+        "scenario": "Malformed JSON from tool responses not parsed correctly",
+        "symptom": "Mastra workflow step receives `{data: null}` but continues to next tool expecting valid data",
+        "impact": "Agent hallucinates based on empty data, produces incorrect final answers"
+      },
+      {
+        "scenario": "Stale memory context injected into tool selection",
+        "symptom": "Agent sees previous tool call state in memory and re-executes same tools",
+        "impact": "Infinite loop until memory TTL expires (24+ hours)"
+      },
+      {
+        "scenario": "Sync integration data causing repeated validation loops",
+        "symptom": "CRM sync tool returns partial data → validation tool → CRM sync tool endlessly",
+        "impact": "Sync failures cascade, data inconsistency across systems"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Step Cycle Monitor",
+        "description": "Tracks Mastra workflow step transitions to detect repeating tool sequences",
+        "code": "import { AgentRun, WorkflowStep } from 'mastra';\n\nconst detectToolLoop = (steps: WorkflowStep[]): boolean => {\n  const toolCalls = steps\n    .filter(step => step.type === 'tool')\n    .map(step => `${step.toolName}:${JSON.stringify(step.input)}`);\n  \n  const sequences = [];\n  for (let i = 0; i < toolCalls.length - 3; i++) {\n    sequences.push(toolCalls.slice(i, i + 4).join('->'));\n  }\n  \n  const sequenceCounts = sequences.reduce((acc, seq) => {\n    acc[seq] = (acc[seq] || 0) + 1;\n    return acc;\n  }, {} as Record<string, number>);\n  \n  return Object.values(sequenceCounts).some(count => count >= 3);\n};\n\n// Usage in Mastra agent runner\nconst monitorLoop = (agentRun: AgentRun) => {\n  if (detectToolLoop(agentRun.steps)) {\n    console.warn('🔄 TOOL LOOP DETECTED:', agentRun.id);\n    return true;\n  }\n  return false;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Pollution Check",
+        "description": "Detects when Mastra memory retrieval contains tool call artifacts from previous cycles",
+        "code": "import { MemoryContext } from 'mastra';\n\nconst detectMemoryLoop = (memory: MemoryContext, currentStep: WorkflowStep): boolean => {\n  const toolArtifacts = [\n    'tool_result',\n    'search_results',\n    'api_response',\n    'parsed_data'\n  ];\n  \n  const memoryContent = JSON.stringify(memory);\n  const recentToolCalls = memoryContent.match(/tool_name\\s*:\\s*[\"']([^\"']+)[\"']/g) || [];\n  \n  // Check if memory contains >3 identical tool calls\n  const toolCounts = recentToolCalls.reduce((acc, match) => {\n    const toolName = match.match(/[\"']([^\"']+)[\"']/)?.[1];\n    if (toolName) acc[toolName] = (acc[toolName] || 0) + 1;\n    return acc;\n  }, {} as Record<string, number>);\n  \n  return Object.values(toolCounts).some(count => count > 3);\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Token Budget Exhaustion Monitor",
+        "description": "Mastra-specific token tracking showing loop patterns before budget exhaustion",
+        "code": "import { AgentSession } from 'mastra';\n\nconst trackTokenLoops = (session: AgentSession): { looping: boolean; pattern: string } => {\n  const { steps, totalTokens } = session;\n  const toolSteps = steps.filter(s => s.type === 'tool');\n  \n  if (toolSteps.length > 10 && totalTokens > session.maxTokens * 0.8) {\n    const lastTools = toolSteps.slice(-5).map(s => s.toolName).join(' → ');\n    return {\n      looping: true,\n      pattern: `High token usage (${totalTokens}) with repeating tools: ${lastTools}`\n    };\n  }\n  \n  return { looping: false, pattern: '' };\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Workflow Transition Validator",
+        "description": "Mastra middleware that validates tool outputs before step transitions",
+        "code": "import { WorkflowMiddleware } from 'mastra';\n\nconst loopPreventionMiddleware: WorkflowMiddleware = async (context, next) => {\n  const { step, memory } = context;\n  \n  if (step.type === 'tool') {\n    // Validate tool output schema\n    const outputValid = validateToolOutput(step.output, step.toolName);\n    \n    if (!outputValid) {\n      // Break loop with error state\n      context.memory.set('LOOP_BROKEN', {\n        reason: 'Invalid tool output',\n        tool: step.toolName,\n        output: step.output\n      });\n      return { status: 'error', message: 'Tool loop prevented' };\n    }\n  }\n  \n  // Check for repeating tool patterns\n  const recentTools = memory.get('recent_tools') || [];\n  recentTools.push(step.toolName);\n  \n  if (recentTools.length > 5) {\n    recentTools.shift();\n    if (recentTools.every(t => t === recentTools[0])) {\n      throw new Error('Tool loop detected and blocked');\n    }\n  }\n  \n  memory.set('recent_tools', recentTools);\n  return next();\n};\n\nconst validateToolOutput = (output: any, toolName: string): boolean => {\n  // Tool-specific validation\n  switch (toolName) {\n    case 'searchTool':\n      return !!output.results && output.results.length > 0;\n    case 'parseTool':\n      return !!output.data && typeof output.data === 'object';\n    default:\n      return true;\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Loop Filter",
+        "description": "Filters stale tool artifacts from Mastra memory context before agent reasoning",
+        "code": "import { MemoryManager } from 'mastra';\n\nconst cleanLoopMemory = (memoryManager: MemoryManager): MemoryManager => {\n  const context = memoryManager.getContext();\n  const cleaned = Object.entries(context).reduce((acc, [key, value]) => {\n    // Remove tool loop indicators\n    if (/\\/tool_result|api_response|search_results/.test(key)) {\n      const toolAge = (Date.now() - (value as any).timestamp) / 1000 / 60;\n      if (toolAge > 5) { // 5 min TTL\n        console.log(`🧹 Cleared stale tool memory: ${key}`);\n        return acc;\n      }\n    }\n    acc[key] = value;\n    return acc;\n  }, {} as any);\n  \n  memoryManager.setContext(cleaned);\n  return memoryManager;\n};\n\n// Apply before each agent step\nconst agentExecutor = async (agentId: string, input: any) => {\n  const memory = await memoryManager.get(agentId);\n  const cleanedMemory = cleanLoopMemory(memory);\n  // Continue with cleaned memory\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Max Iterations Guard",
+        "description": "Hard limit on Mastra workflow iterations with loop pattern breaking",
+        "code": "import { AgentExecutor } from 'mastra';\n\nconst safeAgentExecutor: AgentExecutor = {\n  maxIterations: 15,\n  async execute(agentId: string, input: any) {\n    let iteration = 0;\n    const toolHistory: string[] = [];\n    \n    while (iteration < this.maxIterations) {\n      const result = await this.agent.run(input);\n      \n      if (result.type === 'tool') {\n        const toolSig = `${result.toolName}:${JSON.stringify(result.input).slice(0, 50)}`;\n        toolHistory.push(toolSig);\n        \n        // Detect 4+ identical tool calls\n        if (toolHistory.length >= 4 && \n            toolHistory.slice(-4).every(sig => sig === toolSig)) {\n          throw new Error(`Tool loop detected: ${toolSig} x4`);\n        }\n      }\n      \n      iteration++;\n      if (result.complete) break;\n    }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in Mastra Agents with Vex",
+      "description": "Vex integrates as middleware in Mastra's agent pipeline, automatically detecting tool loops by analyzing workflow step patterns, memory context pollution, and token consumption trends. When loops are detected, Vex triggers automated remediation including memory clearing, workflow termination, and root cause alerting with specific tool call sequences. \n\nThe platform provides real-time dashboards showing loop frequency by agent, tool combinations most prone to cycling, and cost impact analysis. Vex's ML models learn your Mastra workflow patterns to predict loops before they consume significant tokens or API credits. \n\nRemediation workflows can automatically apply fixes like the transition validators above, inject corrective prompts, or escalate to human review with full execution traces.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { MastraAgent, WorkflowStep } from 'mastra';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\n// Mastra middleware integration\nconst mastraLoopGuard = async (agent: MastraAgent, steps: WorkflowStep[]) => {\n  // Send execution trace to Vex\n  const trace = await vex.trace({\n    name: 'mastra-tool-loop-check',\n    input: { agentId: agent.id, steps },\n    metadata: {\n      framework: 'mastra',\n      totalTokens: agent.session.totalTokens,\n      toolCalls: steps.filter(s => s.type === 'tool').length\n    }\n  });\n  \n  if (trace.hasIssue('tool-loop')) {\n    // Vex auto-remediates\n    await vex.remediate({\n      traceId: trace.id,\n      fix: 'clear_memory',\n      actions: [\n        'terminate_workflow',\n        'reset_tool_history',\n        'inject_progress_prompt'\n      ]\n    });\n    \n    console.log('✅ Vex blocked tool loop:', trace.issue);\n    return { blocked: true };\n  }\n  \n  return { safe: true };\n};\n\n// Install in Mastra agent pipeline\nagent.useMiddleware(mastraLoopGuard);",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix Mastra Tool Loops Automatically with Vex",
+      "description": "npm install @vex_dev/sdk and block tool loops in <5 minutes across all your Mastra agents"
+    }
+  }
+}

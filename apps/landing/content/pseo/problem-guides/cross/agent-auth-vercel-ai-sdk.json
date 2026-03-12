@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Vercel AI SDK Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Vercel AI SDK agent-auth",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK agents, authentication and authorization issues manifest when tool calls lack proper credential scoping, leading to unauthorized API access during streaming responses. Agents often expose sensitive operations without user context validation, especially in Server Actions and Edge Runtimes where session data isn't propagated to LLM tool invocations. This creates security gaps in multi-step agent flows using generateText and streamText, where partial auth failures go undetected amid hallucinations.",
+    "howItManifests": [
+      {
+        "scenario": "Unscoped database tool calls in streamText agents",
+        "symptom": "Agent streams user data from wrong tenant during multi-turn conversation",
+        "impact": "Cross-tenant data leakage; GDPR violations"
+      },
+      {
+        "scenario": "Missing auth headers in external API tools",
+        "symptom": "Tool calls fail silently with 401s, agent hallucinates responses",
+        "impact": "Inaccurate outputs; users receive fabricated API data"
+      },
+      {
+        "scenario": "Server Action auth bypass via direct LLM tool invocation",
+        "symptom": "Admin-only tools accessible in user context",
+        "impact": "Privilege escalation; full account takeover possible"
+      },
+      {
+        "scenario": "Edge function session loss in agent loops",
+        "symptom": "Auth tokens expire mid-conversation, tools return empty results",
+        "impact": "Broken agent flows; poor UX and trust erosion"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Missing Auth Context in Tool Calls",
+        "description": "Scan generateText/streamText calls for tool definitions lacking user/session context injection",
+        "code": "```typescript\nimport { generateText } from 'ai';\nimport { z } from 'zod';\n\nconst detectMissingAuth = async (code: string) => {\n  const toolRegex = /tool\\s*:\\s*\\{(.*?\\n)*?function\\s*:\\s*\\(([^)]*)\\)/gs;\n  const matches = code.match(toolRegex);\n  if (!matches) return [];\n  \n  return matches.map(match => {\n    const params = match.match(/\\(([^)]*)\\)/)?.[1] || '';\n    const hasAuth = params.includes('user') || params.includes('session') || params.includes('auth');\n    return {\n      line: code.indexOf(match),\n      hasAuthContext: hasAuth,\n      severity: !hasAuth ? 'HIGH' : 'LOW'\n    };\n  }).filter(issue => !issue.hasAuthContext);\n};\n\n// Usage\nconst issues = await detectMissingAuth(yourAgentCode);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Unauthorized API Key Exposure",
+        "description": "Detect hardcoded API keys or missing dynamic credential injection in tool functions",
+        "code": "```typescript\nconst detectApiKeyExposure = (code: string) => {\n  const apiKeyPatterns = [\n    /apiKey\\s*:\\s*['\"][^'\"]+['\"]/,\n    /authorization\\s*:\\s*['\"][^'\"]+['\"]/,\n    /bearer\\s+[^\\s]+/i,\n    /sk-\\w{48}/\n  ];\n  \n  return apiKeyPatterns\n    .map(pattern => ({\n      pattern: pattern.source,\n      matches: [...code.matchAll(pattern)]\n    }))\n    .flatMap(result => result.matches.map(m => ({\n      start: m.index!,\n      end: m.index! + m[0].length,\n      exposure: m[0],\n      type: result.pattern.includes('sk-') ? 'OPENAI' : 'GENERIC'\n    })));\n};\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Session Propagation Failures",
+        "description": "Check Server Actions and RSC for missing auth middleware in agent routes",
+        "code": "```typescript\nimport type { RouteHandler } from 'next/server';\n\nconst detectSessionPropagation = (handler: RouteHandler | any) => {\n  const code = handler.toString();\n  const missingPatterns = [\n    { pattern: /generateText|streamText/, requires: 'getServerSession|auth\\(\\)' },\n    { pattern: /useChat|useCompletion/, requires: 'useSession|auth' }\n  ];\n  \n  return missingPatterns\n    .filter(({ pattern, requires }) => \n      code.match(new RegExp(pattern)) && !code.match(new RegExp(requires))\n    )\n    .map(issue => ({\n      missingAuth: issue.requires,\n      location: code.slice(0, 200) + '...',\n      recommendation: `Add ${issue.requires} before ${issue.pattern}`\n    }));\n};\n```",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Scoped Tool Auth Middleware",
+        "description": "Inject user context into all tool calls using Vercel AI SDK's tool schema",
+        "code": "```typescript\nimport { generateText } from 'ai';\nimport { z } from 'zod';\nimport { auth } from '@clerk/nextjs/server';\n\ntype AuthContext = {\n  userId: string;\n  tenantId?: string;\n  permissions: string[];\n};\n\nconst createScopedTools = (ctx: AuthContext) => [{\n  name: 'get_user_data',\n  description: 'Get user data for current authenticated user',\n  parameters: z.object({\n    userId: z.string().optional(), // Auto-filled from auth\n  }),\n  execute: async ({ userId }) => {\n    const effectiveUserId = userId || ctx.userId;\n    if (!ctx.permissions.includes('read:user')) {\n      throw new Error('Unauthorized');\n    }\n    // Safe database call with tenant scoping\n    return db.user.findUnique({\n      where: { id: effectiveUserId, tenantId: ctx.tenantId }\n    });\n  }\n}];\n\nexport async function authenticatedAgent(prompt: string) {\n  const { userId } = auth();\n  const ctx: AuthContext = {\n    userId: userId!,\n    tenantId: getTenantId(),\n    permissions: await getUserPermissions(userId!)\n  };\n  \n  const { text } = await generateText({\n    model: openai('gpt-4o'),\n    tools: createScopedTools(ctx),\n    prompt\n  });\n  return text;\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Streaming with Auth Validation",
+        "description": "Validate auth at each stream chunk for long-running agent conversations",
+        "code": "```typescript\nimport { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\nimport { auth } from '@clerk/nextjs/server';\n\nexport async function authenticatedStream(prompt: string) {\n  const { userId } = auth();\n  if (!userId) throw new Error('Unauthorized');\n  \n  const stream = await streamText({\n    model: openai('gpt-4o'),\n    tools: {\n      getCustomerData: {\n        parameters: z.object({ customerId: z.string() }),\n        execute: async ({ customerId }) => {\n          // Re-validate auth for each tool call\n          const freshAuth = auth();\n          if (!freshAuth.userId || freshAuth.userId !== userId) {\n            throw new Error('Session expired');\n          }\n          return db.customer.findUnique({\n            where: { id: customerId, ownerId: userId }\n          });\n        }\n      }\n    },\n    prompt\n  });\n  \n  return stream;\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Edge Runtime Auth Headers",
+        "description": "Propagate auth headers through Vercel Edge functions to agent tools",
+        "code": "```typescript\nimport { generateObject } from 'ai';\nimport { headers } from 'next/headers';\n\nexport const runtime = 'edge';\n\nexport async function POST(req: Request) {\n  const authHeaders = headers();\n  const sessionToken = authHeaders.get('x-auth-token');\n  \n  if (!sessionToken) {\n    return Response.json({ error: 'Unauthorized' }, { status: 401 });\n  }\n  \n  const { prompt } = await req.json();\n  \n  const result = await generateObject({\n    model: openai('gpt-4o'),\n    schema: z.object({ action: z.string() }),\n    toolChoice: 'auto',\n    tools: {\n      callStripeAPI: {\n        parameters: z.object({ customerId: z.string() }),\n        execute: async ({ customerId }) => {\n          return fetch('https://api.stripe.com/v1/customers/' + customerId, {\n            headers: {\n              'Authorization': `Bearer ${process.env.STRIPE_SECRET_KEY}`,\n              'X-User-ID': sessionToken, // Scoped to user\n              'X-Tenant-ID': authHeaders.get('x-tenant-id')!\n            }\n          }).then(r => r.json());\n        }\n      }\n    },\n    prompt\n  });\n  \n  return Response.json(result);\n}\n```",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex automatically instruments Vercel AI SDK's generateText and streamText calls to detect auth failures in real-time. It wraps tool execution with auth validation middleware, catching missing user context, expired tokens, and privilege escalations before they reach the LLM. During agent runs, Vex traces session propagation across Server Actions, Edge functions, and tool calls, flagging incomplete auth chains.\n\nVex's remediation engine injects dynamic auth context into tool schemas and validates permissions at execution time. For streaming agents, it monitors partial responses for auth-related hallucinations and enforces structured output validation. The SDK integrates in <1 line of code and provides coverage reports showing auth compliance across your agent fleet.\n\nKey features include automatic mock credential injection for local testing, production token rotation monitoring, and drift detection when auth patterns change across deployments.",
+      "code": "```typescript\nimport { generateText, streamText } from 'ai';\nimport { createVexMiddleware } from '@vex_dev/sdk/vercel';\n\n// Single line integration\ncreateVexMiddleware({\n  detectors: ['auth-missing-context', 'token-exposure', 'privilege-escalation'],\n  remediations: ['inject-user-context', 'validate-permissions']\n});\n\nexport async function secureAgent(prompt: string) {\n  // Vex automatically wraps these calls\n  const { text } = await generateText({\n    model: openai('gpt-4o'),\n    tools: [/* your tools */],\n    prompt\n  });\n  \n  return text;\n}\n\n// Vex generates this report:\n/*\n{\n  \"authCoverage\": 94%,\n  \"issues\": [\n    {\n      \"type\": \"missing-tenant-scope\",\n      \"tool\": \"getCustomerData\",\n      \"fix\": \"Add ctx.tenantId to where clause\"\n    }\n  ]\n}\n*/\n```",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex middleware to secure all your Vercel AI SDK agents instantly."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in Flowise Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "Flowise agent-auth",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, AI Agent Authentication and Authorization issues manifest when chatflows expose sensitive tools, vector stores, or API endpoints without proper user/session validation, allowing unauthorized access to premium features or private data. Drag-and-drop nodes like Custom Tool, Agent, and Vector Store Retrieval often lack built-in auth guards, leading to privilege escalation across multi-agent handoffs. This is exacerbated by Flowise's stateless chatflow execution where context like user tokens isn't propagated between nodes.",
+    "howItManifests": [
+      {
+        "scenario": "Custom Tool Node with Database Access",
+        "symptom": "Tool executes SQL queries for any chat input without checking user permissions",
+        "impact": "Attackers extract sensitive customer data via crafted prompts"
+      },
+      {
+        "scenario": "Multi-Agent Sequential Flow",
+        "symptom": "Downstream agents inherit elevated privileges from upstream admin tools",
+        "impact": "Privilege escalation across agent handoffs exposes admin functions"
+      },
+      {
+        "scenario": "Vector Store Retrieval Node",
+        "symptom": "Returns private enterprise documents to unauthenticated users",
+        "impact": "Data leakage of proprietary information through RAG pipelines"
+      },
+      {
+        "scenario": "Chatflow API Endpoint Exposure",
+        "symptom": "Public chatflow endpoint bypasses session authentication",
+        "impact": "Anyone with chatflow ID can trigger expensive/premium operations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Scan Custom Tool Nodes for Auth Checks",
+        "description": "Detect tools missing user context validation before executing sensitive operations",
+        "code": "import { ChatFlow, CustomTool } from 'flowise';\n\nconst detectAuthlessTools = (chatflow: ChatFlow) => {\n  const issues: string[] = [];\n  \n  chatflow.data.nodes.forEach(node => {\n    if (node.type === 'customTool' && node.data) {\n      const tool = node.data as CustomTool;\n      // Check if tool function references user/session validation\n      const hasAuthCheck = tool.code.includes('user') || \n                          tool.code.includes('session') ||\n                          tool.code.includes('auth') ||\n                          tool.code.includes('permissions');\n      \n      if (!hasAuthCheck && (tool.code.includes('db') || tool.code.includes('sql') || tool.code.includes('api'))) {\n        issues.push(`Tool ${node.data.name} lacks auth checks but accesses sensitive resources`);\n      }\n    }\n  });\n  \n  return issues;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Trace Context Propagation Across Agents",
+        "description": "Verify user context flows through multi-agent handoffs without privilege escalation",
+        "code": "const traceAgentContextFlow = (chatflow: ChatFlow) => {\n  const contextLosses: string[] = [];\n  let currentContext: string[] = [];\n  \n  chatflow.data.nodes.forEach((node, index) => {\n    if (node.type === 'agent') {\n      const hasContextInput = node.data.inputs?.some(input => \n        input.name === 'userContext' || input.name === 'session'\n      );\n      \n      if (!hasContextInput && currentContext.length > 0) {\n        contextLosses.push(`Agent ${node.data.name} loses user context from previous nodes`);\n      }\n      \n      // Assume agent preserves context unless explicitly dropped\n      if (node.data.tools?.some(tool => tool.requiresAdmin)) {\n        currentContext.push('adminPrivileges');\n      }\n    }\n  });\n  \n  return contextLosses;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Audit Vector Store Access Controls",
+        "description": "Check if vector retrieval nodes validate document access permissions",
+        "code": "const auditVectorStoreAuth = (chatflow: ChatFlow) => {\n  const violations: string[] = [];\n  \n  chatflow.data.nodes.forEach(node => {\n    if (node.type === 'vectorStoreRetriever') {\n      const retrieverConfig = node.data;\n      \n      // Check for tenant/user filtering in query\n      const hasUserFilter = retrieverConfig.query?.includes('userId') ||\n                           retrieverConfig.query?.includes('tenantId') ||\n                           retrieverConfig.filter?.includes('permissions');\n      \n      if (!hasUserFilter) {\n        violations.push(`Vector store ${node.data.name} lacks user-specific filtering`);\n      }\n    }\n  });\n  \n  return violations;\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add User Context to Custom Tool",
+        "description": "Inject user session data into tool execution context",
+        "code": "// Fixed Custom Tool Node Code\nconst executeWithAuth = async (input: string, userContext: any) => {\n  // Extract user permissions\n  const { userId, tenantId, permissions } = userContext;\n  \n  if (!permissions.includes('db:read')) {\n    throw new Error('Insufficient permissions');\n  }\n  \n  const query = `SELECT * FROM customers WHERE tenant_id = ?`;\n  const results = await db.query(query, [tenantId]);\n  \n  return results;\n};\n\n// Tool configuration\n{\n  name: 'customerQuery',\n  description: 'Query customer data (requires db:read permission)',\n  parameters: {\n    input: { type: 'string' }\n  },\n  execute: async (params, context) => {\n    return executeWithAuth(params.input, context.userContext);\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Implement Agent Context Propagation",
+        "description": "Ensure user context flows through multi-agent chains",
+        "code": "// Agent configuration with context preservation\nconst agentConfig = {\n  name: 'analysisAgent',\n  llm: 'gpt-4',\n  tools: [customerQueryTool],\n  systemMessage: `You are an analyst. Always respect user permissions from context.\n  User Context: {{userContext}}\n  Available permissions: {{permissions}}`,\n  inputs: [\n    { name: 'messages', type: 'chatMessages' },\n    { name: 'userContext', type: 'object', required: true }\n  ],\n  outputs: [\n    { name: 'response', type: 'string' },\n    { name: 'userContext', type: 'object' } // Preserve for downstream\n  ]\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Vector Store with Tenant Filter",
+        "description": "Add user-specific filtering to document retrieval",
+        "code": "// Secure Vector Store Retriever Config\nconst secureRetrieverConfig = {\n  name: 'secureDocsRetriever',\n  vectorStore: 'pinecone',\n  topK: 5,\n  query: '{{query}}',\n  filter: {\n    tenantId: '{{userContext.tenantId}}',\n    accessLevel: { $gte: '{{userContext.accessLevel}}' }\n  },\n  preprocess: async (docs, userContext) => {\n    // Double-check permissions\n    return docs.filter(doc => \n      doc.metadata.tenantId === userContext.tenantId\n    );\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly into Flowise chatflows as a callback handler, automatically tracing authentication flows across all nodes and detecting missing permission checks in real-time. During chatflow execution, Vex monitors user context propagation, tool privilege escalation, and vector store access patterns, flagging violations before they impact production.\n\nVex's policy engine validates that every sensitive operation (database calls, API requests, document retrieval) receives proper user context injection. It generates remediation blueprints showing exactly which nodes need auth guards and provides one-click fixes via Flowise's node configuration API.\n\nThe integration requires adding Vex as a global callback in your Flowise deployment, after which it passively monitors all chatflows while providing API endpoints for automated remediation workflows.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlowRequest, ChatFlowResponse } from 'flowise';\n\nconst vex = new Vex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!\n});\n\n// Flowise Global Callback Handler\nexport const flowiseAuthGuard = async (\n  req: ChatFlowRequest,\n  res: ChatFlowResponse\n): Promise<ChatFlowResponse> => {\n  // 1. Trace auth context through entire flow\n  const authTrace = await vex.trace({\n    type: 'flowise.auth',\n    chatflowId: req.body.chatflowid,\n    userContext: req.body.userContext,\n    override: {\n      policy: 'agent-auth-validation',\n      threshold: 'critical'\n    }\n  });\n  \n  if (authTrace.violations.length > 0) {\n    return {\n      text: 'Access denied: Missing permissions',\n      sourceDocuments: [],\n      flagged: authTrace.violations\n    };\n  }\n  \n  // 2. Execute with Vex monitoring\n  const monitoredRes = await vex.monitor(\n    () => req.originalResponse,\n    {\n      spans: ['tool_calls', 'vector_retrieval', 'agent_handoffs'],\n      assertions: [\n        'userContext.present',\n        'permissions.checked',\n        'no_privilege_escalation'\n      ]\n    }\n  );\n  \n  return monitoredRes;\n};\n\n// Install: npm install flowise @vex_dev/sdk",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one callback handler to secure all your Flowise agents against auth failures."
+    }
+  }
+}

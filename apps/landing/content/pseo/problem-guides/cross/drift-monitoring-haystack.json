@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Haystack Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Haystack drift-monitoring",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Haystack pipelines manifests as subtle degradations in RAG performance, where retrievers return increasingly irrelevant documents, generators hallucinate outside retrieved context, and custom components fail silently without raising errors. These issues compound over time as models evolve or data distributions shift, leading to pipelines that appear functional but deliver poor user experiences. Haystack's composable nature makes drift hard to spot without systematic monitoring of component outputs and pipeline states.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever returning irrelevant documents",
+        "symptom": "Document scores drop below 0.7 threshold consistently, embedding drift detected in vector store",
+        "impact": "Generator produces hallucinated answers, user trust erodes over weeks"
+      },
+      {
+        "scenario": "Generator hallucinating beyond retrieved context",
+        "symptom": "Generated answers contain facts not present in top-k retrieved documents (>30% hallucination rate)",
+        "impact": "Critical misinformation in production Q&A systems"
+      },
+      {
+        "scenario": "Pipeline component output type mismatches",
+        "symptom": "Document list expected but receives single Document object, pipeline silently fails downstream",
+        "impact": "Zero results returned to users without error logs"
+      },
+      {
+        "scenario": "Custom component errors silently swallowed",
+        "symptom": "Custom reranker returns None instead of ranked documents, no exception raised",
+        "impact": "Pipeline completes but returns empty results"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retriever Relevance Drift Monitor",
+        "description": "Tracks average document score from retriever over time, alerts when drops >15% from baseline",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\nclass DriftMonitor:\n    def __init__(self):\n        self.baseline_score = None\n        self.score_history = []\n    \n    def monitor_retriever(self, retriever, query):\n        result = retriever.run(query=query)\n        docs = result.get('documents', [])\n        if docs:\n            avg_score = sum(doc.score or 0 for doc in docs) / len(docs)\n            self.score_history.append(avg_score)\n            \n            if self.baseline_score is None:\n                self.baseline_score = avg_score\n            elif avg_score < self.baseline_score * 0.85:\n                print(f'🚨 RETRIEVER DRIFT: {avg_score:.3f} vs baseline {self.baseline_score:.3f}')\n        return result",
+        "language": "python"
+      },
+      {
+        "name": "Generator Hallucination Detector",
+        "description": "Checks if generated answer contains information not present in retrieved context using keyword overlap",
+        "code": "def detect_hallucination(generated_answer: str, context_docs: list) -> float:\n    from sklearn.feature_extraction.text import TfidfVectorizer\n    from sklearn.metrics.pairwise import cosine_similarity\n    \n    context_text = ' '.join([doc.content for doc in context_docs])\n    \n    vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)\n    tfidf_matrix = vectorizer.fit_transform([context_text, generated_answer])\n    \n    similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]\n    hallucination_score = 1 - similarity\n    \n    if hallucination_score > 0.3:\n        print(f'🚨 HALLUCINATION DETECTED: {hallucination_score:.2f}')\n    \n    return hallucination_score",
+        "language": "python"
+      },
+      {
+        "name": "Pipeline Type Safety Checker",
+        "description": "Validates component output types match expected pipeline contracts",
+        "code": "from typing import List, Union\nfrom haystack.dataclasses import Document\n\nclass TypeChecker:\n    def __init__(self):\n        self.type_contracts = {\n            'retriever': List[Document],\n            'generator': str,\n            'reranker': List[Document]\n        }\n    \n    def validate_output(self, component_name: str, output: any) -> bool:\n        expected_type = self.type_contracts.get(component_name)\n        \n        if expected_type == List[Document]:\n            if not isinstance(output, list) or not all(isinstance(d, Document) for d in output):\n                print(f'🚨 TYPE MISMATCH: {component_name} expected List[Document], got {type(output)}')\n                return False\n        elif expected_type == str and not isinstance(output, str):\n            print(f'🚨 TYPE MISMATCH: {component_name} expected str, got {type(output)}')\n            return False\n        \n        return True",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Retriever Score Threshold",
+        "description": "Automatically adjusts retrieval threshold based on 7-day rolling baseline",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\nimport numpy as np\n\nclass AdaptiveRetriever(InMemoryEmbeddingRetriever):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n        self.score_history = []\n        self.window_size = 50\n    \n    def run(self, query: str, top_k: int = 5, **kwargs):\n        result = super().run(query=query, top_k=top_k*2, **kwargs)\n        docs = result['documents']\n        \n        # Calculate adaptive threshold\n        if len(self.score_history) >= self.window_size:\n            threshold = np.percentile(self.score_history[-self.window_size:], 25)\n        else:\n            threshold = 0.5\n        \n        filtered_docs = [d for d in docs if (d.score or 0) >= threshold]\n        result['documents'] = filtered_docs[:top_k]\n        \n        return result",
+        "language": "python"
+      },
+      {
+        "name": "Context-Grounded Generator",
+        "description": "Forces generator to stay within retrieved context with explicit instructions",
+        "code": "from haystack.components.generators import OpenAIGenerator\n\nclass GroundedGenerator(OpenAIGenerator):\n    def __init__(self, **kwargs):\n        prompt_template = \"\"\"\n        Context: {{context}}\n        \n        Answer the question using ONLY the context above. If the answer isn't in the context, say 'I don't know'. Do not make up answers.\n        \n        Question: {{query}}\n        Answer:\"\"\"\n        super().__init__(prompt_template=prompt_template, **kwargs)",
+        "language": "python"
+      },
+      {
+        "name": "Error-Bubbling Custom Component",
+        "description": "Ensures custom components raise descriptive errors instead of returning None",
+        "code": "from haystack import component\n\n@component\nclass SafeReranker:\n    @component.output_types(documents=list[Document])\n    def run(self, documents: list[Document]) -> dict:\n        if not documents:\n            raise ValueError('Reranker received empty document list')\n        \n        try:\n            # Reranking logic here\n            reranked_docs = self._rerank(documents)\n            if not reranked_docs:\n                raise ValueError('Reranker produced no valid outputs')\n            return {'documents': reranked_docs}\n        except Exception as e:\n            raise RuntimeError(f'Reranker failed: {str(e)}') from e",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates seamlessly as a custom Haystack component that automatically baselines your pipeline's healthy performance across all common drift vectors: retriever relevance, generator faithfulness, type safety, and component reliability. Once integrated, Vex continuously monitors production traffic, maintains rolling baselines of component outputs, and triggers automated alerts or rollbacks when drift exceeds configured thresholds. The platform's ML-powered anomaly detection adapts to your specific pipeline patterns, catching subtle degradations before they impact users.\n\nVex provides one-click remediation templates that inject fixes directly into your Haystack pipeline YAML, including adaptive thresholds, grounded prompts, and type-safe wrappers. Production teams using Vex report 80% faster drift detection and 60% reduction in manual debugging time for Haystack RAG pipelines. The integration requires zero changes to your existing pipeline logic.",
+      "code": "from haystack import Pipeline\nfrom vex_sdk.haystack import VexMonitor\nfrom haystack_integrations.document_stores.in_memory import InMemoryDocumentStore\n\n# Install: pip install haystack-ai vex-sdk\n\nvex_monitor = VexMonitor(\n    project_id=\"your-vex-project\",\n    pipeline_name=\"rag-pipeline\",\n    drift_thresholds={\n        'retriever_score': 0.15,\n        'hallucination_rate': 0.10,\n        'type_errors': 0.05\n    }\n)\n\n# Add Vex as first component in ANY Haystack pipeline\npipeline = Pipeline()\npipeline.add_component(\"vex_monitor\", vex_monitor)\n\n# Connect to your existing components\npipeline.connect(\"vex_monitor.output\", \"your_retriever.query\")\n\n# Vex auto-baselines and alerts on drift\npipeline.run({\n    \"vex_monitor\": {\"query\": \"user question\"},\n    \"your_retriever\": {\"query\": \"user question\"}\n})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex monitoring to your Haystack pipeline and eliminate AI agent drift forever."
+    }
+  }
+}

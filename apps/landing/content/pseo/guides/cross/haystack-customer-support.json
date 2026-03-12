@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Haystack + Vex Guardrails",
+    "description": "Learn how to build customer support with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack customer support",
+      "Haystack guardrails",
+      "customer support reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Haystack enables scalable RAG pipelines that integrate CRM data, knowledge bases, and tool-calling for ticket management. However, failure modes like irrelevant retrievals, hallucinations, and PII leaks can damage trust and compliance. Vex provides runtime verification as a custom component to ensure response accuracy, policy compliance, and safe escalation.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Haystack",
+      "description": "The typical Haystack customer support pipeline starts with a user query routed through an EmbeddingsRetriever against a knowledge base of FAQs, product docs, and CRM-synced customer history. Retrieved documents feed a PromptBuilder that constructs context-aware prompts for an LLM like GPT-4, which generates responses and decides on tool calls for actions like ticket creation or order lookup via custom FunctionCalling components. A final Router component handles escalations to human agents based on confidence scores or trigger keywords.\n\nCRM integration pulls customer-specific data (past tickets, orders) via API calls triggered by the LLM's tool decisions, while the knowledge base ensures factual grounding. The pipeline must filter PII from responses and maintain brand tone across interactions. Vex slots in as a verification component post-generation to check accuracy, compliance, and safety before response delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Embeddings      │───▶│  PromptBuilder   │\n│  (Haystack      │    │  Retriever (KB   │    │  + CRM Context   │\n│   DocumentStore)│    │  + Customer Hist)│    │                  │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                                             │\n                                                      ┌──────▼──────┐\n                                                      │   LLM       │───▶┌──────────────────┐\n                                                      │ (Generator  │    │ Vex Verifier    │\n                                                      │ + ToolCall) │◀───│ (Accuracy, PII, │\n                                                      └──────────────┘    │ Tone, Policy)   │\n                                                             │        └──────────────────┘\n                                                      ┌──────▼──────┐             │\n                                                      │ Custom Tools │             │\n                                                      │ (CRM API,    │             ▼\n                                                      │ Ticket/Order)│        ┌──────────────┐\n                                                      └──────────────┘        │ Final Response│\n                                                           │               │ or Escalation  │\n                                                           ▼               └──────────────┘\n                                                    ┌──────────────────┐"
+    },
+    "risks": [
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Embedding mismatches return unrelated KB/CRM docs, causing inaccurate or off-topic responses",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks between query and top-k retrieved docs"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM fabricates order details or ticket status not grounded in retrieved context",
+        "severity": "critical",
+        "mitigation": "Vex context faithfulness scoring and citation verification"
+      },
+      {
+        "name": "PII filtering failures",
+        "description": "Customer phone numbers, emails, or account IDs leak into responses",
+        "severity": "high",
+        "mitigation": "Vex PII entity extraction and redaction before delivery"
+      },
+      {
+        "name": "Tone/policy violations",
+        "description": "Responses use unprofessional language or violate brand escalation policies",
+        "severity": "high",
+        "mitigation": "Vex sentiment analysis and policy rule evaluation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG Pipeline with CRM Context",
+        "description": "Core Haystack pipeline with retriever, prompt builder, and tool-calling generator",
+        "code": "from haystack import Pipeline, Document\n\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.builders import PromptBuilder\nfrom haystack.components.generators import OpenAIGenerator\n\n# Mock CRM/customer data retrieval\ncrm_context = Document(content=\"Customer #12345: John Doe, last order #67890 on 2024-01-15\")\n\nretrieval = InMemoryEmbeddingRetriever(document_store=doc_store)\nprompt_builder = PromptBuilder(template=\"Answer using context: {{documents}} and CRM: {{crm_context}}. Query: {{query}}\")\ngenerator = OpenAIGenerator(model=\"gpt-4o\")\n\nrag_pipeline = Pipeline()\nrag_pipeline.add_component(\"retriever\", retrieval)\nrag_pipeline.add_component(\"prompt_builder\", prompt_builder)\nrag_pipeline.add_component(\"generator\", generator)\n\nrag_pipeline.connect(\"retriever\", \"prompt_builder.documents\")\nrag_pipeline.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Custom Tool Calling for Ticket Creation",
+        "description": "Haystack FunctionNode for CRM ticket creation and order lookup",
+        "code": "from haystack.components.tools import Tool\n\nfrom typing import Dict, Any\n\n@Tool(name=\"create_ticket\")\ndef create_support_ticket(customer_id: str, issue: str) -> Dict[str, Any]:\n    # Mock CRM API call\n    return {\"ticket_id\": \"TKT-45678\", \"status\": \"created\", \"customer\": customer_id}\n\n@Tool(name=\"lookup_order\")\ndef lookup_customer_order(order_id: str) -> Dict[str, Any]:\n    # Mock order lookup\n    return {\"order_id\": order_id, \"status\": \"shipped\", \"items\": [\"Widget X\"]}\n\ntool_pipeline = Pipeline()\ntool_pipeline.add_component(\"ticket_tool\", create_support_ticket)\ntool_pipeline.add_component(\"order_tool\", lookup_customer_order)\n\n# Connect to main generator's tool_calls output",
+        "language": "python"
+      },
+      {
+        "title": "Escalation Router Component",
+        "description": "Custom component to route low-confidence or urgent queries to human agents",
+        "code": "from haystack import component\n\n@component\nclass EscalationRouter:\n    @component.output_types(has_escalated=bool, escalation_reason=str)\n    def run(self, response: str, confidence: float = 0.8, keywords: list = [\"urgent\", \"billing_issue\"]):\n        reason = None\n        if confidence < 0.7:\n            reason = \"low_confidence\"\n        elif any(kw in response.lower() for kw in keywords):\n            reason = \"escalation_keywords\"\n        \n        return {\"has_escalated\": reason is not None, \"escalation_reason\": reason or \"none\"}",
+        "language": "python"
+      },
+      {
+        "title": "PII Redaction Pre-Processor",
+        "description": "Filter customer PII before feeding to LLM or returning responses",
+        "code": "import re\n\nfrom haystack import component\n\n@component\nclass PIIFilter:\n    @component.input_types(text=str)\n    @component.output_types(cleaned_text=str, entities_found=list)\n    def run(self, text: str):\n        patterns = [\n            r'\\b\\d{3}-\\d{3}-\\d{4}\\b',  # Phone\n            r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n            r'\\b\\d{16}\\b'  # Credit card\n        ]\n        entities = []\n        cleaned = text\n        for pattern in patterns:\n            matches = re.finditer(pattern, cleaned)\n            for match in matches:\n                entities.append(match.group())\n                cleaned = cleaned.replace(match.group(), \"[REDACTED]\")\n        return {\"cleaned_text\": cleaned, \"entities_found\": entities}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Verifier as Custom Pipeline Component",
+        "description": "Add Vex verification after generation to check all critical requirements",
+        "code": "from vex_sdk import VexClient\nfrom haystack import component\n\n@component\nclass VexVerifier:\n    def __init__(self, vex_api_key: str, project_id: str):\n        self.vex = VexClient(api_key=vex_api_key)\n        self.project_id = project_id\n\n    @component.input_types(response=str, retrieved_docs=list, query=str, customer_id=str)\n    @component.output_types(approved=bool, feedback=str, score=float)\n    def run(self, response: str, retrieved_docs: list, query: str, customer_id: str):\n        # Define verification tests for customer support\n        tests = {\n            \"response_accuracy\": {\n                \"type\": \"semantic_similarity\",\n                \"input\": response,\n                \"reference\": \"\\n\".join([doc.content for doc in retrieved_docs]),\n                \"threshold\": 0.75\n            },\n            \"pii_filtering\": {\n                \"type\": \"pii_detection\",\n                \"input\": response,\n                \"policy\": \"block\"\n            },\n            \"tone_consistency\": {\n                \"type\": \"sentiment_analysis\",\n                \"input\": response,\n                \"target\": \"positive|neutral\",\n                \"min_score\": 0.6\n            },\n            \"policy_compliance\": {\n                \"type\": \"policy_check\",\n                \"input\": response,\n                \"rules\": [\"no_promises\", \"escalate_billing\", \"brand_tone\"]\n            }\n        }\n\n        result = self.vex.verify_suite(\n            project_id=self.project_id,\n            tests=tests,\n            metadata={\"customer_id\": customer_id, \"query\": query}\n        )\n        \n        return {\n            \"approved\": result[\"pass\"],\n            \"feedback\": result[\"feedback\"],\n            \"score\": result[\"aggregate_score\"]\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Full Pipeline with Vex Integration",
+        "description": "Complete customer support pipeline connecting all components with Vex guardrails",
+        "code": "from haystack import Pipeline\n\n# Initialize components (from previous examples)\nfull_pipeline = Pipeline()\n\nfull_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever(doc_store))\nfull_pipeline.add_component(\"vex_verifier\", VexVerifier(api_key=\"vex_abc123\", project_id=\"cs-001\"))\nfull_pipeline.add_component(\"generator\", OpenAIGenerator(model=\"gpt-4o\"))\nfull_pipeline.add_component(\"router\", EscalationRouter())\nfull_pipeline.add_component(\"pii_filter\", PIIFilter())\n\n# Core flow\nfull_pipeline.connect(\"retriever\", \"vex_verifier.retrieved_docs\")\nfull_pipeline.connect(\"vex_verifier\", \"generator\")\nfull_pipeline.connect(\"generator.response\", \"router.response\")\nfull_pipeline.connect(\"generator.response\", \"pii_filter.text\")\n\n# Conditional routing\nfull_pipeline.connect(\"pii_filter.cleaned_text\", \"vex_verifier.response\")\nfull_pipeline.connect(\"router.has_escalated\", \"vex_verifier\")  # Re-verify escalations\n\n# Run pipeline\nresult = full_pipeline.run({\n    \"retriever\": {\"query\": \"Where is my order #67890?\"},\n    \"vex_verifier\": {\"query\": \"Where is my order #67890?\", \"customer_id\": \"12345\"}\n})\n\nif result[\"vex_verifier\"][\"approved\"]:\n    print(result[\"pii_filter\"][\"cleaned_text\"])\nelse:\n    print(f\"Blocked: {result['vex_verifier']['feedback']}\")",
+        "language": "python"
+      },
+      {
+        "title": "Runtime Monitoring Dashboard Setup",
+        "description": "Configure Vex monitoring for production customer support metrics",
+        "code": "from vex_sdk import VexClient\n\nvex = VexClient(api_key=\"vex_abc123\")\n\n# Create customer support verification project\nproject = vex.create_project(\n    name=\"Haystack Customer Support\",\n    risk_profile=\"high\",\n    verifications=[\n        \"response_accuracy\",\n        \"pii_filtering\",\n        \"tone_consistency\",\n        \"policy_compliance\",\n        \"escalation_triggers\"\n    ]\n)\n\n# Production monitoring query\nmetrics = vex.get_metrics(\n    project_id=\"cs-001\",\n    time_window=\"24h\",\n    filters={\"pipeline\": \"haystack-customer-support\"}\n)\n\nprint(f\"Pass rate: {metrics['pass_rate']:.1%}\")\nprint(f\"Top failures: {metrics['top_failures']}\")\n\n# Alert on degradation\nif metrics['pass_rate'] < 0.95:\n    vex.trigger_alert(\n        project_id=\"cs-001\",\n        message=f\"Customer support guardrail degradation: {metrics['pass_rate']:.1%}\"\n    )",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Customer Support",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your RAG agents from production failures."
+    }
+  }
+}

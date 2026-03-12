@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Flowise + Vex Guardrails",
+    "description": "Learn how to build data extraction with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise data extraction",
+      "Flowise guardrails",
+      "data extraction reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of data extraction pipelines through its drag-and-drop interface, combining document loaders, vector stores, and schema-guided LLM nodes for structured output from unstructured text. Guardrails are essential to ensure schema compliance, field accuracy, and completeness in high-stakes extraction tasks. Vex provides runtime verification to catch failures like unvalidated outputs or lost context in multi-node flows.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Flowise",
+      "description": "A typical Flowise data extraction chatflow starts with a Document Loader node (e.g., PDF or text upload) feeding into a Text Splitter for chunking. Chunks are embedded and stored/retrieved from a Vector Store (e.g., Pinecone or FAISS) for RAG. A Chain node with a schema-guided LLM (using tools like Pydantic or JSON mode) extracts structured data into a final output node. Custom Tool nodes may handle validation or enrichment, with Sequential or Multi-Agent flows coordinating complex extractions.\n\n\nRisks arise from unvalidated intermediate LLM outputs propagating errors, irrelevant retrievals degrading accuracy, silent tool failures, and context loss in agent handoffs. Vex integrates as a callback handler to monitor and verify each node execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Document      │───▶│  Text Splitter   │───▶│ Vector Store     │\n│     Loader      │    │   + Embeddings   │    │   (RAG Retrieve) │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                   │                       │\n                                   ▼                       ▼\n                          ┌──────────────────┐    ┌──────────────────┐\n                          │ Schema-Guided    │◀──▶│   Custom Tools   │\n                          │      LLM         │    │ (Validation)     │\n                          └──────────────────┘    └──────────────────┘\n                                   │\n                                   ▼\n                          ┌──────────────────┐\n                          │  Structured      │\n                          │    Output        │\n                          └──────────────────┘\n\nVex Callback ───────────────────────────────────────────────────────────────▶\n"
+    },
+    "risks": [
+      {
+        "name": "Chatflow chains producing unvalidated intermediate outputs",
+        "description": "LLM nodes output partial or hallucinated data that flows downstream without schema checks",
+        "severity": "high",
+        "mitigation": "Vex schema compliance checks at each chain output"
+      },
+      {
+        "name": "Vector store retrieval returning low-relevance documents",
+        "description": "RAG retrieves irrelevant chunks, poisoning extraction accuracy",
+        "severity": "high",
+        "mitigation": "Vex semantic relevance scoring on retrieved contexts"
+      },
+      {
+        "name": "Custom tool nodes failing silently without error propagation",
+        "description": "Validation or enrichment tools fail without surfacing errors to the main flow",
+        "severity": "medium",
+        "mitigation": "Vex error monitoring and propagation callbacks"
+      },
+      {
+        "name": "Multi-agent sequential flow losing context between agent handoffs",
+        "description": "Agents drop critical extraction state during handoffs, causing incomplete outputs",
+        "severity": "medium",
+        "mitigation": "Vex context continuity verification across agent boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Pydantic Schema for Document Extraction",
+        "description": "Create a structured schema for invoice extraction that Flowise LLM nodes will target",
+        "code": "import { z } from 'zod';\n\nconst InvoiceSchema = z.object({\n  invoice_number: z.string().min(1, 'Invoice number required'),\n  date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/, 'Invalid date format'),\n  total_amount: z.number().positive(),\n  vendor_name: z.string().min(1),\n  line_items: z.array(z.object({\n    description: z.string(),\n    quantity: z.number().int().positive(),\n    unit_price: z.number().positive(),\n    total: z.number().positive()\n  })).min(1)\n});\n\ntype Invoice = z.infer<typeof InvoiceSchema>;",
+        "language": "typescript"
+      },
+      {
+        "title": "Flowise Chatflow with Schema Tool Node",
+        "description": "Configure Flowise chain to use structured output mode with your schema",
+        "code": "// Flowise Chatflow JSON export snippet\nconst chatflowConfig = {\n  \"nodes\": {\n    \"llm-node\": {\n      \"type\": \"OpenAI\",\n      \"template\": \"Extract invoice data from this document: {context}\\n\\nProvide JSON matching the schema:\",\n      \"tools\": [{\n        \"type\": \"pydantic\",\n        \"schema\": InvoiceSchema\n      }],\n      \"outputParser\": \"json\"\n    },\n    \"vex-callback\": {\n      \"type\": \"CustomFunction\",\n      \"function\": \"vexVerifyExtraction\"\n    }\n  },\n  \"edges\": [\n    { \"source\": \"vector-retrieve\", \"target\": \"llm-node\" },\n    { \"source\": \"llm-node\", \"target\": \"vex-callback\" }\n  ]\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store RAG Setup for Extraction Context",
+        "description": "Configure Pinecone retriever with metadata filtering for document sections",
+        "code": "import { PineconeStore } from '@langchain/pinecone';\nimport { OpenAIEmbeddings } from '@langchain/openai';\n\nconst embeddings = new OpenAIEmbeddings();\nconst pineconeStore = await PineconeStore.fromExistingIndex(\n  embeddings,\n  { pineconeIndex: pineconeIndex }\n);\n\n// Retrieve relevant chunks for extraction\nconst relevantDocs = await pineconeStore.similaritySearch(\n  queryText,\n  5,\n  { filter: { document_type: 'invoice' } }\n);",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Tool for Post-Extraction Validation",
+        "description": "Flowise custom tool to validate extracted totals match line item sums",
+        "code": "// Flowise Custom Tool Function\nconst validateInvoiceTotals = (extraction: Invoice): boolean => {\n  const lineItemTotal = extraction.line_items.reduce(\n    (sum, item) => sum + (item.quantity * item.unit_price),\n    0\n  );\n  const diff = Math.abs(lineItemTotal - extraction.total_amount);\n  return diff <= 0.01; // Allow small floating point differences\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Add Vex callback handler to Flowise configuration with medium risk profile",
+        "code": "npm install @vex_dev/sdk\n\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-extraction',\n  riskProfile: 'medium'\n});\n\n// Add to Flowise server startup\napp.use('/api/v1/prediction/:id', vex.middleware());",
+        "language": "typescript"
+      },
+      {
+        "title": "Schema Compliance Verification Callback",
+        "description": "Intercept LLM outputs and verify against Pydantic schema before downstream flow",
+        "code": "import { defineCheck } from '@vex_dev/sdk/checks';\n\nconst schemaCompliance = defineCheck({\n  name: 'invoice_schema_compliance',\n  description: 'Verify extracted data matches invoice schema',\n  verify: async ({ input, output }) => {\n    const result = InvoiceSchema.safeParse(output);\n    if (!result.success) {\n      return {\n        passed: false,\n        reason: 'Schema violation',\n        issues: result.error.issues\n      };\n    }\n    return { passed: true };\n  }\n});\n\nvex.addCheck(schemaCompliance);",
+        "language": "typescript"
+      },
+      {
+        "title": "Retrieval Relevance + Completeness Guard",
+        "description": "Verify RAG relevance and extraction completeness across the full flow",
+        "code": "// Complete Flowise callback handler\nconst vexVerifyExtraction = async (input: any, output: any) => {\n  const checks = await vex.run([\n    schemaCompliance,\n    {\n      name: 'retrieval_relevance',\n      verify: ({ context }) => {\n        const relevance = await computeSemanticSimilarity(input.query, context);\n        return relevance > 0.75;\n      }\n    },\n    {\n      name: 'extraction_completeness',\n      verify: ({ output }) => {\n        return output.line_items?.length > 0 && output.total_amount > 0;\n      }\n    }\n  ], { input, output });\n\n  if (!checks.allPassed()) {\n    throw new Error(`Extraction failed checks: ${checks.failedReasons()}`);\n  }\n  return output;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Data Extraction",
+      "description": "Add Vex guardrails to your Flowise flows today and eliminate extraction failures with one line of code."
+    }
+  }
+}

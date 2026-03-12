@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with DSPy + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy ai coding assistant",
+      "DSPy guardrails",
+      "ai coding assistant reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI Coding Assistants with DSPy enables programming LLMs through composable, optimizable modules rather than brittle prompting, streamlining repository-aware code generation and debugging. However, optimized modules can overfit to training data, produce plausible-but-incorrect logic, or compose unexpectedly, risking code errors, security vulnerabilities, and compliance issues. Vex provides runtime verification to catch these failures before they reach production.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with DSPy",
+      "description": "The DSPy-powered AI Coding Assistant processes repository context through a `RepositoryContext` module that extracts relevant files and dependencies. A `CodeGenerator` module produces fixes or new features using chain-of-thought reasoning optimized over test cases, followed by a `Validator` module that executes code in a sandbox and checks assertions. Iterative debugging flows through a `Debugger` module that analyzes test failures and proposes refined solutions.\n\nDSPy signatures define structured LM calls (e.g., `generate_code(repo_context, task_description -> generated_code)`), compiled into optimized programs. The full pipeline wraps these module `forward()` calls with Vex verification to ensure code correctness, security, and compliance before execution.\n\nThis modular approach allows teleprompters to optimize over execution traces, but introduces risks when modules compose unexpectedly or overfit to synthetic training data.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   User Task     │───▶│  DSPy Program    │───▶│   Sandbox Exec   │\n│  + Repo Context │    │  (Context+Gen+   │    │  + Test Suite    │\n└─────────────────┘    │   Validate+Debug) │    └─────────────────┘\n                       └──────────────────�┘           ▲\n                       ┌──────────────────┐           │\n                       │   Vex Verify     │◀──────────┘\n                       │ (Correctness+     │\n                       │  Security+Compliance)│\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Overfitted Code Generation",
+        "description": "DSPy optimization creates prompts that pass training tests but fail on real repo edge cases",
+        "severity": "high",
+        "mitigation": "Vex verifies generated code against dynamic test suites and repo-specific invariants"
+      },
+      {
+        "name": "Plausible Incorrect Logic",
+        "description": "Chain-of-thought produces confident but wrong algorithms (e.g., off-by-one errors in loops)",
+        "severity": "critical",
+        "mitigation": "Runtime assertion checking and symbolic execution validation"
+      },
+      {
+        "name": "Security Injection Vectors",
+        "description": "Generated code contains eval(), system calls, or dependency downloads without validation",
+        "severity": "critical",
+        "mitigation": "Static analysis + AST scanning for dangerous patterns before sandbox execution"
+      },
+      {
+        "name": "License/Dependency Violations",
+        "description": "Code suggests incompatible licenses or malicious dependencies",
+        "severity": "medium",
+        "mitigation": "Dependency scanning and license compatibility checking"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Repository Context Signature",
+        "description": "DSPy signature to extract relevant files and build execution context from git repo",
+        "code": "import dspy\n\nclass RepositoryContext(dspy.Signature):\n    '''Extract relevant files for coding task.'''\n    repo_path: str = dspy.InputField()\n    task_description: str = dspy.InputField()\n    relevant_files: list[str] = dspy.OutputField()\n    execution_context: str = dspy.OutputField()\n\nrepo_context = dspy.ChainOfThought(RepositoryContext)\n\n# Usage\ncontext = repo_context(repo_path='/path/to/repo', task_description='Fix login bug').to_dict()",
+        "language": "python"
+      },
+      {
+        "title": "Code Generator Module",
+        "description": "Generates code fixes with test assertions using optimized CoT reasoning",
+        "code": "class CodeGenerator(dspy.Signature):\n    '''Generate correct code with test assertions.'''\n    context: str = dspy.InputField(desc='Repo files + task')\n    tests: str = dspy.InputField(desc='Expected test cases')\n    code: str = dspy.OutputField()\n    test_assertions: str = dspy.OutputField()\n\ngenerator = dspy.ChainOfThought(CodeGenerator)\nprogram = dspy.ModuleList(generator, dspy.Predict('test_assertions'))\nresult = program(context=repo_context, tests='assert login_successful(user)')\n\n# Compile with test cases\ntp = dspy.teleprompt.BootstrapFewShot()\ncompiled_generator = tp.compile(program, trainset=train_examples)",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Validator",
+        "description": "Executes generated code and validates assertions in isolated environment",
+        "code": "import subprocess\nimport tempfile\nfrom pathlib import Path\n\nclass SandboxValidator(dspy.Signature):\n    '''Execute code safely and validate assertions.'''\n    code: str = dspy.InputField()\n    assertions: str = dspy.InputField()\n    passed: bool = dspy.OutputField()\n    error: str = dspy.OutputField()\n\nvalidator = SandboxValidator()\n\ndef safe_execute(code: str, assertions: str) -> dict:\n    with tempfile.TemporaryDirectory() as tmpdir:\n        path = Path(tmpdir) / 'temp.py'\n        path.write_text(code + '\\n' + assertions)\n        result = subprocess.run(['python', str(path)], \n                              capture_output=True, timeout=30)\n        return {'passed': result.returncode == 0, 'error': result.stderr.decode()}",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Debugger",
+        "description": "Analyzes test failures and generates refined fixes",
+        "code": "class Debugger(dspy.Signature):\n    '''Debug failing tests with targeted fixes.'''\n    failing_code: str = dspy.InputField()\n    error_message: str = dspy.InputField()\n    test_expectations: str = dspy.OutputField()\n    targeted_fix: str = dspy.OutputField()\n\ndebugger = dspy.ChainOfThought(Debugger)\n\n# Iterative debugging loop\ndef debug_loop(initial_code, tests):\n    current_code = initial_code\n    for i in range(3):  # Max 3 iterations\n        result = safe_execute(current_code, tests)\n        if result['passed']:\n            return current_code\n        fix = debugger(\n            failing_code=current_code,\n            error_message=result['error']\n        ).targeted_fix\n        current_code += f'\\n# Fix iteration {i+1}:\\n{fix}'\n    return current_code",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Module Forward Calls",
+        "description": "Integrate Vex verification around DSPy module execution for correctness checking",
+        "code": "import vex\n\n@vex.verify({\n    'code_correctness': 'assertions_passed',\n    'security_vulnerabilities': 'no_dangerous_patterns',\n    'no_credential_leakage': 'no_api_keys_or_secrets'\n})\ndef verified_code_gen(context: str, tests: str) -> str:\n    # DSPy module forward call\n    result = compiled_generator(context=context, tests=tests)\n    return result.code\n\n# Usage with automatic verification\nsafe_code = verified_code_gen(repo_context, test_suite)\n# Vex blocks execution if verification fails",
+        "language": "python"
+      },
+      {
+        "title": "Security + Dependency Scanning",
+        "description": "Verify generated code passes security and dependency safety checks",
+        "code": "@vex.verify({\n    'security_vulnerability_scanning': {\n        'scan': 'bandit -r /tmp/generated_code',\n        'threshold': 'B101,B307,B110'  # Ignore specific safe patterns\n    },\n    'dependency_safety': {\n        'pip_audit': 'pip-audit --require-hashes',\n        'no_malicious_packages': True\n    }\n})\ndef secure_code_validation(code: str) -> bool:\n    exec_result = safe_execute(code, assertions)\n    return exec_result['passed']\n\n# Integrates with DSPy pipeline\nverified_result = secure_code_validation(generated_code)",
+        "language": "python"
+      },
+      {
+        "title": "License Compliance + Leak Prevention",
+        "description": "Ensure no credential leakage and license compatibility before deployment",
+        "code": "@vex.verify({\n    'no_credential_leakage': {\n        'patterns': ['API_KEY', 'SECRET', 'PASSWORD'],\n        'regex': r'(?i)(api[_-]?key|secret|password)=?[\"\\']?\\w+'\n    },\n    'license_compliance': {\n        'compatible_licenses': ['MIT', 'Apache-2.0'],\n        'scan': 'licensecheck -license MIT,Apache-2.0'\n    }\n})\ndef compliance_check(code: str, requirements: str) -> dict:\n    # Full DSPy pipeline verification\n    correctness = safe_execute(code, test_assertions)\n    return {\n        'code': code,\n        'tests_pass': correctness['passed'],\n        'compliant': True\n    }\n\nfinal_code = compliance_check(generated_code, 'requirements.txt')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your DSPy modules to eliminate code generation risks."
+    }
+  }
+}

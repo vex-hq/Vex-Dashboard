@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with AutoGen + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen ai email assistant",
+      "AutoGen guardrails",
+      "ai email assistant reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with AutoGen enables sophisticated multi-agent workflows for intent detection, draft generation, and approval processes. However, the conversational nature of AutoGen agents introduces risks like infinite loops, unsafe outputs, and incorrect decisions that could lead to sending inappropriate or confidential emails. Vex provides essential guardrails to verify PII filtering, tone, accuracy, and compliance before emails are dispatched.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with AutoGen",
+      "description": "The AI Email Assistant uses AutoGen's multi-agent system where specialized agents collaborate: an IntentDetectorAgent classifies email purpose (reply, forward, draft), a DraftGeneratorAgent creates content with attachment handling, a ToneReviewerAgent ensures appropriate language, and an ApproverAgent validates before sending. Emails flow through this pipeline with human-in-the-loop for final approval. Vex integrates as a reply filter to catch failures at each agent handoff.\n\nAgents communicate via AutoGen's GroupChatManager, which orchestrates debates and consensus-building. Common patterns include tool calls for email APIs (IMAP/SMTP) and LLM function calling for structured outputs. Risks amplify in multi-turn interactions where agents might loop or drift off-task.",
+      "diagram": "┌─────────────────┐\n│ Incoming Email  │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐\n│IntentDetector   │──Vex Filter───►\n│Agent            │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐\n│DraftGenerator   │──Vex Filter───►\n│Agent            │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐\n│ToneReviewer+    │──Vex Filter───►\n│Approver Agents  │\n└─────────┬───────┘\n          │\n┌─────────▼───────┐\n│ Send Email API  │\n└─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents endlessly debate email tone or content without converging, exhausting tokens and delaying responses",
+        "severity": "critical",
+        "mitigation": "Vex monitors conversation turns and detects repetitive patterns, terminating loops"
+      },
+      {
+        "name": "PII leakage in generated drafts",
+        "description": "DraftGeneratorAgent includes sensitive data like SSNs or internal info in replies",
+        "severity": "critical",
+        "mitigation": "Vex PII filtering scans all agent outputs before they propagate"
+      },
+      {
+        "name": "Inappropriate tone escalation",
+        "description": "Agents agree on sarcastic or aggressive language unsuitable for professional email",
+        "severity": "high",
+        "mitigation": "Vex tone analysis enforces professional communication standards"
+      },
+      {
+        "name": "Incorrect recipient validation",
+        "description": "Agents forward confidential emails to wrong recipients during attachment handling",
+        "severity": "high",
+        "mitigation": "Vex validates recipient domains and email patterns against allowlists"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set up AutoGen Agents for Email Pipeline",
+        "description": "Create specialized agents for the email workflow with Vex-enabled reply functions",
+        "code": "from autogen import AssistantAgent, GroupChat, GroupChatManager\nimport vex\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\nintent_detector = AssistantAgent(\n    name=\"IntentDetector\",\n    llm_config={\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": \"openai-key\"}]},\n    reply_filter=vex_client.filter(\n        checks=[\"pii_filter\", \"content_accuracy\"]\n    )\n)\n\ndraft_generator = AssistantAgent(\n    name=\"DraftGenerator\",\n    system_message=\"Generate professional email drafts. Handle attachments safely.\",\n    reply_filter=vex_client.filter(checks=[\"tone_appropriateness\", \"confidentiality\"])\n)\n\ngroupchat = GroupChat(agents=[intent_detector, draft_generator], messages=[])\nmanager = GroupChatManager(groupchat=groupchat)",
+        "language": "python"
+      },
+      {
+        "title": "Email Intent Detection with Structured Output",
+        "description": "IntentDetectorAgent classifies email purpose and extracts key metadata",
+        "code": "def handle_email_intent(sender, config):\n    email_content = sender.last_message()[\"content\"]\n    \n    response = intent_detector.initiate_chat(\n        sender,\n        message=f\"Analyze this email: {email_content}. Classify intent: reply/forward/draft. Extract recipients and urgency.\",\n        max_turns=3\n    )\n    \n    return {\n        \"intent\": \"reply\",\n        \"recipients\": [\"client@company.com\"],\n        \"urgency\": \"medium\",\n        \"attachments\": []\n    }\n\nintent_detector.register_reply(IntentDetector, handle_email_intent)",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation with Attachment Safety",
+        "description": "Generate email drafts while Vex blocks unsafe attachments or content",
+        "code": "def generate_draft(sender, config):\n    context = sender.last_message()[\"content\"]\n    \n    draft_prompt = f\"\"\"\n    Based on intent: {context['intent']}\n    Generate professional reply to: {context['original_email']}\n    CC: {context['recipients']}\n    Attachments: {context['attachments']}\n    \"\"\"\n    \n    response = draft_generator.generate_reply(messages=[{\"role\": \"user\", \"content\": draft_prompt}])\n    return response\n\n# Vex automatically filters unsafe attachments and PII before reply\ndraft_generator.register_reply(draft_generator, generate_draft)",
+        "language": "python"
+      },
+      {
+        "title": "Final Approval Workflow with Human-in-Loop",
+        "description": "ApproverAgent presents final draft for human confirmation with Vex verification",
+        "code": "approver_agent = AssistantAgent(\n    name=\"Approver\",\n    system_message=\"Review final drafts. Flag issues. Request human approval if needed.\",\n    reply_filter=vex_client.filter(\n        checks=[\"recipient_validation\", \"tone_appropriateness\", \"content_accuracy\"]\n    )\n)\n\ndef final_review(sender, config):\n    draft = sender.last_message()[\"content\"]\n    \n    review = approver_agent.initiate_chat(\n        sender,\n        message=f\"Final review: {draft}\\nApprove for sending?\",\n        human_input_mode=\"ALWAYS\"\n    )\n    \n    if review.summary.approved:\n        return send_email(draft)\n    return \"Draft rejected\"\n\napprover_agent.register_reply(approver_agent, final_review)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Reply Filter for All Agents",
+        "description": "Configure Vex as universal reply filter with email-specific checks",
+        "code": "import vex\nfrom autogen import AssistantAgent\n\n# Define email-specific Vex policy\nemail_policy = {\n    \"pii_filter\": {\"enabled\": True, \"block\": True},\n    \"tone_appropriateness\": {\n        \"enabled\": True,\n        \"categories\": [\"professional\", \"courteous\"],\n        \"block\": True\n    },\n    \"recipient_validation\": {\n        \"enabled\": True,\n        \"allowlist\": [\"@company.com\", \"@client-domain.com\"],\n        \"block\": True\n    },\n    \"content_accuracy\": {\"enabled\": True, \"confidence_threshold\": 0.9}\n}\n\nvex_client = vex.Client(api_key=\"vex-key\")\n\n# Apply to all agents\nfor agent in [intent_detector, draft_generator, approver_agent]:\n    agent.reply_filter = vex_client.filter(\n        policy=email_policy,\n        on_violation=\"terminate\",\n        max_turns=10  # Prevent loops\n    )",
+        "language": "python"
+      },
+      {
+        "title": "Custom Vex Check for Email Confidentiality",
+        "description": "Implement domain-specific confidentiality enforcement",
+        "code": "def confidential_email_check(content: str, metadata: dict) -> dict:\n    \"\"\"Custom Vex check for internal email confidentiality\"\"\"\n    import re\n    \n    confidential_indicators = [\n        r'\\b(internal|confidential|privileged)\\b',\n        r'\\d{3}-\\d{2}-\\d{4}',  # SSN pattern\n        r'\\b[A-Z]{2}\\d{7}\\b'    # Internal ticket numbers\n    ]\n    \n    violations = []\n    for pattern in confidential_indicators:\n        if re.search(pattern, content, re.IGNORECASE):\n            violations.append({\n                \"type\": \"confidentiality\",\n                \"severity\": \"critical\",\n                \"message\": f\"Found confidential pattern: {pattern}\"\n            })\n    \n    return {\n        \"pass\": len(violations) == 0,\n        \"violations\": violations,\n        \"score\": 1.0 if len(violations) == 0 else 0.0\n    }\n\n# Register custom check\nvex_client.register_check(\"email_confidentiality\", confidential_email_check)\n\n# Use in policy\nemail_policy[\"confidentiality\"] = {\"check\": \"email_confidentiality\"}",
+        "language": "python"
+      },
+      {
+        "title": "Monitor Token Spending and Loop Detection",
+        "description": "Prevent uncontrolled costs and infinite agent conversations",
+        "code": "from vex import Client, Policy\n\n# Advanced loop detection policy\nloop_policy = Policy(\n    name=\"email_loop_protection\",\n    checks=[\n        {\n            \"name\": \"conversation_loop\",\n            \"type\": \"loop_detection\",\n            \"params\": {\n                \"max_turns\": 10,\n                \"similarity_threshold\": 0.85,  # Jaccard similarity\n                \"window_size\": 5\n            }\n        },\n        {\n            \"name\": \"token_budget\",\n            \"type\": \"token_limit\",\n            \"params\": {\n                \"max_tokens\": 8000,\n                \"model\": \"gpt-4\"\n            }\n        }\n    ],\n    action_on_violation=\"terminate_with_summary\"\n)\n\n# Apply to group chat\nmanager = GroupChatManager(\n    groupchat=groupchat,\n    reply_filter=vex_client.filter(policy=loop_policy)\n)\n\n# Monitor usage\nmetrics = vex_client.get_metrics(agent_id=\"email-assistant\")\nprint(f\"Blocked loops: {metrics['loop_detections']}\")\nprint(f\"Saved tokens: {metrics['token_savings']}\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen AI Email Assistant",
+      "description": "Install Vex today with `pip install autogen vex-sdk` and protect your email workflows from agent failures."
+    }
+  }
+}

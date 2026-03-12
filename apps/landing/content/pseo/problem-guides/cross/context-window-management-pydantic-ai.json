@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Pydantic AI Agents",
+    "description": "How to detect and fix context window management for ai agents in Pydantic AI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Pydantic AI context-window-management",
+      "Pydantic AI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Pydantic AI, Context Window Management issues manifest when agents exceed token limits during tool calls, structured output generation, or conversation history accumulation, causing truncated responses or validation failures. The framework's strict type-safe result validators reject partial outputs that don't match Pydantic models, while nested tool calls in agent chains can silently drop context. Streaming responses often fail mid-generation when context overflows, breaking production reliability.",
+    "howItManifests": [
+      {
+        "scenario": "Long conversation history in multi-turn agent",
+        "symptom": "PydanticAIResult validator raises `ValidationError` on truncated LLM response",
+        "impact": "Agent resets conversation, losing user context and requiring restart"
+      },
+      {
+        "scenario": "Nested tool calls with large dependency injection context",
+        "symptom": "`context` field missing in inner tool execution",
+        "impact": "Tools fail silently with `None` dependencies, masking root cause"
+      },
+      {
+        "scenario": "Streaming structured output exceeding token limit",
+        "symptom": "Stream validation fails mid-generation with `PydanticAIStreamError`",
+        "impact": "Partial UI updates with invalid data, user confusion"
+      },
+      {
+        "scenario": "Tool retry logic with accumulating context",
+        "symptom": "Exponential token growth per retry, eventual `MaxTokensExceeded`",
+        "impact": "Infinite retry loops consuming excessive API costs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Monitoring",
+        "description": "Detect context overflow by tracking input token counts before PydanticAI agent execution",
+        "code": "from pydantic_ai import Agent\nfrom vex_sdk import monitor\n\n@monitor()\ndef check_context_window(agent: Agent, messages: list) -> bool:\n    # Estimate tokens using PydanticAI's tokenizer\n    total_tokens = sum(len(msg.content) // 4 for msg in messages) + 1000  # prompt overhead\n    return total_tokens < agent.model.max_tokens * 0.8\n\n# Usage\nagent = Agent(model='gpt-4o')\nresult = check_context_window(agent, conversation_history)",
+        "language": "python"
+      },
+      {
+        "name": "Validation Failure Pattern Detection",
+        "description": "Capture Pydantic validation errors indicating truncation",
+        "code": "from pydantic_ai import Agent\nfrom pydantic import ValidationError\n\nclass ContextOverflowDetector:\n    def __init__(self, agent: Agent):\n        self.agent = agent\n        self.truncation_errors = 0\n    \n    def run_with_monitoring(self, messages):\n        try:\n            return self.agent.run(messages)\n        except ValidationError as e:\n            if 'truncated' in str(e).lower() or 'unexpected end' in str(e).lower():\n                self.truncation_errors += 1\n            raise\n\n# Usage\ndetector = ContextOverflowDetector(agent)\nresult = detector.run_with_monitoring(messages)",
+        "language": "python"
+      },
+      {
+        "name": "Streaming Token Overflow Check",
+        "description": "Monitor streaming token usage in real-time",
+        "code": "from pydantic_ai import StreamingAgent\nimport tiktoken\n\nclass StreamingTokenMonitor:\n    def __init__(self, model_name: str):\n        self.encoder = tiktoken.encoding_for_model(model_name)\n        self.total_tokens = 0\n    \n    async def monitor_stream(self, agent: StreamingAgent, messages):\n        async for chunk in agent.stream(messages):\n            self.total_tokens += len(self.encoder.encode(chunk.content))\n            if self.total_tokens > agent.model.max_tokens * 0.9:\n                raise RuntimeError('Context window approaching limit')\n            yield chunk\n\n# Usage\nmonitor = StreamingTokenMonitor('gpt-4o')\nasync for chunk in monitor.monitor_stream(streaming_agent, messages):\n    print(chunk)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Pruning",
+        "description": "Automatically trim conversation history to fit token limits",
+        "code": "from pydantic_ai import Agent\nimport tiktoken\n\ndef prune_context(messages: list, max_tokens: int = 12000) -> list:\n    encoder = tiktoken.get_encoding('cl100k_base')\n    total_tokens = sum(len(encoder.encode(msg.content)) for msg in messages)\n    \n    while total_tokens > max_tokens and len(messages) > 1:\n        # Remove oldest non-system messages\n        for i, msg in enumerate(messages):\n            if msg.role != 'system':\n                messages.pop(i)\n                total_tokens = sum(len(encoder.encode(m.content)) for m in messages)\n                break\n    return messages\n\n# Usage\nagent = Agent(model='gpt-4o')\npruned_messages = prune_context(conversation_history)\nresult = agent.run(pruned_messages)",
+        "language": "python"
+      },
+      {
+        "name": "Context-Aware Retry with Token Reset",
+        "description": "Reset context on retries instead of accumulating",
+        "code": "from pydantic_ai import Agent\n\nclass SmartRetryAgent:\n    def __init__(self, base_agent: Agent, max_retries: int = 3):\n        self.agent = base_agent\n        self.max_retries = max_retries\n    \n    def run(self, messages: list, retry_context: bool = True):\n        for attempt in range(self.max_retries):\n            try:\n                return self.agent.run(messages)\n            except Exception:\n                if retry_context and attempt < self.max_retries - 1:\n                    # Reset to last known good context\n                    messages = messages[-3:]  # Keep last 3 messages\n        raise\n\n# Usage\nsmart_agent = SmartRetryAgent(agent)\nresult = smart_agent.run(messages)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budget Streaming",
+        "description": "Limit streaming output to prevent context overflow",
+        "code": "from pydantic_ai import StreamingAgent\n\nclass TokenBudgetStreamer:\n    def __init__(self, agent: StreamingAgent, output_token_limit: int = 2000):\n        self.agent = agent\n        self.remaining_tokens = output_token_limit\n    \n    async def stream(self, messages: list):\n        async for chunk in self.agent.stream(messages):\n            chunk_tokens = len(chunk.content) // 4  # rough estimate\n            if chunk_tokens > self.remaining_tokens:\n                # Truncate chunk\n                chunk.content = chunk.content[:self.remaining_tokens * 4]\n                self.remaining_tokens = 0\n                yield chunk\n                break\n            \n            self.remaining_tokens -= chunk_tokens\n            yield chunk\n            if self.remaining_tokens <= 0:\n                break\n\n# Usage\nstreamer = TokenBudgetStreamer(streaming_agent)\nasync for chunk in streamer.stream(messages):\n    print(chunk.content)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a result_validator in Pydantic AI agents, automatically detecting context window overflows by monitoring token counts, validation failure patterns, and streaming truncation errors. It captures failure signatures like repeated `ValidationError` on truncated outputs and exponential token growth in retries, then applies intelligent remediation including dynamic context pruning and token-budget enforcement.\n\nThe Vex SDK provides production-ready observability with zero-config setup via `pip install pydantic-ai vex-sdk`. It automatically instruments all agent runs, providing dashboards for context window health and alerting on overflow risks before they impact users. Remediation is automatic - Vex can prune contexts, adjust retry strategies, and enforce token budgets without code changes.\n\nFor teams running Pydantic AI at scale, Vex eliminates the toil of manual token monitoring and provides guardrails that adapt to different LLM providers and models, ensuring reliable agent performance across production workloads.",
+      "code": "from pydantic_ai import Agent\nfrom vex_sdk import Vex\n\n# Zero-config Vex integration\nvex = Vex(api_key='your-vex-key')\n\n@vex.result_validator()  # Auto-detects context issues\nclass ContextSafeAgent(Agent):\n    model = 'gpt-4o'\n    max_retries = 3\n    \n    def preprocess_messages(self, messages: list) -> list:\n        # Vex automatically prunes if needed\n        return messages\n\n# Production usage - Vex handles everything\nagent = ContextSafeAgent()\nresult = agent.run([\n    {'role': 'user', 'content': 'Long conversation history...'},\n    # Vex monitors token count, auto-prunes if >80% limit\n])\n\n# Vex dashboard shows:\n# - Context window utilization\n# - Auto-pruned conversations\n# - Streaming token budgets enforced",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex integration to eliminate context window failures in your Pydantic AI agents forever."
+    }
+  }
+}

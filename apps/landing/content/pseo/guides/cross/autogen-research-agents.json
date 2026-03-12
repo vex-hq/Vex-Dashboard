@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with AutoGen + Vex Guardrails",
+    "description": "Learn how to build research agents with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen research agents",
+      "AutoGen guardrails",
+      "research agents reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Research Agents with AutoGen enables multi-agent systems that collaboratively perform web searches, analyze data, and synthesize insights for complex research tasks. However, these conversational agents are prone to infinite loops, hallucinated conclusions, unsafe code execution, and excessive token usage, which can lead to unreliable outputs and high costs. Vex provides essential guardrails by filtering agent replies for accuracy, safety, and efficiency, ensuring trustworthy research automation.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with AutoGen",
+      "description": "AutoGen Research Agents typically involve a coordinator agent that orchestrates specialized sub-agents: a Web Search Agent retrieves relevant sources, a Source Verifier validates credibility and recency, an Analysis Agent extracts key claims and detects biases, and a Synthesizer compiles a final report. These agents communicate via structured messages with tools for search APIs, fact-checking databases, and content analysis. Human-in-the-loop approval gates ensure quality before final outputs.\n\nThe conversation flow starts with a user query routed to the Search Agent, which delegates to Verifier and Analyzer in parallel, then converges at the Synthesizer. Each agent uses LLM-powered reasoning with custom tools, making the system powerful but vulnerable to cascading errors from poor source selection or biased synthesis.\n\nVex integrates as a reply filter to catch failures at each step, verifying claims against sources and blocking unsafe or infinite responses before they propagate.",
+      "diagram": "User Query\n    |\n[Coordinator Agent]\n    |----------------|\n[Search Agent]  [Human Gate]\n    |                   |\n[Source Verifier]   [Approval]\n    |                   |\n[Analysis Agent] --> [Synthesizer] --> Final Report\n    ^\n[Vex Reply Filter] (guards all agent replies)"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents ping-pong requests without converging, exhausting tokens and time",
+        "severity": "critical",
+        "mitigation": "Vex detects repetitive patterns and conversation drift, forcing termination"
+      },
+      {
+        "name": "Code execution producing unsafe outputs",
+        "description": "Research agents generating malicious code during data analysis or web scraping",
+        "severity": "critical",
+        "mitigation": "Vex sandboxes and scans all code outputs before execution"
+      },
+      {
+        "name": "Agents agreeing on incorrect conclusions",
+        "description": "Groupthink where multiple agents reinforce hallucinated or biased claims",
+        "severity": "high",
+        "mitigation": "Vex cross-verifies claims against sources and external knowledge"
+      },
+      {
+        "name": "Uncontrolled token spending in multi-turn debates",
+        "description": "Endless debates between verifier and analyzer agents without convergence",
+        "severity": "medium",
+        "mitigation": "Vex enforces token budgets and convergence criteria per conversation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Setting up AutoGen Research Agent GroupChat",
+        "description": "Initialize the multi-agent system with coordinator, searcher, verifier, and synthesizer agents",
+        "code": "from autogen import AssistantAgent, GroupChat, GroupChatManager\n\nconfig_list = [{\"model\": \"gpt-4\", \"api_key\": \"your-key\"}]\n\ncoordinator = AssistantAgent(\n    name=\"Coordinator\",\n    llm_config={\"config_list\": config_list},\n)\nsearcher = AssistantAgent(\n    name=\"WebSearcher\",\n    system_message=\"Search web for latest information on topic.\",\n    llm_config={\"config_list\": config_list},\n)\nverifier = AssistantAgent(\n    name=\"SourceVerifier\",\n    system_message=\"Verify source credibility, recency, and bias.\",\n    llm_config={\"config_list\": config_list},\n)\nsynthesizer = AssistantAgent(\n    name=\"Synthesizer\",\n    system_message=\"Synthesize verified information into concise report.\",\n    llm_config={\"config_list\": config_list},\n)\n\ngroupchat = GroupChat(agents=[coordinator, searcher, verifier, synthesizer], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"config_list\": config_list})",
+        "language": "python"
+      },
+      {
+        "title": "Web Search Tool for Research Agent",
+        "description": "Custom tool for agents to perform real web searches and retrieve sources",
+        "code": "import requests\nfrom autogen import register_function\n\ndef web_search(query: str, max_results: int = 5) -> str:\n    # Simulated DuckDuckGo search\n    url = f\"https://api.duckduckgo.com/?q={query}&format=json&no_html=1\"\n    response = requests.get(url)\n    results = response.json().get('RelatedTopics', [])[:max_results]\n    sources = [r.get('Text', '') + ' | ' + r.get('FirstURL', '') for r in results]\n    return \"\\n\".join(sources)\n\nregister_function(\n    web_search,\n    caller=searcher,\n    executor=coordinator,\n    name=\"web_search\",\n    description=\"Search web for research sources\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Source Verification Function",
+        "description": "Agent tool to check source recency, credibility, and bias indicators",
+        "code": "import re\nfrom datetime import datetime\n\ndef verify_source(source_text: str, source_url: str) -> dict:\n    # Check recency (last 30 days)\n    date_match = re.search(r'(\\d{4}-\\d{2}-\\d{2})', source_text)\n    recency_ok = not date_match or (datetime.now() - datetime.strptime(date_match.group(1), '%Y-%m-%d')).days < 30\n    \n    # Basic credibility signals\n    credible_domains = ['.edu', '.gov', '.org']\n    credibility_score = sum(1 for domain in credible_domains if domain in source_url)\n    \n    # Bias detection keywords\n    bias_indicators = ['opinion', 'editorial', 'sponsored']\n    bias_score = sum(source_text.lower().count(indicator) for indicator in bias_indicators)\n    \n    return {\n        'recency_ok': recency_ok,\n        'credibility_score': credibility_score,\n        'bias_score': bias_score,\n        'verified': recency_ok and credibility_score > 0 and bias_score < 2\n    }\n\nregister_function(verify_source, caller=verifier, executor=searcher)",
+        "language": "python"
+      },
+      {
+        "title": "Initiating Research Conversation",
+        "description": "Start the group chat with research query and human proxy",
+        "code": "from autogen import UserProxyAgent\n\nuser_proxy = UserProxyAgent(\n    name=\"User\",\n    human_input_mode=\"TERMINATE\",\n    max_consecutive_auto_reply=10,\n    code_execution_config=False,\n)\n\nresearch_query = \"What are the latest advancements in quantum computing as of 2024?\"\nuser_proxy.initiate_chat(\n    manager,\n    message=research_query\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Install Vex and create client for AutoGen integration",
+        "code": "pip install autogen vex-sdk\n\nimport vex\nfrom vex import Client, Guardrail\n\nvex_client = Client(api_key=\"your-vex-api-key\")\n\n# Define research-specific guardrails\nguardrails = [\n    Guardrail(name=\"source_verification\", type=\"claim_accuracy\", threshold=0.9),\n    Guardrail(name=\"recency_check\", type=\"recency\", days=30),\n    Guardrail(name=\"bias_detection\", type=\"bias\", max_score=2),\n    Guardrail(name=\"loop_detection\", type=\"conversation_drift\", max_turns=20)\n]\n\nvex_policy = vex_client.create_policy(\n    name=\"research_agent_policy\",\n    guardrails=guardrails,\n    risk_profile=\"medium\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Register Vex as Reply Function Filter",
+        "description": "Wrap AutoGen reply function with Vex verification for all agents",
+        "code": "from functools import wraps\n\ndef vex_reply_filter(policy_id: str):\n    def decorator(reply_func):\n        @wraps(reply_func)\n        def wrapper(message, sender, config):\n            # Send reply to Vex for verification\n            verification = vex_client.verify_reply(\n                policy_id=policy_id,\n                content=message[\"content\"],\n                context={\"agents\": [a.name for a in sender.groupchat.agents]},\n                use_case=\"research\"\n            )\n            \n            if not verification.approved:\n                return {\n                    \"content\": f\"[VEX BLOCKED] {verification.reason}: {message['content'][:100]}...\",\n                    \"role\": \"assistant\",\n                    \"blocked\": True\n                }\n            \n            # Forward approved reply\n            return reply_func(message, sender, config)\n        return wrapper\n    return decorator\n\n# Apply to group chat manager\nmanager.reply_func = vex_reply_filter(vex_policy.id)",
+        "language": "python"
+      },
+      {
+        "title": "Custom Vex Guardrail for Research Claims",
+        "description": "Implement claim verification against sources with recency and bias checks",
+        "code": "class ResearchClaimGuardrail(Guardrail):\n    def __init__(self):\n        super().__init__(name=\"research_claim_verification\")\n    \n    def evaluate(self, content: str, context: dict) -> dict:\n        claims = self.extract_claims(content)\n        sources = context.get('sources', [])\n        \n        results = []\n        for claim in claims:\n            # Verify against sources\n            evidence_score = self.find_evidence(claim, sources)\n            recency_ok = self.check_recency(sources)\n            bias_score = self.assess_bias(content)\n            \n            approved = evidence_score > 0.8 and recency_ok and bias_score < 0.3\n            \n            results.append({\n                'claim': claim,\n                'evidence_score': evidence_score,\n                'recency_ok': recency_ok,\n                'bias_score': bias_score,\n                'approved': approved\n            })\n        \n        return {\n            'approved': all(r['approved'] for r in results),\n            'details': results,\n            'score': sum(r['evidence_score'] for r in results) / len(results)\n        }\n\n# Register custom guardrail\nvex_client.register_guardrail(ResearchClaimGuardrail())\n\n# Update policy\nvex_policy.add_guardrail(\"research_claim_verification\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Research Agents",
+      "description": "Install Vex today and protect your research agents from hallucinations, loops, and bias with enterprise-grade verification."
+    }
+  }
+}

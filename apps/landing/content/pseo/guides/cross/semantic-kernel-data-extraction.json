@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "semantic-kernel",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Semantic Kernel + Vex Guardrails",
+    "description": "Learn how to build data extraction with Semantic Kernel + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Semantic Kernel data extraction",
+      "Semantic Kernel guardrails",
+      "data extraction reliability",
+      "Vex Semantic Kernel",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Data Extraction pipelines with Semantic Kernel enables schema-guided LLM calls to parse unstructured documents into structured JSON outputs. Guardrails are essential to prevent cascading errors from plugin chaining, invalid plans, hallucinated memories, and data contamination that can undermine extraction reliability. Vex integration as a kernel filter ensures schema compliance, field accuracy, completeness, and type consistency in production deployments.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Semantic Kernel",
+      "description": "The architecture begins with document ingestion, followed by Semantic Kernel's planner selecting extraction plugins based on schema definitions. Plugins invoke LLMs with schema-guided prompts to extract fields like names, dates, and amounts from unstructured text. Results flow through memory for context retention and chaining for multi-step extractions.\n\nPlanners generate execution graphs that chain native functions, custom plugins, and OpenAI functions. Memory stores prior extractions for iterative refinement, while filters validate outputs against Pydantic schemas. Failures occur when plans omit required fields or memory contaminates cross-document data.\n\nVex integrates as a post-function result filter, verifying extracted JSON against predefined tests before returning to the kernel.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Unstructured  │───▶│ Semantic Kernel  │───▶│ Structured JSON │\n│     Documents   │    │ - Planner        │    │   Extraction    │\n└─────────────────┘    │ - Plugins        │    └─────────────────┘\n                       │ - Memory          │         ▲\n                       │ - Vex Filter ─────┼─────────┘\n                       └──────────────────┘\n                                      │\n                       ┌──────────────────┐\n                       │ LLM Schema-Guided│\n                       │   Extraction     │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Plugin chaining producing cascading errors",
+        "description": "Sequential plugin calls where early extraction failures propagate invalid data to downstream plugins",
+        "severity": "high",
+        "mitigation": "Vex result filters validate each plugin output before chaining"
+      },
+      {
+        "name": "Planner generating invalid execution plans",
+        "description": "Planner selects incompatible plugins or omits required schema fields",
+        "severity": "critical",
+        "mitigation": "Pre-validate plan steps with Vex schema compliance checks"
+      },
+      {
+        "name": "Memory recall hallucinating past interactions",
+        "description": "Kernel memory injects fabricated prior extractions into current document processing",
+        "severity": "medium",
+        "mitigation": "Vex field accuracy tests against ground truth schemas"
+      },
+      {
+        "name": "Cross-plugin data contamination",
+        "description": "Data from one extraction plugin leaks into unrelated schema fields",
+        "severity": "high",
+        "mitigation": "Vex completeness and type consistency verification"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Extraction Schema with Pydantic",
+        "description": "Create schema for invoice extraction that Semantic Kernel plugins will target",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date in YYYY-MM-DD\")\n    total_amount: float = Field(..., ge=0)\n    vendor_name: str = Field(..., min_length=2)\n    line_items: list[dict] = Field(default_factory=list)\n\n    class Config:\n        json_schema_extra = {\n            \"example\": {\n                \"invoice_number\": \"INV-12345\",\n                \"date\": \"2024-01-15\",\n                \"total_amount\": 1250.75,\n                \"vendor_name\": \"Acme Corp\"\n            }\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Create Semantic Kernel Extraction Plugin",
+        "description": "Native function plugin that uses schema-guided LLM call",
+        "code": "from semantic_kernel import ContextVariables, Kernel\nfrom semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion\n\nasync def extract_invoice(\n    kernel: Kernel,\n    context: ContextVariables\n) -> str:\n    document_text = context[\"document\"]\n    schema = Invoice.model_json_schema()\n    \n    prompt = f\"\"\"\nExtract invoice data from this document as valid JSON matching this schema:\n{schema}\n\nDocument: {document_text}\n\nRespond with ONLY valid JSON:\"\"\"\n    \n    chat_service = OpenAIChatCompletion(\n        deployment_name=\"gpt-4\",\n        ai_model_id=\"gpt-4\"\n    )\n    result = await kernel.invoke_prompt_async(\n        prompt, chat_service, context\n    )\n    return str(result)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Schema Definition",
+        "description": "Zod schema for TypeScript extraction pipeline",
+        "code": "import { z } from 'zod';\n\nconst InvoiceSchema = z.object({\n  invoiceNumber: z.string().min(1, 'Invoice number required'),\n  date: z.string().regex(/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/, 'Invalid date format'),\n  totalAmount: z.number().positive(),\n  vendorName: z.string().min(2),\n  lineItems: z.array(z.object({\n    description: z.string(),\n    quantity: z.number().int().positive(),\n    price: z.number().positive()\n  })).optional()\n});\n\ntype Invoice = z.infer<typeof InvoiceSchema>;\n\nexport { InvoiceSchema, Invoice };",
+        "language": "typescript"
+      },
+      {
+        "title": "TypeScript Kernel Plugin Function",
+        "description": "Kernel function for document extraction",
+        "code": "import { Kernel, KernelArguments } from '@semantic-kernel/core';\nimport { OpenAIChatCompletion } from '@semantic-kernel/connectors-ai-openai';\n\nconst extractInvoice = async (\n  kernel: Kernel,\n  context: KernelArguments\n): Promise<string> => {\n  const documentText = context.variables.document;\n  const schema = InvoiceSchema.safeParse({}).success ? InvoiceSchema.schema : '';\n  \n  const prompt = `Extract invoice following this schema: ${JSON.stringify(schema)}\\n\\nDocument: ${documentText}\\n\\nReturn ONLY valid JSON:`;\n  \n  const chatService = kernel.addChatService(\n    'gpt-4',\n    new OpenAIChatCompletion('gpt-4')\n  );\n  \n  const result = await kernel.invokePrompt(prompt, { serviceId: 'gpt-4' });\n  return result.toString();\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Python Vex Kernel Result Filter",
+        "description": "Add Vex as post-function filter to validate extraction results",
+        "code": "import vex\n\nfrom semantic_kernel import KernelFunctionFilter, ContextVariables, KernelArguments\n\n@vex.test_suite(name=\"invoice_extraction\")\ndef invoice_suite():\n    @vex.test(expect_type=dict)\n    def schema_compliance(extracted: dict):\n        Invoice.model_validate(extracted)\n    \n    @vex.test(expect_field=\"total_amount\", min=0)\n    def field_accuracy(extracted: dict):\n        return extracted[\"total_amount\"] > 0\n    \n    @vex.test(expect_fields=[\"invoice_number\", \"date\", \"vendor_name\"])\n    def completeness(extracted: dict):\n        pass\n    \n    @vex.test(expect_type=float, field=\"total_amount\")\n    def type_consistency(extracted: dict):\n        pass\n\nclass VexResultFilter(KernelFunctionFilter):\n    async def on_function_return(self, args: KernelArguments) -> KernelArguments:\n        result = args.get_variable(\"result\")\n        if isinstance(result, str):\n            try:\n                parsed = json.loads(result)\n                vex.verify(\"invoice_extraction\", parsed)\n            except Exception:\n                args.set_variable(\"result\", \"{}\")\n        return args",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Filter Integration",
+        "description": "Vex verification middleware for Kernel results",
+        "code": "import { Vex } from 'vex-sdk';\n\nimport { KernelFunctionFilter, KernelArguments } from '@semantic-kernel/core';\n\nconst invoiceVerifier = Vex.suite('invoice_extraction', {\n  schemaCompliance: Vex.test((data: any) => {\n    return InvoiceSchema.safeParse(data).success;\n  }),\n  fieldAccuracy: Vex.test('totalAmount', (value: number) => value > 0),\n  completeness: Vex.test.fields(['invoiceNumber', 'date', 'vendorName']),\n  typeConsistency: Vex.test.type('totalAmount', 'number')\n});\n\nclass VexFilter implements KernelFunctionFilter {\n  async onFunctionReturn(args: KernelArguments): Promise<KernelArguments> {\n    const result = args.variables.result;\n    try {\n      const parsed = JSON.parse(result);\n      await invoiceVerifier.verify(parsed);\n    } catch (error) {\n      args.variables.result = JSON.stringify({});\n    }\n    return args;\n  }\n}\n\n// Register with kernel\nkernel.addFilter(new VexFilter());",
+        "language": "typescript"
+      },
+      {
+        "title": "Python Planner with Vex Guardrails",
+        "description": "Sequential planner with Vex validation at each step",
+        "code": "from semantic_kernel.planning import SequentialPlanner\n\nfrom semantic_kernel.contents import ChatHistory\n\nplanner = SequentialPlanner(kernel)\n\n# Plan with Vex validation steps\nplan = await planner.create_plan_async(goal=\"Extract invoice from document\")\n\nfor step in plan._steps:\n    result = await kernel.invoke_async(step, document=doc_text)\n    \n    # Vex validates each step result\n    extracted = json.loads(str(result))\n    vex.verify(\"invoice_extraction\", extracted)\n    \n    # Update context for next step\n    step.output_variable = extracted",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Semantic Kernel Data Extraction",
+      "description": "Add Vex guardrails today to ensure 100% schema-compliant extractions in production."
+    }
+  }
+}

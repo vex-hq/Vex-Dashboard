@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with BeeAI + Vex Guardrails",
+    "description": "Learn how to build customer support with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI customer support",
+      "BeeAI guardrails",
+      "customer support reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with BeeAI enables scalable, memory-aware AI interactions with CRM integrations and RAG capabilities. However, long sessions risk unbounded memory growth, tool injection vulnerabilities, and inconsistent model outputs that can lead to inaccurate responses or policy violations. Vex provides essential guardrails to ensure reliability, PII safety, and compliance in high-risk support scenarios.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with BeeAI",
+      "description": "The BeeAI customer support agent follows a RAG architecture with vector search over a knowledge base for product info and FAQs, integrated with CRM APIs for ticket creation and order lookups. Agent memory persists conversation history across sessions, while tools handle actions like querying customer orders or escalating tickets. Observability events capture agent state changes, tool calls, and LLM outputs for monitoring.\n\nKey components include: an LLM (Granite) for reasoning, a vector store for retrieval, BeeAI's Agent class for orchestration, and event listeners for logging. Sessions maintain state via BeeAI's memory manager, with tools validated before execution to prevent errors.\n\nThis setup supports multi-turn conversations but exposes risks like memory bloat in extended support threads or serialization failures during state persistence.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   BeeAI Agent    │\n└─────────────────┘    │  (Memory + Tools) │\n                       │                   │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │   LLM (Granite)   │◀───Vex\n                       │     Reasoning     │    Guardrails\n                       └────────┬──────────┘\n                                │\n                ┌───────────────▼───────────────┐\n                │ RAG: KB Retrieval + CRM Tools │\n                │ (Order Lookup, Ticket Create) │\n                └───────────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long support sessions accumulate conversation history without pruning, causing OOM errors and slow responses.",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory usage and enforces summarization triggers."
+      },
+      {
+        "name": "Tool Injection via Invalid Inputs",
+        "description": "User prompts bypass tool validation, enabling arbitrary API calls to CRM systems.",
+        "severity": "critical",
+        "mitigation": "Vex input sanitization and semantic validation before tool execution."
+      },
+      {
+        "name": "PII Leakage in Responses",
+        "description": "Agent retrieves and echoes customer data (SSN, addresses) without redaction.",
+        "severity": "high",
+        "mitigation": "Vex PII entity extraction and filtering on all outputs."
+      },
+      {
+        "name": "Granite Output Format Drift",
+        "description": "Model inconsistencies break JSON tool calls or structured responses.",
+        "severity": "high",
+        "mitigation": "Vex schema enforcement and retry logic on parse failures."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize BeeAI Agent with Memory and Tools",
+        "description": "Set up the core agent with persistent memory and customer support tools.",
+        "code": "from beeai import Agent, Memory\nfrom beeai.tools import Tool\n\nmemory = Memory(persist=True)\nagent = Agent(\n    model='ibm/granite-13b',\n    memory=memory,\n    tools=[\n        Tool(\n            name='create_ticket',\n            description='Create support ticket',\n            func=lambda **kwargs: print(f'Ticket: {kwargs}')\n        ),\n        Tool(\n            name='lookup_order',\n            description='Lookup customer order',\n            func=lambda order_id: f'Order {order_id}: Status shipped'\n        )\n    ]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Add RAG Knowledge Base Retrieval",
+        "description": "Integrate vector search for product knowledge and FAQs.",
+        "code": "from beeai.retrievers import VectorRetriever\n\nretriever = VectorRetriever.from_documents(\n    docs=kb_docs,  # Pre-loaded support KB\n    embedding_model='sentence-transformers/all-MiniLM-L6-v2'\n)\nagent.add_retriever(retriever)\n\n# Usage in session\nresponse = agent.run('How do I reset my password?', retriever=True)",
+        "language": "python"
+      },
+      {
+        "title": "Handle Multi-Turn Support Sessions",
+        "description": "Process customer queries with CRM context preservation.",
+        "code": "session = agent.create_session(user_id='cust_123')\n\n# Multi-turn interaction\nsession.update('I need help with order #456')\nresponse1 = session.run()\nprint(response1)\n\nsession.update('Can you create a ticket?')\nresponse2 = session.run()\nprint(response2)\n\n# Persist state\nsession.save()",
+        "language": "python"
+      },
+      {
+        "title": "Add Event Listeners for Observability",
+        "description": "Register callbacks for agent events to enable Vex integration.",
+        "code": "def on_tool_call(event):\n    print(f'Tool called: {event.tool_name}')\n\ndef on_memory_update(event):\n    print(f'Memory size: {len(event.memory)}')\n\nagent.add_event_listener('tool_call', on_tool_call)\nagent.add_event_listener('memory_update', on_memory_update)\nagent.add_event_listener('llm_output', lambda e: print(e.output))",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as BeeAI Event Listener",
+        "description": "Hook Vex SDK into agent events for real-time monitoring.",
+        "code": "from vex import VexClient\n\nvex = VexClient(api_key='your-vex-key')\npolicy_id = 'cs-support-high-risk'\n\n@vex.guardrail(policy_id)\ndef vex_tool_call(event):\n    return vex.verify_tool_call(event.tool_name, event.args)\n\n@vex.guardrail(policy_id)\ndef vex_memory_check(event):\n    return vex.check_memory_growth(event.memory, max_tokens=50000)\n\nagent.add_event_listener('tool_call', vex_tool_call)\nagent.add_event_listener('memory_update', vex_memory_check)",
+        "language": "python"
+      },
+      {
+        "title": "PII Filtering and Response Verification",
+        "description": "Scan LLM outputs for PII and enforce response accuracy.",
+        "code": "@vex.guardrail(policy_id, verifications=['pii_filtering', 'response_accuracy'])\ndef vex_llm_output(event):\n    verified = vex.verify({\n        'output': event.output,\n        'query': event.query,\n        'entities': vex.extract_pii(event.output)\n    })\n    if not verified:\n        return 'Response blocked: PII detected'\n    return event.output\n\nagent.add_event_listener('llm_output', vex_llm_output)",
+        "language": "python"
+      },
+      {
+        "title": "Tone and Policy Compliance Checks",
+        "description": "Ensure professional tone and trigger escalations.",
+        "code": "@vex.guardrail(policy_id, verifications=['tone_consistency', 'policy_compliance'])\ndef vex_final_response(event):\n    checks = vex.verify({\n        'response': event.response,\n        'tone_target': 'professional',\n        'policies': ['no_personal_opinions', 'escalate_abuse']\n    })\n    if checks.escalation_triggered:\n        agent.tools['escalate']({'reason': checks.violation})\n    return checks.approved_response\n\nagent.add_event_listener('response_generated', vex_final_response)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Customer Support",
+      "description": "Deploy Vex guardrails today to protect your support agents from memory failures, injections, and compliance risks."
+    }
+  }
+}

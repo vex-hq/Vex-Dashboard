@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent hallucination detection in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "n8n AI Agents hallucination-detection",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, hallucinations manifest as AI nodes generating fabricated facts or incorrect tool call parameters that propagate unchecked through workflow chains, leading to erroneous actions. Common triggers include unvalidated outputs from AI Agent nodes passed directly to HTTP Request or Execute Command nodes, and recursive loops from workflow triggers amplifying bad data. This is exacerbated by n8n's node-based architecture where outputs flow automatically without built-in semantic validation.",
+    "howItManifests": [
+      {
+        "scenario": "AI Agent node outputs unverified facts to downstream HTTP Request node",
+        "symptom": "Agent claims 'API endpoint is https://api.fakebank.com/transfer' which doesn't exist",
+        "impact": "Failed API calls and exposed error logs with hallucinated credentials"
+      },
+      {
+        "scenario": "Recursive workflow trigger from AI node output",
+        "symptom": "Agent generates circular tool calls like 'call workflow again with same params'",
+        "impact": "Infinite loops consuming credits and generating hallucinated response chains"
+      },
+      {
+        "scenario": "Memory window node injects stale hallucinated context",
+        "symptom": "Conversation memory contains 'User balance: $1M' from prior hallucination",
+        "impact": "Agent makes decisions based on fabricated financial data"
+      },
+      {
+        "scenario": "Tool call parameters contain hallucinated auth tokens",
+        "symptom": "AI generates 'Bearer sk-12345fakekey' in tool parameters",
+        "impact": "Credential exposure in workflow logs and failed auth attempts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Semantic Fact-Check Node",
+        "description": "n8n Code node that validates AI output against known facts using simple embedding distance",
+        "code": "const output = $input.all()[0].json.aiResponse;\nconst knownFacts = ['API base URL is https://api.realbank.com', 'Valid endpoints: /transfer, /balance'];\n\nconst isHallucination = knownFacts.every(fact => !output.toLowerCase().includes(fact.toLowerCase()));\n\nreturn [{json: {isHallucinated: isHallucination, confidence: isHallucination ? 0.9 : 0.1, rawOutput: output}}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Parameter Schema Validator",
+        "description": "Validates AI-generated tool call parameters against expected JSON schema",
+        "code": "const toolCall = $input.all()[0].json.toolCall;\nconst schema = {\n  type: 'object',\n  properties: {\n    url: {type: 'string', pattern: '^https://api\\\\.realbank\\\\.com/'},\n    headers: {type: 'object'}\n  }\n};\n\nconst isValid = schema.properties.url.pattern && !toolCall.url.match(schema.properties.url.pattern);\n\nreturn [{json: {isHallucinated: isValid, toolCall, validationError: isValid ? 'Invalid URL pattern' : null}}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Recursion Loop Detector",
+        "description": "Detects recursive patterns in AI agent outputs that could trigger workflow loops",
+        "code": "const currentOutput = $input.all()[0].json.aiResponse;\nconst workflowId = $('Workflow Trigger').first().json.workflowId;\nconst isRecursive = currentOutput.includes('workflow') && currentOutput.includes(workflowId);\n\nconst memory = $node[\"Memory Window\"].json || [];\nconst repeatScore = memory.filter(msg => msg.content === currentOutput).length > 2;\n\nreturn [{json: {isRecursive, repeatScore, riskLevel: isRecursive || repeatScore ? 'HIGH' : 'LOW'}}];",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fallback Fact Injection Node",
+        "description": "Code node that corrects hallucinated outputs with verified facts before downstream actions",
+        "code": "const aiOutput = $input.all()[0].json.aiResponse;\nconst corrections = {\n  'fakebank.com': 'https://api.realbank.com',\n  'sk-12345fakekey': '[REDACTED]',\n  'transfer/abc123': 'transfer/{accountId}'\n};\n\nlet corrected = aiOutput;\nObject.entries(corrections).forEach(([bad, good]) => {\n  corrected = corrected.replace(new RegExp(bad, 'gi'), good);\n});\n\nreturn [{json: {original: aiOutput, corrected, wasFixed: aiOutput !== corrected}}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Call Wrapper",
+        "description": "Sanitizes AI-generated tool parameters before execution",
+        "code": "const toolCall = $input.all()[0].json.toolCall;\nconst safeCall = {\n  ...toolCall,\n  headers: toolCall.headers ? {\n    ...toolCall.headers,\n    Authorization: toolCall.headers.Authorization?.startsWith('Bearer sk-') ? '[SAFE]' : toolCall.headers.Authorization\n  } : {},\n  url: toolCall.url.replace(/fakebank\\.com/gi, 'realbank.com')\n};\n\nreturn [{json: {safeToolCall: safeCall, wasSanitized: JSON.stringify(safeCall) !== JSON.stringify(toolCall)}}];",
+        "language": "typescript"
+      },
+      {
+        "name": "Loop Prevention Gate",
+        "description": "Blocks recursive calls and injects loop-breaking instructions",
+        "code": "const output = $input.all()[0].json.aiResponse;\nconst callCount = $execution.callCount || 0;\n\nif (callCount > 3 || output.includes('workflow') && output.includes('trigger')) {\n  return [{json: {blocked: true, reason: 'Recursion detected', safeResponse: 'Cannot process recursive request. Please rephrase.'}}];\n}\n\nreturn [{json: {blocked: false, safeOutput: output, callCount: callCount + 1}}];",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates seamlessly into n8n workflows as a webhook node placed immediately after AI Agent nodes, automatically detecting hallucinations using semantic validation, schema enforcement, and behavioral pattern analysis. It provides real-time scoring of outputs (0-1 hallucination risk) and automatic remediation by injecting corrected facts or blocking dangerous tool calls before they reach action nodes. For n8n's common failure modes like recursive triggers and memory injection, Vex maintains workflow-specific fact bases and call graphs to prevent propagation of bad data across complex agentic chains.\n\nThe Vex webhook receives n8n's JSON payload, runs it through specialized hallucination detectors tuned for AI Agent node outputs, and returns either 'PASS' with cleaned data or 'BLOCK' with remediation instructions. This prevents credential exposure, failed API calls, and infinite loops without requiring manual code node configuration. Vex also provides a dashboard showing hallucination trends across all n8n workflows, helping teams identify problematic AI models or prompt patterns.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  project: 'n8n-ai-agents'\n});\n\n// n8n Webhook node receives AI Agent output\nexport default defineN8nWebhook(async (req, res) => {\n  const aiOutput = req.body.json;\n  \n  const result = await vex.detect({\n    type: 'ai-agent-hallucination',\n    framework: 'n8n',\n    payload: {\n      aiResponse: aiOutput.aiResponse || aiOutput.content,\n      toolCalls: aiOutput.toolCalls,\n      workflowId: req.body.workflowId,\n      nodeName: req.body.node?.name\n    },\n    rules: [\n      'semantic-fact-check',\n      'tool-schema-validation',\n      'recursion-detection',\n      'credential-exposure'\n    ]\n  });\n  \n  if (result.riskScore > 0.7) {\n    return res.json({\n      json: {\n        blocked: true,\n        riskScore: result.riskScore,\n        remediation: result.fixedOutput || 'BLOCKED: Hallucination detected',\n        vexTraceId: result.traceId\n      }\n    });\n  }\n  \n  return res.json({\n    json: {\n      ...aiOutput,\n      vexVerified: true,\n      riskScore: result.riskScore,\n      vexTraceId: result.traceId\n    }\n  });\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node to your n8n AI Agent workflows and eliminate hallucinations instantly - start your free trial at vex.dev/n8n"
+    }
+  }
+}

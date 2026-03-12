@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "rag-pipeline",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building RAG Pipeline with AutoGen + Vex Guardrails",
+    "description": "Learn how to build rag pipeline with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen rag pipeline",
+      "AutoGen guardrails",
+      "rag pipeline reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building RAG pipelines with AutoGen enables multi-agent systems to retrieve documents, assemble context, and synthesize responses with attribution, powering reliable knowledge-intensive applications. However, multi-agent conversations risk infinite loops, hallucinations, incorrect consensus, and token overspending, especially in high-risk scenarios requiring source faithfulness. Vex integration as a reply filter provides precise verification for context relevance, citation accuracy, and hallucination detection.",
+    "architectureOverview": {
+      "heading": "RAG Pipeline Architecture with AutoGen",
+      "description": "The AutoGen RAG pipeline typically involves a Retriever Agent using vector search (e.g., FAISS or Pinecone) to fetch relevant documents from a knowledge base. A Context Assembler Agent processes retrieved chunks, filters for relevance, and formats context for the Synthesizer Agent, which generates responses with source citations using an LLM like GPT-4. Agents collaborate via AutoGen's conversational protocol, with human-in-the-loop oversight for complex queries.\n\nFailure points emerge in agent handoffs: the Retriever may return irrelevant chunks, the Assembler might concatenate noisy context, and the Synthesizer could hallucinate despite citations. Multi-turn refinement debates between agents amplify risks of looping or token exhaustion. Vex intercepts replies at each stage to verify source faithfulness and context grounding before forwarding.\n\nThe architecture scales with agent specialization—separate Citation Verifier and Hallucination Detector agents—but requires robust termination conditions and cost controls.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Retriever Agent │───▶│ Context Assembler│\n└─────────────────┘    │  (Vector Search)  │    │   (Relevance     │\n                       └──────────────────┘    │    Filter)        │\n                                               └──────────────────┘\n                                                            │\n                                                    ┌───────▼───────┐\n                                                    │ Vex Reply     │\n                                                    │ Filter        │\n                                                    │ (Faithfulness │\n                                                    │  Verification)│\n                                                    └───────────────┘\n                                                             │\n                                               ┌─────────────▼─────────────┐\n                                               │   Synthesizer Agent      │\n                                               │   (LLM Response +       │\n                                               │    Citations)           │\n                                               └──────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Agents enter endless debate cycles refining RAG outputs without convergence criteria",
+        "severity": "critical",
+        "mitigation": "Vex monitors conversation depth and semantic drift, terminating loops"
+      },
+      {
+        "name": "Hallucination despite retrieved context",
+        "description": "Synthesizer Agent generates unsupported claims even with relevant documents",
+        "severity": "critical",
+        "mitigation": "Vex verifies source faithfulness via sentence-level entailment checks"
+      },
+      {
+        "name": "Irrelevant context injection",
+        "description": "Retriever returns low-relevance chunks that mislead synthesis",
+        "severity": "high",
+        "mitigation": "Vex scores context relevance before assembly using embedding similarity"
+      },
+      {
+        "name": "Citation accuracy failures",
+        "description": "Incorrect or fabricated source references undermine trust",
+        "severity": "high",
+        "mitigation": "Vex validates citation mappings against actual document content"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Setup AutoGen Agents with Vex Filter",
+        "description": "Initialize Retriever, Assembler, and Synthesizer agents with Vex reply function filter registration.",
+        "code": "from autogen import AssistantAgent, UserProxyAgent, register_function\nfrom vex_sdk import VexClient\n\nvex = VexClient(api_key=\"your-vex-key\")\n\ndef vex_reply_filter(message, sender, recipient):\n    verified = vex.verify(\n        task='rag-verification',\n        inputs={'message': message, 'context': sender.last_context}\n    )\n    return verified['approved'] and verified['reply']\n\nretriever = AssistantAgent(\n    name=\"Retriever\",\n    llm_config={\"model\": \"gpt-4\"},\n    reply_filter=vex_reply_filter\n)\nassembler = AssistantAgent(name=\"Assembler\", reply_filter=vex_reply_filter)\nsynthesizer = AssistantAgent(name=\"Synthesizer\", reply_filter=vex_reply_filter)",
+        "language": "python"
+      },
+      {
+        "title": "Vector Search Retriever Implementation",
+        "description": "Retriever agent performs FAISS similarity search and passes chunks to Vex filter.",
+        "code": "import faiss\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\nindex = faiss.IndexFlatL2(384)  # Pre-built index\n\ndef retrieve_docs(query, k=5):\n    query_emb = model.encode([query])\n    scores, indices = index.search(query_emb, k)\n    docs = [doc_store[i] for i in indices[0]]\n    return {'query': query, 'docs': docs, 'scores': scores[0].tolist()}\n\nretriever.register_for_llm(\n    name=\"retrieve\",\n    description=\"Retrieve relevant documents\",\n    func=retrieve_docs\n)",
+        "language": "python"
+      },
+      {
+        "title": "Context Assembly with Relevance Filter",
+        "description": "Assembler filters chunks by cosine similarity threshold before synthesis.",
+        "code": "def assemble_context(retrieval_result):\n    query_emb = model.encode([retrieval_result['query']])\n    relevant_docs = []\n    for doc, score in zip(retrieval_result['docs'], retrieval_result['scores']):\n        doc_emb = model.encode([doc['content']])\n        similarity = np.dot(query_emb, doc_emb.T).squeeze()\n        if similarity > 0.7:\n            relevant_docs.append(doc)\n    context = \"\\n\".join([f\"[DOC {i}]: {d['content']}\" for i, d in enumerate(relevant_docs)])\n    return {'context': context, 'sources': [d['source'] for d in relevant_docs]}\n\nassembler.register_for_llm(name=\"assemble\", func=assemble_context)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Synthesis with Citation Tracking",
+        "description": "Synthesizer generates attributed response with source mappings.",
+        "code": "def synthesize_response(context_data, query):\n    prompt = f\"\"\"Answer using ONLY this context:\n{context_data['context']}\n\nQuery: {query}\nCite sources as [DOC X] inline.\"\"\"\n    response = synthesizer.generate_reply(prompt)\n    return {\n        'answer': response,\n        'sources': context_data['sources'],\n        'citations': extract_citations(response)\n    }\n\nuser_proxy = UserProxyAgent(\n    name=\"User\",\n    human_input_mode=\"NEVER\",\n    code_execution_config=False\n)\nuser_proxy.initiate_chat(retriever, message=\"What is AutoGen?\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Vex checks if generated claims are entailed by source documents.",
+        "code": "def vex_source_check(message, context_docs):\n    results = vex.verify(\n        task='source-faithfulness',\n        inputs={\n            'claim': message['answer'],\n            'sources': [doc['content'] for doc in context_docs],\n            'citations': message['citations']\n        },\n        verifiers=['entailment-nli']\n    )\n    return {\n        'approved': results['pass_rate'] > 0.9,\n        'reply': message if results['pass_rate'] > 0.9 else 'Sources do not support this answer',\n        'score': results['pass_rate']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Context Relevance Scoring",
+        "description": "Vex validates retrieved documents match query intent.",
+        "code": "def vex_relevance_filter(retrieval):\n    verdict = vex.verify(\n        task='context-relevance',\n        inputs={\n            'query': retrieval['query'],\n            'documents': [d['content'] for d in retrieval['docs']],\n            'scores': retrieval['scores']\n        },\n        threshold=0.75\n    )\n    if not verdict['approved']:\n        return {'error': 'Irrelevant context detected', 'retry': True}\n    return retrieval",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Loop Detection",
+        "description": "Vex monitors agent debates for repetition and drift.",
+        "code": "conversation_history = []\n\ndef vex_loop_detector(current_message, agents):\n    conversation_history.append(current_message)\n    if len(conversation_history) > 10:\n        loop_risk = vex.verify(\n            task='conversation-drift',\n            inputs={'history': conversation_history[-8:]},\n            verifiers=['semantic-similarity']\n        )\n        if loop_risk['loop_detected']:\n            return {'terminate': True, 'reason': 'Infinite loop detected'}\n    return {'continue': True}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen RAG Pipeline",
+      "description": "Install Vex today with `pip install vex-sdk` and register as reply filter to eliminate RAG failures."
+    }
+  }
+}

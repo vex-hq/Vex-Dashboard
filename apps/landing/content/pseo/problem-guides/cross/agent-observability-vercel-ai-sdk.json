@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Vercel AI SDK Agents",
+    "description": "How to detect and fix ai agent observability in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Vercel AI SDK agent-observability",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK, AI Agent Observability challenges arise from streaming responses that mix partial hallucinations with valid content, unvalidated tool call results displayed directly to users, inconsistent structured outputs across LLM providers, and edge function timeouts during complex agent tasks. These issues manifest uniquely in the SDK's `generateText` and `streamText` APIs, where real-time rendering bypasses traditional validation, leading to unreliable agent interactions. Proper observability is critical for production agents built with React Server Components and the SDK's agent patterns.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming responses with partial hallucinations",
+        "symptom": "Partial token streams contain fabricated facts mid-response before correction",
+        "impact": "Users see convincing but incorrect info in real-time UI, eroding trust"
+      },
+      {
+        "scenario": "Tool call results not validated before display",
+        "symptom": "Raw tool outputs (errors, empty results) rendered directly via `streamObject`",
+        "impact": "Broken UIs and security risks from untrusted external data"
+      },
+      {
+        "scenario": "Inconsistent structured output across providers",
+        "symptom": "OpenAI `tool_calls` vs Anthropic `toolUse` parsed differently by `streamObject`",
+        "impact": "Runtime parsing failures crash agent flows unpredictably"
+      },
+      {
+        "scenario": "Edge function timeouts on complex agent tasks",
+        "symptom": "`generateText` hangs during multi-tool orchestration on Vercel Edge",
+        "impact": "Users experience blank streaming UIs after 30s timeout"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Hallucination Detector",
+        "description": "Intercepts `streamText` chunks to flag semantic drift using embedding distance",
+        "code": "import { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\n\nexport async function detectHallucinations(messages: any[]) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n  });\n\n  let chunkCount = 0;\n  let hallucinationScore = 0;\n  \n  for await (const chunk of result.textStream) {\n    chunkCount++;\n    // Detect rapid fact changes via token entropy\n    if (chunk.length > 50 && hasHighEntropy(chunk)) {\n      hallucinationScore += 0.3;\n      console.warn(`Potential hallucination in chunk ${chunkCount}:`, chunk.slice(0, 100));\n    }\n  }\n  \n  return hallucinationScore > 0.5;\n}\n\nfunction hasHighEntropy(text: string): boolean {\n  // Simple entropy check for hallucination proxy\n  const charCount = new Map();\n  for (const char of text) charCount.set(char, (charCount.get(char) || 0) + 1);\n  const entropy = -Array.from(charCount.values()).reduce((sum, count) => \n    sum + (count / text.length) * Math.log2(count / text.length), 0\n  );\n  return entropy > 3.5;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Validation Monitor",
+        "description": "Inspects `streamObject` tool results for validation before UI render",
+        "code": "import { streamObject } from 'ai/rsc';\n\nexport async function monitorToolCalls(agent: any) {\n  const result = await streamObject({\n    model: openai('gpt-4o'),\n    schema: agentSchema,\n    mode: 'json',\n    tools: {\n      search: {\n        parameters: z.object({ query: z.string() }),\n        execute: async ({ query }) => {\n          const result = await searchApi(query);\n          // DETECTION: Validate before return\n          if (!result || result.length === 0) {\n            console.error('EMPTY TOOL RESULT:', query);\n            throw new Error('Tool returned empty result');\n          }\n          if (typeof result[0] !== 'string') {\n            console.error('INVALID TOOL FORMAT:', result);\n          }\n          return result;\n        }\n      }\n    }\n  });\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Timeout & Latency Tracker",
+        "description": "Measures `generateText` duration to detect edge timeouts",
+        "code": "import { generateText } from 'ai';\n\nexport async function trackAgentLatency(messages: any[]) {\n  const start = Date.now();\n  let partials = 0;\n  \n  try {\n    const { text } = await generateText({\n      model: openai('gpt-4o'),\n      messages,\n      maxTokens: 2000,\n    });\n    \n    const duration = Date.now() - start;\n    if (duration > 25000) {\n      console.error(`AGENT TIMEOUT: ${duration}ms`, { messages: messages.length });\n    }\n    return { duration, text };\n  } catch (error: any) {\n    console.error('AGENT FAILED:', error.message, { duration: Date.now() - start });\n    throw error;\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Chunk-Level Hallucination Filter",
+        "description": "Buffers `streamText` chunks and filters hallucinations before UI render",
+        "code": "import { createStreamableValue } from 'ai/rsc';\n\nexport async function safeStreamText(messages: any[]) {\n  const streamableText = createStreamableValue('');\n  \n  (async () => {\n    const result = await streamText({\n      model: openai('gpt-4o'),\n      messages,\n    });\n    \n    let buffer = '';\n    for await (const chunk of result.textStream) {\n      buffer += chunk;\n      // Filter hallucinations using simple fact-check proxy\n      if (!containsHallucination(buffer)) {\n        await streamableText.update(chunk);\n      }\n    }\n    streamableText.done();\n  })();\n  \n  return streamableText.value;\n}\n\nfunction containsHallucination(text: string): boolean {\n  const hallucinationPatterns = [\n    /\\b(impossible|never|always|100% guaranteed)\\b/i,\n    /\\b[source]|citation/i,\n  ];\n  return hallucinationPatterns.some(pattern => pattern.test(text));\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Validated Tool Result Wrapper",
+        "description": "Always validates tool outputs before streaming to UI",
+        "code": "import { streamObject } from 'ai/rsc';\nimport { z } from 'zod';\n\nconst safeTool = {\n  weather: {\n    parameters: z.object({ city: z.string() }),\n    execute: async ({ city }) => {\n      const result = await weatherApi(city);\n      // FIX: Structured validation\n      const validated = weatherSchema.parse(result);\n      if (!validated.current) {\n        throw new Error(`No weather data for ${city}`);\n      }\n      return validated;\n    }\n  }\n};\n\nexport async function safeAgent() {\n  return streamObject({\n    model: openai('gpt-4o'),\n    schema: agentResponse,\n    tools: safeTool,\n  });\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Edge-Optimized Agent Chunking",
+        "description": "Breaks complex tasks into smaller `generateText` calls to avoid timeouts",
+        "code": "async function edgeSafeAgent(messages: any[]) {\n  // Chunk complex reasoning into steps\n  const steps = chunkMessages(messages, 4);\n  const streamable = createStreamableValue([]);\n  \n  for (const stepMessages of steps) {\n    const { text } = await generateText({\n      model: openai('gpt-4o'),\n      messages: stepMessages,\n      maxTokens: 500, // Edge-friendly limits\n      temperature: 0.1,\n    });\n    \n    await streamable.update([{ step: stepMessages.length, text }]);\n    \n    if (Date.now() % 20000 > 19000) {\n      await new Promise(r => setTimeout(r, 1000)); // Edge cooldown\n    }\n  }\n  \n  streamable.done();\n  return streamable.value;\n}\n\nfunction chunkMessages(messages: any[], maxLength = 4): any[][] {\n  const chunks: any[][] = [];\n  for (let i = 0; i < messages.length; i += maxLength) {\n    chunks.push(messages.slice(i, i + maxLength));\n  }\n  return chunks;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex middleware automatically wraps Vercel AI SDK's `generateText` and `streamText` calls, injecting observability without code changes. It captures streaming chunks, tool call payloads, and latency metrics in real-time, using AI-powered detectors trained on Vercel AI SDK failure patterns. \n\nThe SDK detects all four failure modes—hallucinations via semantic drift analysis, unvalidated tools through schema enforcement, structured output inconsistencies across providers, and edge timeouts with predictive scaling. Vex generates remediation code automatically and supports one-click rollout.\n\nIntegration takes 3 lines: install `@vex_dev/sdk`, wrap your AI calls with `vexMiddleware`, and view dashboards showing failure rates, traces, and auto-fixes for your Vercel deployments.",
+      "code": "import { vexMiddleware } from '@vex_dev/sdk/ai';\nimport { generateText, streamText } from 'ai';\n\n// 3-line Vex integration\nvexMiddleware({\n  appId: 'your-vercel-agent',\n  detectors: ['hallucination', 'tool-validation', 'structured-output', 'edge-timeout'],\n  autoRemediate: true,\n});\n\n// Your existing code works unchanged\nexport async function agentHandler() {\n  // Vex auto-wraps these calls\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools: { search: searchTool },\n  });\n  \n  return result;\n}\n\n// View dashboard: https://app.vex.dev/your-vercel-agent",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add 3 lines of Vex middleware to eliminate AI Agent observability gaps in your Vercel AI SDK app today."
+    }
+  }
+}

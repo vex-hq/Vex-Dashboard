@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Haystack Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Haystack hallucination-detection",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, AI agent hallucination manifests when the Generator component produces responses that deviate from the retrieved context provided by the Retriever, often due to insufficient or irrelevant documents. This is exacerbated in RAG pipelines where type mismatches between components or silent errors in custom nodes allow fabricated information to propagate unchecked. Haystack's composable nature makes it prone to these issues, as pipelines can chain multiple LLM calls without built-in hallucination guards.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever returns irrelevant documents",
+        "symptom": "Generator outputs confident answers citing non-existent facts from empty/irrelevant context",
+        "impact": "Users receive authoritative but completely fabricated responses"
+      },
+      {
+        "scenario": "Generator ignores retrieved context entirely",
+        "symptom": "Response contains information never present in any retrieved documents",
+        "impact": "Complete fabrication of facts, sources, and statistics"
+      },
+      {
+        "scenario": "Pipeline component output type mismatches",
+        "symptom": "Generator receives malformed context (None, empty dict) and hallucinates freely",
+        "impact": "Silent failures cascade through pipeline producing garbage outputs"
+      },
+      {
+        "scenario": "Custom component errors silently swallowed",
+        "symptom": "Document preprocessing fails but pipeline continues with empty context",
+        "impact": "Generator fabricates entire responses from scratch"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Context Faithfulness Check",
+        "description": "Detects when generated response contains information not present in retrieved context using Haystack's Document scoring",
+        "code": "from haystack import Pipeline\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\n# In your Haystack pipeline\ndef detect_hallucination(response: str, documents: list) -> bool:\n    context_text = ' '.join([doc.content for doc in documents])\n    # Simple n-gram overlap check\n    response_ngrams = set(response.lower().split())\n    context_ngrams = set(context_text.lower().split())\n    overlap_ratio = len(response_ngrams.intersection(context_ngrams)) / len(response_ngrams)\n    return overlap_ratio < 0.3  # Hallucination threshold",
+        "language": "python"
+      },
+      {
+        "name": "Retriever Relevance Scoring",
+        "description": "Checks if retrieved documents actually contain query-relevant information before generation",
+        "code": "from haystack import component\n\n@component\nclass RelevanceChecker:\n    @component.output_types(has_relevant_context=bool)\n    def run(self, query: str, documents: list):\n        relevant_docs = [d for d in documents if any(word in d.content.lower() for word in query.lower().split())]\n        return {'has_relevant_context': len(relevant_docs) > 0}\n\n# Usage in pipeline:\n# relevance_checker >> generator",
+        "language": "python"
+      },
+      {
+        "name": "Self-Consistency Verification",
+        "description": "Generates multiple responses and checks for consistency against retrieved context",
+        "code": "from haystack.components.builders import PromptBuilder\n\ndef verify_consistency(query: str, documents: list, generator):\n    prompt_template = \"\"\"\n    Context: {{documents}}\n    Query: {{query}}\n    Answer only using the context above. If unsure, say 'I don't know':\n    \"\"\"\n    \n    responses = []\n    for _ in range(3):\n        result = generator.run(query=query, documents=documents)\n        responses.append(result['replies'][0])\n    \n    # Check if all responses agree on key facts\n    return len(set(responses)) <= 1",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Context-Grounded Prompting",
+        "description": "Forces generator to strictly adhere to retrieved context with explicit instructions",
+        "code": "from haystack.components.builders import PromptBuilder\n\ncontext_prompt = PromptBuilder(\n    template=\"\"\"\n    Answer ONLY using the following context. If the answer isn't in the context, say 'Insufficient information':\n    \n    Context: {{join(key='content', documents=documents, separator='\\n')}}\n    \n    Query: {{query}}\n    \n    Answer:\"\"\"\n)\n\ngenerator = OpenAIGenerator(model='gpt-4o-mini')\n\nrag_pipeline = Pipeline()\nrag_pipeline.add_component('prompt_builder', context_prompt)\nrag_pipeline.add_component('generator', generator)\nrag_pipeline.connect('prompt_builder', 'generator')",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Empty Context Handler",
+        "description": "Prevents generation when retriever returns insufficient context",
+        "code": "@component\nclass ContextGuard:\n    @component.output_types(should_generate=bool, documents=list)\n    def run(self, documents: list):\n        if len(documents) == 0 or not any(doc.content.strip() for doc in documents):\n            return {'should_generate': False, 'documents': []}\n        return {'should_generate': True, 'documents': documents}\n\n# Pipeline wiring\nguard >> conditional_router >> [generator, fallback_handler]",
+        "language": "python"
+      },
+      {
+        "name": "Document Pre-Validation",
+        "description": "Filters out irrelevant or empty documents before generation",
+        "code": "from haystack import component\n\n@component\nclass DocumentValidator:\n    @component.output_types(valid_documents=list)\n    def run(self, documents: list, query: str):\n        MIN_CONTENT_LENGTH = 50\n        valid_docs = []\n        for doc in documents:\n            if (len(doc.content) >= MIN_CONTENT_LENGTH and \n                any(query_word in doc.content.lower() for query_word in query.lower().split())):\n                valid_docs.append(doc)\n        return {'valid_documents': valid_docs}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates seamlessly as a custom Haystack component to automatically detect hallucination across all pipeline runs. It monitors retriever outputs, generator responses, and context faithfulness in real-time, flagging issues before they reach production. Vex provides detailed diagnostics including hallucination scores, context overlap metrics, and remediation suggestions specific to Haystack pipelines.\n\nThe Vex Haystack component wraps your existing RAG pipeline, injecting hallucination checks at critical junctions without requiring pipeline rewrites. It automatically generates test suites targeting your specific failure modes and provides one-click fixes through Haystack-compatible components. Vex's continuous monitoring catches regressions as you iterate on prompts, retrievers, or models.",
+      "code": "from vex_sdk.haystack import VexHallucinationMonitor\nfrom haystack import Pipeline\n\n# Install: pip install haystack-ai vex-sdk\n\n# 1. Wrap existing pipeline with Vex monitor\nrag_pipeline = Pipeline()\n# ... your existing components ...\n\nvex_monitor = VexHallucinationMonitor(\n    failure_modes=['context_drift', 'fact_fabrication'],\n    thresholds={'faithfulness': 0.8, 'relevance': 0.6}\n)\n\n# 2. Add to pipeline\nrag_pipeline.add_component('vex_monitor', vex_monitor)\nrag_pipeline.connect('retriever', 'vex_monitor.retriever_input')\nrag_pipeline.connect('vex_monitor.generator_input', 'generator')\n\n# 3. Run with automatic hallucination detection\nresult = rag_pipeline.run({\n    'query': 'What is Haystack?',\n    'vex_monitor': {'api_key': 'your-vex-api-key'}\n})\n\n# Vex auto-generates remediation code\nprint(result['vex_monitor']['remediation_code'])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex to your Haystack pipeline in 3 lines of code to eliminate hallucinations automatically."
+    }
+  }
+}

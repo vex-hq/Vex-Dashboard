@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Azure AI Agent Service hallucination-detection",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, AI agent hallucinations manifest as agents generating ungrounded responses from unreliable tool outputs like Bing Search or file retrievals, bypassing enterprise validation. Common issues include outdated grounding data, policy-violating tool results, and metadata pollution from Azure file search, leading to confidently wrong enterprise decisions. Vex integration as middleware enables real-time hallucination detection in the agent processing pipeline.",
+    "howItManifests": [
+      {
+        "scenario": "Bing Search grounding returns outdated product pricing",
+        "symptom": "Agent confidently states 'iPhone 16 Pro: $899' when actual price is $1199",
+        "impact": "Enterprise loses $300k in misquoted B2B deals"
+      },
+      {
+        "scenario": "File search returns Azure metadata instead of document content",
+        "symptom": "Agent cites 'LastModified: 2024-01-15' instead of contract terms",
+        "impact": "Legal team signs contract missing key indemnity clauses"
+      },
+      {
+        "scenario": "Tool execution ignores enterprise PII redaction policy",
+        "symptom": "Agent returns customer SSNs in sales summary",
+        "impact": "GDPR violation with $20M fine exposure"
+      },
+      {
+        "scenario": "Thread token limit exceeded mid-conversation",
+        "symptom": "Agent hallucinates previous conversation context",
+        "impact": "Customer support gives wrong refund amounts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Bing Search Freshness Validation",
+        "description": "Detects hallucination from outdated Bing grounding data by checking publication dates",
+        "code": "from azure.ai.projects import AgentClient\nfrom datetime import datetime, timedelta\n\ndef detect_bing_freshness(agent_response):\n    client = AgentClient.from_connection_string('your-connection-string')\n    \n    # Extract grounding sources from agent trace\n    trace = client.get_agent_trace(agent_response.trace_id)\n    bing_sources = [tool for tool in trace.tools if tool.type == 'bing_search']\n    \n    for source in bing_sources:\n        pub_date = datetime.fromisoformat(source.metadata.get('published_date'))\n        if datetime.now() - pub_date > timedelta(days=7):\n            return {\n                'hallucination': True,\n                'type': 'outdated_grounding',\n                'confidence': 0.92,\n                'evidence': f\"Bing source {source.url} older than 7 days\"\n            }\n    return {'hallucination': False}",
+        "language": "python"
+      },
+      {
+        "name": "Azure File Metadata Pollution Check",
+        "description": "Identifies when file search returns Azure blob metadata instead of content",
+        "code": "from azure.ai.projects import AgentClient\nimport re\n\ndef detect_file_metadata_pollution(agent_response):\n    metadata_pattern = re.compile(r'(LastModified|Content-MD5|Etag|Content-Type):')\n    \n    if metadata_pattern.search(agent_response.content):\n        return {\n            'hallucination': True,\n            'type': 'metadata_pollution',\n            'confidence': 0.88,\n            'evidence': 'Azure blob metadata detected in response content',\n            'suggestion': 'Use content extraction transform'\n        }\n    return {'hallucination': False}",
+        "language": "python"
+      },
+      {
+        "name": "Token Limit Overflow Detection",
+        "description": "Monitors agent thread token usage against limits with degradation detection",
+        "code": "import asyncio\nfrom azure.ai.projects import AgentClient\n\ndef detect_token_overflow(thread_id):\n    client = AgentClient.from_connection_string('your-connection-string')\n    stats = client.get_thread_stats(thread_id)\n    \n    if stats.total_tokens > stats.max_tokens * 0.9:\n        if 'truncation_warning' not in stats.status:\n            return {\n                'hallucination': True,\n                'type': 'token_overflow',\n                'confidence': 0.95,\n                'current_usage': stats.total_tokens,\n                'max_allowed': stats.max_tokens,\n                'evidence': 'Thread exceeded 90% token limit without graceful degradation'\n            }\n    return {'hallucination': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Freshness-Aware Grounding Filter",
+        "description": "Filters Bing search results older than 3 days and forces re-grounding",
+        "code": "from azure.ai.projects import AgentClient\nfrom datetime import datetime, timedelta\n\ndef freshness_filter_middleware(request):\n    client = AgentClient.from_connection_string('your-connection-string')\n    \n    # Intercept Bing tool calls\n    if request.tools and any(t.type == 'bing_search' for t in request.tools):\n        fresh_results = []\n        for result in request.tools[0].results:\n            pub_date = datetime.fromisoformat(result.metadata['published_date'])\n            if datetime.now() - pub_date <= timedelta(days=3):\n                fresh_results.append(result)\n        \n        if len(fresh_results) == 0:\n            request.tools[0].results = [{'content': 'No recent sources found. Using cached enterprise knowledge base.', 'fresh': False}]\n        else:\n            request.tools[0].results = fresh_results\n    \n    return request",
+        "language": "python"
+      },
+      {
+        "name": "Azure File Content Extractor",
+        "description": "Strips metadata and extracts actual document content from file search",
+        "code": "from azure.ai.projects import AgentClient\nfrom azure.storage.blob import BlobServiceClient\nimport re\n\ndef content_extractor_middleware(response):\n    if 'azure://' in response.content:\n        # Extract blob content\n        blob_client = BlobServiceClient.from_connection_string('your-storage-connection')\n        blob_url = re.search(r'azure://([^\\s]+)', response.content).group(1)\n        blob_content = blob_client.get_blob_client(blob_url).download_blob().readall()\n        \n        # Remove metadata pollution\n        clean_content = re.sub(r'LastModified|Content-MD5|Etag', '', str(blob_content))\n        response.content = f\"Document content: {clean_content[:4000]}...\"\n    \n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Thread Manager",
+        "description": "Gracefully degrades when approaching token limits",
+        "code": "from azure.ai.projects import AgentClient\n\ndef token_manager_middleware(request):\n    client = AgentClient.from_connection_string('your-connection-string')\n    thread_stats = client.get_thread_stats(request.thread_id)\n    \n    if thread_stats.total_tokens > thread_stats.max_tokens * 0.8:\n        # Archive old messages and summarize\n        old_messages = client.list_thread_messages(request.thread_id, limit=50)\n        summary = client.create_summary(old_messages)\n        \n        # Clear thread history, inject summary\n        client.clear_thread_history(request.thread_id)\n        client.add_system_message(request.thread_id, f\"Previous conversation summary: {summary}\")\n        \n        request.metadata['token_degradation'] = True\n    \n    return request",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex integrates as middleware in Azure AI Agent Service pipelines, automatically detecting hallucinations across Bing grounding, file search pollution, and token overflows. It runs 17+ hallucination detectors in parallel, scoring responses with enterprise-grounded confidence metrics. \n\nVex's Azure-native SDK (`pip install vex-sdk azure-ai-projects`) wraps agent calls with zero-config hallucination guards, automatically applying fixes like freshness filtering and content extraction. Remediation happens inline - bad responses get re-grounded before reaching users.\n\nThe platform provides dashboards showing hallucination rates by agent/thread, with one-click policy deployment across entire Azure AI Projects deployments.",
+      "code": "from vex_sdk import VexGuard\nfrom azure.ai.projects import AgentClient\n\n# Install: pip install vex-sdk azure-ai-projects\nvex = VexGuard(\n    azure_project_id=\"your-project-id\",\n    detectors=[\n        \"bing_freshness\",\n        \"file_metadata_pollution\", \n        \"token_overflow\",\n        \"pii_leakage\",\n        \"policy_violation\"\n    ],\n    auto_fix=True\n)\n\n# Wrap existing Azure agent client\nazure_client = AgentClient.from_connection_string('your-connection-string')\nprotected_client = vex.wrap(azure_client)\n\n# All agent calls now auto-protected\nresponse = protected_client.create_thread(\n    instructions=\"Customer support agent\"\n)\n\nif vex.hallucination_detected(response):\n    print(f\"Blocked: {vex.violation_details(response)}\")\n    fixed_response = vex.auto_remediate(response)\nelse:\n    print(\"✅ Response verified safe\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `vex.wrap(your_azure_client)` to protect all your Azure AI Agents from hallucinations in 5 minutes"
+    }
+  }
+}

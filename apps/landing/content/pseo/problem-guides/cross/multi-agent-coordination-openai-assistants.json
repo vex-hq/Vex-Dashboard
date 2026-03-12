@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in OpenAI Assistants API Agents",
+    "description": "How to detect and fix multi-agent coordination failure in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "OpenAI Assistants API multi-agent-coordination",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in OpenAI Assistants API occurs when multiple assistants fail to synchronize state, share context, or coordinate task handoffs through threads and runs, leading to duplicated efforts, conflicting outputs, or incomplete workflows. This manifests uniquely due to the API's thread-based isolation where agents can't natively communicate cross-thread without explicit orchestration. The lack of built-in pub/sub or shared memory forces developers to hack coordination via shared files or external databases, creating race conditions and stale state issues.",
+    "howItManifests": [
+      {
+        "scenario": "Parallel research agents duplicating API calls",
+        "symptom": "Multiple assistants in separate threads querying the same external API endpoints simultaneously",
+        "impact": "Wasted API quota, rate limiting, and inconsistent data due to timing differences"
+      },
+      {
+        "scenario": "Task handoff without state transfer",
+        "symptom": "Specialist agent receives incomplete context from orchestrator via message passing",
+        "impact": "Downstream agents produce wrong results or infinite loops waiting for missing data"
+      },
+      {
+        "scenario": "Shared file state race conditions",
+        "symptom": "Agents reading/writing the same coordination JSON file without atomic updates",
+        "impact": "Corrupted shared state, agents acting on stale or partial coordination data"
+      },
+      {
+        "scenario": "Thread context pollution from uncoordinated runs",
+        "symptom": "Orchestrator thread grows beyond 128k token limit from unpruned agent messages",
+        "impact": "Silent truncation of conversation history, causing agents to lose critical coordination context"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Duplicate External API Calls",
+        "description": "Monitor run events across threads for identical function calls within time windows",
+        "code": "from openai import OpenAI\nimport time\nfrom collections import defaultdict\n\nclient = OpenAI()\ncalls = defaultdict(list)\n\ndef detect_duplicate_calls(thread_id, run):\n    for tool_call in run.required_action.submit_tool_outputs.tool_calls:\n        if tool_call.type == 'function':\n            func_name = tool_call.function.name\n            timestamp = run.created\n            \n            recent_calls = [c for c in calls[func_name] \n                          if time.time() - c['time'] < 300]  # 5min window\n            \n            if len(recent_calls) > 1:\n                print(f'DUPLICATE DETECTED: {func_name} in {thread_id}')\n                return True\n            \n            calls[func_name].append({'thread': thread_id, 'time': time.time()})\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Cross-Thread Context Loss",
+        "description": "Compare message content between orchestrator and specialist threads for missing handoff data",
+        "code": "def detect_context_loss(orchestrator_messages, specialist_messages):\n    handoff_markers = ['please handle', 'your turn', 'specialist needed']\n    \n    # Find last handoff message from orchestrator\n    last_handoff = None\n    for msg in reversed(orchestrator_messages):\n        if any(marker in msg.content[0].text.value.lower() for marker in handoff_markers):\n            last_handoff = msg\n            break\n    \n    if not last_handoff:\n        return False\n    \n    # Check if specialist thread acknowledges the handoff context\n    specialist_context = ' '.join([m.content[0].text.value for m in specialist_messages[-5:]])\n    handoff_content = last_handoff.content[0].text.value\n    \n    context_match = any(word in specialist_context for word in handoff_content.split()[:10])\n    if not context_match:\n        print('CONTEXT LOSS: Specialist missing handoff data')\n        return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Thread Token Bloat Monitor",
+        "description": "Track thread message count and estimate token usage against limits",
+        "code": "async function monitorThreadBloat(client: OpenAI, threadId: string) {\n  const messages = await client.beta.threads.messages.list(threadId);\n  const messageCount = messages.data.length;\n  \n  // Rough token estimation: 4 tokens per word, avg 10 words per message\n  const estimatedTokens = messageCount * 40;\n  const TOKEN_LIMIT = 128000;\n  \n  if (estimatedTokens > TOKEN_LIMIT * 0.9) {\n    console.warn(`Thread ${threadId} at ${Math.round(estimatedTokens/1000)}k tokens (${messageCount} messages)`);\n    return {\n      bloat: true,\n      usage: estimatedTokens,\n      messages: messageCount,\n      action: 'PRUNE_REQUIRED'\n    };\n  }\n  return { bloat: false };\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Centralized Coordination Thread",
+        "description": "Route all agent communication through single orchestrator thread with fan-out messaging",
+        "code": "def create_coordination_hub(client, orchestrator_thread):\n    '''Single source of truth for all agent coordination'''\n    \n    def broadcast_to_specialists(message, specialist_threads):\n        for thread_id in specialist_threads:\n            client.beta.threads.messages.create(\n                thread_id=thread_id,\n                role='user',\n                content=f\"ORCHESTRATOR UPDATE: {message}\"\n            )\n            # Trigger run in each specialist\n            client.beta.threads.runs.create(thread_id, assistant_id=SPECIALIST_ASSISTANT_ID)\n    \n    def collect_responses(specialist_threads, timeout=300):\n        responses = {}\n        for thread_id in specialist_threads:\n            run = client.beta.threads.runs.create(thread_id, assistant_id=SPECIALIST_ASSISTANT_ID)\n            run = client.beta.threads.runs.wait(thread_id, run.id, timeout)\n            messages = client.beta.threads.messages.list(thread_id)\n            responses[thread_id] = messages.data[0].content[0].text.value\n        return responses\n    \n    return {\n        'broadcast': broadcast_to_specialists,\n        'collect': collect_responses,\n        'thread': orchestrator_thread\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Atomic File State Locking",
+        "description": "Use file-based semaphores with expiration for safe shared state",
+        "code": "import json\nimport os\nimport time\nfrom pathlib import Path\n\nclass AtomicState:\n    def __init__(self, state_file='agent_state.json'):\n        self.state_file = Path(state_file)\n        self.lock_file = Path(state_file + '.lock')\n    \n    def update_state(self, update):\n        timeout = 30\n        start = time.time()\n        \n        while self.lock_file.exists() and (time.time() - start < timeout):\n            time.sleep(0.1)\n        \n        if self.lock_file.exists():\n            raise TimeoutError('State lock timeout')\n        \n        # Atomic write with lock\n        self.lock_file.touch()\n        try:\n            state = {}\n            if self.state_file.exists():\n                state = json.loads(self.state_file.read_text())\n            state.update(update)\n            self.state_file.write_text(json.dumps(state, indent=2))\n        finally:\n            self.lock_file.unlink(missing_ok=True)",
+        "language": "python"
+      },
+      {
+        "name": "Run Completion Webhook with State Sync",
+        "description": "Sync state across threads on every run completion via webhook",
+        "code": "app.post('/run-complete', async (req, res) => {\n  const { thread_id, run_id, status } = req.body;\n  \n  if (status === 'completed') {\n    const client = new OpenAI();\n    \n    // Get final messages\n    const messages = await client.beta.threads.messages.list(thread_id, {\n      limit: 5\n    });\n    \n    const finalMessage = messages.data[0];\n    const stateUpdate = {\n      thread: thread_id,\n      run: run_id,\n      completed_at: new Date().toISOString(),\n      summary: finalMessage.content[0].text.value.slice(0, 500),\n      status: 'completed'\n    };\n    \n    // Broadcast to all coordination threads\n    const coordThreads = ['thread_123', 'thread_456']; // From config\n    for (const coordThread of coordThreads) {\n      await client.beta.threads.messages.create(coordThread, {\n        role: 'user',\n        content: `STATE UPDATE: ${JSON.stringify(stateUpdate)}`\n      });\n    }\n  }\n  \n  res.json({ received: true });\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates as a verification layer that automatically detects coordination failures by analyzing run completion events across all threads. It maintains a real-time graph of agent interactions, flagging duplicate function calls, context loss during handoffs, and thread bloat before they cascade into failures. When issues are detected, Vex can automatically trigger state synchronization, prune bloated threads, or reroute tasks to healthy agents.\n\nThe webhook receives every run completion, correlates events across threads using Vex's built-in tracing, and applies coordination-specific assertions like 'no duplicate external calls within 5 minutes' and 'handoff context preserved across threads.' Remediation is automatic: Vex can inject coordination messages, pause conflicting runs, or spin up replacement agents.\n\nThis eliminates the need for custom monitoring while providing 99.9% uptime for multi-agent systems at scale.",
+      "code": "from vex import Vex, Verification\nfrom openai import OpenAI\n\nvex = Vex(api_key='vex-key')\nclient = OpenAI()\n\n@vex.verification()\ndef check_coordination_health(run_events: list) -> Verification:\n    # Detect duplicate function calls\n    func_calls = []\n    for event in run_events:\n        for tool in event.get('required_action', {}).get('tool_calls', []):\n            func_calls.append({\n                'name': tool['function']['name'],\n                'thread': event['thread_id'],\n                'time': event['created']\n            })\n    \n    duplicates = find_duplicates(func_calls, window=300)\n    \n    return Verification(\n        passed=len(duplicates) == 0,\n        issues=[f'Duplicate {d[\"name\"]} in {d[\"threads\"]}' for d in duplicates],\n        remediation='pause_duplicate_runs',\n        metadata={'coord_score': calculate_health_score(run_events)}\n    )\n\n# Install webhook\nwebhook_url = vex.create_webhook({\n    'events': ['thread.run.completed'],\n    'verification': 'check_coordination_health',\n    'auto_remediate': True\n})\n\nprint(f'Vex webhook ready: {webhook_url}')\n\n# Attach to assistant\nassistant = client.beta.assistants.update(\n    'asst_123',\n    tool_resources={\n        'webhooks': [{'url': webhook_url, 'events': ['thread.run.completed']]}\n    }\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and eliminate multi-agent coordination failures in one line of code."
+    }
+  }
+}

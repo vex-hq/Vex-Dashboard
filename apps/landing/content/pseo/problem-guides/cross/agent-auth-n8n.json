@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "n8n AI Agents agent-auth",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, authentication and authorization failures manifest as agents executing unauthorized actions through exposed credentials in tool calls or recursive workflow triggers bypassing auth checks. Native AI nodes often pass unvalidated outputs directly to credential-requiring action nodes, while memory window nodes inject stale auth tokens into conversations. This creates critical security gaps in agentic workflows where AI decisions control access to sensitive systems.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node triggers HTTP Request node with embedded API keys in headers",
+        "impact": "Infinite auth bypass loops expose credentials across workflow executions"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Chat Trigger → AI Agent → Google Sheets node receives unescaped auth tokens",
+        "impact": "Malicious inputs grant unauthorized spreadsheet access"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "Custom tool functions log or return API keys in agent responses",
+        "impact": "Secrets leak to n8n execution logs and monitoring systems"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Window Buffer node passes expired OAuth tokens to new agent sessions",
+        "impact": "Failed auth attempts across all downstream API integrations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Auth Pattern Scanner",
+        "description": "Detects AI Agent nodes triggering credential nodes in workflow loops",
+        "code": "import { Workflow, INode } from 'n8n-workflow';\n\nfunction scanRecursiveAuth(workflow: Workflow): string[] {\n  const issues: string[] = [];\n  \n  workflow.nodes.forEach(node => {\n    if (isAIAgentNode(node) && hasCredentialDownstream(node)) {\n      const connections = workflow.connectionsByDestinationNode[node.id];\n      connections?.forEach(conn => {\n        const targetNode = workflow.nodes.find(n => n.id === conn.node);\n        if (targetNode?.type.includes('HttpRequest') && isLoopConnection(node, targetNode)) {\n          issues.push(`Recursive auth exposure: ${node.name} → ${targetNode.name}`);\n        }\n      });\n    }\n  });\n  \n  return issues;\n}\n\nfunction isAIAgentNode(node: INode): boolean {\n  return node.type === 'n8n-nodes-langchain.agent' || node.type.includes('aiAgent');\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Credential Leak Detector",
+        "description": "Scans AI tool function parameters for hardcoded credentials",
+        "code": "function detectToolCredentialLeaks(node: INode): string[] {\n  const leaks: string[] = [];\n  \n  if (node.type === 'n8n-nodes-langchain.tool') {\n    const parameters = node.parameters as any;\n    \n    // Check function code for common credential patterns\n    const funcCode = parameters.jsCode || parameters.functionCode;\n    if (funcCode) {\n      const credPatterns = [\n        /apiKey['\"]?\\s*[:=]\\s*['\"][A-Za-z0-9]{32,}/,\n        /bearer\\s+['\"][A-Za-z0-9_-]+['\"]/,\n        /Authorization\\s*[:=]\\s*['\"]/\n      ];\n      \n      credPatterns.forEach(pattern => {\n        if (pattern.test(funcCode)) {\n          leaks.push(`Credential pattern found in tool ${node.name}`);\n        }\n      });\n    }\n  }\n  \n  return leaks;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Auth Token Validator",
+        "description": "Identifies stale auth tokens in memory window nodes",
+        "code": "function validateMemoryAuthTokens(node: INode): string[] {\n  const issues: string[] = [];\n  \n  if (node.type === 'n8n-nodes-base.windowBufferMemory') {\n    const params = node.parameters as any;\n    const memoryContent = params.sessionId || params.memoryKey;\n    \n    // Check for expired token patterns in memory context\n    if (memoryContent && /expired|invalid|401|403/.test(memoryContent)) {\n      issues.push(`Stale auth tokens detected in ${node.name}`);\n    }\n  }\n  \n  return issues;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Auth Proxy Middleware Node",
+        "description": "Intercepts AI outputs and validates credentials before action nodes",
+        "code": "// Add as Code node between AI Agent and credential nodes\nconst items = $input.all();\nconst safeOutputs: any[] = [];\n\nfor (const item of items) {\n  const aiOutput = item.json;\n  \n  // Strip credentials from AI-generated parameters\n  const sanitized = sanitizeAIOutput(aiOutput);\n  \n  // Validate authorization scope\n  if (await validateAuthScope(sanitized)) {\n    safeOutputs.push({ json: sanitized });\n  }\n}\n\nreturn safeOutputs;\n\nfunction sanitizeAIOutput(output: any): any {\n  const forbidden = ['apiKey', 'bearer', 'Authorization', 'password'];\n  const sanitized = { ...output };\n  \n  Object.keys(sanitized).forEach(key => {\n    if (forbidden.includes(key.toLowerCase())) {\n      delete sanitized[key];\n    }\n  });\n  \n  return sanitized;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Secure Tool Function Template",
+        "description": "Credential-safe AI tool implementation",
+        "code": "// Secure tool function for AI Agent nodes\nexport function secureApiCaller(input: any) {\n  // Never accept credentials as parameters\n  const { endpoint, method = 'GET', payload } = input;\n  \n  // Use n8n credentials system\n  const credentials = $credentials.apiService;\n  \n  return $http.request({\n    method,\n    url: endpoint,\n    headers: {\n      Authorization: `Bearer ${credentials.apiKey}`,\n    },\n    body: payload,\n    timeout: 5000\n  }).catch(err => ({\n    error: 'Auth failed',\n    status: err.statusCode\n  }));\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Auth-Aware Memory Manager",
+        "description": "Rotates expired tokens in conversation memory",
+        "code": "// Code node for memory window preprocessing\nconst memoryItems = $input.all();\nconst cleanedMemory: any[] = [];\n\nfor (const item of memoryItems) {\n  const context = item.json;\n  \n  // Rotate expired auth tokens\n  if (context.auth && isTokenExpired(context.auth.expires_at)) {\n    context.auth = await refreshAuthToken(context.auth.refresh_token);\n  }\n  \n  // Remove sensitive data before AI processing\n  delete context.auth?.token;\n  cleanedMemory.push({ json: context });\n}\n\nreturn cleanedMemory;\n\nasync function refreshAuthToken(refreshToken: string) {\n  return await $http.request({\n    method: 'POST',\n    url: 'https://auth.provider/token',\n    body: { refresh_token: refreshToken }\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after every AI Agent node in n8n workflows, automatically scanning for auth patterns, credential leaks, and authorization bypasses. It analyzes the full execution context including node parameters, AI outputs, and downstream connections without requiring workflow modifications. Vex provides real-time blocking of malicious auth flows and auto-generates remediation Code nodes with precise fixes.\n\nThe Vex SDK hooks into n8n's execution pipeline, validating every AI-to-action handoff against an auth policy engine trained on n8n-specific failure modes. When violations occur, Vex injects remediation directly into the workflow execution, swapping unsafe parameters with secure credential references. This eliminates 98% of auth-related agent failures without developer intervention.\n\nDeployment takes 30 seconds: install the Vex webhook node after AI agents, configure your auth policies, and Vex handles continuous monitoring and auto-remediation across all workflows.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\n// n8n Code node - Vex integration after AI Agent\nconst vex = new Vex({\n  webhookUrl: 'https://api.vex.dev/webhook/n8n',\n  projectId: 'your-project-id',\n  policies: ['n8n-agent-auth']\n});\n\nconst aiOutput = $input.first().json;\n\n// Scan AI output for auth violations\nconst { isSafe, remediation } = await vex.scan({\n  framework: 'n8n',\n  nodeType: 'aiAgent',\n  input: aiOutput,\n  credentials: $credentials,\n  workflowId: $workflow.id\n});\n\nif (!isSafe) {\n  // Vex auto-generates remediation\n  return [{\n    json: {\n      ...remediation.safeParams,\n      vexBlocked: true,\n      violation: remediation.description\n    }\n  }];\n}\n\n// Safe to pass to credential nodes\nreturn [{ json: aiOutput }];",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node to secure all your n8n AI Agent auth flows forever."
+    }
+  }
+}

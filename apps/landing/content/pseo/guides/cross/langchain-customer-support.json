@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with LangChain + Vex Guardrails",
+    "description": "Learn how to build customer support with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain customer support",
+      "LangChain guardrails",
+      "customer support reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with LangChain enables powerful RAG pipelines and tool-calling for CRM integration and ticket management. However, hallucinations in retrieval, infinite tool loops, context overflows, and inconsistent formatting can lead to poor customer experiences and compliance violations. Vex provides runtime verification to ensure response accuracy, PII safety, tone consistency, and policy adherence in high-risk support scenarios.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with LangChain",
+      "description": "A typical LangChain customer support agent combines RAG for knowledge base retrieval with agent executors for CRM tools like ticket creation and order lookup. User queries trigger vector store retrieval from support docs, followed by an LLM agent that decides between direct responses, tool calls (e.g., check_order_status, create_ticket), or escalation. Chains handle conversation history to maintain context across multi-turn interactions, with output parsers ensuring structured responses.\n\nThe architecture flows from user input → retriever → agent executor → tools/LLM → verified response. CRM integrations use custom tools wrapping APIs like Salesforce or Zendesk, while knowledge bases use FAISS or Pinecone for fast similarity search. Long conversations risk context overflow, requiring summarization chains.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   LangChain      │\n│  (Support Req)  │    │   Retriever      │\n└─────────────────┘    │ (Knowledge Base) │\n                       └──────────────────┘\n                               │\n                       ┌──────────────────┐\n                       │   Agent Executor │◄──┐\n                       │   (ReAct/GPT-4)  │   │\n                       └──────────────────┘   │\n                              │ ▲            │\n                ┌──────────────┼─┼────────────┘\n                │              │ │\n    ┌───────────▼──┐ ┌─────────▼─┐ ┌──────────┐\n    │ Order Lookup │ │Create Ticket│ │ Escalation│\n    │   (CRM Tool)  │ │ (Zendesk)  │ │   Trigger │\n    └──────────────┘ └────────────┘ └──────────┘\n                               │\n                       ┌──────────────────┐\n                       │ Vex.verify()     │\n                       │ (Accuracy/PII)   │\n                       └──────────────────┘\n                               │\n                       ┌──────────────────┐\n                       │  Final Response  │\n                       │   to Customer    │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Hallucination in RAG retrieval chains",
+        "description": "Agent fabricates order details or policy info when retrieval misses relevant docs",
+        "severity": "critical",
+        "mitigation": "Wrap chain.invoke() with vex.verify() using response accuracy checks against ground truth"
+      },
+      {
+        "name": "Tool call loops in agent executors",
+        "description": "Agent repeatedly calls order_lookup without progressing conversation",
+        "severity": "high",
+        "mitigation": "Vex monitors tool call sequences and enforces max iterations per turn"
+      },
+      {
+        "name": "Context window overflow in long conversations",
+        "description": "Token limits cause truncated history, losing conversation context",
+        "severity": "high",
+        "mitigation": "Vex truncates/summarizes history and verifies context relevance before LLM calls"
+      },
+      {
+        "name": "Inconsistent output formatting across chain steps",
+        "description": "Mixed JSON/text responses break frontend parsers and ticket creation",
+        "severity": "medium",
+        "mitigation": "Vex enforces structured output schemas with Pydantic/JSON schema validation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "RAG Chain for Knowledge Base",
+        "description": "Basic retrieval chain augmented with conversation history for support queries",
+        "code": "from langchain.chains import RetrievalQA\nfrom langchain.embeddings import OpenAIEmbeddings\nfrom langchain.vectorstores import FAISS\nfrom langchain.llms import OpenAI\n\n# Setup retriever\nembeddings = OpenAIEmbeddings()\nvectorstore = FAISS.load_local('support_kb', embeddings)\nretriever = vectorstore.as_retriever()\n\nllm = OpenAI(model='gpt-4')\nqa_chain = RetrievalQA.from_chain_type(\n    llm=llm,\n    chain_type='stuff',\n    retriever=retriever,\n    return_source_documents=True\n)\n\n# Customer support query\nresult = qa_chain.invoke({\n    'query': 'How do I reset my password?',\n    'chat_history': []  # From session store\n})\nprint(result['result'])",
+        "language": "python"
+      },
+      {
+        "title": "CRM Tool for Order Lookup",
+        "description": "Custom tool integrates with mock CRM API for order status",
+        "code": "from langchain.tools import BaseTool\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass OrderLookupInput(BaseModel):\n    order_id: str = Field(description='Customer order ID')\n\nclass OrderLookupTool(BaseTool):\n    name = 'order_lookup'\n    description = 'Lookup order status by ID'\n    args_schema = OrderLookupInput\n\n    def _run(self, order_id: str) -> str:\n        # Mock CRM API\n        orders = {'12345': 'Shipped 2024-01-15', '67890': 'Pending payment'}\n        return orders.get(order_id, 'Order not found')\n\norder_tool = OrderLookupTool()\nresult = order_tool.run('12345')  # 'Shipped 2024-01-15'",
+        "language": "python"
+      },
+      {
+        "title": "Agent Executor Setup",
+        "description": "ReAct agent with support tools and memory",
+        "code": "from langchain.agents import initialize_agent, AgentType\nfrom langchain.memory import ConversationBufferMemory\n\nmemory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)\n\ntools = [order_tool, create_ticket_tool]  # From previous examples\nagent = initialize_agent(\n    tools,\n    llm,\n    agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,\n    memory=memory,\n    verbose=True,\n    max_iterations=5  # Prevent loops\n)\n\nresponse = agent.run('My order 12345 is late, what\\'s the status?')\nprint(response)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript RAG Chain",
+        "description": "LangChain.js equivalent for Node.js deployments",
+        "code": "import { OpenAIEmbeddings } from '@langchain/openai';\nimport { FAISS } from '@langchain/community/vectorstores/faiss';\nimport { RetrievalQAChain } from 'langchain/chains';\nimport { OpenAI } from '@langchain/openai';\n\nconst embeddings = new OpenAIEmbeddings();\nconst vectorStore = await FAISS.load(\n  './support_kb',\n  embeddings,\n  { embeddings }\n);\n\nconst llm = new OpenAI({ modelName: 'gpt-4' });\nconst chain = RetrievalQAChain.fromLLM(llm, vectorStore.asRetriever());\n\nconst response = await chain.call({\n  query: 'How do I reset my password?'\n});\nconsole.log(response.text);",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Response Accuracy & PII",
+        "description": "Wrap agent execution with comprehensive verification for support responses",
+        "code": "import vex\n\n@vex.verify(\n    checks=[\n        'response_accuracy',  # Against retrieved docs\n        'pii_filtering',      # No customer data leakage\n        'tone_consistency'    # Professional support tone\n    ],\n    risk_profile='high'\n)\ndef verified_support_agent(query: str, history: list) -> str:\n    result = agent.run(query)\n    return result\n\n# Usage\nsafe_response = verified_support_agent(\n    'My order 12345 is late',\n    session_history\n)\n\n# Vex auto-blocks: hallucinated facts, PII, rude tone",
+        "language": "python"
+      },
+      {
+        "title": "Prevent Tool Call Loops",
+        "description": "Monitor agent execution for infinite loops and enforce iteration limits",
+        "code": "import vex\n\n@vex.verify(\n    checks=['tool_loop_detection'],\n    max_tool_calls=10,\n    risk_profile='high'\n)\ndef safe_agent_executor(query: str):\n    return agent.run(query)\n\ntry:\n    response = safe_agent_executor('Check my order status')\nexcept vex.ViolationError as e:\n    response = 'Sorry, having trouble with our system. Escalating to human agent.'\n    # Auto-escalate on loop detection",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Wrapper",
+        "description": "Node.js integration with policy compliance checks",
+        "code": "import { verify } from 'vex-sdk';\n\nconst safeAgent = async (query: string, history: string[]) => {\n  const checks = [\n    'response_accuracy',\n    'pii_filtering',\n    'policy_compliance',\n    'escalation_triggers'\n  ];\n\n  const result = await verify(\n    async () => {\n      return await agent.call({ input: query, chatHistory: history });\n    },\n    {\n      checks,\n      riskProfile: 'high',\n      escalationThreshold: 0.8\n    }\n  );\n\n  return result.output;\n};\n\nconst response = await safeAgent('Order issue', []);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Customer Support",
+      "description": "Add Vex verification to your support agents in 5 minutes - start with our free tier today."
+    }
+  }
+}

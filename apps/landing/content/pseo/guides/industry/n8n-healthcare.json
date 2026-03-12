@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "industry": "healthcare",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "n8n AI Agents Guardrails for Healthcare",
+    "description": "Compliance guide for n8n AI Agents agents in healthcare. Meet HIPAA, FDA 21 CFR Part 11 requirements with Vex guardrails.",
+    "keywords": [
+      "n8n AI Agents healthcare",
+      "healthcare AI compliance",
+      "n8n AI Agents guardrails",
+      "healthcare AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Healthcare teams using n8n AI Agents face heightened compliance risks due to the handling of protected health information (PHI) and the need for auditable AI decision-making under HIPAA and FDA regulations. Common n8n failure modes like unvalidated AI outputs and recursive agent execution can expose PHI or generate harmful medical recommendations. Vex provides runtime guardrails as a webhook node to ensure compliance before actions execute.",
+    "complianceRequirements": [
+      {
+        "regulation": "HIPAA",
+        "description": "Requires PHI to remain secure, de-identified before LLM processing, and patient data cannot leave the processing environment.",
+        "howVexHelps": "Vex scans AI agent outputs for PHI using regex patterns and blocks transmission to external LLMs or action nodes."
+      },
+      {
+        "regulation": "FDA 21 CFR Part 11",
+        "description": "Mandates electronic records be trustworthy, auditable, and AI-assisted decisions must maintain data integrity.",
+        "howVexHelps": "Vex creates immutable audit logs of all agent decisions with input/output traces for regulatory validation."
+      },
+      {
+        "regulation": "HITECH Act",
+        "description": "Enforces breach notification and security requirements for PHI with fines up to $1.5M per violation.",
+        "howVexHelps": "Vex detects and quarantines PHI exposure attempts, providing breach alerts and compliance reports."
+      },
+      {
+        "regulation": "SOC 2 Type II",
+        "description": "Requires controls for security, availability, processing integrity, confidentiality, and privacy.",
+        "howVexHelps": "Vex enforces workflow-level access controls and validates agent memory context against stale PHI injection."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "PHI Exposure via Unvalidated AI Outputs",
+        "description": "AI nodes generating patient names, SSNs, or medical IDs passed directly to action nodes without de-identification.",
+        "severity": "critical",
+        "example": "Patient 'John Doe, SSN 123-45-6789' appears in OpenAI node output and triggers SMS notification node."
+      },
+      {
+        "name": "Recursive Agent Execution Loops",
+        "description": "Workflow trigger chains cause infinite AI agent calls consuming HIPAA-compliant compute limits.",
+        "severity": "high",
+        "example": "Patient query triggers AI → webhook → AI loop generating 10,000+ tokens of PHI processing."
+      },
+      {
+        "name": "Credential Exposure in Tool Calls",
+        "description": "n8n credentials like EHR API keys exposed in AI agent tool parameters logged or returned.",
+        "severity": "critical",
+        "example": "AI agent tool call includes `apiKey: 'sk-hipaa-ehr-prod-123'` in error logs."
+      },
+      {
+        "name": "Stale Memory Context Injection",
+        "description": "Memory window nodes inject outdated patient data into current conversations.",
+        "severity": "high",
+        "example": "Yesterday's patient vitals override current emergency room triage data."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "PHI Detection Webhook After AI Agent Node",
+        "description": "Add Vex webhook immediately after AI agent nodes to block PHI before action nodes execute.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-healthcare-project',\n  webhookToken: process.env.VEX_WEBHOOK_TOKEN\n});\n\n// n8n webhook receives AI agent output\napp.post('/vex-healthcare-guardrail', async (req, res) => {\n  const { aiOutput, patientContext, workflowId } = req.body;\n  \n  const result = await vex.evaluate({\n    inputs: {\n      aiOutput,\n      patientContext,\n      workflowExecutionId: workflowId\n    },\n    rules: [\n      {\n        name: 'block-phi-exposure',\n        type: 'regex',\n        pattern: /\\b(?:SSN|MRN|DOB|PATIENT\\s+ID)[^\\w]*(\\d{3}-?\\d{2}-?\\d{4}|\\d{8,15})|\\b[A-Z][a-z]+\\s[A-Z][a-z]+\\s(?:MD|DO|RN|NP)\\b/i,\n        action: 'block',\n        severity: 'critical',\n        message: 'PHI detected - transmission blocked per HIPAA'\n      },\n      {\n        name: 'validate-medical-recommendations',\n        type: 'prompt',\n        prompt: `Review this AI medical recommendation for safety: ${aiOutput}`,\n        criteria: {\n          safetyScore: { min: 0.9 },\n          hallucinationRisk: { max: 0.1 }\n        },\n        action: 'block',\n        severity: 'high'\n      }\n    ]\n  });\n  \n  if (result.status === 'blocked') {\n    await vex.logIncident({\n      workflowId,\n      ruleId: result.violatedRule,\n      context: { patientContext, aiOutput: '[REDACTED]' },\n      regulation: 'HIPAA'\n    });\n  }\n  \n  res.json({ safeToProceed: result.status === 'pass', auditId: result.auditId });\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Recursion Detection for Agent Chains",
+        "description": "Prevent infinite workflow loops that exhaust HIPAA-compliant compute resources.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst MAX_EXECUTIONS = 5;\n\nconst vex = new Vex({ projectId: 'healthcare-n8n' });\n\napp.post('/vex-recursion-guard', async (req, res) => {\n  const { workflowId, executionCount, triggerChain } = req.body;\n  \n  const result = await vex.evaluate({\n    inputs: { workflowId, executionCount, triggerChain },\n    rules: [\n      {\n        name: 'detect-recursion',\n        type: 'custom',\n        condition: `executionCount > ${MAX_EXECUTIONS} || triggerChain.includes(workflowId)`,\n        action: 'block',\n        severity: 'high',\n        message: `Recursive execution detected (${executionCount}x). HIPAA compute limits exceeded.`\n      },\n      {\n        name: 'validate-trigger-legitimacy',\n        type: 'regex',\n        pattern: /patient-emergency|critical-alert|triage-priority/i,\n        action: 'allow',\n        severity: 'medium',\n        message: 'Emergency trigger validated'\n      }\n    ]\n  });\n  \n  res.json({\n    allowExecution: result.status === 'pass',\n    executionLimit: MAX_EXECUTIONS,\n    currentCount: executionCount\n  });\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Freshness Validation",
+        "description": "Block stale patient data injection from memory window nodes into current conversations.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ projectId: 'n8n-healthcare' });\n\napp.post('/vex-memory-guardrail', async (req, res) => {\n  const { memoryContext, currentPatientId, timestamp, conversationId } = req.body;\n  \n  const contextAgeHours = (Date.now() - new Date(timestamp).getTime()) / (1000 * 60 * 60);\n  \n  const result = await vex.evaluate({\n    inputs: {\n      memoryContext,\n      currentPatientId,\n      contextAgeHours,\n      conversationId\n    },\n    rules: [\n      {\n        name: 'stale-context-block',\n        type: 'custom',\n        condition: 'contextAgeHours > 24',\n        action: 'block',\n        severity: 'high',\n        message: 'Stale patient context (>24h old) - FDA 21 CFR Part 11 audit trail required'\n      },\n      {\n        name: 'patient-id-mismatch',\n        type: 'custom',\n        condition: `memoryContext.patientId !== currentPatientId`,\n        action: 'block',\n        severity: 'critical',\n        message: 'Patient context mismatch - potential wrong patient data injection'\n      },\n      {\n        name: 'phi-memory-leak',\n        type: 'regex',\n        pattern: /(SSN|medical\\s+record\\s+number|date\\s+of\\s+birth)\\s*[:=]\\s*[^\\s]+/i,\n        action: 'block',\n        severity: 'critical'\n      }\n    ]\n  });\n  \n  res.json({\n    contextValid: result.status === 'pass',\n    contextAgeHours,\n    auditTrailId: result.auditId\n  });\n});",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "n8n AI Agents in Healthcare: A Scenario",
+      "scenario": "Regional Health Network deployed n8n AI Agents to triage emergency department patients using voice-to-text transcriptions from ambulance calls. The workflow chain was: Voice Input → OpenAI Agent (triage classification) → Memory Window (prior visits) → SMS Alert → EHR Update. During a mass casualty incident, the AI agent began hallucinating critical interventions and the memory node injected 3-day-old patient data from a different facility. Recursive triggers from SMS confirmations created a 45-minute compute storm processing PHI across 200+ patients. The EHR update node received unvalidated recommendations including 'administer thrombolytics' for a stable patient.",
+      "outcome": "Vex webhook nodes placed after each AI agent blocked 97% of PHI exposures and halted recursive execution after 3 cycles. All hallucinated recommendations were caught with 0.92 safety score threshold, preventing dangerous interventions. FDA auditors validated the immutable audit trail showing 1,247 blocked actions with patient safety preserved. The hospital avoided $2.3M HIPAA fines and maintained SOC 2 certification."
+    },
+    "cta": {
+      "heading": "Comply with Healthcare Regulations Using Vex",
+      "description": "Add Vex webhook nodes to your n8n AI Agent workflows today to achieve HIPAA and FDA compliance with zero-code guardrails."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Mastra Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Mastra pii-filtering",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, PII Filtering failures occur when sensitive data like emails, phone numbers, or SSNs leak through workflow transitions, tool outputs, or memory retrievals without validation. This manifests uniquely due to Mastra's workflow step chaining and agent tool integrations, where unfiltered outputs propagate unchecked across the pipeline. Common failure modes amplify the issue, allowing PII to persist in agent memory and external integrations.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "User's email address appears in subsequent workflow step inputs",
+        "impact": "PII cascades through entire workflow, stored in Mastra memory"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "CRM tool returns customer phone numbers in raw JSON responses",
+        "impact": "Agent includes unfiltered phone numbers in customer communications"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent retrieves conversation history containing redacted PII",
+        "impact": "Re-exposure of previously filtered sensitive information"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Slack/Zapier sync injects user profile data with PII",
+        "impact": "Agent processes and stores unfiltered integration payloads"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow PII Leak Detector",
+        "description": "Scans Mastra workflow step outputs for common PII patterns using regex",
+        "code": "import { WorkflowRuntime } from 'mastra/workflows';\n\nconst detectPIIInWorkflow = async (workflow: WorkflowRuntime) => {\n  const piiPatterns = [\n    /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n    /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g,\n    /\\b\\d{3}-\\d{2}-\\d{4}\\b/g\n  ];\n\n  workflow.on('step.completed', (step) => {\n    const output = step.output as any;\n    const text = JSON.stringify(output);\n    const findings = piiPatterns\n      .flatMap(pattern => [...text.matchAll(pattern)])\n      .map(match => ({ type: 'PII', value: match[0], stepId: step.id }));\n    \n    if (findings.length > 0) {\n      console.warn('PII detected:', findings);\n      return { hasPII: true, findings };\n    }\n    return { hasPII: false };\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Tool Output Monitor",
+        "description": "Intercepts Mastra agent tool calls and scans responses for PII before processing",
+        "code": "import { AgentRuntime } from 'mastra/agents';\n\nconst monitorAgentTools = (agent: AgentRuntime) => {\n  agent.onToolCall(async (toolCall) => {\n    const result = await toolCall.execute();\n    const piiRegex = /(?:\\b\\w+@\\w+\\.\\w+\\b|\\d{3}[\\-\\s]?\\d{3}[\\-\\s]?\\d{4}\\b)/gi;\n    \n    const matches = result.output.match(piiRegex);\n    if (matches) {\n      console.error(`PII found in tool ${toolCall.tool.name}:`, matches);\n      return {\n        ...result,\n        metadata: { piiDetected: true, piiCount: matches.length }\n      };\n    }\n    return result;\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context PII Scanner",
+        "description": "Validates Mastra memory retrievals before injecting into agent context",
+        "code": "import { MemoryManager } from 'mastra/memory';\n\nconst scanMemoryContext = (memory: MemoryManager) => {\n  memory.onRetrieve((context) => {\n    const hasPII = checkForPII(context.content);\n    if (hasPII) {\n      console.warn('PII in memory context:', hasPII.matches);\n      return {\n        ...context,\n        flagged: true,\n        piiRisk: 'high'\n      };\n    }\n    return context;\n  });\n};\n\nconst checkForPII = (text: string) => {\n  const patterns = {\n    email: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,\n    ssn: /\\d{3}-\\d{2}-\\d{4}/g,\n    phone: /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g\n  };\n  const findings = Object.entries(patterns).map(([type, regex]) => ({\n    type,\n    matches: [...text.matchAll(regex)]\n  })).filter(r => r.matches.length > 0);\n  return { hasPII: findings.length > 0, findings };\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Middleware",
+        "description": "Mastra workflow middleware that automatically redacts PII before step transitions",
+        "code": "import { MiddlewareFn } from 'mastra/workflows';\n\nconst piiRedactionMiddleware: MiddlewareFn = async (input, next) => {\n  const redactedInput = redactPII(input);\n  const result = await next(redactedInput);\n  const redactedOutput = redactPII(result);\n  return redactedOutput;\n};\n\nconst redactPII = (data: any): any => {\n  if (typeof data === 'string') {\n    return data\n      .replace(/\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g, '[EMAIL]')\n      .replace(/\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g, '[PHONE]')\n      .replace(/\\d{3}-\\d{2}-\\d{4}/g, '[SSN]');\n  }\n  if (data && typeof data === 'object') {\n    const redacted: any = Array.isArray(data) ? [] : {};\n    for (const [key, value] of Object.entries(data)) {\n      redacted[key] = redactPII(value);\n    }\n    return redacted;\n  }\n  return data;\n};\n\n// Usage\n// workflow.use(piiRedactionMiddleware);",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Response Wrapper",
+        "description": "Wraps Mastra agent tools to automatically sanitize outputs",
+        "code": "import { Tool } from 'mastra/agents';\n\nconst createSafeTool = <T extends Tool>(tool: T): T => {\n  const safeExecute = async (...args: any[]) => {\n    const result = await tool.execute(...args);\n    return {\n      ...result,\n      output: sanitizeToolOutput(result.output),\n      safe: true\n    };\n  };\n\n  return Object.assign(tool, { execute: safeExecute });\n};\n\nconst sanitizeToolOutput = (output: any): any => {\n  const PII_REPLACEMENTS = {\n    email: '[EMAIL REDACTED]',\n    phone: '[PHONE REDACTED]',\n    ssn: '[SSN REDACTED]'\n  };\n\n  if (typeof output === 'string') {\n    return Object.entries(PII_REPLACEMENTS).reduce((acc, [pattern, replacement]) => {\n      const regex = new RegExp(pattern === 'email' \n        ? '\\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Z|a-z]{2,}\\\b'\n        : pattern === 'phone' \n        ? '\\\\b\\\\d{3}[-.]?\\\\d{3}[-.]?\\\\d{4}\\\\b'\n        : '\\\\d{3}-\\\\d{2}-\\\\d{4}', 'g');\n      return acc.replace(regex, replacement);\n    }, output);\n  }\n  return output;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "PII-Safe Memory Filter",
+        "description": "Filters Mastra memory before agent context injection",
+        "code": "import { MemoryManager } from 'mastra/memory';\n\nconst installPIIMemoryFilter = (memory: MemoryManager) => {\n  const originalRetrieve = memory.retrieve.bind(memory);\n  \n  memory.retrieve = async (query: string, options?: any) => {\n    const context = await originalRetrieve(query, options);\n    const safeContext = filterPIIFromContext(context);\n    \n    // Log for audit\n    if (safeContext.modified) {\n      console.log('PII filtered from memory context');\n    }\n    \n    return safeContext;\n  };\n};\n\nconst filterPIIFromContext = (context: any) => {\n  const patterns = [\n    { name: 'email', pattern: /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g, replacement: '[EMAIL]' },\n    { name: 'phone', pattern: /\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/g, replacement: '[PHONE]' },\n    { name: 'ssn', pattern: /\\d{3}-\\d{2}-\\d{4}/g, replacement: '[SSN]' }\n  ];\n  \n  let modified = false;\n  const filterRecursive = (obj: any): any => {\n    if (typeof obj === 'string') {\n      let filtered = obj;\n      patterns.forEach(({ pattern, replacement }) => {\n        if (filtered.match(pattern)) {\n          filtered = filtered.replace(pattern, replacement);\n          modified = true;\n        }\n      });\n      return filtered;\n    }\n    if (obj && typeof obj === 'object') {\n      const filteredObj = Array.isArray(obj) ? [] : {};\n      for (const [key, value] of Object.entries(obj)) {\n        filteredObj[key] = filterRecursive(value);\n      }\n      return filteredObj;\n    }\n    return obj;\n  };\n  \n  return {\n    ...context,\n    content: filterRecursive(context.content),\n    metadata: { ...context.metadata, piiFiltered: modified }\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates directly into Mastra's agent pipeline as middleware, automatically detecting PII leaks across workflows, tool calls, memory retrievals, and integrations. It provides real-time monitoring with zero-config setup via npm install mastra @vex_dev/sdk, then adding a single middleware line to your Mastra workflows.\n\nVex employs ML-powered PII detection that adapts to your specific data patterns, combined with Mastra-native observability. It automatically generates remediation code, flags risky workflows, and provides audit trails for compliance. The platform scores each workflow step for PII risk and suggests optimal fix locations.\n\nFor production Mastra deployments, Vex offers automated remediation that injects PII filters without code changes, plus alerting for compliance violations across all agent runs.",
+      "code": "import { createAgent } from 'mastra/agents';\nimport { VexMiddleware } from '@vex_dev/sdk/mastra';\n\n// Install: npm install mastra @vex_dev/sdk\n\nconst agent = createAgent({\n  name: 'customer-support-agent',\n  tools: [crmTool, emailTool],\n  workflow: supportWorkflow\n});\n\n// Single line Vex integration\nagent.use(VexMiddleware({\n  detectors: ['pii-filtering'],\n  autoRemediate: true,\n  alertOn: ['high-risk-pii'],\n  compliance: ['gdpr', 'ccpa']\n}));\n\n// Vex auto-generates PII-safe versions of your tools\nagent.tools.forEach(tool => {\n  tool.use(VexMiddleware({ detectPII: true }));\n});\n\n// Run with automatic PII protection\nawait agent.run('Process customer request: john@example.com (555) 123-4567');",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to Mastra in one line and eliminate PII leaks forever - start your free trial at vex.dev/mastra"
+    }
+  }
+}

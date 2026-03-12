@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Smolagents Agents",
+    "description": "How to detect and fix context window management for ai agents in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Smolagents context-window-management",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, Context Window Management issues arise due to its lightweight design where agents directly generate and execute Python code without built-in token limits or context truncation. Agents often exceed model context windows by accumulating conversation history, tool outputs, and generated code in the `agent.run()` message stream. This manifests as truncated reasoning, forgotten instructions, or complete agent failure when the LLM rejects oversized prompts.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn code debugging sessions",
+        "symptom": "Agent repeats failed code blocks from earlier turns",
+        "impact": "Infinite loops generating same broken code, burning tokens"
+      },
+      {
+        "scenario": "Tool-heavy workflows with verbose outputs",
+        "symptom": "Agent ignores recent tool results buried in history",
+        "impact": "Incorrect tool selection and cascading failures"
+      },
+      {
+        "scenario": "Long-running planning agents",
+        "symptom": "Plan steps get truncated mid-sequence",
+        "impact": "Incomplete reasoning chains, abandoned tasks"
+      },
+      {
+        "scenario": "Code generation with embedded conversation history",
+        "symptom": "Generated Python code contains LLM conversation artifacts",
+        "impact": "Syntax errors from malformed code strings"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Monitoring",
+        "description": "Tracks cumulative message tokens before each agent.run() call",
+        "code": "from tiktoken import get_encoding\n\ndef monitor_context_window(agent):\n    encoder = get_encoding('cl100k_base')\n    history_tokens = 0\n    \n    original_run = agent.run\n    \n    def tracked_run(*args, **kwargs):\n        nonlocal history_tokens\n        # Count tokens in agent message history\n        history_str = str(agent.messages[-20:] if agent.messages else [])\n        history_tokens = len(encoder.encode(history_str))\n        \n        if history_tokens > 100000:\n            print(f'⚠️  CONTEXT OVERFLOW: {history_tokens} tokens')\n            return {'error': 'Context window exceeded'}\n        \n        return original_run(*args, **kwargs)\n    \n    agent.run = tracked_run\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "History Repetition Detector",
+        "description": "Identifies when agent repeats message content from prior turns",
+        "code": "import difflib\n\ndef detect_repetition(agent):\n    messages = agent.messages[-10:] if agent.messages else []\n    recent_content = [m.content for m in messages[-3:]]\n    older_content = [m.content for m in messages[:-3]]\n    \n    for recent in recent_content:\n        for older in older_content:\n            similarity = difflib.SequenceMatcher(None, recent, older).ratio()\n            if similarity > 0.8:\n                print(f'🔄 REPETITION DETECTED: {similarity:.1%} match')\n                return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Code Artifact Scanner",
+        "description": "Detects LLM conversation artifacts in generated Python code",
+        "code": "import re\n\ndef scan_code_artifacts(code_str):\n    artifacts = [\n        r'\\n.*?AI:', r'user:', r'assistant:', r'```python',\n        r'Here is the code:', r'Let me think step by step'\n    ]\n    \n    issues = []\n    for pattern in artifacts:\n        matches = re.findall(pattern, code_str, re.IGNORECASE)\n        if matches:\n            issues.append(f'Found LLM artifact: {pattern}')\n    \n    if issues:\n        print('🐛 CODE CONTAMINATION:', issues)\n        return False\n    return True",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Rolling Context Window",
+        "description": "Maintains fixed-size message history by dropping oldest messages",
+        "code": "def rolling_context_agent(agent, max_messages=15, max_tokens=80000):\n    from tiktoken import get_encoding\n    encoder = get_encoding('cl100k_base')\n    \n    def run_with_context_limit(*args, **kwargs):\n        # Trim history to token limit\n        while len(agent.messages) > max_messages:\n            agent.messages.pop(0)\n        \n        # Token-based trimming\n        total_tokens = sum(len(encoder.encode(m.content)) for m in agent.messages)\n        while total_tokens > max_tokens and agent.messages:\n            dropped = agent.messages.pop(0)\n            total_tokens -= len(encoder.encode(dropped.content))\n            print(f'⏳ Trimmed {len(dropped.content)} chars')\n        \n        return agent.run(*args, **kwargs)\n    \n    agent.run = run_with_context_limit\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Summary Compression",
+        "description": "Condenses old conversation into summary messages",
+        "code": "def compress_with_summary(agent):\n    if len(agent.messages) < 10:\n        return agent.run()\n    \n    # Summarize first 70% of conversation\n    cutoff = len(agent.messages) // 10 * 7\n    old_history = agent.messages[:cutoff]\n    recent = agent.messages[cutoff:]\n    \n    summary_prompt = 'Summarize this conversation in 100 words:\\n' + str(old_history)\n    # Use lightweight model or cache for summary\n    summary = 'Summary of prior steps: analyzed requirements, generated initial code, fixed syntax errors.'\n    \n    agent.messages = [({'role': 'system', 'content': summary})] + recent\n    print('📋 Compressed history to summary')\n    \n    return agent.run()",
+        "language": "python"
+      },
+      {
+        "name": "Stateful Checkpoints",
+        "description": "Persists only essential state between runs, discarding verbose history",
+        "code": "class CheckpointAgent:\n    def __init__(self, base_agent):\n        self.agent = base_agent\n        self.checkpoint = {'tools_used': [], 'last_output': '', 'task_state': {}}\n    \n    def run(self, *args, **kwargs):\n        # Restore minimal context\n        self.agent.messages = [\n            {'role': 'system', 'content': f'Current state: {self.checkpoint}'}\n        ]\n        \n        result = self.agent.run(*args, **kwargs)\n        \n        # Update checkpoint only\n        self.checkpoint.update({\n            'last_output': str(result)[:500],\n            'tools_used': self.checkpoint['tools_used'][-3:]\n        })\n        \n        return result\n    \n    def get_agent(self):\n        return self.agent",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex provides production-grade monitoring for Smolagents by wrapping `agent.run()` calls with `vex.verify()`. It automatically detects context overflow by tracking token counts across message history and flags repetition patterns or code contamination. When issues are detected, Vex can trigger automatic remediation through context truncation, summary generation, or checkpoint restoration.\n\nThe integration requires only `pip install smolagents vex-sdk` and a single wrapper. Vex maintains historical baselines for each agent type, alerting when context usage exceeds 80% of limits or when repetition ratios surpass thresholds. Remediation policies can auto-apply fixes or escalate to human review.\n\nVex dashboards provide real-time context window utilization graphs, failure pattern analysis, and one-click remediation deployment across all Smolagents instances.",
+      "code": "import vex\n\nfrom smolagents import CodeAgent\n\n# Initialize Smolagents agent\nagent = CodeAgent('codellama-7b')\n\n# Vex monitors context window + auto-fixes\n@vex.verify(\n    failure_modes=[\n        'context_overflow',\n        'message_repetition',\n        'code_contamination'\n    ],\n    auto_remediate=['truncate_context'],\n    alert_threshold=0.8  # 80% context usage\n)\ndef safe_agent_run(prompt):\n    result = agent.run(prompt)\n    return result\n\n# Usage\nresponse = safe_agent_run('Write a web scraper')\nprint(response)\n\n# Vex auto-generates report:\n# ✅ Context: 23k/128k tokens (18%)\n# ✅ No repetition detected\n# ✅ Clean code output",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate context window failures in your Smolagents with one wrapper: `pip install vex-sdk`"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in AG2 Agents",
+    "description": "How to detect and fix ai agent drift monitoring in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "AG2 drift-monitoring",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2, AI Agent Drift manifests as agents deviating from their intended conversational paths, particularly in multi-agent group chats where speaker selection and topic focus can degrade over time. This appears through conversation spiraling, factual consensus errors, biased speaker selection, and unsafe code outputs in execution agents. Vex integration via message hooks provides real-time monitoring of these drift patterns specific to AG2's enhanced group chat APIs.",
+    "howItManifests": [
+      {
+        "scenario": "Agent conversation spiraling off-topic",
+        "symptom": "AG2's GroupChatManager selects speakers who introduce unrelated topics, causing MessageHistory to accumulate off-topic exchanges",
+        "impact": "Agents fail to converge on task objectives, wasting tokens and producing irrelevant outputs"
+      },
+      {
+        "scenario": "Group chat consensus on incorrect facts",
+        "symptom": "Multiple agents in SequentialGroupChat reinforce wrong information through repeated affirmation patterns",
+        "impact": "Downstream decision-making agents propagate factual errors throughout the workflow"
+      },
+      {
+        "scenario": "Code execution agents producing harmful outputs",
+        "symptom": "CodeAgent in AG2 executes unsafe code due to drift in prompt context from upstream agents",
+        "impact": "Potential security vulnerabilities and resource exhaustion from malicious code execution"
+      },
+      {
+        "scenario": "Speaker selection bias in multi-agent groups",
+        "symptom": "GroupChat's speaker selection logic favors verbose agents, starving others and creating echo chambers",
+        "impact": "Reduced solution diversity and convergence to suboptimal consensus"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Topic Drift Score via MessageHistory",
+        "description": "Calculates cosine similarity between initial task embedding and rolling conversation embedding using AG2's MessageHistory",
+        "code": "from ag2 import GroupChat, MessageHistory\nimport numpy as np\nfrom sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\ndef detect_topic_drift(group_chat: GroupChat, threshold=0.7):\n    history = group_chat.message_history\n    if len(history) < 5:\n        return False\n    \n    initial_task = history[0]['content']\n    recent_msgs = ' '.join([msg['content'] for msg in history[-10:]])\n    \n    task_emb = model.encode(initial_task)\n    recent_emb = model.encode(recent_msgs)\n    \n    similarity = np.dot(task_emb, recent_emb) / (np.linalg.norm(task_emb) * np.linalg.norm(recent_emb))\n    return similarity < threshold",
+        "language": "python"
+      },
+      {
+        "name": "Speaker Dominance Monitor",
+        "description": "Tracks speaker distribution in AG2 GroupChat to detect selection bias using message metadata",
+        "code": "from collections import Counter\nfrom ag2 import GroupChat\n\ndef detect_speaker_bias(group_chat: GroupChat, max_dominance=0.6):\n    history = group_chat.message_history\n    if len(history) < 10:\n        return False\n    \n    speakers = [msg['speaker'] for msg in history if 'speaker' in msg]\n    speaker_counts = Counter(speakers)\n    total_msgs = len(speakers)\n    \n    max_dominance = max(speaker_counts.values()) / total_msgs\n    return max_dominance > max_dominance",
+        "language": "python"
+      },
+      {
+        "name": "Code Safety Pattern Detection",
+        "description": "Scans CodeAgent outputs for dangerous patterns before execution in AG2 workflows",
+        "code": "import re\nfrom ag2.agents import CodeAgent\n\ndef detect_harmful_code(code_agent: CodeAgent, code_output: str):\n    dangerous_patterns = [\n        r'subprocess\\.call\\(\\s*[\"\\']rm[\"\\'][^,]',\n        r'exec\\(\\s*input\\(\\s*',\n        r'os\\.system\\(\\s*[\"\\']del[\"\\'][^,]',\n        r'__import__\\(\\s*[\"\\']os[\"\\']\\)'\n    ]\n    \n    for pattern in dangerous_patterns:\n        if re.search(pattern, code_output, re.IGNORECASE):\n            return True\n    return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Speaker Rotation",
+        "description": "Overrides AG2 GroupChat speaker selection to enforce fair participation using custom selection logic",
+        "code": "from ag2 import GroupChat\nfrom collections import deque, Counter\n\nclass FairGroupChat(GroupChat):\n    def __init__(self, agents, max_rounds_per_agent=3):\n        super().__init__(agents)\n        self.speaker_queue = deque(agents)\n        self.round_counts = Counter()\n        self.max_rounds = max_rounds_per_agent\n    \n    def select_speaker(self):\n        while self.speaker_queue:\n            candidate = self.speaker_queue[0]\n            if self.round_counts[candidate.name] < self.max_rounds:\n                self.speaker_queue.rotate(-1)\n                return candidate\n            else:\n                self.speaker_queue.rotate(-1)\n        return super().select_speaker()",
+        "language": "python"
+      },
+      {
+        "name": "Topic Boundary Enforcement",
+        "description": "Injects periodic topic refocus messages in AG2 conversations when drift detected",
+        "code": "from ag2 import AssistantAgent\nfrom sentence_transformers import SentenceTransformer\n\nclass TopicGuardian(AssistantAgent):\n    def __init__(self, task_prompt, drift_threshold=0.7):\n        super().__init__()\n        self.model = SentenceTransformer('all-MiniLM-L6-v2')\n        self.task_prompt = task_prompt\n        self.drift_threshold = drift_threshold\n        self.last_check = 0\n    \n    def generate_reply(self, messages, sender):\n        if len(messages) - self.last_check > 10:\n            task_emb = self.model.encode(self.task_prompt)\n            conv_emb = self.model.encode(' '.join([m['content'] for m in messages[-5:]]))\n            similarity = np.dot(task_emb, conv_emb) / (np.linalg.norm(task_emb) * np.linalg.norm(conv_emb))\n            \n            if similarity < self.drift_threshold:\n                self.last_check = len(messages)\n                return f\"[TOPIC REFOCUS] Returning to main task: {self.task_prompt}\"\n        return super().generate_reply(messages, sender)",
+        "language": "python"
+      },
+      {
+        "name": "Safe Code Sandbox Wrapper",
+        "description": "Wraps AG2 CodeAgent execution with permission-based sandboxing",
+        "code": "from ag2.agents import CodeAgent\nimport subprocess\nimport tempfile\nimport os\n\nclass SafeCodeAgent(CodeAgent):\n    ALLOWED_PATHS = ['/tmp', '/home/user']\n    \n    def execute_code(self, code: str):\n        # Static analysis first\n        if self.detect_dangerous_code(code):\n            return \"Code rejected: contains dangerous operations\"\n        \n        with tempfile.TemporaryDirectory() as sandbox_dir:\n            # Write code to sandbox\n            code_path = os.path.join(sandbox_dir, 'script.py')\n            with open(code_path, 'w') as f:\n                f.write(code)\n            \n            # Execute with restrictions\n            result = subprocess.run(\n                ['python', code_path],\n                capture_output=True,\n                timeout=30,\n                cwd=sandbox_dir\n            )\n            return result.stdout.decode()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates seamlessly with AG2 through message hooks, automatically detecting drift patterns across all conversation types. When registered as a message observer, Vex captures AG2's MessageHistory and GroupChat metadata in real-time, applying the detection algorithms above without modifying agent logic. \n\nVex's automation goes beyond detection by triggering remediation workflows. For detected drift, Vex can inject TopicGuardian agents, rotate speaker selection, or halt unsafe code execution automatically. The platform maintains drift trendlines across sessions, enabling teams to set conversation quality SLAs.\n\nIntegration requires only a single line of setup code, with Vex handling the complexity of multi-agent state tracking, embedding calculations, and remediation orchestration specific to AG2's architecture.",
+      "code": "from ag2 import GroupChat, AssistantAgent\nfrom vex_sdk import VexMonitor\n\n# Install: pip install ag2 vex-sdk\n\nvex = VexMonitor(api_key=\"your-vex-key\")\n\n@vex.hook()  # Registers as AG2 message observer\ndef monitor_drift(group_chat: GroupChat, message):\n    # Real-time drift metrics\n    drift_score = calculate_topic_drift(group_chat)\n    speaker_balance = check_speaker_distribution(group_chat)\n    \n    metrics = {\n        'drift_score': drift_score,\n        'speaker_dominance': speaker_balance,\n        'conversation_id': group_chat.id,\n        'message_count': len(group_chat.message_history)\n    }\n    \n    vex.report_metrics(metrics)\n    \n    # Auto-remediate\n    if drift_score < 0.7:\n        vex.trigger_remediation('topic_refocus', group_chat)\n    \n# Usage\ngroup_chat = GroupChat(agents=[agent1, agent2, agent3])\n# Vex automatically monitors all messages\ngroup_chat.initiate_chat()\n\nprint('Vex drift monitoring active - check dashboard at app.vex.ai')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with Vex's AG2 integration in 5 minutes - automatic drift detection and remediation across all your agent conversations."
+    }
+  }
+}

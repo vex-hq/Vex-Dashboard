@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in LangChain Agents",
+    "description": "How to detect and fix multi-agent coordination failure in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "LangChain multi-agent-coordination",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in LangChain occurs when multiple agents fail to synchronize their actions, leading to conflicting tool calls, duplicated efforts, or unresolved tasks in hierarchical or multi-agent setups like LangGraph or AgentExecutor teams. This manifests as agents overriding each other's state, infinite coordination loops, or incomplete task handoffs due to poor shared memory or messaging patterns. LangChain's AgentExecutor and custom graph patterns exacerbate this when agents lack clear ownership or termination signals.",
+    "howItManifests": [
+      {
+        "scenario": "Hierarchical agent supervisor fails to delegate properly",
+        "symptom": "Supervisor agent repeatedly assigns same task to different workers",
+        "impact": "Infinite loops and duplicated API calls wasting tokens and budget"
+      },
+      {
+        "scenario": "Multi-agent team with shared tools causes race conditions",
+        "symptom": "Agents call same tool simultaneously with conflicting parameters",
+        "impact": "Corrupted external state and inconsistent final outputs"
+      },
+      {
+        "scenario": "LangGraph conditional edges cause agent starvation",
+        "symptom": "One agent never receives control due to routing logic failure",
+        "impact": "Partial task completion with missing critical steps"
+      },
+      {
+        "scenario": "Agent handoff without proper state checkpointing",
+        "symptom": "Subsequent agents receive incomplete or hallucinated context",
+        "impact": "Cascading failures where downstream agents produce garbage outputs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Loop Detector",
+        "description": "Monitors AgentExecutor traces for repeated agent names in execution cycles",
+        "code": "from langchain.callbacks import BaseCallbackHandler\n\nclass LoopDetector(BaseCallbackHandler):\n    def __init__(self):\n        self.agent_calls = {}\n        self.max_calls = 3\n    \n    def on_agent_action(self, action, **kwargs):\n        agent_name = action.tool\n        self.agent_calls[agent_name] = self.agent_calls.get(agent_name, 0) + 1\n        if self.agent_calls[agent_name] > self.max_calls:\n            raise ValueError(f\"LOOP DETECTED: Agent {agent_name} called {self.agent_calls[agent_name]} times\")\n\n# Usage\nagent_executor = AgentExecutor.from_agent_and_tools(...)\nagent_executor.invoke({\"input\": query}, callbacks=[LoopDetector()])",
+        "language": "python"
+      },
+      {
+        "name": "State Conflict Monitor",
+        "description": "Tracks shared memory writes across multiple agents for overwrites",
+        "code": "from langchain.memory import ConversationBufferMemory\nfrom collections import defaultdict\n\nclass StateConflictMonitor:\n    def __init__(self):\n        self.state_writes = defaultdict(list)\n    \n    def track_write(self, agent_id, key, value):\n        self.state_writes[key].append((agent_id, value))\n        conflicts = [w for w in self.state_writes[key] if w[1] != value]\n        if len(conflicts) > 1:\n            print(f\"CONFLICT on {key}: {conflicts}\")\n\n# In agent wrapper\nmemory = ConversationBufferMemory()\nmonitor = StateConflictMonitor()\nmonitor.track_write('agent1', 'task_status', 'completed')",
+        "language": "python"
+      },
+      {
+        "name": "Handoff Completeness Check",
+        "description": "Verifies all required context keys exist after agent handoffs",
+        "code": "def validate_handoff_state(state: dict, required_keys: list[str]):\n    missing = [k for k in required_keys if k not in state]\n    if missing:\n        raise ValueError(f\"Handoff incomplete. Missing keys: {missing}\")\n    return True\n\n# LangGraph node\n@node\ndef agent_node(state):\n    result = agent_executor.invoke(state)\n    new_state = {**state, **result}\n    validate_handoff_state(new_state, ['task_status', 'final_answer'])\n    return new_state",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Leader Election Pattern",
+        "description": "Designate single coordinating agent using LangGraph state management",
+        "code": "from langgraph.graph import StateGraph, END\nfrom typing import TypedDict, Annotated\nimport operator\n\nclass AgentState(TypedDict):\n    messages: Annotated[list, operator.add]\n    active_agent: str\n    task_status: str\n\n# Single source of truth\nsupervisor = create_react_agent(llm, tools=[coordinator_tool])\n\nworkflow = StateGraph(AgentState)\nworkflow.add_node('supervisor', lambda state: supervisor.invoke(state))\nworkflow.add_conditional_edges(...)\n\napp = workflow.compile()",
+        "language": "python"
+      },
+      {
+        "name": "Locking Mechanism for Shared Resources",
+        "description": "Implement tool-level locking to prevent race conditions",
+        "code": "from langchain.tools import BaseTool\nfrom threading import Lock\n\nclass LockedDatabaseTool(BaseTool):\n    name = 'locked_db_query'\n    lock = Lock()\n    \n    def _run(self, query: str, owner_agent: str):\n        with self.lock:\n            # Verify owner\n            if not self.is_authorized_owner(owner_agent):\n                return f\"Access denied. Agent {owner_agent} not authorized\"\n            return self.db.query(query)\n    \n    def is_authorized_owner(self, agent_id):\n        return agent_id == self.current_owner",
+        "language": "python"
+      },
+      {
+        "name": "Checkpointed Handoff Protocol",
+        "description": "Standardize state handoff with validation schema",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Dict, Any\n\nclass HandoffSchema(BaseModel):\n    task_id: str\n    status: str = Field(..., regex='^(pending|working|completed|failed)$')\n    context: Dict[str, Any]\n    next_agent: str\n    \nclass CheckpointedAgent:\n    def handoff(self, state):\n        handoff = HandoffSchema(\n            task_id=state['task_id'],\n            status='completed',\n            context=state,\n            next_agent='researcher'\n        )\n        return {'handoff': handoff.model_dump()}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex automatically instruments LangChain AgentExecutor and LangGraph applications to detect coordination failures by analyzing execution traces for loop patterns, state conflicts, and incomplete handoffs. It establishes behavioral baselines during happy-path runs and flags deviations like repeated agent activations (>3 cycles) or missing handoff checkpoints. Vex's verification engine correlates agent actions across traces, identifying ownership violations and resource contention before they cascade into production failures.\n\nThe platform generates remediation blueprints showing exactly which agents need locking mechanisms or clearer delegation logic. For LangGraph users, Vex validates conditional edge coverage and state persistence across graph traversals. Integration requires wrapping chain.invoke() calls with vex.verify(), providing immediate ROI through prevented token waste and hallucinated coordination failures.",
+      "code": "import vex\nfrom langchain.agents import AgentExecutor\n\n# Install: pip install langchain vex-sdk\n\nagent_executor = AgentExecutor.from_agent_and_tools(\n    llm, tools, verbose=True\n)\n\n@vex.verify(\n    failure_modes=[\n        'agent_loop',\n        'state_conflict',\n        'handoff_failure'\n    ],\n    remediation=True\n)\ndef coordinated_workflow(query):\n    result = agent_executor.invoke({\"input\": query})\n    return result['output']\n\n# Vex auto-detects:\n# - Agent loops (>3 identical calls)\n# - State overwrites by multiple agents\n# - Missing handoff validation\nresponse = coordinated_workflow('research market trends')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today and eliminate multi-agent coordination failures with one line of code."
+    }
+  }
+}

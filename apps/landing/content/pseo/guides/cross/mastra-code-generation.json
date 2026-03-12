@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Mastra + Vex Guardrails",
+    "description": "Learn how to build code generation with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra code generation",
+      "Mastra guardrails",
+      "code generation reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Mastra provides a powerful TypeScript framework for building AI agents with workflows, knowledge bases, and integrations, making it ideal for code generation use cases where agents iteratively produce, test, and refine code. Guardrails are essential in this high-risk scenario to prevent syntax errors, unsafe code execution, credential leaks, and malformed outputs that could lead to production failures or security breaches. Vex integrates seamlessly as middleware to verify agent outputs, ensuring reliable code generation pipelines.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Mastra",
+      "description": "The typical Mastra code generation architecture involves an LLM agent workflow that receives a user prompt, generates initial code using tools like code interpreters, executes it in a sandbox, validates tests, and iterates based on feedback. Mastra's workflow steps handle transitions between generation, execution, and refinement phases, with memory retrieval providing conversation history and knowledge bases supplying language-specific patterns.\n\nAgent tools integrate with sandbox environments (e.g., Docker or Node.js sandboxes) for safe execution, while verification steps check syntax, safety, and functionality. Memory management ensures context relevance, but without validation, stale data or malformed tool outputs can derail iterations.\n\nVex middleware intercepts workflow outputs at key transitions, applying checks for code safety, syntax, and dependencies before proceeding.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Prompt   │───▶│ Mastra Workflow  │\n│     (Mastra)    │    │   (Agent Steps)  │\n└─────────────────┘    │                  │\n                       │ ┌──────────────┐ │\n                       │ │Vex Middleware│ │\n                       │ │  Validation  │ │\n                       │ └──────────────┘ │\n                       │ ┌──────────────┐ │\n                       │ │ Code Gen LLM │ │──▶┌─────────────────┐\n                       │ └──────────────┘ │  │ Sandbox Exec   │\n                       │ ┌──────────────┐ │  │ + Test Suite   │\n                       │ │Memory/KB     │ │  └─────────────────┘\n                       │ │Retrieval     │ │         ▲\n                       │ └──────────────┘ │         │\n                       └──────────────────┘         │\n                                   ▲                │\n                                   └────────────────┘\n                                        Iteration"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra workflows pass unverified code between generation, execution, and refinement steps, allowing syntax errors to propagate.",
+        "severity": "critical",
+        "mitigation": "Vex middleware validates outputs at each transition using syntax parsers and safety scanners."
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Sandbox execution tools return invalid JSON or partial code snippets, confusing downstream LLM refinement.",
+        "severity": "high",
+        "mitigation": "Vex parses and normalizes tool outputs before injecting into workflow context."
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Previous iteration code snippets pollute context, causing agents to regenerate flawed solutions.",
+        "severity": "high",
+        "mitigation": "Vex filters memory retrievals to include only verified, relevant code artifacts."
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Third-party API responses (e.g., npm package data) contain unexpected formats, derailing code generation.",
+        "severity": "medium",
+        "mitigation": "Vex schemas enforce expected data shapes from integrations before agent processing."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Code Generation Workflow Setup",
+        "description": "Define a Mastra workflow with code generation, sandbox execution, and test validation steps.",
+        "code": "import { createWorkflow, Step } from 'mastra/workflows';\nimport { z } from 'zod';\n\nconst codeGenWorkflow = createWorkflow({\n  name: 'code-generation',\n  steps: [\n    new Step({\n      name: 'generate',\n      inputSchema: z.object({ prompt: z.string() }),\n      llm: 'gpt-4o',\n      outputSchema: z.object({\n        code: z.string(),\n        explanation: z.string()\n      }),\n    }),\n    new Step({\n      name: 'execute',\n      inputSchema: z.object({ code: z.string() }),\n      tools: ['sandbox-exec'],\n      outputSchema: z.object({\n        stdout: z.string(),\n        stderr: z.string(),\n        passed: z.boolean()\n      }),\n    }),\n    new Step({\n      name: 'refine',\n      inputSchema: z.object({ code: z.string(), feedback: z.string() }),\n    })\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Sandbox Execution Tool Integration",
+        "description": "Configure Mastra tool for safe Node.js sandbox execution with test validation.",
+        "code": "import { createTool } from 'mastra/tools';\n\nconst sandboxExecutor = createTool({\n  name: 'sandbox-exec',\n  description: 'Execute code in secure Node.js sandbox',\n  inputSchema: z.object({\n    code: z.string().describe('JavaScript/TypeScript code'),\n    tests: z.array(z.string()).optional()\n  }),\n  execute: async ({ code, tests }) => {\n    const sandbox = await createNodeSandbox();\n    const result = await sandbox.run(code);\n    \n    if (tests) {\n      const testResults = await sandbox.runTests(tests);\n      return {\n        stdout: result.stdout,\n        stderr: result.stderr,\n        passed: testResults.every(t => t.passed)\n      };\n    }\n    \n    return result;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context for Iterative Refinement",
+        "description": "Mastra memory retrieval provides conversation history for multi-turn code refinement.",
+        "code": "import { createAgent } from 'mastra/agents';\n\nconst codeAgent = createAgent({\n  name: 'code-gen-agent',\n  llm: 'gpt-4o',\n  memory: {\n    type: 'conversation',\n    maxTokens: 8000,\n    retrieval: async (query) => {\n      // Retrieve relevant code iterations\n      return await memoryStore.search({\n        query,\n        filter: { type: 'code-iteration' },\n        limit: 5\n      });\n    }\n  },\n  tools: [sandboxExecutor]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Test-Driven Code Validation Step",
+        "description": "Mastra step that generates and validates unit tests for generated code.",
+        "code": "const testStep = new Step({\n  name: 'validate-tests',\n  inputSchema: z.object({\n    code: z.string(),\n    requirements: z.string()\n  }),\n  llm: 'gpt-4o',\n  systemPrompt: `Generate comprehensive unit tests for the provided code that verify:\\n1. Syntax validity\\n2. Core functionality\\n3. Edge cases\\n4. Error handling`,\n  outputSchema: z.object({\n    tests: z.array(z.string()),\n    testResults: z.object({\n      passed: z.number(),\n      failed: z.number(),\n      coverage: z.number()\n    })\n  }),\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for Workflow Validation",
+        "description": "Add Vex as middleware to validate all Mastra workflow step outputs before transitions.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  project: 'mastra-code-gen'\n});\n\nconst withVexValidation = async (workflow) => {\n  return {\n    ...workflow,\n    steps: workflow.steps.map(step => ({\n      ...step,\n      execute: async (input) => {\n        const result = await step.execute(input);\n        \n        // Vex validates code safety & syntax\n        const verified = await vex.verify({\n          data: result,\n          checks: [\n            'code_safety',\n            'syntax_validity',\n            'no_credential_leakage',\n            'dependency_safety'\n          ],\n          context: { language: 'typescript', useCase: 'code-generation' }\n        });\n        \n        if (!verified.valid) {\n          throw new Error(`Vex validation failed: ${verified.issues.join(', ')}`);\n        }\n        \n        return result;\n      }\n    }))\n  };\n};\n\nconst secureWorkflow = withVexValidation(codeGenWorkflow);",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Output Normalization with Vex",
+        "description": "Ensure sandbox tool responses are properly formatted before agent processing.",
+        "code": "const secureSandboxExecutor = createTool({\n  ...sandboxExecutor,\n  execute: async (input) => {\n    const rawResult = await sandboxExecutor.execute(input);\n    \n    // Vex normalizes malformed tool outputs\n    const normalized = await vex.normalize({\n      data: rawResult,\n      schema: z.object({\n        stdout: z.string(),\n        stderr: z.string(),\n        passed: z.boolean()\n      }),\n      repair: true\n    });\n    \n    // Additional safety scan\n    await vex.verify({\n      data: input.code,\n      checks: ['execution_sandboxing'],\n      context: { sandbox: true }\n    });\n    \n    return normalized;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Retrieval Filtering with Vex",
+        "description": "Filter stale or unsafe code from Mastra memory before agent context injection.",
+        "code": "const secureMemoryRetrieval = async (query: string) => {\n  const rawMemory = await memoryStore.search({ query, limit: 10 });\n  \n  // Vex filters unsafe/stale context\n  const safeContext = await vex.filter({\n    data: rawMemory,\n    checks: [\n      'code_safety',\n      'no_credential_leakage',\n      'syntax_validity'\n    ],\n    context: {\n      maxAge: '1h',\n      useCase: 'code-generation-memory'\n    }\n  });\n  \n  return safeContext.validItems.slice(0, 5);\n};\n\ncodeAgent.memory.retrieval = secureMemoryRetrieval;",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Code Generation",
+      "description": "Integrate Vex today to eliminate code generation risks and ensure production-ready outputs."
+    }
+  }
+}

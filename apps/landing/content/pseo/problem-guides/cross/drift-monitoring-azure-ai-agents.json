@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Azure AI Agent Service drift-monitoring",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Azure AI Agent Service manifests as agents producing unreliable outputs due to unvalidated tool results, outdated grounding data, and infrastructure limits that bypass enterprise safeguards. Agents leveraging Azure OpenAI models with Bing Search grounding or file search tools often drift when external data becomes stale or metadata pollutes responses. Without middleware validation, these issues evade Azure's built-in security controls, leading to policy violations and degraded enterprise reliability.",
+    "howItManifests": [
+      {
+        "scenario": "Tool execution results not validated against enterprise policies",
+        "symptom": "Agent returns PII-containing responses from unfiltered RAG tools",
+        "impact": "GDPR violations and enterprise security alerts triggered"
+      },
+      {
+        "scenario": "Grounding data from Bing Search containing outdated information",
+        "symptom": "Agent cites 2023 pricing data in 2025 enterprise proposals",
+        "impact": "Customer trust erosion and lost revenue opportunities"
+      },
+      {
+        "scenario": "File search returning Azure-specific metadata instead of content",
+        "symptom": "Responses contain blob storage URLs instead of document summaries",
+        "impact": "Users receive unusable technical metadata in business contexts"
+      },
+      {
+        "scenario": "Agent thread token limits exceeded without graceful degradation",
+        "symptom": "Thread abruptly terminates mid-conversation with 429 errors",
+        "impact": "Poor user experience and abandoned enterprise workflows"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Policy Violation Scanner",
+        "description": "Detects PII and enterprise policy violations in tool execution outputs using Azure AI Content Safety integration",
+        "code": "from azure.ai.contentsafety import ContentSafetyClient\nfrom azure.core.credentials import AzureKeyCredential\n\ncontent_safety_client = ContentSafetyClient(\n    endpoint=\"https://your-contentsafety.cognitiveservices.azure.com/\",\n    credential=AzureKeyCredential(\"your-key\")\n)\n\nasync def scan_tool_output(tool_output: str) -> bool:\n    request = AnalyzeTextOptions(text=tool_output)\n    response = await content_safety_client.analyze_text_async(request)\n    severity = response.hate.severity\n    return severity in ['High', 'Medium']",
+        "language": "python"
+      },
+      {
+        "name": "Freshness Timestamp Validator",
+        "description": "Validates Bing Search grounding data freshness by checking publication dates in search results",
+        "code": "import re\nfrom datetime import datetime, timedelta\n\ndef validate_bing_freshness(search_result: str) -> bool:\n    date_pattern = r'published:\\s*(\\d{4}-\\d{2}-\\d{2})'\n    match = re.search(date_pattern, search_result, re.IGNORECASE)\n    if match:\n        pub_date = datetime.strptime(match.group(1), '%Y-%m-%d')\n        return (datetime.now() - pub_date) < timedelta(days=30)\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Token Limit Monitor",
+        "description": "Tracks Azure OpenAI thread token usage against limits with predictive overflow detection",
+        "code": "import openai\n\nasync def monitor_thread_tokens(thread_id: str, api_key: str) -> dict:\n    client = openai.AsyncAzureOpenAI(\n        api_key=api_key,\n        azure_endpoint=\"https://your-openai.azure.com/\"\n    )\n    \n    messages = await client.beta.threads.messages.list(thread_id)\n    total_tokens = sum(msg.usage.total_tokens for msg in messages.data if hasattr(msg, 'usage'))\n    \n    limit = 128000  # Azure AI Agent Service thread limit\n    return {\n        'current': total_tokens,\n        'limit': limit,\n        'overflow_risk': total_tokens > limit * 0.8\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Enterprise Policy Middleware",
+        "description": "Intercepts tool calls and validates outputs against Azure Content Safety before agent response",
+        "code": "from azure.ai.projects import ProjectsClient\n\nclass PolicyMiddleware:\n    def __init__(self, content_safety_client):\n        self.safety_client = content_safety_client\n    \n    async def validate_tool_output(self, tool_call):\n        if await self.safety_client.analyze_text(tool_call.output):\n            return {'error': 'Policy violation detected', 'action': 'blocked'}\n        return {'approved': True, 'output': tool_call.output}",
+        "language": "python"
+      },
+      {
+        "name": "Freshness-Aware Grounding",
+        "description": "Filters Bing Search results older than 30 days and forces re-grounding",
+        "code": "async def fresh_grounding(agent_session, query: str):\n    from azure.search.documents import SearchClient\n    \n    search_client = SearchClient(\n        endpoint=\"https://your-search-service.search.windows.net\",\n        index_name=\"bing-grounding\",\n        credential=DefaultAzureCredential()\n    )\n    \n    results = search_client.search(\n        search_text=query,\n        filter=\"publish_date ge 2024-10-01\"\n    )\n    \n    return [doc for doc in results if validate_bing_freshness(doc['content'])]",
+        "language": "python"
+      },
+      {
+        "name": "Graceful Token Overflow Handler",
+        "description": "Implements thread summarization when approaching Azure AI Agent Service token limits",
+        "code": "async def handle_token_overflow(thread_id: str, client):\n    if await monitor_thread_tokens(thread_id, client.api_key)['overflow_risk']:\n        # Summarize conversation history\n        messages = await client.beta.threads.messages.list(thread_id)\n        summary_prompt = \"Summarize this conversation concisely: \" + str(messages.data[-10:])\n        \n        summary_thread = await client.beta.threads.create()\n        await client.beta.threads.messages.create(\n            summary_thread.id, \n            role=\"user\", \n            content=summary_prompt\n        )\n        \n        await client.beta.threads.runs.create(summary_thread.id, assistant_id=\"your-assistant\")\n        return summary_thread.id  # Return fresh thread",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically intercepting all tool calls, grounding responses, and thread states. It applies enterprise-specific drift detectors for policy violations, data freshness, metadata pollution, and token limits, scoring agent reliability in real-time. When drift is detected, Vex triggers automated remediation workflows including content filtering, re-grounding, and thread migration while maintaining full audit trails for compliance.\n\nThe Vex SDK (`pip install azure-ai-projects vex-sdk`) provides Azure-native detectors that hook into agent run events without code changes. Configuration is done via Azure AI Projects YAML manifests, enabling fleet-wide deployment across all agents. Vex's adaptive thresholds learn from your enterprise patterns, reducing false positives while catching subtle drift patterns unique to Azure AI Agent Service.",
+      "code": "from vex_sdk import VexMonitor\nfrom azure.identity import DefaultAzureCredential\nfrom azure.ai.projects import ProjectsClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex = VexMonitor(\n    azure_tenant_id=\"your-tenant-id\",\n    subscription_id=\"your-sub-id\",\n    resource_group=\"rg-agent-service\"\n)\n\n@vex.monitor_agent(\"enterprise-sales-agent\")\ndef azure_agent_pipeline(project_name: str, agent_thread_id: str):\n    client = ProjectsClient(\n        credential=DefaultAzureCredential(),\n        subscription_id=\"your-sub-id\"\n    )\n    \n    # Vex auto-instruments all runs\n    run = client.begin_agent_run(\n        project_name=project_name,\n        agent_id=\"sales-agent\",\n        thread_id=agent_thread_id\n    )\n    \n    # Vex detects drift and auto-remediates\n    if vex.detect_drift(run):\n        vex.remediate(run, actions=[\n            \"policy_filter\",\n            \"fresh_grounding\",\n            \"token_migrate\"\n        ])\n    \n    return run.result",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Deploy Vex middleware to your Azure AI Agent Service in 5 minutes and eliminate agent drift across your enterprise fleet."
+    }
+  }
+}

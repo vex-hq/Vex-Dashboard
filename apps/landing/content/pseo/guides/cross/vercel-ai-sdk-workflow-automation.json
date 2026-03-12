@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK workflow automation",
+      "Vercel AI SDK guardrails",
+      "workflow automation reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building workflow automation with Vercel AI SDK enables multi-step agentic applications that integrate APIs, handle conditional logic, and incorporate human approvals for reliable task execution. Guardrails are essential to prevent partial hallucinations in streaming responses, unvalidated tool calls, inconsistent structured outputs, and timeouts during complex agent tasks. Vex provides middleware integration to verify action correctness, permissions, idempotency, and rollback capabilities in real-time.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Vercel AI SDK",
+      "description": "The architecture centers on Vercel AI SDK's generateText and streamText functions within Next.js API routes or Server Actions, orchestrating multi-step agents that call external APIs, process conditional logic, and pause for human-in-the-loop approvals. Streaming UIs built with React Server Components display real-time progress while the agent maintains state across steps using Vercel KV or Postgres for persistence. Tool calls trigger API integrations with validation layers, ensuring idempotent operations and rollback mechanisms for failed steps.\n\nEdge functions handle the initial request, streaming partial responses while Vex middleware intercepts tool calls and structured outputs for verification. Human approval steps route to dedicated endpoints that resume workflows with verified inputs, maintaining audit trails for compliance. This setup scales horizontally on Vercel's edge network while mitigating common failure modes through structured verification.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Next.js App   │───▶│ Vercel AI SDK    │\n│ (RSC Streaming) │    │ generateText()   │\n└──────────┬──────┘    │ streamText()     │\n           │            │ + Vex Middleware │\n           ▼            └────────┬─────────┘\n┌─────────────────┐             │\n│   Multi-Step    │◄────────────┘\n│   Agent Logic   │\n│ (Tools/Condits) ├─→ API Calls\n│ Human Approval  │    Idempotent\n└──────┬──────────┘    Rollback\n       │\n   ┌──▼──┐\n   │Vex   │ Verify: actions,\n   │Guard │ perms, idempotency\n   └──────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Agent generates incorrect intermediate steps during streaming, leading users to act on flawed workflow instructions",
+        "severity": "high",
+        "mitigation": "Vex middleware validates each streamed chunk against workflow schema before UI rendering"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Unverified API responses shown to users, potentially exposing sensitive data or executing wrong actions",
+        "severity": "critical",
+        "mitigation": "Intercept tool calls with Vex to validate permissions and response schemas pre-display"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLM providers return varying JSON structures for workflow steps, breaking conditional logic",
+        "severity": "medium",
+        "mitigation": "Vex normalizes structured outputs to consistent schemas regardless of provider"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Multi-step workflows exceed Vercel edge timeouts, leaving partial state and failed rollbacks",
+        "severity": "high",
+        "mitigation": "Vex async verification with checkpointing ensures workflow resumption post-timeout"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Multi-Step Agent with Tool Calls",
+        "description": "Core workflow agent using Vercel AI SDK that orchestrates API calls and conditional logic",
+        "code": "import { generateText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst approveStep = tool({\n  description: 'Request human approval for critical steps',\n  parameters: z.object({\n    step: z.string().describe('Workflow step needing approval'),\n    details: z.string(),\n  }),\n  execute: async ({ step, details }) => {\n    // Store for human approval endpoint\n    await kv.set(`approval:${step}`, { details, status: 'pending' });\n    return { approved: false, message: 'Awaiting human approval' };\n  },\n});\n\nexport async function executeWorkflow(userId: string, task: string) {\n  const { text, toolResults } = await generateText({\n    model: 'openai/gpt-4o',\n    prompt: `Execute workflow: ${task}`,\n    tools: { approveStep },\n    maxTokens: 2000,\n  });\n  return { result: text, tools: toolResults };\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming UI with Human Approval",
+        "description": "React Server Component streaming workflow progress with approval modals",
+        "code": "import { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\n\nexport default async function WorkflowStream({ task }: { task: string }) {\n  const stream = await streamText({\n    model: 'openai/gpt-4o',\n    prompt: `Process workflow task: ${task}`,\n  });\n\n  const result = createStreamableValue('');\n  (async () => {\n    for await (const delta of stream.textStream) {\n      result.update(delta);\n    }\n    result.done();\n  })();\n\n  return (\n    <div>\n      <p>Workflow Status: {result.value}</p>\n      <ApprovalModal task={task} />\n    </div>\n  );\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Idempotent API Integration",
+        "description": "Tool wrapper ensuring API calls are idempotent with retry logic",
+        "code": "import { tool } from 'ai';\nimport { z } from 'zod';\n\nconst idempotentApiCall = tool({\n  description: 'Make idempotent external API call',\n  parameters: z.object({\n    endpoint: z.string(),\n    payload: z.record(z.unknown()),\n    idempotencyKey: z.string(),\n  }),\n  execute: async ({ endpoint, payload, idempotencyKey }) => {\n    const cacheKey = `api:${idempotencyKey}`;\n    const cached = await kv.get(cacheKey);\n    if (cached) return cached;\n\n    const response = await fetch(endpoint, {\n      method: 'POST',\n      headers: { 'Idempotency-Key': idempotencyKey },\n      body: JSON.stringify(payload),\n    });\n\n    const result = await response.json();\n    await kv.set(cacheKey, result, { ex: 3600 });\n    return result;\n  },\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Human Approval Endpoint",
+        "description": "Server Action to resume workflow after human approval",
+        "code": "import { actionClient } from './actions';\nimport { executeWorkflow } from './agent';\n\nexport const approveWorkflow = actionClient\n  .schema(z.object({\n    stepId: z.string(),\n    approved: z.boolean(),\n    userId: z.string(),\n  }))\n  .action(async ({ stepId, approved, userId }) => {\n    if (!approved) {\n      await rollbackWorkflow(stepId);\n      return { status: 'rejected', message: 'Workflow rolled back' };\n    }\n\n    await kv.set(`approval:${stepId}`, { status: 'approved' });\n    const workflowState = await getWorkflowState(stepId);\n    const result = await executeWorkflow(userId, workflowState.nextTask);\n    \n    return { status: 'approved', result };\n  });\n\nfunction rollbackWorkflow(stepId: string) {\n  // Implementation for workflow rollback\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText",
+        "description": "Wrap Vercel AI SDK's generateText with Vex verification for action correctness",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { generateText } from 'ai';\n\nconst vex = createVex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  apiKey: process.env.VEX_API_KEY!,\n});\n\nexport async function verifiedGenerateText(params: any) {\n  // Define verification spec for workflow actions\n  const spec = {\n    name: 'workflow-action',\n    assertions: [\n      { type: 'action_correctness', threshold: 0.95 },\n      { type: 'permission_check', roles: ['workflow:execute'] },\n    ],\n    rollback: true,\n  };\n\n  const result = await generateText(params);\n  \n  // Verify tool calls and structured output\n  const verified = await vex.verify({\n    input: params.prompt,\n    output: result.text,\n    tools: result.toolResults,\n    spec,\n  });\n\n  if (!verified.valid) {\n    await vex.rollback({ traceId: verified.traceId });\n    throw new Error(`Verification failed: ${verified.errors}`);\n  }\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex StreamText Middleware",
+        "description": "Real-time streaming verification preventing partial hallucinations",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { streamText } from 'ai';\n\nconst vex = createVex({ /* config */ });\n\nexport async function verifiedStreamText(params: any) {\n  const stream = await streamText(params);\n  const verifiedStream = new TransformStream({\n    transform: async (chunk, controller) => {\n      const verified = await vex.verifyStreamChunk({\n        chunk: chunk,\n        context: params.prompt,\n        spec: { type: 'streaming_workflow', threshold: 0.9 },\n      });\n      \n      if (verified.valid) {\n        controller.enqueue(verified.chunk);\n      } else {\n        controller.enqueue('[VERIFICATION_BLOCKED]');\n      }\n    },\n  });\n\n  return stream.pipeThrough(verifiedStream);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Call Permission Validation",
+        "description": "Vex middleware validating tool permissions before execution",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport type { ToolCall } from 'ai';\n\nconst vex = createVex({ /* config */ });\n\nexport async function verifyToolCall(toolCall: ToolCall, userContext: any) {\n  const verification = await vex.verify({\n    input: toolCall.args,\n    spec: {\n      name: 'tool_permission',\n      assertions: [\n        {\n          type: 'permission_validation',\n          required: ['api:write'],\n          userContext,\n        },\n        {\n          type: 'idempotency_check',\n          key: toolCall.args.idempotencyKey,\n        },\n      ],\n    },\n  });\n\n  if (!verification.valid) {\n    throw new Error(`Tool access denied: ${verification.reason}`);\n  }\n\n  return toolCall;\n}\n\n// Usage in agent:\n// const verifiedTools = await Promise.all(\n//   toolResults.map(t => verifyToolCall(t, { userId })));\n",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Workflow Automation",
+      "description": "Add Vex middleware to your Vercel AI SDK workflows in 5 minutes to eliminate hallucinations, validate tools, and ensure reliable automation - start your free trial now."
+    }
+  }
+}

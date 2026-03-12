@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Haystack + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack ai email assistant",
+      "Haystack guardrails",
+      "ai email assistant reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Haystack enables intelligent email processing through modular pipelines for intent detection, draft generation, and approval workflows. Guardrails are essential due to the high-risk nature of email handling, where errors can lead to PII leaks, inappropriate communications, or confidentiality breaches. Vex integration provides runtime verification to ensure reliability and compliance in production.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Haystack",
+      "description": "The AI Email Assistant pipeline begins with an Email Parser component that extracts sender, recipient, subject, body, and attachments from incoming emails. This feeds into an Intent Detector using a text classifier to identify actions like 'reply', 'forward', 'draft', or 'archive'. A Router then directs to specialized sub-pipelines: the Reply Generator retrieves relevant context via RAG, generates drafts with an LLM, and applies PII filters; the Attachment Handler processes and validates files; and the Approval Workflow routes high-risk drafts for human review.\n\nVerification occurs at multiple stages: post-retrieval relevance checks, pre-generation content filtering, and final output validation for tone, accuracy, and compliance. The pipeline outputs structured email actions with confidence scores, ensuring safe automation of email workflows.\n\nThis composable architecture leverages Haystack's DocumentStores, Retrievers, and Generators while integrating custom components for email-specific logic.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   Email Input   │───▶│   Intent Detect  │───▶│     Router       │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                                        │\n            ┌─────────────────────────────────────────────┼──────────────┐\n            │                                             │              │\n┌─────────────────┐                           ┌──────────────────┐ ┌──────────────────┐\n│ Reply Generator │◀─────────────────────────▶│ Attachment Handler│ │ Approval Workflow│\n│ + Vex Guardrail │                           └──────────────────┘ └──────────────────┘\n└─────────────────┘\n     │\n┌─────────────────┐\n│   Send/Archive  │\n└─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "PII Leakage in Generated Replies",
+        "description": "Generator includes sensitive data from retrieved context or email body in outgoing drafts",
+        "severity": "critical",
+        "mitigation": "Vex PII filtering component scans all generated content before dispatch"
+      },
+      {
+        "name": "Inappropriate Tone Detection Failure",
+        "description": "Intent classifier or generator produces sarcastic/hostile language unsuitable for professional email",
+        "severity": "high",
+        "mitigation": "Multi-layer tone analysis with Vex sentiment and professionalism verification"
+      },
+      {
+        "name": "Invalid Recipient Forwarding",
+        "description": "Retriever suggests irrelevant contacts or generator fabricates email addresses",
+        "severity": "high",
+        "mitigation": "Recipient validation against verified contact lists with exact match requirements"
+      },
+      {
+        "name": "Hallucinated Content Beyond Context",
+        "description": "Generator fabricates facts not grounded in email thread or retrieved knowledge base",
+        "severity": "medium",
+        "mitigation": "Vex context faithfulness checks with similarity thresholds on generated vs retrieved content"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Email Intent Detection Pipeline",
+        "description": "Core pipeline classifying email intent using Haystack's text classification",
+        "code": "from haystack import Pipeline\nfrom haystack.components.classifiers import ZeroShotTextClassifier\nfrom haystack.utils import ComponentDevice\n\nintent_pipeline = Pipeline()\nintent_pipeline.add_component(\n    \"classifier\",\n    ZeroShotTextClassifier(model=\"microsoft/deberta-v3-base\", device=ComponentDevice.from_str(\"cuda\"))\n)\n\nintent_pipeline.add_edge(\n    \"classifier.candidate_labels\",\n    \"classifier.labels\",\n    inputs=[\"reply\", \"forward\", \"archive\", \"draft\"]\n)\n\nresult = intent_pipeline.run({\n    \"classifier\": {\n        \"text\": \"Please review the attached Q3 financials and provide feedback by EOD\"\n    }\n})\nprint(result[\"classifier\"][\"labels\"][0])  # 'reply'",
+        "language": "python"
+      },
+      {
+        "title": "RAG Reply Generator with Context Retrieval",
+        "description": "Retrieves relevant email history and generates context-grounded replies",
+        "code": "from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIGenerator\nfrom haystack.components.builders import PromptBuilder\n\nrag_pipeline = Pipeline()\n\nrag_pipeline.add_component(\n    \"retriever\",\n    InMemoryEmbeddingRetriever(document_store=doc_store, embeddable_document_types=[Document])\n)\n\nrag_pipeline.add_component(\n    \"prompt_builder\",\n    PromptBuilder(template=\"\"\"Context: {{join(retriever.documents, delimiter_newline=True)}}\nEmail: {{email_text}}\nReply professionally:\"\"\"))\n\nrag_pipeline.add_component(\n    \"generator\",\n    OpenAIGenerator(api_key=\"your-key\", model=\"gpt-4o-mini\")\n)\n\nrag_pipeline.connect(\"retriever\", \"prompt_builder.documents\")\nrag_pipeline.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Processing Component",
+        "description": "Custom component for safe attachment extraction and virus scanning",
+        "code": "from haystack import component\n\n@component\nclass AttachmentProcessor:\n    @component.output_types(attachments=dict, safe_to_forward=bool)\n    def run(self, email_content: str, max_size_mb: int = 10):\n        import email.mime.multipart\nfrom email import policy\n        msg = email.message_from_string(email_content, policy=policy.default)\n        attachments = {}\n        safe = True\n        \n        for part in msg.walk():\n            if part.get_content_maintype() == 'multipart':\n                continue\n            if part.get('Content-Disposition') is None:\n                continue\n            filename = part.get_filename()\n            if filename:\n                size = len(part.get_payload(decode=True))\n                if size > max_size_mb * 1024 * 1024:\n                    safe = False\n                attachments[filename] = size\n        \n        return {\"attachments\": attachments, \"safe_to_forward\": safe}",
+        "language": "python"
+      },
+      {
+        "title": "Approval Workflow Router",
+        "description": "Routes drafts to human approval based on confidence and risk scores",
+        "code": "from haystack.components.routers import PromptTemplateRouter\nfrom haystack.components.builders import PromptBuilder\n\napproval_router = Pipeline()\n\napproval_router.add_component(\n    \"risk_assessor\",\n    PromptBuilder(template=\"\"\"Draft: {{draft}}\nAssess risk level (LOW/MEDIUM/HIGH):\"\"\")\n)\n\napproval_router.add_component(\n    \"router\",\n    PromptTemplateRouter([\n        PromptTemplateRouter.Template(name=\"low_risk\", template=\"send immediately\"),\n        PromptTemplateRouter.Template(name=\"medium_risk\", template=\"manager review\"),\n        PromptTemplateRouter.Template(name=\"high_risk\", template=\"executive approval\")\n    ])\n)\n\napproval_router.connect(\"risk_assessor\", \"router\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex PII Filter Component",
+        "description": "Custom Haystack component using Vex SDK for real-time PII detection",
+        "code": "from haystack import component\nimport vex\n\n@component\nclass VexPIIFilter:\n    def __init__(self):\n        self.vex_client = vex.Client(api_key=\"your-vex-key\")\n    \n    @component.output_types(clean_text=str, pii_detected=list, safe_to_send=bool)\n    def run(self, text: str):\n        verification = self.vex_client.verify(\n            text,\n            checks=[\n                vex.PIIFilterCheck(),\n                vex.ConfidenceCheck(min_score=0.9)\n            ]\n        )\n        \n        return {\n            \"clean_text\": verification.cleaned_output,\n            \"pii_detected\": verification.issues,\n            \"safe_to_send\": verification.passed\n        }\n\n# Usage in pipeline\npipeline.add_component(\"pii_filter\", VexPIIFilter())\npipeline.connect(\"generator\", \"pii_filter.text\")",
+        "language": "python"
+      },
+      {
+        "title": "Vex Tone & Professionalism Guardrail",
+        "description": "Ensures generated email drafts maintain professional tone",
+        "code": "from haystack import component\nimport vex\n\n@component\nclass VexToneGuardrail:\n    def __init__(self):\n        self.vex_client = vex.Client(api_key=\"your-vex-key\")\n    \n    @component.output_types(tone_score=float, professional=bool, suggestions=list)\n    def run(self, draft: str):\n        result = self.vex_client.verify(\n            draft,\n            checks=[\n                vex.SentimentCheck(desired_sentiment=\"neutral-positive\"),\n                vex.CustomCheck(\n                    name=\"professionalism\",\n                    prompt=\"Rate professional tone 0-1 for corporate email\"\n                )\n            ]\n        )\n        \n        return {\n            \"tone_score\": result.metrics[\"professionalism\"],\n            \"professional\": result.metrics[\"professionalism\"] > 0.85,\n            \"suggestions\": result.suggestions\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Vex Context Faithfulness Verifier",
+        "description": "Ensures generated replies stay faithful to retrieved email context",
+        "code": "from haystack import component\nimport vex\n\n@component\nclass VexFaithfulnessCheck:\n    def __init__(self):\n        self.vex_client = vex.Client(api_key=\"your-vex-key\")\n    \n    @component.output_types(faithful=bool, hallucination_score=float, evidence_used=str)\n    def run(self, context: list, generated_reply: str):\n        context_text = \"\\n\".join([doc.content for doc in context])\n        \n        verification = self.vex_client.verify(\n            generated_reply,\n            context=[context_text],\n            checks=[\n                vex.GroundingCheck(),\n                vex.HallucinationCheck(threshold=0.1)\n            ]\n        )\n        \n        return {\n            \"faithful\": verification.passed,\n            \"hallucination_score\": verification.metrics[\"hallucination\"],\n            \"evidence_used\": verification.evidence\n        }\n\n# Pipeline connection\npipeline.connect(\"retriever.documents\", \"faithfulness.context\")\npipeline.connect(\"generator.replies\", \"faithfulness.generated_reply\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack AI Email Assistant",
+      "description": "Integrate Vex guardrails today to protect your email automation from compliance failures and ensure production reliability."
+    }
+  }
+}

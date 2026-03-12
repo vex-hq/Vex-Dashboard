@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Smolagents + Vex Guardrails",
+    "description": "Learn how to build customer support with Smolagents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Smolagents customer support",
+      "Smolagents guardrails",
+      "customer support reliability",
+      "Vex Smolagents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Smolagents leverages its lightweight, code-first approach for fast RAG-based reasoning and tool integration with CRMs. However, the simplicity that makes Smolagents powerful also exposes risks like unsafe code generation and multi-step reasoning failures in high-stakes support scenarios. Vex provides essential guardrails to verify response accuracy, filter PII, ensure policy compliance, and maintain professional tone.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Smolagents",
+      "description": "A typical Smolagents customer support agent uses a code agent for RAG retrieval from a knowledge base, combined with tool agents for CRM operations like ticket creation and order lookup. The agent receives user queries, retrieves relevant docs via vector search, reasons over context with an LLM, and calls tools to update Salesforce or Zendesk. Multi-step flows handle escalations by checking sentiment and routing to human agents when needed.\n\nThe architecture emphasizes minimal boilerplate: a single agent.run() orchestrates retrieval, reasoning, and action. Knowledge bases are indexed via simple embedding functions, while tools are defined with Pydantic schemas for type safety. This enables rapid prototyping but requires verification at runtime to catch compounding errors in complex support interactions.\n\nVex wraps the agent execution to validate outputs against support-specific criteria like PII redaction and escalation triggers before responses reach customers.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Smolagents     │\n│  (Support Ticket)│    │   Code Agent     │\n└─────────────────┘    │ + Tool Agent     │\n                       │                  │\n                       │  ┌─────────────┐  │\n                       │  │ RAG KB      │◀──┤\n                       │  │ Retrieval   │  │ │\n                       └─▶│ (FAISS/Vector)│  │\n                          └─────────────┘  │\n                              │           │\n                       ┌──────────────────┘\n                       │ CRM Tools\n                  ┌────▼──────┐    ┌──────────────┐\n                  │Salesforce │    │   Vex        │\n                  │Zendesk    │◀──▶│Verification │\n                  │Order Lookup│    │(PII/Tone/...)│\n                  └────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unsafe Python Execution",
+        "description": "Code agent generates malicious or resource-intensive Python like os.system() calls or infinite loops during ticket processing",
+        "severity": "critical",
+        "mitigation": "Wrap agent.run() with Vex sandboxed execution and code safety checks"
+      },
+      {
+        "name": "PII Leakage in Responses",
+        "description": "Agent exposes customer phone numbers, emails, or order details pulled from CRM without redaction",
+        "severity": "critical",
+        "mitigation": "Vex PII filtering scans all outputs before customer delivery"
+      },
+      {
+        "name": "Tone Inconsistency",
+        "description": "Multi-step reasoning produces unprofessional, sarcastic, or overly casual responses compounding across conversation",
+        "severity": "high",
+        "mitigation": "Vex tone verification against brand voice guidelines per response"
+      },
+      {
+        "name": "Missed Escalation Triggers",
+        "description": "Agent fails to detect urgent keywords (refund, fraud, outage) and continues self-service flow inappropriately",
+        "severity": "high",
+        "mitigation": "Vex policy checks for escalation patterns and required human handoff"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "RAG Knowledge Base Setup",
+        "description": "Index support docs with sentence embeddings for fast retrieval in agent reasoning",
+        "code": "from smolagents import CodeAgent\nfrom smolagents.tools import tool\nfrom sentence_transformers import SentenceTransformer\nimport faiss\n\n# Index support knowledge base\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\ndocs = ['Returns policy...', 'Shipping FAQ...', 'Billing support...']\nembeddings = model.encode(docs)\nindex = faiss.IndexFlatL2(embeddings.shape[1])\nindex.add(embeddings.astype('float32'))\n\n@tool\ndef retrieve_docs(query: str) -> str:\n    query_emb = model.encode([query])\n    _, indices = index.search(query_emb.astype('float32'), 3)\n    return '\\n'.join([docs[i] for i in indices[0]])",
+        "language": "python"
+      },
+      {
+        "title": "CRM Tool Definitions",
+        "description": "Define typed tools for ticket creation and order lookup with Pydantic validation",
+        "code": "from smolagents.tools import tool\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass Ticket(BaseModel):\n    customer_id: str = Field(..., description=\"Unique customer ID\")\n    issue: str = Field(..., max_length=500)\n    priority: str = Field('medium', pattern='^(low|medium|high|critical)$')\n\nclass Order(BaseModel):\n    order_id: str\n    customer_email: str\n\n@tool\ndef create_ticket(ticket: Ticket) -> str:\n    \"\"\"Create support ticket in Zendesk/Salesforce\"\"\"\n    return f\"Ticket #{12345} created for {ticket.customer_id}\"\n\n@tool\ndef lookup_order(order: Order) -> dict:\n    \"\"\"Retrieve order details from CRM\"\"\"\n    return {'status': 'shipped', 'items': ['Widget A'], 'tracking': 'UPS123'}",
+        "language": "python"
+      },
+      {
+        "title": "Core Support Agent",
+        "description": "Combine RAG retrieval with CRM tools in single code agent",
+        "code": "agent = CodeAgent(\n    model=\"mistral-7b-instruct\",\n    tools=[retrieve_docs, create_ticket, lookup_order],\n    instructions=\"\"\"You are a helpful customer support agent.\n    1. Retrieve relevant docs first\n    2. Use tools for CRM actions\n    3. Escalate critical issues\n    4. Keep responses professional and concise\"\"\"\n)\n\ndef handle_support_query(query: str) -> str:\n    return agent.run(query)",
+        "language": "python"
+      },
+      {
+        "title": "Escalation Detection Logic",
+        "description": "Multi-step reasoning to detect and handle escalation triggers",
+        "code": "def analyze_escalation(query: str) -> bool:\n    triggers = ['refund all', 'complete outage', 'fraud alert', 'urgent billing']\n    return any(trigger in query.lower() for trigger in triggers)\n\n@tool\ndef escalate_to_human(customer_id: str, reason: str) -> str:\n    \"\"\"Escalate to human agent immediately\"\"\"\n    return f\"Escalated customer {customer_id}: {reason}\"",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Basic Vex Wrapper for agent.run()",
+        "description": "Wrap core agent execution with comprehensive verification suite",
+        "code": "from vex import verify\n\ndef secure_support_handler(query: str) -> str:\n    raw_response = handle_support_query(query)\n    \n    verified = verify(\n        raw_response,\n        checks=[\n            \"response_accuracy\",\n            \"pii_filtering\",\n            \"tone_consistency:professional\",\n            \"policy_compliance:support\",\n            \"escalation_triggers\"\n        ],\n        context={\"query\": query}\n    )\n    return verified.response",
+        "language": "python"
+      },
+      {
+        "title": "PII + Tone Verification",
+        "description": "Specific checks for customer support compliance requirements",
+        "code": "verified = verify(\n    raw_response,\n    checks={\n        \"pii_filtering\": {\n            \"entities\": [\"PHONE_NUMBER\", \"EMAIL_ADDRESS\", \"CREDIT_CARD\"],\n            \"action\": \"redact\"\n        },\n        \"tone_consistency\": {\n            \"target\": \"professional,empathetic,concise\",\n            \"min_score\": 0.85\n        },\n        \"no_hallucinations\": {\n            \"knowledge_base\": support_docs\n        }\n    }\n)\n\nif not verified.passed:\n    return escalate_to_human(customer_id, verified.failure_reason)",
+        "language": "python"
+      },
+      {
+        "title": "Escalation + Policy Guardrails",
+        "description": "Policy enforcement with automatic escalation for high-risk queries",
+        "code": "from vex.policies import SupportPolicy\n\npolicy = SupportPolicy(\n    escalation_keywords=[\"fraud\", \"legal\", \"refund dispute\"],\n    max_autoresolve_steps=3,\n    pii_redaction=True\n)\n\nresult = verify(\n    raw_response,\n    policy=policy,\n    context={\n        \"customer_tier\": \"premium\",\n        \"conversation_history\": history,\n        \"query_sentiment\": sentiment_score\n    }\n)\n\nif result.should_escalate:\n    return f\"Transferring to specialist: {result.escalation_reason}\"",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Smolagents Customer Support",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your agent.run() calls to eliminate support risks immediately."
+    }
+  }
+}

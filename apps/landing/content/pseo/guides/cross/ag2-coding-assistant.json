@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "ag2",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with AG2 + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with AG2 + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AG2 ai coding assistant",
+      "AG2 guardrails",
+      "ai coding assistant reliability",
+      "Vex AG2",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with AG2 enables multi-agent collaboration for code generation, review, testing, and debugging within a repository context. AG2's enhanced group chat features power iterative refinement but introduce risks like off-topic conversations, factual errors in consensus, and unsafe code execution. Vex guardrails ensure reliable, secure outputs by verifying code correctness, security, and compliance before deployment.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with AG2",
+      "description": "The AI Coding Assistant uses AG2's multi-agent group chat with specialized roles: a CodeGenerator agent proposes solutions, a Reviewer critiques for bugs/security, a Tester executes in a sandbox with validation, and a Debugger iterates fixes. Repository context is injected via tools, enabling agents to read files, run tests, and commit changes. Group chat consensus drives refinement until tests pass and security checks clear.\n\nSandbox execution isolates code runs, with test suites validating functionality. Vex integrates as a message hook to scan every agent output for risks before execution or consensus. This architecture scales to complex repos while maintaining safety through verification gates.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   AG2 Group Chat │\n└─────────────────┘    │  (Generator+      │\n                       │   Reviewer+Tester+ │\n                       │     Debugger)     │\n                       └──────┬─────────────┘\n                              │\n                       ┌──────▼─────────────┐\n                       │   Vex Guardrails   │\n                       │ (Code Scan+Sec+    │\n                       │  Tests+Compliance) │\n                       └──────┬─────────────┘\n                              │\n                       ┌──────▼─────────────┐\n                       │  Sandbox Execute   │──▶┌──────────────┐\n                       │   + Test Validate  │   │  Commit Code  │\n                       └────────────────────┘   └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious Code Generation",
+        "description": "CodeGenerator agent produces harmful code (RCE, data exfiltration) during iterative debugging",
+        "severity": "critical",
+        "mitigation": "Vex security scanning on all code outputs before sandbox execution"
+      },
+      {
+        "name": "Credential Leakage in Context",
+        "description": "Repo context injection exposes API keys/secrets in agent conversations",
+        "severity": "high",
+        "mitigation": "Vex PII/credential detection strips sensitive data from messages"
+      },
+      {
+        "name": "Test Bypass via Group Consensus",
+        "description": "Reviewer+Tester agents reach false consensus on broken code, skipping validation",
+        "severity": "high",
+        "mitigation": "Vex independent code correctness verification overrides group decisions"
+      },
+      {
+        "name": "Dependency Supply Chain Attack",
+        "description": "Agents install compromised packages during sandbox setup",
+        "severity": "medium",
+        "mitigation": "Vex dependency safety scanning blocks known vulnerable packages"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "AG2 Group Chat Setup",
+        "description": "Initialize multi-agent group with coding roles and repo context tools",
+        "code": "from ag2 import GroupChat, GroupChatManager\nfrom ag2.agent import AssistantAgent\n\n# Define specialized agents\ngenerator = AssistantAgent(name=\"CodeGenerator\", llm_config={\"model\": \"gpt-4o\"})\nreviewer = AssistantAgent(name=\"CodeReviewer\", llm_config={\"model\": \"gpt-4o\"})\ntester = AssistantAgent(name=\"Tester\", llm_config={\"model\": \"gpt-4o\"}, code_execution_config={\"work_dir\": \"sandbox\"})\n\ngroupchat = GroupChat(agents=[generator, reviewer, tester], messages=[], max_round=20)\nmanager = GroupChatManager(groupchat=groupchat, llm_config={\"model\": \"gpt-4o\"})",
+        "language": "python"
+      },
+      {
+        "title": "Repository Context Tool",
+        "description": "Tool for agents to read repo files and inject context into conversations",
+        "code": "from ag2.tools import tool\n\n@tool\ndef read_repo_file(file_path: str) -> str:\n    \"\"\"Read file from repository context\"\"\"\n    with open(file_path, 'r') as f:\n        return f.read()\n\n@tool\ndef list_repo_files(dir_path: str = \".\") -> list:\n    \"\"\"List files in repository directory\"\"\"\n    import os\n    return [f for f in os.listdir(dir_path) if f.endswith(('.py', '.js'))]\n\ngenerator.tools = [read_repo_file, list_repo_files]",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Test Execution",
+        "description": "Tester agent runs code in isolated sandbox with pytest validation",
+        "code": "from ag2.tools import code_executor\n\ntester.code_executor = code_executor.CodeExecutor(\n    work_dir=\"sandbox\",\n    timeout=30,\n    command=\"python -m pytest {{code}} -v\"\n)\n\ndef run_unit_tests(code: str) -> str:\n    \"\"\"Execute code and run pytest suite\"\"\"\n    result = tester.code_executor.execute(f\"\"\"\n{code}\n\n# Auto-generated test\nassert some_function() == expected_result\n    \"\"\")\n    return result",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Debug Loop",
+        "description": "Group chat continues until tests pass and code is approved",
+        "code": "def run_coding_session(task: str):\n    generator.initiate_chat(\n        manager,\n        message=task + \"\\nRepo context: use read_repo_file tool\"\n    )\n    \n    while not tester.last_message().get('test_passed', False):\n        manager.run_chat()\n    \n    return generator.last_message()['content']",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Message Hook",
+        "description": "Add Vex as hook to scan all agent messages before processing",
+        "code": "import vex\nfrom ag2 import register_message_hook\n\n@vex.guardrail(\n    verifications=[\n        \"code_correctness\",\n        \"security_vulnerability_scanning\",\n        \"no_credential_leakage\",\n        \"dependency_safety\"\n    ],\n    risk_profile=\"medium\"\n)\ndef vex_message_hook(message: dict) -> bool:\n    \"\"\"Vex verification for AG2 messages\"\"\"\n    result = vex.verify_message(message['content'])\n    if not result.passed:\n        print(f\"Vex blocked: {result.issues}\")\n        return False\n    return True\n\n# Register globally\nregister_message_hook(vex_message_hook)",
+        "language": "python"
+      },
+      {
+        "title": "Code Output Verification",
+        "description": "Specific Vex check for generated code before sandbox execution",
+        "code": "@vex.guardrail(verifications=[\"code_correctness\", \"security_vulnerability_scanning\"])\ndef verify_generated_code(code: str, context: str) -> dict:\n    \"\"\"Verify code before execution\"\"\"\n    result = vex.verify_code(code, context=context)\n    \n    issues = []\n    if result.security_issues:\n        issues.append(\"SECURITY: \" + str(result.security_issues))\n    if result.static_analysis_errors:\n        issues.append(\"CORRECTNESS: \" + str(result.static_analysis_errors))\n    \n    return {\n        \"safe_to_execute\": len(issues) == 0,\n        \"issues\": issues,\n        \"clean_code\": result.cleaned_code if result.cleaned_code else code\n    }\n\ntester.message_hook = verify_generated_code",
+        "language": "python"
+      },
+      {
+        "title": "Group Consensus Override",
+        "description": "Vex final check prevents unsafe consensus from bypassing tests",
+        "code": "def final_consensus_check(group_messages: list) -> bool:\n    \"\"\"Vex override for group chat consensus\"\"\"\n    combined_code = \"\\n\".join([msg['content'] for msg in group_messages if '```python' in msg['content']])\n    \n    result = vex.verify([\n        vex.CodeCorrectness(combined_code),\n        vex.SecurityScan(combined_code),\n        vex.LicenseCompliance(),\n        vex.DependencySafety()\n    ])\n    \n    if not result.all_passed():\n        raise ValueError(f\"Vex blocked deployment: {result.violations}\")\n    return True\n\nmanager.on_consensus = final_consensus_check",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AG2 AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and register message hooks to protect your codebase."
+    }
+  }
+}

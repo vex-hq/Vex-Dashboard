@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Haystack + Vex Guardrails",
+    "description": "Learn how to build code generation with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack code generation",
+      "Haystack guardrails",
+      "code generation reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation pipelines with Haystack enables LLM agents to produce, execute, and refine code iteratively, powering advanced developer tools. However, high-risk scenarios like sandbox execution and credential handling demand robust guardrails to prevent syntax errors, security breaches, and hallucinations. Vex integration ensures reliable outputs through comprehensive verification at every pipeline stage.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Haystack",
+      "description": "The typical Haystack code generation pipeline starts with a user prompt routed to a retriever that fetches relevant code examples or documentation from a vector store. This context feeds a code generator LLM (e.g., CodeLlama) producing executable code, which passes through a sandbox executor for safe runtime evaluation. Results from execution—including stdout, stderr, and test outcomes—trigger an iterative refinement loop via a critic agent that diagnoses failures and prompts regeneration until validation passes.\n\nKey components include a PromptNode for orchestration, CustomCodeExecutor for sandboxing, and VexGuardrailNode for verification. The pipeline handles iterative flows using conditional routing based on execution success, test coverage, and safety checks. This modular design supports scaling to complex multi-file codebases with dependency management.",
+      "diagram": "User Prompt → Retriever (FAISS) → Code Generator (CodeLlama)\n                     ↓\n              Vex Guardrails (Safety/Syntax)\n                     ↓\n             Sandbox Executor (Docker/Pyodide)\n                     ↓\n              Test Validator (Pytest/Unittest)\n                     ↓\n             Critic Agent → [Iterate | Success]"
+    },
+    "risks": [
+      {
+        "name": "Malicious code injection",
+        "description": "LLM generates code with syscalls, file writes, or network requests bypassing sandbox",
+        "severity": "critical",
+        "mitigation": "Vex code safety scanner + isolated Docker execution"
+      },
+      {
+        "name": "Syntax errors halting execution",
+        "description": "Invalid Python syntax crashes sandbox, blocking iteration",
+        "severity": "high",
+        "mitigation": "Pre-execution AST parsing + syntax validation"
+      },
+      {
+        "name": "Credential leakage in generated code",
+        "description": "Hardcoded API keys or secrets from training data contamination",
+        "severity": "critical",
+        "mitigation": "Regex pattern matching + secret detection"
+      },
+      {
+        "name": "Unsafe dependency installation",
+        "description": "pip install of malicious packages during execution",
+        "severity": "high",
+        "mitigation": "Allowlist + dependency safety scanning"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Pipeline",
+        "description": "Core pipeline with retriever, generator, and executor components",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import PromptBuilder\nfrom haystack.components.generators import HuggingFaceLocalGenerator\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\n\ncode_pipeline = Pipeline()\ncode_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever())\ncode_pipeline.add_component(\"prompt_builder\", PromptBuilder(template=\"Write Python code for: {{query}} using context: {{documents}}\"))\ncode_pipeline.add_component(\"generator\", HuggingFaceLocalGenerator(model=\"codellama/CodeLlama-7b-hf\"))\ncode_pipeline.connect(\"retriever\", \"prompt_builder.documents\")\ncode_pipeline.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Code Executor Component",
+        "description": "Custom component safely executes generated code with timeout and resource limits",
+        "code": "from haystack import component\nfrom subprocess import run, PIPE\nimport docker\n\n@component\nclass SandboxExecutor:\n    @component.output_types(execution_result=str, success=bool)\n    def run_code(self, code: str) -> dict:\n        client = docker.from_env()\n        container = client.containers.run(\n            \"python:3.11-slim\",\n            command=f\"python -c '{code}'\",\n            mem_limit=\"256m\",\n            cpu_quota=100000,\n            detach=False,\n            remove=True\n        )\n        return {\"execution_result\": container.decode('utf-8'), \"success\": True}",
+        "language": "python"
+      },
+      {
+        "title": "Test Validation Component",
+        "description": "Automatically generates and runs pytest validations against generated code",
+        "code": "import tempfile\nimport pytest\nfrom haystack import component\n\n@component\nclass TestValidator:\n    @component.output_types(passed=bool, failures=list)\n    def validate_code(self, code: str, expected_output: str) -> dict:\n        with tempfile.TemporaryDirectory() as tmpdir:\n            test_file = f\"{tmpdir}/test_code.py\"\n            with open(test_file, 'w') as f:\n                f.write(f\"\"\"\ndef test_generated_code():\n    exec({{{code!r}}})\n    assert 'expected_result' in locals()\n\"\"\")\n            result = pytest.main([test_file, '-v'])\n        return {\"passed\": result == 0, \"failures\": []}",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Refinement Orchestrator",
+        "description": "Conditional routing for code refinement based on execution and test results",
+        "code": "from haystack.components.routers import PromptTemplateRouter\nfrom haystack import Pipeline\n\nrefine_pipeline = Pipeline()\nrefine_pipeline.add_component(\"executor\", SandboxExecutor())\nrefine_pipeline.add_component(\"validator\", TestValidator())\nrefine_pipeline.add_component(\"router\", PromptTemplateRouter([\n    {\"condition\": \"{{validator.passed}}\", \"template\": \"Success!\"},\n    {\"condition\": \"else\", \"template\": \"Fix this code: {{code}}. Errors: {{failures}}\"}\n]))\nrefine_pipeline.connect(\"executor.execution_result\", \"validator.code\")\nrefine_pipeline.connect(\"validator\", \"router\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Guardrail Custom Component",
+        "description": "Add Vex as pipeline component for comprehensive code verification",
+        "code": "from vex_sdk import VexClient\nfrom haystack import component\n\n@component\nclass VexGuardrailNode:\n    def __init__(self):\n        self.vex = VexClient(api_key=\"your-vex-key\")\n    \n    @component.input_types(code=str)\n    @component.output_types(safe=bool, issues=list)\n    def verify_code(self, code: str) -> dict:\n        results = self.vex.verify(\n            content=code,\n            verifications=[\n                \"code_safety\",\n                \"syntax_validity\",\n                \"no_credential_leakage\",\n                \"dependency_safety\"\n            ]\n        )\n        return {\n            \"safe\": results.passed,\n            \"issues\": results.issues\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Pipeline with Vex Integration",
+        "description": "Insert Vex guardrails between generator and executor",
+        "code": "from haystack import Pipeline\n\nfull_pipeline = Pipeline()\nfull_pipeline.add_component(\"generator\", HuggingFaceLocalGenerator())\nfull_pipeline.add_component(\"vex_guardrail\", VexGuardrailNode())\nfull_pipeline.add_component(\"executor\", SandboxExecutor())\n\nfull_pipeline.connect(\"generator\", \"vex_guardrail.code\")\nfull_pipeline.connect(\"vex_guardrail\", \"executor\")\n\n# Only execute safe code\nfull_pipeline.add_conditional_connections(\n    \"vex_guardrail.safe\",\n    [\"executor\", \"end\"],\n    [\"safe\", \"unsafe\"]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Runtime Vex Monitoring",
+        "description": "Continuous verification during iterative refinement loops",
+        "code": "def monitor_refinement_loop(pipeline, max_iterations=5):\n    results = []\n    for i in range(max_iterations):\n        result = pipeline.run({\n            \"generator\": {\"prompt\": f\"Iteration {i+1}: {{query}}\"}\n        })\n        \n        vex_result = VexClient().verify(\n            content=result[\"vex_guardrail.issues\"],\n            verifications=[\"execution_sandboxing\"]\n        )\n        \n        if not vex_result.passed:\n            print(f\"Iteration {i+1} blocked: {vex_result.issues}\")\n            break\n        results.append(result)\n    return results",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Code Generation",
+      "description": "Integrate Vex today to protect your production code generation pipelines from critical safety failures."
+    }
+  }
+}

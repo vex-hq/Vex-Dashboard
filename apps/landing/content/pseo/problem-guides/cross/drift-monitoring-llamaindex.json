@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in LlamaIndex Agents",
+    "description": "How to detect and fix ai agent drift monitoring in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "LlamaIndex drift-monitoring",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in LlamaIndex manifests as degradation in retrieval accuracy and response relevance over time, where agents return irrelevant context, hallucinate beyond indexed sources, serve stale data from outdated indexes, or lose critical information due to poor chunking. These issues arise from evolving data sources, index staleness, and suboptimal retrieval configurations in LlamaIndex's RAG pipelines. Vex provides observability to detect these drifts before they impact production agents.",
+    "howItManifests": [
+      {
+        "scenario": "Retrieved context irrelevant to query",
+        "symptom": "Vector embeddings fail to match semantic intent as data distributions shift",
+        "impact": "Agent generates responses based on unrelated documents, reducing answer accuracy by 40-60%"
+      },
+      {
+        "scenario": "Synthesizer hallucinating beyond source documents",
+        "symptom": "Response LLM generates content not grounded in retrieved nodes despite citations",
+        "impact": "Loss of response faithfulness; users receive plausible but incorrect information"
+      },
+      {
+        "scenario": "Index staleness causing outdated responses",
+        "symptom": "Responses reference data older than expected freshness window",
+        "impact": "Critical business decisions based on obsolete information"
+      },
+      {
+        "scenario": "Chunk boundary errors losing critical context",
+        "symptom": "Key sentences split across chunk boundaries, causing incomplete context retrieval",
+        "impact": "Missing critical context leads to incomplete or wrong answers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Score Monitoring",
+        "description": "Tracks cosine similarity between query embedding and top-k retrieved nodes over time",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\nfrom llama_index.embeddings.openai import OpenAIEmbedding\n\n\ndocs = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(docs)\n\nquery_engine = index.as_query_engine(similarity_top_k=3)\n\n# Track retrieval scores\nresponse = query_engine.query(\"What is the latest product pricing?\")\n\nnode_scores = []\nfor node_with_score in response.source_nodes:\n    similarity_score = node_with_score.score\n    node_scores.append({\n        'node_id': node_with_score.node.node_id,\n        'similarity': similarity_score,\n        'content_preview': node_with_score.node.text[:100]\n    })\n\nprint(f\"Avg similarity: {sum(n['similarity'] for n in node_scores)/len(node_scores):.3f}\")\nif sum(n['similarity'] for n in node_scores)/len(node_scores) < 0.75:\n    print('🚨 RETRIEVAL DRIFT DETECTED')",
+        "language": "python"
+      },
+      {
+        "name": "Response Faithfulness Check",
+        "description": "Measures if response sticks to provided context using LlamaIndex faithfulness metric",
+        "code": "from llama_index.core.evaluation import FaithfulnessEvaluator\nfrom llama_index.llms.openai import OpenAI\n\nllm = OpenAI(model=\"gpt-4\")\nevaluator = FaithfulnessEvaluator(llm=llm)\n\n# After query\nresponse = query_engine.query(\"Your query here\")\n\n# Evaluate faithfulness to source nodes\nfaithfulness_metrics = evaluator.evaluate_response(\n    query_str=\"Your query here\",\n    response=response.response,\n    contexts=[node.text for node in response.source_nodes]\n)\n\nfaithfulness_score = faithfulness_metrics.score\nprint(f\"Faithfulness: {faithfulness_score:.3f}\")\nif faithfulness_score < 0.8:\n    print('🚨 HALLUCINATION DRIFT DETECTED')",
+        "language": "python"
+      },
+      {
+        "name": "Index Freshness Audit",
+        "description": "Checks document metadata timestamps against expected freshness window",
+        "code": "from datetime import datetime, timedelta\nimport pandas as pd\n\n# Analyze index freshness\nfreshness_issues = []\nfor node in index.index_struct.nodes:\n    doc_timestamp = node.metadata.get('last_updated', node.metadata.get('created_at'))\n    if doc_timestamp:\n        doc_time = datetime.fromisoformat(doc_timestamp.replace('Z', '+00:00'))\n        age_days = (datetime.now(doc_time.tzinfo) - doc_time).days\n        if age_days > 7:  # 7-day freshness window\n            freshness_issues.append({\n                'node_id': node.node_id,\n                'age_days': age_days,\n                'content': node.text[:50]\n            })\n\nstale_pct = len(freshness_issues) / len(index.index_struct.nodes)\nprint(f\"Stale documents: {stale_pct:.1%}\")\nif stale_pct > 0.1:\n    print('🚨 INDEX STALENESS DETECTED')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Chunk Size Optimization",
+        "description": "Adjusts chunking strategy based on content semantics to preserve context boundaries",
+        "code": "from llama_index.core.node_parser import SentenceSplitter\nfrom llama_index.core.text_splitter import SentenceSplitter\n\n# Semantic-aware chunking\nnode_parser = SentenceSplitter(\n    chunk_size=512,\n    chunk_overlap=64,\n    paragraph_separator=\"\\n\\n\",\n    secondary_chunking_regex=r'[^\\.!?]+[\\.!?]+'\n)\n\n# Rebuild index with better chunking\ndocs = SimpleDirectoryReader('data').load_data()\nnodes = node_parser.get_nodes_from_documents(docs)\nindex = VectorStoreIndex(nodes)\n\nprint(f\"Created {len(nodes)} semantically-aware chunks\")",
+        "language": "python"
+      },
+      {
+        "name": "Hybrid Retrieval with Reranking",
+        "description": "Combines vector search with reranking to improve relevance under drift",
+        "code": "from llama_index.core.retrievers import VectorIndexRetriever\nfrom llama_index.core.postprocessor import LLMRerank\nfrom llama_index.llms.openai import OpenAI\n\nllm = OpenAI(model=\"gpt-4\")\n\n# Hybrid retrieval with reranking\nretriever = VectorIndexRetriever(index=index, similarity_top_k=8)\nreranker = LLMRerank(\n    llm=llm,\n    top_n=3,\n    verbose=True\n)\n\nquery_engine = index.as_query_engine(\n    node_postprocessors=[reranker],\n    similarity_top_k=8\n)\n\nresponse = query_engine.query(\"Your query\")\nprint(\"Reranked results:\", [n.node_id for n in response.source_nodes])",
+        "language": "python"
+      },
+      {
+        "name": "Automated Index Refresh Pipeline",
+        "description": "Schedules index rebuilds based on data change detection",
+        "code": "from llama_index.core import StorageContext, load_index_from_storage\nimport os\nfrom datetime import datetime\n\n# Check if refresh needed\ndef needs_refresh(index_path: str, max_age_days: int = 1) -> bool:\n    if not os.path.exists(index_path):\n        return True\n    \n    persist_time = datetime.fromtimestamp(os.path.getmtime(index_path))\n    return (datetime.now() - persist_time).days > max_age_days\n\n# Auto-refresh\nif needs_refresh('./storage'):\n    print(\"Refreshing index...\")\n    docs = SimpleDirectoryReader('data').load_data()\n    index = VectorStoreIndex.from_documents(docs)\n    index.storage_context.persist(persist_dir=\"./storage\")\n    print(\"✅ Index refreshed\")\nelse:\n    storage_context = StorageContext.from_defaults(persist_dir=\"./storage\")\n    index = load_index_from_storage(storage_context)\n    print(\"Using cached index\")",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex automatically wraps LlamaIndex query engines to capture full observability traces including retrieval scores, faithfulness metrics, and index freshness. It establishes production baselines during warmup then alerts on statistical deviations using changepoint detection. Vex's agent reliability dashboard visualizes drift patterns across all LlamaIndex deployments with one-click remediation workflows.\n\nThe integration requires only one line of code around query_engine.query(). Vex captures node metadata, similarity scores, response faithfulness, and execution latency automatically. When drift is detected, Vex triggers automated fixes like index rebuilds or retrieval parameter tuning via predefined remediation policies.\n\nVex maintains golden datasets of known-good queries and compares production responses against these baselines, providing precise drift quantification and root cause analysis specific to LlamaIndex failure modes.",
+      "code": "from vex import verify\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Install: pip install llama-index vex-sdk\n\n# Load your LlamaIndex setup\ndocs = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(docs)\nquery_engine = index.as_query_engine()\n\n# Vex monitors ALL drift patterns automatically\n@verify(  # <- ONE LINE INTEGRATION\n    monitors=[\n        'retrieval_relevance',\n        'response_faithfulness', \n        'index_freshness',\n        'chunk_context_loss'\n    ],\n    alert_on_drift=True,\n    auto_remediate=True\n)\ndef monitored_query(query: str):\n    response = query_engine.query(query)\n    return str(response)\n\n# Production usage\nresult = monitored_query(\"What are current pricing tiers?\")\n\n# Vex auto-alerts + fixes:\n# 🚨 Retrieval relevance dropped 23% from baseline\n# 🔧 Auto-triggered index refresh\n# ✅ Drift resolved",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `vex.verify()` to your LlamaIndex query engine in 60 seconds and eliminate agent drift forever"
+    }
+  }
+}

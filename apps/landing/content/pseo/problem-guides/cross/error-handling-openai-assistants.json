@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in OpenAI Assistants API Agents",
+    "description": "How to detect and fix ai agent error handling patterns in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "OpenAI Assistants API error-handling",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, AI Agent Error Handling Patterns manifest as silent failures in managed runtimes where code interpreter sandboxes crash on unsafe operations, file search returns irrelevant documents without validation, thread contexts exceed token limits without warnings, and function calls produce hallucinated arguments outside JSON schemas. These issues arise from the API's asynchronous run lifecycle and lack of built-in validation, leading agents to produce unreliable outputs or infinite loops. Without explicit error boundaries, agents degrade gracefully but fail to self-correct, amplifying errors across multi-turn conversations.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter executing unsafe operations in sandbox",
+        "symptom": "Run status transitions to 'requires_action' or 'failed' with vague 'sandbox_error' annotations in run events",
+        "impact": "Agent halts mid-task, loses conversation context, requires manual thread restart"
+      },
+      {
+        "scenario": "File search retrieving irrelevant or outdated documents",
+        "symptom": "Tool call returns file_search results with low relevance scores but no rejection logic",
+        "impact": "Agent hallucinates answers based on wrong documents, erodes user trust over time"
+      },
+      {
+        "scenario": "Thread context growing beyond model limits silently",
+        "symptom": "Run completes successfully but response quality degrades, no token limit warnings in API",
+        "impact": "Infinite context drift leads to incoherent long-running conversations"
+      },
+      {
+        "scenario": "Function call arguments hallucinated outside valid schema",
+        "symptom": "Function tool_calls contain malformed JSON or extra fields not in function schema",
+        "impact": "Downstream function execution fails, agent gets stuck in requires_action loop"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Sandbox Tool Errors",
+        "description": "Detect code interpreter failures by inspecting run annotations for sandbox violations",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\ndef check_sandbox_errors(run):\n    annotations = run.annotations or []\n    sandbox_errors = [a for a in annotations if a.type == 'error' and 'sandbox' in a.content[0].type]\n    return len(sandbox_errors) > 0\n\n# Usage in run polling\nrun = client.beta.threads.runs.retrieve(thread_id, run_id)\nif check_sandbox_errors(run):\n    print('Sandbox error detected')",
+        "language": "python"
+      },
+      {
+        "name": "Validate Function Call Schemas",
+        "description": "Check function tool_calls against declared schema using Pydantic-like validation",
+        "code": "import json\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef validate_function_args(tool_calls, functions):\n    errors = []\n    for tool_call in tool_calls:\n        if tool_call.type == 'function':\n            func_name = tool_call.function.name\n            func_schema = next(f for f in functions if f.name == func_name)\n            try:\n                args = json.loads(tool_call.function.arguments)\n                # Validate against schema (simplified)\n                if not all(k in func_schema.parameters.properties for k in args):\n                    errors.append(f'Invalid args for {func_name}')\n            except json.JSONDecodeError:\n                errors.append(f'Malformed JSON for {func_name}')\n    return errors\n\nrun = client.beta.threads.runs.retrieve(thread_id, run_id)\nerrors = validate_function_args(run.required_action.submit_tool_outputs.tool_calls, assistant.tools)",
+        "language": "python"
+      },
+      {
+        "name": "Track Thread Token Bloat",
+        "description": "Monitor message count as proxy for context overflow before run completion",
+        "code": "import tiktoken\n\nfrom openai import OpenAI\n\nclient = OpenAI()\nencoding = tiktoken.encoding_for_model('gpt-4o')\n\ndef estimate_thread_tokens(thread_id):\n    messages = client.beta.threads.messages.list(thread_id)\n    total_tokens = sum(len(encoding.encode(msg.content[0].text.value)) for msg in messages.data)\n    return total_tokens\n\n# Alert threshold\nif estimate_thread_tokens(thread_id) > 100000:\n    print('Thread context overflow risk')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Safe Code Interpreter Wrapper",
+        "description": "Pre-validate code before interpreter execution using restricted operations whitelist",
+        "code": "from openai import OpenAI\nimport re\n\nclient = OpenAI()\n\nSAFE_OPERATIONS = {'print', 'len', 'range', 'list', 'dict', 'str', 'int', 'float'}\n\ndef validate_code_safety(code):\n    lines = code.split('\\n')\n    for line in lines:\n        imports = re.findall(r'import\\s+(\\w+)', line)\n        execs = re.findall(r'exec\\(|eval\\(', line)\n        if imports or execs:\n            return False\n    return True\n\n# In tool_outputs handler\ndef safe_submit_tools(run):\n    tool_calls = run.required_action.submit_tool_outputs.tool_calls\n    safe_outputs = []\n    for tool_call in tool_calls:\n        if tool_call.function.name == 'code_interpreter':\n            if validate_code_safety(tool_call.function.arguments):\n                # Execute safely\n                safe_outputs.append(tool_call)\n    return safe_outputs",
+        "language": "python"
+      },
+      {
+        "name": "Function Schema Strict Mode",
+        "description": "Use exact schema validation and auto-reject invalid function calls",
+        "code": "from pydantic import BaseModel, ValidationError\nfrom openai import OpenAI\n\nclient = OpenAI()\n\nclass OrderFunction(BaseModel):\n    product: str\n    quantity: int\n\nFUNCTION_SCHEMAS = {'create_order': OrderFunction}\n\ndef validate_and_execute(function_call):\n    schema_cls = FUNCTION_SCHEMAS.get(function_call.function.name)\n    if not schema_cls:\n        return {'error': 'Unknown function'}\n    \n    try:\n        args = json.loads(function_call.function.arguments)\n        validated = schema_cls(**args)\n        return validated.dict()\n    except ValidationError as e:\n        return {'error': f'Validation failed: {e}'}\n\n# Reject invalid calls\nif 'error' in result:\n    client.beta.threads.runs.submit_tool_outputs(\n        thread_id,\n        run_id,\n        tool_outputs=[{\n            'tool_call_id': function_call.id,\n            'output': json.dumps(result)\n        }]\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Thread Context Pruner",
+        "description": "Automatically truncate old messages when approaching token limits",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\ndef prune_thread_context(thread_id, max_messages=50):\n    messages = client.beta.threads.messages.list(thread_id)\n    if len(messages.data) > max_messages:\n        messages_to_delete = messages.data[max_messages:]\n        for msg in messages_to_delete:\n            client.beta.threads.messages.delete(thread_id, msg.id)\n        print(f'Pruned {len(messages_to_delete)} old messages')\n\n# Call before each new run\nprune_thread_context(thread_id)\nrun = client.beta.threads.runs.create(\n    thread_id=thread_id,\n    assistant_id=assistant_id\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI run completion events, automatically detecting all four failure modes by analyzing run objects, tool_calls, and annotations in real-time. When errors are detected, Vex can trigger automatic remediation like thread pruning, function call rejection, or sandbox restarts without human intervention. The platform provides observability dashboards showing error rates across deployments and ML-based anomaly detection for emerging failure patterns.\n\nInstallation is simple: pip install openai vex-sdk, then configure Vex as your run_completed webhook endpoint. Vex processes every run completion, extracts relevant signals (tool errors, token usage, schema violations), and scores reliability using pre-built detectors for Assistants API patterns. Failed runs trigger instant notifications and automated recovery workflows.",
+      "code": "from vex_sdk import VexClient\nfrom openai import OpenAI\n\nvex = VexClient(api_key='vex-api-key')\nclient = OpenAI()\n\ndef vex_run_webhook(run_data):\n    # Vex auto-detects all 4 failure modes\n    verdict = vex.verify_run(\n        run_object=run_data,\n        detectors=[\n            'openai_sandbox_errors',\n            'openai_function_schema_violations',\n            'openai_thread_context_bloat',\n            'openai_file_search_relevance'\n        ]\n    )\n    \n    if not verdict.passes:\n        # Auto-remediate\n        if verdict.failure_type == 'context_bloat':\n            prune_thread_context(run_data.thread_id)\n        vex.notify_team(verdict)\n    return verdict\n\n# Register webhook\nclient.beta.assistants.update(\n    assistant_id,\n    tool_resources=...,\n    run_webhook_url='https://api.vex.run/webhooks/openai-assistants'\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get started with Vex in 5 minutes: pip install vex-sdk and add as your Assistants API webhook"
+    }
+  }
+}

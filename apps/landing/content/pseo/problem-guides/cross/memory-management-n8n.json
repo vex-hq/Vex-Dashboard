@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent memory management in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "n8n AI Agents memory-management",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, memory management issues arise from improper handling of conversation history in the AI Agent node's memory window, leading to context pollution and degraded performance. Workflow chains often accumulate stale memory across recursive triggers, while unvalidated AI outputs passed to action nodes can inject corrupted context into subsequent memory stores. This manifests as agents losing coherence mid-conversation or executing actions based on outdated or hallucinated memory states.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node receives exponentially growing memory payloads from looped workflow triggers",
+        "impact": "Memory window exceeds token limits, causing 429 rate limits or context truncation"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Unstructured AI responses stored directly in memory window without schema validation",
+        "impact": "Corrupted memory entries break downstream tool calls and conversation flow"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "Memory window captures API keys from tool call parameters in conversation history",
+        "impact": "Sensitive credentials persist in workflow execution logs and memory stores"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Previous conversation sessions merged into current agent memory without session isolation",
+        "impact": "Agents respond with irrelevant historical context, confusing users"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Memory Growth Detector",
+        "description": "Monitors AI Agent node inputs for exponentially increasing memory payload sizes across workflow executions",
+        "code": "const detectRecursiveMemoryGrowth = (items: n8n.INodeExecutionData[][]): boolean => {\n  const memorySizes = items.map(item => \n    JSON.stringify(item[0]?.json?.memory || {}).length\n  );\n  \n  if (memorySizes.length < 3) return false;\n  \n  const growthRate = memorySizes[memorySizes.length - 1] / memorySizes[0];\n  const consecutiveGrowth = memorySizes.slice(-3).every((size, idx) => \n    idx === 0 || size > memorySizes[idx - 1]\n  );\n  \n  return growthRate > 2 && consecutiveGrowth;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Stale Context Injection Scanner",
+        "description": "Detects when memory window contains timestamps older than current session threshold",
+        "code": "const detectStaleContext = (memory: any[]): boolean => {\n  const SESSION_WINDOW_HOURS = 1;\n  const now = new Date();\n  const threshold = new Date(now.getTime() - SESSION_WINDOW_HOURS * 60 * 60 * 1000);\n  \n  return memory.some(entry => {\n    const timestamp = new Date(entry.timestamp || entry.createdAt);\n    return timestamp < threshold && entry.role !== 'system';\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Credential Exposure Detector",
+        "description": "Scans memory content and tool parameters for exposed API keys and secrets",
+        "code": "const detectCredentialExposure = (content: string): string[] => {\n  const patterns = [\n    /(?i)(?:api[-_]?key|secret|token|password)[\\s:=]+['\"][^'\"]{20,}['\"]/g,\n    /(?:sk[-_])?[a-zA-Z0-9]{48}/g,\n    /xoxb-[0-9a-zA-Z-]+/g\n  ];\n  \n  const findings: string[] = [];\n  patterns.forEach(pattern => {\n    const matches = content.match(pattern);\n    if (matches) findings.push(...matches);\n  });\n  \n  return findings;\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Window Truncation Node",
+        "description": "Code node that truncates memory history to last N exchanges before AI Agent node",
+        "code": "// Place this Code node BEFORE your AI Agent node\nconst truncateMemoryWindow = (items: n8n.INodeExecutionData[][]): n8n.INodeExecutionData[][] => {\n  const MAX_MESSAGES = 10;\n  const item = items[0];\n  \n  if (!item[0]?.json?.memory) return items;\n  \n  const memory = item[0].json.memory as any[];\n  const recentMemory = memory.slice(-MAX_MESSAGES);\n  \n  item[0].json.memory = recentMemory;\n  item[0].json.memoryTruncated = memory.length > MAX_MESSAGES;\n  \n  return items;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Session Isolation Manager",
+        "description": "Ensures memory isolation between different workflow triggers using session IDs",
+        "code": "// Add as first node after trigger to generate session context\nconst generateSessionContext = (items: n8n.INodeExecutionData[][]): n8n.INodeExecutionData[][] => {\n  const sessionId = $execution.id + '-' + Date.now();\n  items[0][0].json.session = {\n    id: sessionId,\n    startedAt: new Date().toISOString(),\n    maxAgeMs: 60 * 60 * 1000 // 1 hour\n  };\n  return items;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Content Sanitizer",
+        "description": "Strips sensitive data from memory before storage in AI Agent node",
+        "code": "// Sanitize function for Code node before memory storage\nconst sanitizeMemoryContent = (memory: any[]): any[] => {\n  const SENSITIVE_PATTERNS = [/api[-_]?key/gi, /secret/gi, /token/gi];\n  \n  return memory.map(entry => ({\n    ...entry,\n    content: SENSITIVE_PATTERNS.reduce((text, pattern) => \n      text.replace(pattern, '[REDACTED]'), \n      entry.content || ''\n    )\n  }));\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates seamlessly as a webhook node immediately after n8n AI Agent nodes, automatically intercepting all memory payloads for real-time analysis. It detects the four primary failure modes using workflow-specific patterns and provides instant remediation through dynamic workflow modifications. Vex maintains a historical baseline of healthy memory states per workflow, flagging deviations and auto-applying fixes like memory truncation or session isolation.\n\nThe Vex SDK provides TypeScript-native integration with n8n's execution context, enabling zero-config deployment. It automatically instruments AI Agent outputs, validates memory schemas against workflow expectations, and enforces token limits before forwarding to downstream nodes. Remediation actions are executed as workflow modifications, ensuring memory hygiene without manual intervention.\n\nVex's n8n-specific detectors handle recursive trigger chains by analyzing execution IDs and payload growth rates, while credential scanners leverage n8n's structured logging format for precise exposure detection.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  webhookSecret: process.env.VEX_WEBHOOK_SECRET!,\n  detectors: ['n8n-memory-growth', 'n8n-stale-context', 'n8n-credential-exposure'],\n  autoRemediate: true\n});\n\n// n8n Code node after AI Agent - Vex integration\nconst monitorAgentMemory = async (items: n8n.INodeExecutionData[][]): Promise<n8n.INodeExecutionData[][]> => {\n  const payload = items[0][0].json;\n  \n  // Send to Vex for analysis\n  const results = await vex.analyze({\n    workflowId: $workflow.id,\n    executionId: $execution.id,\n    memoryPayload: payload.memory,\n    agentOutput: payload.output\n  });\n  \n  if (results.issues.length > 0) {\n    // Vex auto-applies fixes\n    items[0][0].json.vexRemediated = results.fixedIssues;\n    items[0][0].json.memory = results.cleanedMemory;\n  }\n  \n  return items;\n};",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node after your AI Agents and eliminate memory issues forever - start your 14-day free trial now."
+    }
+  }
+}

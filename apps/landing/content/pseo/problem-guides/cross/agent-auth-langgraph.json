@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in LangGraph Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "LangGraph agent-auth",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, AI Agent Authentication and Authorization problems manifest as unauthorized state mutations, privilege escalation across graph nodes, and insecure token propagation through cyclical workflows. These issues arise because LangGraph's stateful graphs often pass authentication contexts as schema fields without validation, allowing malicious nodes or external inputs to bypass checks during parallel execution or human-in-the-loop handoffs. The framework's checkpointing system exacerbates this by persisting potentially compromised auth tokens across sessions.",
+    "howItManifests": [
+      {
+        "scenario": "Unauthorized state mutation via tool nodes",
+        "symptom": "Graph nodes execute admin-level actions using user tokens",
+        "impact": "Data breaches through privilege escalation in tool calls"
+      },
+      {
+        "scenario": "Token leakage in parallel branch merging",
+        "symptom": "Higher-privilege tokens from one branch override user tokens",
+        "impact": "Cross-tenant data access violations during state convergence"
+      },
+      {
+        "scenario": "Checkpoint replay with expired auth tokens",
+        "symptom": "Deserialized checkpoints use stale JWTs for critical operations",
+        "impact": "Failed auth cascades cause infinite retry loops"
+      },
+      {
+        "scenario": "Bypassed human-in-the-loop auth validation",
+        "symptom": "Conditional edges skip auth checks after human approval",
+        "impact": "Malicious inputs approved without re-validating user permissions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Auth Token Propagation Tracer",
+        "description": "Traces authentication tokens through graph execution to detect unauthorized propagation",
+        "code": "from langgraph.graph import StateGraph\nfrom typing import TypedDict, Annotated\nimport operator\n\nclass AuthState(TypedDict):\n    user_id: str\n    auth_token: Annotated[str, operator.add]\n    permissions: list[str]\n\n# Inject tracer into state\ndef trace_auth(state: AuthState) -> AuthState:\n    if 'admin' in state['auth_token'] and state['user_id'] != 'admin':\n        raise ValueError(f\"PRIVILEGE ESCALATION: {state['user_id']} has admin token\")\n    print(f\"Token trace: {state['user_id']} -> {state['permissions'][:2]}\")\n    return state\n\n# Add as first node\ngraph.add_node(\"auth_tracer\", trace_auth)",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Auth Validator",
+        "description": "Validates deserialized checkpoint tokens before graph resumption",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\nimport jwt\n\nclass SecureCheckpoint(SqliteSaver):\n    def get(self, config):\n        checkpoint = super().get(config)\n        if checkpoint:\n            token = checkpoint['next']['auth_token']\n            try:\n                payload = jwt.decode(token, options={\"verify_signature\": False})\n                if payload.get('exp', 0) < time.time():\n                    raise ValueError(\"EXPIRED CHECKPOINT TOKEN\")\n            except:\n                raise ValueError(\"INVALID CHECKPOINT AUTH\")\n        return checkpoint\n\ncheckpointer = SecureCheckpoint.from_conn_string(\":memory:\")",
+        "language": "python"
+      },
+      {
+        "name": "Permission Drift Detector",
+        "description": "Monitors permission changes across state transitions",
+        "code": "from langgraph.graph.message import add_messages\n\nclass PermissionMonitor:\n    def __init__(self):\n        self.last_permissions = set()\n    \n    def check_drift(self, state):\n        current_perms = set(state.get('permissions', []))\n        if self.last_permissions and current_perms - self.last_permissions:\n            drift = current_perms - self.last_permissions\n            print(f\"PERMISSION DRIFT DETECTED: {drift}\")\n        self.last_permissions = current_perms\n        return state\n\nmonitor = PermissionMonitor()\n\n# Use in END node\ndef final_check(state):\n    monitor.check_drift(state)\n    return state\ngraph.add_node(\"permission_check\", final_check)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Immutable Auth Context Node",
+        "description": "Creates a dedicated node that validates and freezes auth context",
+        "code": "from langgraph.graph import END\nfrom typing import TypedDict\n\nclass SecureState(TypedDict):\n    user_id: str\n    auth_context: dict  # Immutable\n    config: dict\n\n@graph.node\ndef auth_guard(state: SecureState) -> SecureState:\n    user_id = state['config']['configurable'].get('user_id')\n    if state['user_id'] != user_id:\n        raise PermissionError(f\"User mismatch: {state['user_id']} != {user_id}\")\n    \n    # Freeze auth context\n    state['auth_context'] = {\n        **state['auth_context'],\n        'frozen': True,\n        'validated_at': '2024-01-01T00:00:00Z'\n    }\n    return state\n\ngraph.add_node(\"auth_guard\", auth_guard)\ngraph.set_entry_point(\"auth_guard\")",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware State Schema",
+        "description": "Uses LangGraph's Annotated types to enforce auth at schema level",
+        "code": "from typing import Annotated, TypedDict\nimport operator\nfrom langgraph.graph import StateGraph\n\ndef validate_user_token(user_id: str, token: str) -> bool:\n    return user_id.startswith(token[:8])  # Simplified check\n\nclass AuthenticatedState(TypedDict):\n    user_id: str\n    messages: Annotated[list, add_messages]\n    auth_token: str\n    \n    def __setitem__(self, key, value):\n        if key == 'auth_token':\n            if not validate_user_token(self['user_id'], value):\n                raise PermissionError(\"Invalid auth token\")\n        super().__setitem__(key, value)\n\n# Use in graph\nworkflow = StateGraph(AuthenticatedState)\n\n@workflow.node\ndef secure_tool(state: AuthenticatedState):\n    # Token automatically validated on state mutation\n    return {\"messages\": [{\"role\": \"tool\", \"content\": \"Secure execution\"}]}",
+        "language": "python"
+      },
+      {
+        "name": "Scoped Parallel Execution",
+        "description": "Isolates auth contexts in parallel branches",
+        "code": "from langgraph.prebuilt import ToolNode, tools_condition\nfrom langgraph.graph import StateGraph\n\nclass BranchState(TypedDict):\n    user_id: str\n    branch_tokens: dict[str, str]  # Per-branch tokens\n    results: dict[str, dict]\n\n@graph.node\ndef branch_auth(state: BranchState):\n    branches = ['read', 'write', 'admin']\n    state['branch_tokens'] = {\n        b: f\"token_{state['user_id']}_{b}\" for b in branches\n        if b in state.get('permissions', [])\n    }\n    return state\n\ngraph.add_node(\"branch_auth\", branch_auth)\n\n# Parallel execution respects branch tokens\n@graph.node\ndef read_branch(state):\n    token = state['branch_tokens'].get('read')\n    if not token:\n        return {\"results\": {\"read\": \"PERMISSION_DENIED\"}}\n    return {\"results\": {\"read\": \"success\"}}\n\ngraph.add_node(\"read_branch\", read_branch)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex integrates directly with LangGraph through two primary methods: wrapping graph.invoke() calls with vex.verify() for runtime monitoring, or injecting Vex as a dedicated graph node for continuous auth validation. The platform automatically detects token propagation patterns, permission drift, and checkpoint auth failures by analyzing state schemas and execution traces. Vex's policy engine enforces role-based access control (RBAC) across graph nodes and generates remediation patches for common auth vulnerabilities.\n\nWhen wrapping graph.invoke(), Vex captures the full state trajectory including authentication contexts, parallel branch merges, and checkpoint deserialization events. As a graph node, Vex provides zero-overhead monitoring with sub-millisecond auth validation using pre-compiled policy bytecode. The platform maintains a historical audit trail of all auth decisions, enabling root-cause analysis of privilege escalations.\n\nVex's LangGraph integration includes built-in detectors for the four most common auth failure modes, with automatic code generation for fixes including immutable auth contexts and scoped parallel execution.",
+      "code": "pip install langgraph vex-sdk\n\nfrom vex import verify\nfrom langgraph.graph import StateGraph, END\nimport os\n\n# Method 1: Wrap graph.invoke()\ndef secure_invoke(graph, input, config):\n    result = verify(\n        lambda: graph.invoke(input, config),\n        policies=[\n            \"langgraph.auth.token_propagation\",\n            \"langgraph.auth.checkpoint_validation\",\n            \"langgraph.auth.permission_drift\"\n        ],\n        config={\n            \"user_id\": config['configurable'].get('user_id'),\n            \"api_key\": os.getenv('VEX_API_KEY')\n        }\n    )\n    return result\n\n# Method 2: Vex as graph node\n@graph.node\ndef vex_auth_node(state):\n    from vex import NodeVerifier\n    verifier = NodeVerifier()\n    \n    verified_state = verifier.verify_state(\n        state,\n        policy=\"langgraph.full_auth_suite\",\n        context={\"user_id\": state['user_id']}\n    )\n    \n    if verifier.violations:\n        raise PermissionError(f\"Vex blocked: {verifier.violations}\")\n    \n    return verified_state\n\ngraph.add_node(\"vex_auth\", vex_auth_node)\ngraph.set_entry_point(\"vex_auth\")\n\n# Production usage\nresult = secure_invoke(compiled_graph, {\"messages\": [...]}, {\"configurable\": {\"user_id\": \"user123\"}})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LangGraph agents in 3 lines of code to eliminate auth vulnerabilities forever."
+    }
+  }
+}

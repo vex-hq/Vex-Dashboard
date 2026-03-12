@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "claude-tool-use",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Claude Tool Use Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Claude Tool Use agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Claude Tool Use data-leakage",
+      "Claude Tool Use reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Claude Tool Use agents, sensitive data leakage occurs when the model inadvertently includes API keys, user PII, or internal tokens in tool call parameters or final responses during agentic workflows. This manifests uniquely due to Claude's structured tool_use content blocks, where unfiltered reasoning or malformed tool arguments expose secrets in logs, traces, or downstream systems. Common triggers include extended chain-of-thought reasoning that references credentials or parallel tool calls mishandling authentication data.",
+    "howItManifests": [
+      {
+        "scenario": "Tool chain with auth-dependent API calls",
+        "symptom": "Early tool call embeds API key in tool_use.content[0].input",
+        "impact": "Key logged in Anthropic API traces and Vex observability dashboard"
+      },
+      {
+        "scenario": "Parallel database query tools",
+        "symptom": "One tool's input contains DB credentials conflicting with sanitized parallel call",
+        "impact": "Credentials propagated to external query endpoints without resolution"
+      },
+      {
+        "scenario": "Extended agent reasoning before tool use",
+        "symptom": "messages.create() response includes secret in tool_use.name or description",
+        "impact": "Secrets stored in conversation history and accessible via list_messages()"
+      },
+      {
+        "scenario": "Dynamic tool generation from user input",
+        "symptom": "User-supplied PII injected into tool_use.input during runtime",
+        "impact": "PII exfiltrated to third-party tools without content filtering"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex Pattern Scan on Tool Inputs",
+        "description": "Scans Claude tool_use.content.input for common secret patterns like API keys and tokens",
+        "code": "import re\n\ndef detect_secrets_in_tool_use(response):\n    patterns = [\n        r'\\b[A-Za-z0-9]{32,}\\b',  # API keys\n        r'(sk-|gpt-)\\w{48}',       # OpenAI/Claude keys\n        r'AKIA[0-9A-Z]{16}'         # AWS keys\n    ]\n    for block in response.content:\n        if block.type == 'tool_use':\n            input_data = block.input\n            for pattern in patterns:\n                if re.search(pattern, str(input_data)):\n                    return {'leak': True, 'pattern': pattern, 'data': input_data}\n    return {'leak': False}",
+        "language": "python"
+      },
+      {
+        "name": "Content Block Type Analysis",
+        "description": "Inspects all tool_use blocks in messages.create() response for sensitive content types",
+        "code": "from anthropic import Anthropic\n\nclient = Anthropic()\nresponse = client.messages.create(\n    model=\"claude-3-5-sonnet-20240620\",\n    max_tokens=1024,\n    tools=[...],\n    messages=[...]\n)\n\ndef analyze_tool_blocks(response):\n    leaks = []\n    for i, block in enumerate(response.content):\n        if block.type == 'tool_use':\n            input_str = str(block.input)\n            if any(keyword in input_str.lower() for keyword in ['key', 'token', 'password', 'secret']):\n                leaks.append({'block_index': i, 'input': input_str[:100]})\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "PII Entity Recognition",
+        "description": "Uses regex to detect PII patterns in tool_use responses using TypeScript for frontend monitoring",
+        "code": "function detectPIIInToolUse(response: any[]): boolean {\n  const piiPatterns = [\n    /\\b\\d{3}-\\d{2}-\\d{4}\\b/g,  // SSN\n    /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b/g,  // Email\n    /\\b\\d{16}\\b/g  // Credit card\n  ];\n  \n  return response.some(block => {\n    if (block.type === 'tool_use') {\n      return piiPatterns.some(pattern => pattern.test(JSON.stringify(block.input)));\n    }\n    return false;\n  });\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Pre-Tool Call Sanitization Filter",
+        "description": "Filters tool_use.input before sending to Anthropic API",
+        "code": "import re\nfrom anthropic.types import ToolUseBlock\n\ndef sanitize_tool_input(tool_input: dict) -> dict:\n    def recursive_sanitize(obj):\n        if isinstance(obj, dict):\n            return {k: recursive_sanitize(v) for k, v in obj.items()}\n        elif isinstance(obj, list):\n            return [recursive_sanitize(item) for item in obj]\n        elif isinstance(obj, str):\n            # Redact common secrets\n            obj = re.sub(r'(sk-|gpt-)\\w{48}', '[REDACTED_KEY]', obj)\n            obj = re.sub(r'AKIA[0-9A-Z]{16}', '[REDACTED_AWS_KEY]', obj)\n            return obj\n        return obj\n    return recursive_sanitize(tool_input)\n\n# Apply before tool submission\nsanitized_input = sanitize_tool_input(tool_use_block.input)",
+        "language": "python"
+      },
+      {
+        "name": "Response Content Scrubber",
+        "description": "Post-processes Claude responses to strip secrets from tool_use blocks",
+        "code": "def scrub_claude_response(response):\n    scrubbed_content = []\n    for block in response.content:\n        if block.type == 'tool_use':\n            # Create scrubbed copy\n            scrubbed_block = ToolUseBlock(\n                type='tool_use',\n                id=block.id,\n                name=block.name,\n                input=sanitize_tool_input(block.input),\n                is_error=block.is_error\n            )\n            scrubbed_content.append(scrubbed_block)\n        else:\n            scrubbed_content.append(block)\n    response.content = scrubbed_content\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Credential Vault Integration",
+        "description": "Replaces inline credentials with vault references in TypeScript agent",
+        "code": "async function injectVaultCredentials(toolInput: any): Promise<any> {\n  if (toolInput.apiKey) {\n    const vaultToken = await fetchVaultToken(toolInput.service);\n    toolInput.apiKey = vaultToken;  // Ephemeral token\n    delete toolInput.secret;  // Remove persistent secrets\n  }\n  \n  // Validate no secrets remain\n  const hasSecrets = /sk-|AKIA[0-9A-Z]{16}/.test(JSON.stringify(toolInput));\n  if (hasSecrets) {\n    throw new Error('Secrets detected after sanitization');\n  }\n  \n  return toolInput;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides runtime verification for Claude Tool Use agents by wrapping messages.create() calls with vex.verify(), automatically detecting secret patterns in tool_use.content.input blocks. The platform scans for 50+ credential patterns and PII entities across reasoning chains, parallel tool calls, and final outputs, providing precise leak locations with remediation templates. Integration takes <5 minutes via pip install vex-sdk, with zero-config detection of cascading leakage from tool failures.\n\nVex's Claude-specific detectors analyze tool_use.id, tool_use.name, and nested input structures, flagging inconsistencies between reasoning traces and tool parameters. Automated remediation injects sanitization filters and credential vaults, reducing MTTR from hours to seconds. Dashboards show leakage heatmaps by tool chain position and model version.",
+      "code": "from vex import verify\nfrom anthropic import Anthropic\n\nclient = Anthropic()\n\n@verify(\n    check='no_sensitive_data',\n    patterns=['api_key', 'pii', 'aws_secret'],\n    targets=['tool_use.input', 'reasoning.text']\n)\ndef safe_claude_agent(messages, tools):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=4096,\n        tools=tools,\n        messages=messages\n    )\n    # Vex auto-scans tool_use blocks\n    return response\n\n# Usage\nresult = safe_claude_agent(messages, tools)\n# Vex blocks if secrets detected, returns remediation code",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to prevent sensitive data leakage in your Claude agents with one decorator."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Google ADK + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK ai email assistant",
+      "Google ADK guardrails",
+      "ai email assistant reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Google's Agent Development Kit (ADK) enables sophisticated multi-agent workflows for intent detection, draft generation, attachment handling, and send approvals using Gemini models. However, multi-agent delegation, model switching, and session state issues can lead to critical failures like sending inappropriate or confidential emails. Vex provides essential guardrails to verify PII filtering, tone, recipient validity, content accuracy, and confidentiality before execution.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Google ADK",
+      "description": "The AI Email Assistant uses Google ADK's multi-agent system where an Intent Detection Agent classifies incoming emails (reply, forward, draft new), passing to specialized agents: Draft Generator creates responses, Attachment Handler processes files, and Approval Agent validates before sending. Agents communicate via ADK's session state and tool calls, with Gemini models handling reasoning. Long conversations risk state corruption, while delegation can create loops if agents misroute tasks.\n\nEach agent uses ADK's BaseAgent with custom tools for email APIs (Gmail/IMAP), PII detection, and tone analysis. The orchestrator routes based on intent scores, ensuring workflow progression from triage to send approval. Vex integrates as a before_agent_callback to verify outputs across all agents.\n\nSession persistence via ADK's context management supports threaded conversations, but requires careful state handling to prevent drift over extended interactions.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Incoming      │───▶│ Intent Detection │\n│     Email       │    │      Agent       │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │ Draft Generator Agent     │\n                │ + Tone Checker Tool       │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │ Attachment Handler Agent  │\n                │ + PII Scanner Tool        │\n                └─────────────┬─────────────┘\n                              │\n                       ┌──────▼──────┐\n                       │ Approval    │───▶ Send Email\n                       │   Agent     │\n                       └─────────────┘\n                           ↑ Vex Guardrails\n"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Intent agent delegates to draft agent, which re-delegates back for clarification, creating infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex verifies delegation paths and blocks circular references before agent execution"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different agents use gemini-1.5-pro vs gemini-2.0-flash, leading to tone/format mismatches in email drafts",
+        "severity": "high",
+        "mitigation": "Vex normalizes outputs and validates consistency across model boundaries"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Threaded email chains corrupt context, causing agents to reference wrong conversation history",
+        "severity": "high",
+        "mitigation": "Vex validates session state integrity and conversation continuity before processing"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "Attachment handler returns binary data while approval expects JSON, causing send failures",
+        "severity": "medium",
+        "mitigation": "Vex enforces standardized tool response schemas across all agents"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Detection Agent Setup",
+        "description": "Base agent for classifying email intent using Gemini with ADK tools",
+        "code": "from google_adk.agents import BaseAgent\nimport vex\n\n@vex.guardrail(risk_profile='high')\nclass IntentDetectionAgent(BaseAgent):\n    def __init__(self):\n        super().__init__(\n            model='gemini-1.5-pro',\n            system_prompt=\"Classify email intent: REPLY, FORWARD, DRAFT_NEW, or IGNORE\"\n        )\n        \n    async def classify_intent(self, email_content: str) -> str:\n        result = await self.run(email_content)\n        return result.intent\n\n# Usage\nagent = IntentDetectionAgent()\nintent = await agent.classify_intent('Please review Q3 report...')",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation with Tone Validation",
+        "description": "Generates email drafts with integrated tone checking tool",
+        "code": "from google_adk.tools import Tool\n\nclass ToneCheckerTool(Tool):\n    name = 'tone_checker'\n    description = 'Validate email tone: professional, friendly, urgent'\n    \n    async def execute(self, text: str) -> dict:\n        # Integrate with Vex for tone verification\n        return {'tone': 'professional', 'score': 0.92}\n\nclass DraftAgent(BaseAgent):\n    def __init__(self):\n        super().__init__(model='gemini-1.5-pro')\n        self.tools = [ToneCheckerTool()]\n        \n    async def generate_draft(self, intent: str, context: str) -> str:\n        prompt = f\"Generate {intent} email: {context}\"\n        return await self.run(prompt)",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Handler Agent",
+        "description": "Processes email attachments with PII scanning",
+        "code": "import base64\nfrom google_adk.agents import BaseAgent\n\nclass AttachmentHandler(BaseAgent):\n    async def process_attachments(self, email_data: dict) -> list:\n        attachments = []\n        for attachment in email_data.get('attachments', []):\n            content = base64.b64decode(attachment['data'])\n            # Vex PII scan here\n            if not self.scan_pii(content):\n                attachments.append({\n                    'filename': attachment['name'],\n                    'safe': True\n                })\n        return attachments\n    \n    def scan_pii(self, content: bytes) -> bool:\n        # Placeholder for Vex PII detection\n        return False",
+        "language": "python"
+      },
+      {
+        "title": "Approval Workflow Orchestrator",
+        "description": "Final validation before email send with multi-checks",
+        "code": "class ApprovalAgent(BaseAgent):\n    def __init__(self):\n        super().__init__(model='gemini-2.0-flash')\n    \n    async def validate_send(self, draft: str, recipients: list, attachments: list) -> bool:\n        checks = await self.run({\n            'draft': draft,\n            'recipients': recipients,\n            'attachments': attachments\n        })\n        return all([\n            checks['tone_appropriate'],\n            checks['recipients_valid'],\n            checks['no_pii'],\n            checks['confidentiality_ok']\n        ])",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex before_agent_callback Setup",
+        "description": "Global guardrail wrapper for all ADK agents preventing execution of risky actions",
+        "code": "import vex\nfrom google_adk import AgentDevelopmentKit\n\n# High-risk profile for email operations\nrisk_profile = 'high'\nverifications = [\n    'pii_filtering',\n    'tone_appropriateness',\n    'recipient_validation',\n    'content_accuracy',\n    'confidentiality_enforcement'\n]\n\n@vex.guardrail(\n    risk_profile=risk_profile,\n    verifications=verifications,\n    before_agent_callback=True\n)\ndef adk_agent_wrapper(agent, input_data):\n    \"\"\"Vex callback runs before every agent execution\"\"\"\n    verdict = vex.verify({\n        'input': input_data,\n        'agent_type': agent.__class__.__name__,\n        'session_id': agent.session_id\n    })\n    if not verdict.approved:\n        raise ValueError(f'Blocked by Vex: {verdict.reason}')\n    return agent.run(input_data)\n\n# Apply to ADK orchestrator\nkit = AgentDevelopmentKit(agents=[intent_agent, draft_agent])\nkit.set_before_callback(adk_agent_wrapper)",
+        "language": "python"
+      },
+      {
+        "title": "Session State Integrity Check",
+        "description": "Prevents state corruption in long email threads",
+        "code": "@vex.guardrail(verification='session_state')\ndef validate_session_state(session_data: dict, current_input: str) -> bool:\n    \"\"\"Vex callback for ADK session validation\"\"\"\n    # Check conversation continuity\n    if 'thread_id' not in session_data:\n        return False\n    \n    # Verify no circular delegation\n    delegation_path = session_data.get('delegation_path', [])\n    if len(delegation_path) > 10 or delegation_path[-3:] == delegation_path[-6:-3]:\n        vex.block('Circular delegation detected')\n    \n    # Context length limits\n    if len(str(session_data)) > 100000:\n        vex.block('Session state exceeds safe limits')\n    \n    return True\n\n# Register with ADK\nkit.register_callback('before_agent', validate_session_state)",
+        "language": "python"
+      },
+      {
+        "title": "PII and Confidentiality Filter",
+        "description": "Blocks emails containing sensitive data before sending",
+        "code": "@vex.guardrail(verification=['pii_filtering', 'confidentiality_enforcement'])\ndef email_content_guardrail(draft: str, recipients: list) -> dict:\n    \"\"\"Critical verification before email send\"\"\"\n    \n    # PII patterns\n    pii_patterns = [\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n        r'\\b\\d{16}\\b'  # Credit card\n    ]\n    \n    for pattern in pii_patterns:\n        if re.search(pattern, draft):\n            return {'approved': False, 'reason': 'PII detected'}\n    \n    # Recipient domain validation\n    internal_domains = ['company.com', 'internal.net']\n    for recipient in recipients:\n        if not any(domain in recipient for domain in internal_domains):\n            return {'approved': False, 'reason': 'External recipient without approval'}\n    \n    return {'approved': True}\n\n# Integrate with approval agent\napproval_agent.tools.append(email_content_guardrail)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK AI Email Assistant",
+      "description": "Install Vex today with `pip install vex-sdk google-adk` and protect your email workflows from critical failures."
+    }
+  }
+}

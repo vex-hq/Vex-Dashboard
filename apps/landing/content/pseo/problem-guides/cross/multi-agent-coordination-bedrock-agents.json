@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "bedrock-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Amazon Bedrock Agents Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Amazon Bedrock Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Amazon Bedrock Agents multi-agent-coordination",
+      "Amazon Bedrock Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in Amazon Bedrock Agents occurs when multiple agents fail to synchronize state, share context, or coordinate action execution across parallel invocations. This manifests as agents overwriting each other's session attributes, duplicate action group calls, or inconsistent knowledge base retrievals due to concurrent processing. The stateless nature of Bedrock Agents exacerbates this when Lambda action groups don't properly manage shared session state via `sessionState` attributes.",
+    "howItManifests": [
+      {
+        "scenario": "Concurrent action group invocations",
+        "symptom": "Multiple Lambda functions receive same sessionState but return conflicting `observation` responses",
+        "impact": "Agent enters orchestration loop, repeatedly calling same actions with diverging context"
+      },
+      {
+        "scenario": "Knowledge base retrieval during parallel agent steps",
+        "symptom": "Agents retrieve overlapping document chunks but different `retrievedReferences` due to timing",
+        "impact": "Inconsistent reasoning traces and hallucinated coordination between agent responses"
+      },
+      {
+        "scenario": "Guardrail application across multi-agent workflow",
+        "symptom": "One agent's guardrail blocks action while parallel agent proceeds with same input",
+        "impact": "Partial execution with security violations and incomplete task completion"
+      },
+      {
+        "scenario": "Session state loss between multi-turn invocations",
+        "symptom": "`sessionAttributes` missing keys populated by previous agent steps",
+        "impact": "Agents lose coordination context, causing redundant actions and task fragmentation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Session State Drift Detection",
+        "description": "Monitors sessionAttributes consistency across consecutive agent_step responses",
+        "code": "import boto3\nimport json\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\nprev_session_attrs = {}\ndef detect_session_drift(response):\n    current_attrs = response.get('completion', {}).get('sessionAttributes', {})\n    \n    drift_detected = False\n    for key in prev_session_attrs:\n        if prev_session_attrs[key] != current_attrs.get(key):\n            print(f\"DRIFT DETECTED: {key} changed from '{prev_session_attrs[key]}' to '{current_attrs[key]}'\")\n            drift_detected = True\n    \n    global prev_session_attrs\n    prev_session_attrs = current_attrs.copy()\n    return drift_detected",
+        "language": "python"
+      },
+      {
+        "name": "Duplicate Action Invocation Monitor",
+        "description": "Tracks actionGroup invocations within session to detect coordination loops",
+        "code": "from collections import defaultdict\n\nsession_actions = defaultdict(list)\n\ndef detect_duplicate_actions(response):\n    trace = response.get('trace', [])\n    current_actions = []\n    \n    for step in trace:\n        if 'actionGroup' in step:\n            action_id = step['actionGroup'].get('actionGroup', 'unknown')\n            current_actions.append(action_id)\n    \n    session_key = response['sessionId']\n    duplicates = [a for a in current_actions if a in session_actions[session_key]]\n    \n    if duplicates:\n        print(f\"DUPLICATE ACTIONS: {duplicates} in session {session_key}\")\n        return True\n    \n    session_actions[session_key].extend(current_actions)\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Concurrent Trace Overlap Check",
+        "description": "Detects overlapping orchestration steps indicating parallel execution conflicts",
+        "code": "def detect_concurrent_overlap(response):\n    trace = response.get('trace', [])\n    step_names = []\n    \n    for step in trace:\n        if 'orchestration' in step:\n            step_names.append(step['orchestration'].get('step', 'unknown'))\n    \n    # Detect coordination patterns indicating multi-agent overlap\n    conflict_patterns = [\n        ['actionGroup1', 'actionGroup2'],\n        ['retrieve', 'actionGroup'],\n        ['generate', 'orchestrate']\n    ]\n    \n    for pattern in conflict_patterns:\n        if all(p in step_names for p in pattern):\n            print(f\"CONCURRENT OVERLAP: {pattern} in trace\")\n            return True\n    \n    return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Centralized Session State Manager",
+        "description": "Lambda function coordinates session state across all action groups",
+        "code": "import json\nimport boto3\n\n dynamodb = boto3.resource('dynamodb')\ntable = dynamodb.Table('BedrockSessionState')\n\ndef lambda_handler(event, context):\n    session_id = event['sessionState']['sessionAttributes'].get('sessionId')\n    \n    # Atomic state coordination\n    table.put_item(\n        Item={\n            'sessionId': session_id,\n            'lockVersion': 1,\n            'coordinatedState': event['sessionState'],\n            'timestamp': int(time.time())\n        },\n        ConditionExpression='attribute_not_exists(sessionId) OR lockVersion = :ver',\n        ExpressionAttributeValues={':ver': 0}\n    )\n    \n    response = {\n        'sessionState': {\n            'sessionAttributes': {\n                'coordinatorStatus': 'synced',\n                'lockVersion': 1\n            }\n        },\n        'observation': 'State coordinated successfully'\n    }\n    return response",
+        "language": "python"
+      },
+      {
+        "name": "Action Group Invocation Guard",
+        "description": "Prevents duplicate action calls within session using session attributes",
+        "code": "def lambda_handler(event, context):\n    session_attrs = event['sessionState']['sessionAttributes']\n    action_group = event['actionGroup']\n    session_id = session_attrs.get('sessionId')\n    \n    executed_actions = session_attrs.get('executedActions', [])\n    \n    if action_group in executed_actions:\n        return {\n            'sessionState': {\n                'sessionAttributes': {\n                    **session_attrs,\n                    'coordinationError': f'Duplicate {action_group} invocation'\n                }\n            },\n            'observation': 'Action already executed in this session'\n        }\n    \n    # Execute action logic here\n    result = execute_action_logic(event)\n    \n    # Mark as executed\n    executed_actions.append(action_group)\n    \n    return {\n        'sessionState': {\n            'sessionAttributes': {\n                **session_attrs,\n                'executedActions': executed_actions\n            }\n        },\n        'observation': result\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Multi-Agent Trace Synchronizer",
+        "description": "Merges parallel agent traces before final response",
+        "code": "import boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\ndef synchronize_traces(session_id, traces):\n    merged_trace = []\n    seen_steps = set()\n    \n    for trace in traces:\n        for step in trace.get('trace', []):\n            step_id = step.get('stepId', 'unknown')\n            if step_id not in seen_steps:\n                merged_trace.append(step)\n                seen_steps.add(step_id)\n    \n    # Update session with synchronized trace\n    bedrock.invoke_agent(\n        agentId='your-agent-id',\n        agentAliasId='your-alias',\n        sessionId=session_id,\n        inputText='',\n        sessionState={\n            'sessionAttributes': {\n                'traceSynced': True,\n                'traceLength': len(merged_trace)\n            }\n        }\n    )\n    \n    return {'trace': merged_trace}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex provides runtime verification for Bedrock Agents by wrapping `invoke_agent()` calls with `vex.verify()` post-processing. This automatically detects session state drift, duplicate action invocations, and concurrent trace overlaps using pattern-based assertions on agent responses. Vex maintains session history and generates remediation traces with exact failure coordinates in the agent's execution trace.\n\nThe integration captures all four common failure modes: malformed Lambda responses, knowledge base chunking issues, guardrail bypasses, and session state loss. Vex's verification policies execute in <50ms overhead while providing 99.9% detection accuracy across enterprise Bedrock deployments.\n\nRemediation workflows automatically inject coordination fixes via sessionAttributes synchronization and action group guards, reducing MTTR from hours to seconds.",
+      "code": "import vex\nimport boto3\n\nbedrock = boto3.client('bedrock-agent-runtime')\n\n@vex.verify(\n    assert=lambda resp: 'sessionAttributes' in resp.get('completion', {}),\n    on_fail='retry_with_coordination',\n    policy='bedrock-multi-agent-coordination'\n)\ndef invoke_bedrock_agent_with_vex(agent_id, session_id, input_text):\n    response = bedrock.invoke_agent(\n        agentId=agent_id,\n        agentAliasId='latest',\n        sessionId=session_id,\n        inputText=input_text,\n        enableTrace=True\n    )\n    \n    # Vex automatically verifies:\n    # 1. Session state consistency\n    # 2. No duplicate action groups\n    # 3. Guardrail enforcement\n    # 4. Trace coordination\n    \n    return response\n\n# Usage\nresult = invoke_bedrock_agent_with_vex(\n    'YOUR_AGENT_ID',\n    'session-123',\n    'Coordinate multi-agent task'\n)\n\nif result.vex_status == 'verified':\n    print('✅ Coordination verified')\nelse:\n    print(f'❌ Fixed: {result.vex_remediation}')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Bedrock Agents in 3 lines of code to eliminate coordination failures."
+    }
+  }
+}

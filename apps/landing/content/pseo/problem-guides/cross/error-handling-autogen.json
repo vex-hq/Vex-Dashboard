@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in AutoGen Agents",
+    "description": "How to detect and fix ai agent error handling patterns in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "AutoGen error-handling",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, AI Agent Error Handling Patterns manifest as failures in multi-agent conversations where agents lack mechanisms to detect and recover from errors like infinite loops or unsafe code execution. Without proper termination conditions and error boundaries, agents can spiral into unproductive cycles or produce harmful outputs. This deep-dive explores how these issues appear in AutoGen's conversational patterns and APIs, with detection and fixes using Vex integration.",
+    "howItManifests": [
+      {
+        "scenario": "Infinite conversation loops between agents",
+        "symptom": "Agents continuously reply without termination, exceeding max_turns despite configuration",
+        "impact": "Uncontrolled compute costs and token exhaustion"
+      },
+      {
+        "scenario": "Code execution producing unsafe outputs",
+        "symptom": "Agents execute code via code_executor that deletes files or accesses unauthorized resources",
+        "impact": "Security vulnerabilities and data corruption"
+      },
+      {
+        "scenario": "Agents agreeing on incorrect conclusions",
+        "symptom": "Group chat agents converge on hallucinated facts without validation mechanisms",
+        "impact": "Propagation of misinformation in downstream tasks"
+      },
+      {
+        "scenario": "Uncontrolled token spending in multi-turn debates",
+        "symptom": "Debate agents exceed token budgets due to verbose reasoning without summarization",
+        "impact": "API rate limits and excessive LLM costs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Loop Cycle Detection",
+        "description": "Monitor conversation history for repeated message patterns indicating infinite loops",
+        "code": "from autogen import GroupChat, GroupChatManager\nimport re\ndef detect_loops(chat_history):\n    recent_msgs = chat_history[-10:]\n    patterns = []\n    for msg in recent_msgs:\n        content = msg.get('content', '')\n        if len(content) > 50:\n            patterns.append(re.sub(r'\\s+', ' ', content.lower())[:100])\n    if len(patterns) > 3:\n        for i in range(len(patterns)-3):\n            if all(p1 == p2 for p1, p2 in zip(patterns[i:i+3], patterns[i+1:i+4])):\n                return True\n    return False\n\n# Usage in agent\nchat_history = groupchat.messages\nif detect_loops(chat_history):\n    print('INFINITE LOOP DETECTED')",
+        "language": "python"
+      },
+      {
+        "name": "Unsafe Code Pattern Scanner",
+        "description": "Scan agent-generated code for dangerous operations before execution",
+        "code": "import re\ndef scan_unsafe_code(code_content):\n    dangerous_patterns = [\n        r'rm\\s+-rf',\n        r'del\\s+\\\\*\\.', \n        r'exec\\(input\\(',\n        r'subprocess\\.call\\([\\s\\S]*shell=True',\n        r'open\\([\\s\\S]*wb',\n    ]\n    for pattern in dangerous_patterns:\n        if re.search(pattern, code_content, re.IGNORECASE):\n            return {'safe': False, 'risk': pattern}\n    return {'safe': True}\n\n# In reply function\ndef safe_code_executor(message):\n    if '```python' in message:\n        code = re.search(r'```python\\n([\\s\\S]*?)```', message)\n        if code:\n            result = scan_unsafe_code(code.group(1))\n            if not result['safe']:\n                return 'ERROR: Unsafe code detected'\n    return message",
+        "language": "python"
+      },
+      {
+        "name": "Token Budget Monitor",
+        "description": "Track cumulative token usage across multi-turn conversations",
+        "code": "def track_token_budget(messages, budget=50000):\n    total_tokens = 0\n    for msg in messages:\n        # Simple token estimation\n        content = msg.get('content', '')\n        total_tokens += len(content) // 4 + 100  # Rough estimation\n    if total_tokens > budget:\n        return {\n            'over_budget': True,\n            'current': total_tokens,\n            'budget': budget\n        }\n    return {'over_budget': False}\n\n# Check before each reply\ndef budget_check(groupchat):\n    status = track_token_budget(groupchat.messages)\n    if status['over_budget']:\n        groupchat.terminate()\n        return 'Token budget exceeded'",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Conversation Termination Guard",
+        "description": "Implement max_turns and semantic similarity checks to prevent loops",
+        "code": "from autogen import GroupChat, GroupChatManager\nfrom sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\ndef loop_guardian(last_n=5, similarity_threshold=0.9):\n    def guard_function(groupchat):\n        history = groupchat.messages[-last_n*2:]\n        if len(history) < last_n:\n            return False\n        \n        recent_contents = [msg['content'] for msg in history[-last_n:]]\n        # Simple similarity check\n        contents_vec = [hash(c) % 1000 for c in recent_contents]\n        if len(set(contents_vec)) < 2:\n            return True\n        return False\n    return guard_function\n\n# Usage\ngroupchat = GroupChat(\n    agents=[agent1, agent2],\n    messages=[],\n    max_round=10,\n    termination_condition=loop_guardian()\n)",
+        "language": "python"
+      },
+      {
+        "name": "Safe Code Executor Wrapper",
+        "description": "Sandbox code execution with whitelisted operations only",
+        "code": "from autogen import register_function\nimport subprocess\nimport tempfile\nimport os\n\ndef safe_execute_code(code):\n    allowed_imports = {'numpy', 'pandas', 'math'}\n    if any(imp in code for imp in ['os', 'sys', 'subprocess', 'shutil']):\n        return 'ERROR: Forbidden imports detected'\n    \n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code)\n        temp_file = f.name\n    \n    try:\n        result = subprocess.run(\n            ['python', temp_file],\n            capture_output=True,\n            text=True,\n            timeout=30\n        )\n        os.unlink(temp_file)\n        return result.stdout + result.stderr\n    except subprocess.TimeoutExpired:\n        os.unlink(temp_file)\n        return 'ERROR: Execution timeout'\n\nregister_function(\n    safe_execute_code,\n    caller=agent,\n    executor=code_agent,\n    name='safe_code_exec'\n)",
+        "language": "python"
+      },
+      {
+        "name": "Consensus Validation Layer",
+        "description": "Require multiple agents to validate critical conclusions",
+        "code": "from autogen import AssistantAgent\n\nclass ValidatorAgent(AssistantAgent):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.validation_threshold = 0.8\n    \n    def validate_consensus(self, messages):\n        conclusions = []\n        for msg in messages[-5:]:\n            if 'CONCLUSION' in msg['content'].upper():\n                conclusions.append(msg['content'])\n        \n        if len(conclusions) >= 3:\n            agreements = sum(1 for c in conclusions if any(word in c for word in conclusions[0].split()))\n            return agreements / len(conclusions) > self.validation_threshold\n        return False\n\n# Usage\nvalidator = ValidatorAgent(\n    name='Validator',\n    system_message='Validate conclusions from other agents',\n    llm_config=llm_config\n)\n\ndef consensus_check(sender):\n    if validator.validate_consensus(sender.groupchat.messages):\n        return True\n    return 'Requires further validation'",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex integrates directly as a reply function filter in AutoGen, automatically scanning every agent message for the four core failure patterns before they propagate. By registering Vex's Python SDK as a pre-reply validator, it catches infinite loops through semantic similarity analysis, blocks unsafe code via static analysis, validates consensus through cross-agent verification, and enforces token budgets with real-time monitoring. This eliminates manual instrumentation while providing detailed error reports and automatic remediation suggestions.\n\nThe Vex SDK hooks into AutoGen's message pipeline non-intrusively, preserving agent autonomy while adding enterprise-grade reliability. Configuration is simple - one pip install and a single registration call - making it ideal for production AutoGen deployments. Vex also provides dashboards for visualizing error patterns across agent fleets.",
+      "code": "pip install autogen vex-sdk\nfrom vex_sdk import VexAgentMonitor\nfrom autogen import AssistantAgent, GroupChat\n\n# Initialize Vex monitor for AutoGen\nvex_monitor = VexAgentMonitor(\n    patterns=[\n        'infinite_loops',\n        'unsafe_code',\n        'consensus_failure',\n        'token_exhaustion'\n    ],\n    max_turns=20,\n    token_budget=50000\n)\n\n# Register as reply filter\n@vex_monitor.register_filter\ndef autogen_vex_filter(message, sender, recipient):\n    verdict = vex_monitor.scan_message(message)\n    if not verdict.safe:\n        return f\"VEX BLOCKED: {verdict.reason} - Score: {verdict.confidence}\"\n    return message\n\n# Apply to agents\nagent1 = AssistantAgent(\n    name=\"Agent1\",\n    reply_func=lambda msg, sender: autogen_vex_filter(msg, sender, agent1)\n)\n\n# Vex auto-terminates problematic conversations\ngroupchat = GroupChat([agent1, agent2], message_filter=vex_monitor.filter_pipeline)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate AutoGen agent failures in one line of code."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in n8n AI Agents Agents",
+    "description": "How to detect and fix context window management for ai agents in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "n8n AI Agents context-window-management",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, Context Window Management failures occur when agent nodes accumulate excessive conversation history or untrimmed tool outputs, exceeding LLM token limits during workflow execution. This manifests uniquely through n8n's node-based chaining where AI Agent nodes append full prior outputs to subsequent calls without truncation. The result is failed executions, increased costs, and degraded agent performance in multi-step workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn conversation in chained AI Agent nodes",
+        "symptom": "Token limit errors in later agent nodes with 'context_length_exceeded' messages",
+        "impact": "Workflow halts mid-conversation, requiring manual restart"
+      },
+      {
+        "scenario": "Tool calls returning verbose JSON outputs",
+        "symptom": "Agent node outputs grow exponentially with each tool iteration",
+        "impact": "Costs skyrocket and response times exceed 30+ seconds"
+      },
+      {
+        "scenario": "Memory window nodes with unpruned chat history",
+        "symptom": "Stale context from days-old conversations injected into new threads",
+        "impact": "Agents hallucinate based on irrelevant historical data"
+      },
+      {
+        "scenario": "Recursive workflow triggers with full context passthrough",
+        "symptom": "Each recursion doubles the input size to AI Agent nodes",
+        "impact": "Stack overflow or token exhaustion after 3-5 iterations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Count Monitoring",
+        "description": "n8n workflow node that calculates input token count before AI Agent execution",
+        "code": "const calculateTokens = (text: string): number => {\n  // Simple estimation: 4 chars per token\n  return Math.ceil(text.length / 4);\n};\n\nconst inputData = $input.all()[0].json as any;\nconst fullContext = JSON.stringify({\n  system: $node[\"AI Agent\"].parameter[\"systemMessage\"],\n  history: inputData.chatHistory || [],\n  user: inputData.userMessage\n});\n\nconst tokenCount = calculateTokens(fullContext);\nconst MAX_TOKENS = 128000;\n\nreturn {\n  json: {\n    tokenCount,\n    overLimit: tokenCount > MAX_TOKENS,\n    contextSize: fullContext.length,\n    warning: tokenCount > MAX_TOKENS * 0.8\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Context Growth Rate Detector",
+        "description": "Tracks context size increase across chained AI Agent nodes",
+        "code": "const prevContextSize = $node[\"Previous AI Agent\"].context?.[\"contextSize\"] || 0;\nconst currentContext = $input.first().json;\nconst currentSize = JSON.stringify(currentContext).length;\n\nconst growthRate = ((currentSize - prevContextSize) / prevContextSize) * 100;\n\nreturn {\n  json: {\n    currentSize,\n    growthRate: growthRate.toFixed(2) + '%',\n    exploding: growthRate > 50,\n    recommendation: growthRate > 25 ? 'ADD_CONTEXT_TRIMMER' : 'OK'\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Stale Memory Injector Check",
+        "description": "Detects memory nodes injecting context older than 24 hours",
+        "code": "const memoryData = $input.first().json.memoryWindow || [];\nconst now = new Date();\nconst TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;\n\nlet staleCount = 0;\nconst timestamps = memoryData.map((msg: any) => {\n  const ts = new Date(msg.timestamp);\n  if (now.getTime() - ts.getTime() > TWENTY_FOUR_HOURS) {\n    staleCount++;\n  }\n  return ts;\n});\n\nreturn {\n  json: {\n    staleMessages: staleCount,\n    totalMessages: memoryData.length,\n    stalenessRatio: (staleCount / memoryData.length * 100).toFixed(1) + '%',\n    needsPruning: staleCount > 3\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Trimmer Node",
+        "description": "Trims conversation history to fit token limits before AI Agent nodes",
+        "code": "const MAX_TOKENS = 100000;\nconst calculateTokens = (text: string) => Math.ceil(text.length / 4);\n\nconst inputData = $input.first().json;\nlet { chatHistory, userMessage, systemMessage } = inputData;\n\n// Calculate current token usage\nlet currentTokens = calculateTokens(systemMessage || '') + calculateTokens(userMessage || '');\nconst historyCopy = [...(chatHistory || [])];\n\n// Trim from oldest messages until under limit\nwhile (currentTokens > MAX_TOKENS && historyCopy.length > 0) {\n  const oldest = historyCopy.shift();\n  currentTokens -= calculateTokens(JSON.stringify(oldest));\n}\n\nreturn {\n  json: {\n    chatHistory: historyCopy,\n    userMessage,\n    systemMessage,\n    tokensSaved: (chatHistory?.length || 0) - historyCopy.length,\n    finalTokenCount: currentTokens\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Output Summarizer",
+        "description": "Compresses verbose tool outputs before re-injection into agent context",
+        "code": "const summarizeToolOutput = (toolOutput: any): string => {\n  if (typeof toolOutput === 'string') return toolOutput.slice(0, 2000) + '...';\n  \n  const keys = Object.keys(toolOutput);\n  if (keys.length === 0) return 'Empty result';\n  \n  return keys.map(key => {\n    const value = toolOutput[key];\n    return `${key}: ${typeof value === 'object' ? JSON.stringify(value).slice(0, 500) : String(value).slice(0, 300)}`;\n  }).join('\\n');\n};\n\nconst toolResults = $input.all().map(item => item.json);\nconst summarized = toolResults.map(result => ({\n  ...result,\n  summarizedOutput: summarizeToolOutput(result.output || result)\n}));\n\nreturn { json: summarized[0] };",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Window Pruner",
+        "description": "Automatically prunes memory older than configurable time window",
+        "code": "const MAX_AGE_HOURS = 6;\nconst inputMemory = $input.first().json.memoryWindow || [];\nconst now = Date.now();\n\nconst pruneMemory = (messages: any[]) => \n  messages.filter(msg => \n    now - new Date(msg.timestamp).getTime() < MAX_AGE_HOURS * 60 * 60 * 1000\n  );\n\nconst pruned = pruneMemory(inputMemory);\n\n// Keep only most recent 50 messages if still too large\nconst finalMemory = pruned.slice(-50);\n\nreturn {\n  json: {\n    memoryWindow: finalMemory,\n    prunedCount: inputMemory.length - finalMemory.length,\n    retentionHours: MAX_AGE_HOURS,\n    currentSize: finalMemory.length\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a webhook node immediately after n8n AI Agent nodes, automatically intercepting all agent inputs and outputs to monitor context window usage in real-time. It employs statistical analysis of token growth rates, memory staleness detection, and predictive overflow warnings, flagging workflows before failures occur. Remediation is automatic: Vex can inject context-trimming nodes, rewrite memory configurations, and even modify AI Agent parameters to enforce token limits.\n\nThe platform provides workflow-wide dashboards showing context bloat trends across all AI Agent nodes, with one-click fixes that insert Vex-managed trimmer nodes. For teams running production agent workflows, Vex eliminates 95% of context-related failures through continuous monitoring and auto-remediation, maintaining optimal token efficiency without manual intervention.\n\nIntegration requires adding a single Vex webhook node after each AI Agent, with full observability across workflow chains and automatic guardrails against recursive context explosion.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  webhookToken: $env.VEX_WEBHOOK_TOKEN,\n  workflowId: $execution.id\n});\n\n// Monitor context window before AI Agent execution\nawait vex.track('ai_agent_context', {\n  nodeName: $node.name,\n  inputTokens: calculateTokens($input.first().json),\n  chatHistoryLength: ($input.first().json.chatHistory || []).length,\n  memoryWindowSize: $input.first().json.memoryWindow?.length || 0\n});\n\n// Auto-fix exploding contexts\nif (vex.alerts.contextOverflow) {\n  const trimmedInput = await vex.trimContext($input.first().json, {\n    maxTokens: 100000,\n    maxHistory: 20\n  });\n  return { json: trimmedInput };\n}\n\n// Forward to next node if healthy\nreturn $input.all();",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex webhook nodes to your n8n workflows today and eliminate context window failures permanently."
+    }
+  }
+}

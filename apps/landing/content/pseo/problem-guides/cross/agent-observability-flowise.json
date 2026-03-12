@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Flowise Agents",
+    "description": "How to detect and fix ai agent observability in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Flowise agent-observability",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, AI agent observability issues arise from its drag-and-drop chatflow architecture where intermediate outputs, retrievals, and tool calls often lack visibility across chained nodes. Common failures like unvalidated LLM outputs in chatflow chains or silent tool node errors go undetected without proper tracing, leading to degraded agent performance and poor user experiences. Vex integration as a callback handler provides end-to-end observability into these low-code LLM orchestrations.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains producing unvalidated intermediate outputs",
+        "symptom": "LLM Chain nodes output JSON that fails downstream parsing without error surfacing",
+        "impact": "Chatflow halts silently or produces garbage responses after multiple node failures"
+      },
+      {
+        "scenario": "Vector store retrieval returning low-relevance documents",
+        "symptom": "Retriever Node returns documents with low cosine similarity scores (<0.7)",
+        "impact": "Agent hallucinates or provides irrelevant answers despite RAG setup"
+      },
+      {
+        "scenario": "Custom tool nodes failing silently without error propagation",
+        "symptom": "Tool Node 'execute' callback throws unhandled exception, flow continues with null result",
+        "impact": "Agent appears functional but delivers incomplete or wrong actions"
+      },
+      {
+        "scenario": "Multi-agent sequential flow losing context between agent handoffs",
+        "symptom": "ContextAggregator Node receives truncated session state between Agent Nodes",
+        "impact": "Downstream agents lack conversation history, causing repetitive or incoherent responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Trace Intermediate LLM Outputs",
+        "description": "Add callback to ChatflowRuntime to capture and validate JSON outputs from LLM Chain nodes",
+        "code": "import { ChatFlow, CallbackManager } from 'flowise';\n\nconst flow = await ChatFlow.init();\nconst callbackManager = new CallbackManager();\n\ncallbackManager.onChainEnd = (output: any) => {\n  if (output.jsonSchema && !output.content.match(output.jsonSchema)) {\n    console.error('Invalid JSON output:', output);\n    // Vex capture: track unvalidated intermediate outputs\n  }\n};\n\nflow.setCallbackManager(callbackManager);\nawait flow.chat(reqPayload, callbackManager);",
+        "language": "typescript"
+      },
+      {
+        "name": "Monitor Vector Retrieval Relevance",
+        "description": "Inspect ConversationalRetrievalQAChain node outputs for document similarity scores",
+        "code": "import { ConversationalRetrievalQAChain } from 'flowise';\n\nconst retrieverCallback = {\n  onRetrieverEnd: (documents: any[], queryEmbedding: number[]) => {\n    const similarities = documents.map(doc => \n      cosineSimilarity(queryEmbedding, doc.embedding)\n    );\n    const avgRelevance = similarities.reduce((a, b) => a + b) / similarities.length;\n    \n    if (avgRelevance < 0.7) {\n      console.warn('Low relevance retrieval:', { avgRelevance, similarities });\n      // Vex alert: poor RAG performance\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Detect Silent Tool Failures",
+        "description": "Wrap custom Tool Node execute method to catch and propagate exceptions",
+        "code": "import { ToolNode } from 'flowise';\n\nclass ObservableToolNode extends ToolNode {\n  async executeTool(input: string): Promise<string> {\n    try {\n      const result = await super.executeTool(input);\n      return result;\n    } catch (error) {\n      console.error('Tool execution failed:', error);\n      throw new Error(`Tool failed: ${error.message}`);\n    }\n  }\n}\n\n// In chatflow config\nconst toolNode = new ObservableToolNode({\n  name: 'api_tool',\n  description: 'API caller'\n});",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Add JSON Validation Middleware",
+        "description": "Insert validation node between LLM Chain and downstream consumers",
+        "code": "import { JsonOutputParser } from 'langchain/output_parsers';\nimport { ChatFlow } from 'flowise';\n\nconst parser = new JsonOutputParser();\n\n// Custom validation node\nconst validateJsonNode = {\n  type: 'CustomNode',\n  execute: async (input: any) => {\n    try {\n      const parsed = await parser.parse(input.content);\n      return { ...input, validated: true, data: parsed };\n    } catch (e) {\n      return { ...input, validated: false, error: e.message };\n    }\n  }\n};\n\n// Insert between LLM Chain and next node\nchatflow.nodes.splice(llmIndex + 1, 0, validateJsonNode);",
+        "language": "typescript"
+      },
+      {
+        "name": "Implement Retrieval Reranking",
+        "description": "Add reranker after vector store retrieval to boost relevance",
+        "code": "import { CohereRerank } from '@langchain/cohere';\n\nconst reranker = new CohereRerank({\n  cohereApiKey: process.env.COHERE_API_KEY\n});\n\n// Modify retriever node\nconst enhancedRetriever = {\n  ...originalRetriever,\n  async getRelevantDocuments(query: string) {\n    let docs = await originalRetriever.getRelevantDocuments(query);\n    docs = await reranker.rerank({ query, documents: docs });\n    return docs.slice(0, 3); // Top 3 only\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Persistent Context Aggregator",
+        "description": "Replace default ContextAggregator with session-persistent version",
+        "code": "class PersistentContextAggregator {\n  private sessionStore = new Map<string, any[]>();\n  \n  aggregate(sessionId: string, newContext: any) {\n    if (!this.sessionStore.has(sessionId)) {\n      this.sessionStore.set(sessionId, []);\n    }\n    const context = this.sessionStore.get(sessionId);\n    context.push(newContext);\n    \n    // Limit context window\n    if (context.length > 10) {\n      context.shift();\n    }\n    \n    return context;\n  }\n}\n\nconst aggregatorNode = new PersistentContextAggregator();",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex integrates directly as a Flowise callback handler, automatically capturing traces from all chatflow nodes including LLM chains, retrievers, and custom tools. It detects the four common failure modes by analyzing node outputs, embeddings, and execution traces in real-time, providing instant alerts and remediation suggestions. Vex's ML-powered analysis identifies patterns like low-relevance retrievals or context loss before they impact users, with one-click fixes deployable back into Flowise.\n\nThe Vex SDK hooks into Flowise's execution lifecycle, tracing intermediate outputs and calculating metrics like retrieval relevance and tool success rates. Automated remediation includes injecting validation nodes, reranking retrievers, and restoring lost context—all without manual flow modifications. Vex maintains a historical baseline of healthy agent behavior, flagging regressions as your chatflows evolve.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise';\n\n// Initialize Vex with Flowise integration\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY,\n  integrations: {\n    flowise: {\n      autoTrace: true,\n      detect: ['unvalidated-outputs', 'low-relevance-retrieval', 'silent-tool-failures', 'context-loss']\n    }\n  }\n});\n\n// Single line integration\nconst flow = await ChatFlow.init();\nflow.setCallbackManager(vex.getFlowiseCallback());\n\n// Vex auto-detects and alerts on issues\nconst response = await flow.chat(reqPayload);\n\n// Get remediation suggestions\nif (vex.hasAlerts()) {\n  const fixes = await vex.getRemediations();\n  console.log('Vex fixes:', fixes);\n}",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 minutes to get instant observability and auto-remediation for your Flowise agents."
+    }
+  }
+}

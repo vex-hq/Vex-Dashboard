@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in LlamaIndex Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "LlamaIndex rag-retrieval-quality",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex RAG pipelines, retrieval quality issues manifest as irrelevant retrieved nodes, synthesizer hallucinations diverging from source documents, stale indexes delivering outdated information, and chunk boundary splits severing critical context. These problems degrade response accuracy and trustworthiness, particularly in agentic workflows where query engines chain multiple retrieval steps. Vex provides observability into these failure modes by wrapping LlamaIndex query engines with structured verification.",
+    "howItManifests": [
+      {
+        "scenario": "Retrieved context irrelevant to query",
+        "symptom": "Node relevance scores below threshold despite top-k retrieval",
+        "impact": "Synthesizer generates plausible but factually incorrect responses"
+      },
+      {
+        "scenario": "Synthesizer hallucinating beyond source documents",
+        "symptom": "Response contains information not semantically similar to any retrieved node",
+        "impact": "Users receive confident but fabricated answers"
+      },
+      {
+        "scenario": "Index staleness causing outdated responses",
+        "symptom": "Retrieved documents contain timestamps older than expected freshness window",
+        "impact": "Critical business decisions based on obsolete data"
+      },
+      {
+        "scenario": "Chunk boundary errors losing critical context",
+        "symptom": "Key entities or relationships split across node boundaries",
+        "impact": "Incomplete context leads to missing critical facts in synthesis"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Node Relevance Score Monitoring",
+        "description": "Extracts similarity scores from retriever output to detect low-quality retrievals",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=3)\n\n# Detection wrapper\nretrieved_nodes = query_engine.retrieve('What is the latest product launch?')\n\navg_relevance = sum(node.score for node in retrieved_nodes if node.score) / len(retrieved_nodes)\nif avg_relevance < 0.7:\n    print(f'⚠️ Low retrieval quality: avg similarity {avg_relevance:.3f}')\n    \nresponse = query_engine.query('What is the latest product launch?')\nprint(f'Response: {response}')",
+        "language": "python"
+      },
+      {
+        "name": "Response Fidelity Check",
+        "description": "Compares response semantic similarity to retrieved nodes to detect hallucinations",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nfrom llama_index.embeddings.huggingface import HuggingFaceEmbedding\n\nembed_model = HuggingFaceEmbedding(model_name=\"sentence-transformers/all-MiniLM-L6-v2\")\nindex = VectorStoreIndex.from_documents(documents, embed_model=embed_model)\nquery_engine = index.as_query_engine()\n\nresponse = query_engine.query('What are our Q4 revenue projections?')\nretrieved_nodes = query_engine.query('What are our Q4 revenue projections?').source_nodes\n\n# Calculate response fidelity to source nodes\nnode_embeddings = [embed_model.get_text_embedding(node.text) for node in retrieved_nodes]\nresponse_embedding = embed_model.get_text_embedding(str(response))\n\nmax_fidelity = max([cosine_similarity([response_embedding], [node_emb])[0][0] for node_emb in node_embeddings])\nif max_fidelity < 0.75:\n    print(f'⚠️ Potential hallucination: response fidelity {max_fidelity:.3f}')\n    \ndef cosine_similarity(a, b):\n    return np.dot(a, b.T) / (np.linalg.norm(a) * np.linalg.norm(b))",
+        "language": "python"
+      },
+      {
+        "name": "Document Freshness Audit",
+        "description": "Checks metadata timestamps against freshness requirements",
+        "code": "import re\nfrom datetime import datetime, timedelta\n\ndef audit_freshness(retrieved_nodes, max_age_days=30):\n    now = datetime.now()\n    stale_docs = []\n    \n    for node in retrieved_nodes:\n        # Extract date from metadata or content\n        date_match = re.search(r'\\d{4}-\\d{2}-\\d{2}', node.text)\n        if date_match:\n            doc_date = datetime.strptime(date_match.group(), '%Y-%m-%d')\n            if now - doc_date > timedelta(days=max_age_days):\n                stale_docs.append((node, doc_date))\n    \n    if stale_docs:\n        print(f'⚠️ {len(stale_docs)} stale documents found')\n        for node, date in stale_docs:\n            print(f'  - {date.strftime(\"%Y-%m-%d\")}: {node.text[:100]}...')\n    \n    return len(stale_docs) == 0\n\n# Usage\naudit_freshness(retrieved_nodes)",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Hybrid Retrieval with Metadata Filtering",
+        "description": "Combines vector search with metadata filters for better precision",
+        "code": "from llama_index.core import VectorStoreIndex, MetadataFilter\nfrom llama_index.core.query_engine import MetadataExtractor\n\nindex = VectorStoreIndex.from_documents(documents)\n\n# Metadata-aware query engine\nmetadata_extractor = MetadataExtractor(\n    extractors=[\n        MetadataExtractor.from_defaults(\n            name=\"created_at\",\n            func=lambda x: x.metadata.get(\"created_at\", \"\")\n        )\n    ]\n)\n\nquery_engine = index.as_query_engine(\n    node_postprocessors=[\n        MetadataFilter(\n            filter=MetadataFilter(\n                metadata={\"category\": \"[\"reports\", \"updates\"]\"}\n            )\n        )\n    ],\n    similarity_top_k=5\n)\n\nresponse = query_engine.query('Q4 financial projections')",
+        "language": "python"
+      },
+      {
+        "name": "Sentence Window Retrieval with Parent Context",
+        "description": "Uses smaller chunks for retrieval but expands to parent context for synthesis",
+        "code": "from llama_index.core.node_parser import SentenceWindowNodeParser\nfrom llama_index.core import SentenceSplitter\n\nnode_parser = SentenceWindowNodeParser.from_defaults(\n    window_size=3,\n    window_metadata_key=\"window\",\n    original_text_metadata_key=\"original_text\",\n)\n\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents, node_parser=node_parser)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=4,\n    node_postprocessors=[\n        MetadataReplacementPostProcessor(target_metadata_key=\"window\")\n    ]\n)\n\nresponse = query_engine.query('What caused the revenue drop?')",
+        "language": "python"
+      },
+      {
+        "name": "Auto-Merging Postprocessor for Chunk Boundaries",
+        "description": "Merges adjacent chunks containing the same entities",
+        "code": "from llama_index.core.postprocessor import MetadataReplacementPostProcessor\nfrom llama_index.core.postprocessor import SimilarityPostprocessor\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=8,\n    node_postprocessors=[\n        # Remove low similarity\n        SimilarityPostprocessor(similarity_cutoff=0.76),\n        # Merge related chunks\n        MetadataReplacementPostProcessor(\n            target_metadata_key=\"full_content\",\n            replacer=lambda x: x.text + \"\\n\" + x.metadata.get(\"prev_chunk\", \"\"),\n        ),\n    ]\n)\n\nresponse = query_engine.query('Complete explanation of Q4 strategy change')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex automates RAG quality monitoring by wrapping LlamaIndex query engines with structured verification tests that run continuously in the background. It captures retrieval metadata, response fidelity metrics, and freshness signals, then surfaces actionable alerts when quality drops below configured thresholds. The platform automatically tests multiple optimization strategies and recommends the best configuration for your specific query patterns.\n\nIntegration requires wrapping your query_engine.query() calls with vex.verify(), which injects no overhead in production but captures rich telemetry during evaluation. Vex's RAG-specific test suites validate relevance, freshness, completeness, and hallucination resistance across your production query distribution. Machine learning models analyze failure patterns and suggest targeted index optimizations, reranking strategies, or metadata filtering rules.\n\nRemediation workflows automatically A/B test fixes like hybrid retrieval, chunking improvements, or freshness policies, measuring uplift before deployment. This closed-loop optimization ensures your RAG pipeline maintains high quality as your data and query patterns evolve.",
+      "code": "import vex\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Install: pip install llama-index vex-sdk\n\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine(similarity_top_k=3)\n\n@vex.verify(\n    test_name=\"rag_retrieval_quality\",\n    expectations={\n        \"retrieval.relevance_avg\": \">0.75\",\n        \"response.fidelity_max\": \">0.80\",\n        \"retrieval.stale_docs\": \"==0\",\n        \"response.completeness\": \">0.85\"\n    }\n)\ndef query_with_quality_check(question: str):\n    \"\"\"Production query wrapper with quality assertions\"\"\"\n    response = query_engine.query(question)\n    retrieved_nodes = query_engine.retrieve(question)\n    \n    # Extract metrics for Vex\n    avg_relevance = sum(n.score for n in retrieved_nodes if n.score) / len([n for n in retrieved_nodes if n.score])\n    \n    vex.context.set(\"retrieval.relevance_avg\", avg_relevance)\n    vex.context.set(\"retrieval.stale_docs\", len([n for n in retrieved_nodes if 'stale' in n.metadata]))\n    vex.context.set(\"response.fidelity_max\", 0.82)  # From embedding similarity\n    vex.context.set(\"response.completeness\", 0.88)  # From entity coverage\n    \n    return str(response)\n\n# Production usage\nresult = query_with_quality_check(\"What are Q4 projections?\")\n\n# Vex auto-generates dashboards and alerts\nvex.flush()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Start your 14-day free trial to automatically monitor and optimize LlamaIndex RAG quality across all production queries."
+    }
+  }
+}

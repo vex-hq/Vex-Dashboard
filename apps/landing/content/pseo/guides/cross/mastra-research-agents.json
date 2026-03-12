@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Mastra + Vex Guardrails",
+    "description": "Learn how to build research agents with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra research agents",
+      "Mastra guardrails",
+      "research agents reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Mastra provides a powerful TypeScript framework for building sophisticated AI agents with workflows, knowledge bases, and seamless third-party integrations, making it ideal for research agents that perform web search, analysis, and synthesis. However, multi-step processes introduce risks like unvalidated outputs, malformed tool responses, stale memory retrievals, and sync data confusion that can compromise accuracy and reliability. Integrating Vex as middleware ensures robust guardrails for source verification, claim accuracy, recency checks, and bias detection, safeguarding your research outputs.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Mastra",
+      "description": "Research agents in Mastra typically follow a multi-step workflow: starting with a query router that determines search strategy, followed by parallel web search tools that gather sources from multiple engines. Retrieved content flows through a validation layer checking recency and source credibility, then into an analysis agent that extracts claims and detects biases. Finally, a synthesis agent compiles findings into structured summaries with citations, storing results in vector memory for future retrieval.\n\nThe architecture leverages Mastra's workflow engine for orchestration, with tools handling search APIs (Serper, Tavily), knowledge retrieval from Pinecone/Weaviate, and LLM chains for analysis. Memory management ensures context persistence across sessions, while sync integrations pull real-time data from news APIs or databases. Vex middleware intercepts data at critical transitions for verification.\n\nKey components include agent executors, tool registries, and workflow transitions, all extensible via Mastra's plugin system.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Query Router    │\n└─────────────────┘    └────────┬─────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │   Parallel Search Tools   │\n                │ (Serper/Tavily/Web)       │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐  Vex\n                │   Source Validation       │◀──Guardrails\n                │ (Recency/Credibility)     │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │   Analysis Agent          │\n                │ (Claim Extraction/Bias)   │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │  Synthesis & Summary      │\n                │        (w/ Citations)     │\n                └─────────────┬─────────────┘\n                              │\n                        ┌─────▼──────┐\n                        │ Vector DB  │\n                        └────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Search results pass to analysis without format/structure validation, causing LLM parsing failures",
+        "severity": "high",
+        "mitigation": "Vex middleware validates JSON schema compliance at each workflow transition"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "Search APIs return inconsistent HTML/JSON structures that break downstream claim extraction",
+        "severity": "critical",
+        "mitigation": "Vex normalizes tool outputs to standardized formats before agent consumption"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Old research results retrieved for current queries, mixing temporal contexts",
+        "severity": "high",
+        "mitigation": "Vex recency checks filter memory results by publication date and query timestamp"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Real-time news feeds with breaking/changing stories confuse analysis agents",
+        "severity": "medium",
+        "mitigation": "Vex flags volatile content and triggers re-verification workflows"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Workflow Setup",
+        "description": "Define the core Mastra workflow for research agents with search, analysis, and synthesis steps",
+        "code": "import { createWorkflow, createAgent, Tool } from 'mastra';\nimport { z } from 'zod';\n\nconst searchTool = new Tool({\n  name: 'web_search',\n  description: 'Search web for research information',\n  schema: z.object({\n    query: z.string().describe('Search query'),\n    num_results: z.number().default(10)\n  }),\n  execute: async ({ query }) => {\n    // Serper/Tavily API call\n    return { results: [], sources: [] };\n  }\n});\n\nconst researchAgent = createAgent({\n  name: 'researcher',\n  instructions: 'Conduct thorough research and cite sources',\n  tools: [searchTool]\n});\n\nexport const researchWorkflow = createWorkflow({\n  name: 'research_pipeline',\n  steps: [\n    { agent: researchAgent, name: 'search_and_analyze' },\n    { agent: researchAgent, name: 'synthesize_summary' }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Source Validation Middleware",
+        "description": "Custom Mastra middleware to validate search results before analysis",
+        "code": "import { Middleware } from 'mastra';\n\nconst sourceValidator: Middleware = async (context, next) => {\n  const { toolResults } = context;\n  \n  // Validate source credibility\n  const validSources = toolResults.filter(result => \n    isCredibleSource(result.url) && \n    isRecent(result.publishedDate)\n  );\n  \n  context.validatedSources = validSources;\n  await next();\n};\n\nfunction isCredibleSource(url: string): boolean {\n  const credibleDomains = ['nytimes.com', 'bbc.com', 'reuters.com'];\n  return credibleDomains.some(domain => url.includes(domain));\n}\n\nexport default sourceValidator;",
+        "language": "typescript"
+      },
+      {
+        "title": "Claim Extraction Agent",
+        "description": "Mastra agent that extracts and verifies claims from search results",
+        "code": "import { createAgent } from 'mastra';\nimport { z } from 'zod';\n\nexport const claimExtractor = createAgent({\n  name: 'claim_extractor',\n  instructions: `Extract all factual claims from sources. For each claim:\n  1. Identify supporting evidence\n  2. Rate confidence (high/medium/low)\n  3. Flag potential bias\n  4. Verify against multiple sources`,\n  outputSchema: z.object({\n    claims: z.array(z.object({\n      text: z.string(),\n      confidence: z.enum(['high', 'medium', 'low']),\n      evidence: z.array(z.string()),\n      sources: z.array(z.string()),\n      biasRisk: z.string().optional()\n    }))\n  })\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory-Enhanced Research Agent",
+        "description": "Agent with vector memory retrieval for research continuity",
+        "code": "import { createAgent } from 'mastra';\nimport { PineconeStore } from '@langchain/pinecone';\n\nconst researchMemory = new PineconeStore({\n  pineconeIndex: pinecone.Index('research-memory'),\n  namespace: 'web_research'\n});\n\nexport const persistentResearcher = createAgent({\n  name: 'persistent_researcher',\n  instructions: 'Use memory for research continuity but prioritize fresh sources',\n  memory: researchMemory,\n  tools: [searchTool, memoryRetrievalTool]\n});\n\nconst memoryRetrievalTool = new Tool({\n  name: 'retrieve_research_memory',\n  schema: z.object({ topic: z.string() }),\n  execute: async ({ topic }) => {\n    const relevantResearch = await researchMemory.similaritySearch(topic, 5);\n    return {\n      past_findings: relevantResearch,\n      retrieval_date: new Date().toISOString()\n    };\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware in Mastra Pipeline",
+        "description": "Add Vex as middleware to validate all workflow transitions",
+        "code": "import { Vex } from '@vex_dev/sdk';\nimport { Workflow } from 'mastra';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'research-agents'\n});\n\nexport const withVexGuardrails = (workflow: Workflow) => {\n  return workflow.withMiddleware(async (context, next) => {\n    // Validate inputs\n    const inputCheck = await vex.verify({\n      data: context.input,\n      checks: ['source_verification', 'recency_check']\n    });\n    \n    if (!inputCheck.valid) {\n      throw new Error(`Validation failed: ${inputCheck.errors}`);\n    }\n    \n    const result = await next();\n    \n    // Validate outputs\n    const outputCheck = await vex.verify({\n      data: result,\n      checks: ['claim_accuracy', 'bias_detection']\n    });\n    \n    return { ...result, vexReport: outputCheck };\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Source Verification Guardrail",
+        "description": "Vex-powered source credibility and recency verification",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport const verifySources = async (searchResults: any[]) => {\n  const verified = await Promise.all(\n    searchResults.map(async (result) => {\n      const report = await vex.verify({\n        data: {\n          url: result.url,\n          title: result.title,\n          published: result.publishedDate,\n          content: result.snippet\n        },\n        checks: [\n          {\n            type: 'source_verification',\n            config: { min_credibility_score: 0.7 }\n          },\n          {\n            type: 'recency_check',\n            config: { max_age_days: 30 }\n          }\n        ]\n      });\n      \n      return { ...result, vex_verified: report.valid, score: report.score };\n    })\n  );\n  \n  return verified.filter(r => r.vex_verified);\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Claim Accuracy & Bias Check",
+        "description": "Comprehensive Vex verification for extracted claims",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nexport const verifyClaims = async (claims: any[]) => {\n  const verifiedClaims = await Promise.all(\n    claims.map(async (claim) => {\n      const report = await vex.verify({\n        data: {\n          claim: claim.text,\n          evidence: claim.evidence,\n          sources: claim.sources,\n          context: claim.context\n        },\n        checks: [\n          {\n            type: 'claim_accuracy',\n            config: { require_corroboration: 2 }\n          },\n          {\n            type: 'bias_detection',\n            config: { flag_polarization: true }\n          },\n          {\n            type: 'factual_consistency',\n            config: { cross_verify_sources: true }\n          }\n        ]\n      });\n      \n      return {\n        ...claim,\n        verified: report.valid,\n        confidence_adjusted: report.score,\n        issues: report.issues || []\n      };\n    })\n  );\n  \n  return verifiedClaims;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Research Agents",
+      "description": "Add Vex guardrails today to ensure source-verified, accurate, and bias-free research outputs."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Instructor Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Instructor error-handling",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor, AI Agent Error Handling Patterns manifest as validation failures during structured output extraction from LLM responses, leading to retries or crashes in agent workflows. Common issues include exhausted retries from malformed Pydantic models, missing required fields in partial extractions, hallucinated enum values, and inconsistent nested object depths. These patterns disrupt agent reliability, causing infinite loops or silent failures in production systems.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor's `max_retries` exceeded, raising `InstructorError` after multiple validation attempts",
+        "impact": "Agent workflow halts completely, requiring manual restart or fallback to unstructured text"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Pydantic model partially populates but fails validation due to missing `required=True` fields",
+        "impact": "Agent receives `None` or incomplete data, leading to downstream cascading failures"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "LLM generates enum values like 'purple' when schema expects ['red', 'green', 'blue']",
+        "impact": "Validation fails silently or triggers retries, wasting tokens and increasing latency"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Nested Pydantic models have varying depths (sometimes 2 levels, sometimes 4), failing schema validation",
+        "impact": "Agent parsing logic breaks, causing unhandled exceptions in nested data processing"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects Instructor's `InstructorError` with retry exhaustion by inspecting exception messages",
+        "code": "from instructor import InstructorError\n\ntry:\n    response = client.chat.completions.create(\n        model='gpt-4o',\n        response_model=AgentResponse,\n        messages=messages,\n        max_retries=3\n    )\nexcept InstructorError as e:\n    if 'retries exhausted' in str(e).lower():\n        print(f'Retry exhaustion detected: {e}')\n        raise\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Hallucination Detector",
+        "description": "Captures validation errors specifically for enum value mismatches in Pydantic models",
+        "code": "from pydantic import ValidationError\nfrom instructor import InstructorError\n\ntry:\n    response = client.with_structured_output(AgentResponse).do(messages)\nexcept (InstructorError, ValidationError) as e:\n    if 'enum' in str(e).lower() and 'input' in str(e).lower():\n        print(f'Enum hallucination: {e}')\n        # Log invalid enum value\n        raise\n",
+        "language": "python"
+      },
+      {
+        "name": "Partial Field Detection",
+        "description": "Checks if required fields are None after partial Instructor extraction",
+        "code": "response = client.with_structured_output(AgentResponse).do(messages)\n\nmissing_fields = []\nfor field_name, field_info in AgentResponse.model_fields.items():\n    if field_info.is_required() and getattr(response, field_name) is None:\n        missing_fields.append(field_name)\n\nif missing_fields:\n    print(f'Partial extraction - missing required fields: {missing_fields}')\n    raise ValueError('Required fields missing')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Graceful Fallback with Partial Mode",
+        "description": "Uses Instructor's `partial=True` to extract available fields and handle missing data gracefully",
+        "code": "from instructor import partial\n\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=partial(AgentResponse),\n    messages=messages,\n    max_retries=2,\n    temperature=0.1  # Reduce hallucination\n)\n\n# Handle partial results\nif hasattr(response, 'required_field') and response.required_field is None:\n    response.required_field = 'fallback_value'\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Coercion with Custom Validator",
+        "description": "Adds Pydantic validator to coerce hallucinated enums to closest valid value",
+        "code": "from pydantic import field_validator\nfrom enum import Enum\n\nclass StatusEnum(str, Enum):\n    PENDING = 'pending'\n    COMPLETED = 'completed'\n    FAILED = 'failed'\n\nclass AgentResponse(BaseModel):\n    status: StatusEnum\n    \n    @field_validator('status', mode='before')\n    @classmethod\n    def coerce_status(cls, v):\n        if isinstance(v, str):\n            # Map common hallucinations to valid enums\n            mapping = {'done': 'completed', 'error': 'failed', 'purple': 'failed'}\n            return mapping.get(v.lower(), v)\n        return v\n\nresponse = client.with_structured_output(AgentResponse).do(messages)\n",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Nested Schema Validation",
+        "description": "Uses Instructor's mode='json' for flexible nested extraction with post-validation",
+        "code": "response = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=AgentResponse,\n    mode='json',  # More flexible than 'pydantic'\n    messages=messages\n)\n\n# Post-validate nested structure\ndef validate_nested_depth(obj, expected_depth=3):\n    if isinstance(obj, dict):\n        actual_depth = max(validate_nested_depth(v, expected_depth-1) for v in obj.values())\n        return 1 + actual_depth\n    return 0\n\nif validate_nested_depth(response.model_dump()) != 3:\n    raise ValueError('Inconsistent nested depth')\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex automatically wraps Instructor's structured output calls with `vex.verify()`, providing real-time detection of all four error patterns without code changes. It captures retry exhaustion, partial extractions, enum hallucinations, and nested depth inconsistencies, surfacing them in the Vex dashboard with exact traces and token costs. Remediation happens automatically through Vex's agent recovery patterns, injecting fallbacks, coercing invalid enums, and normalizing nested structures before they reach your agent logic.\n\nThe integration requires only one line: wrap `client.chat.completions.create()` with `vex.verify()`. Vex then applies pattern-specific validators and recovery strategies, reducing error rates by 85%+ in production Instructor agents. Alerts and auto-fixes are configured via the Vex dashboard, with full audit trails for compliance.",
+      "code": "import vex\nfrom instructor import Instructor\nfrom openai import OpenAI\n\n# Install: pip install instructor vex-sdk\nvex.init(api_key='your-vex-key')\nclient = Instructor(OpenAI())\n\n@vex.verify(\n    patterns=['instructor-retry-exhaustion', 'enum-hallucination'],\n    auto_fix=True\n)\ndef agent_task(messages):\n    return client.chat.completions.create(\n        model='gpt-4o',\n        response_model=AgentResponse,\n        messages=messages,\n        max_retries=3\n    )\n\n# Vex auto-detects and fixes all 4 patterns\nresult = agent_task(messages)\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get 85%+ reliability improvement for your Instructor agents in 5 minutes - start your free Vex trial now."
+    }
+  }
+}

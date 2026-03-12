@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in Semantic Kernel Agents",
+    "description": "How to detect and fix ai agent testing strategies in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "Semantic Kernel testing-strategies",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Testing Strategies challenges in Semantic Kernel arise from complex interactions between plugins, planners, and memory components, leading to unreliable agent behavior in enterprise applications. Issues like plugin chaining errors, invalid plans, memory hallucinations, and data contamination undermine agent reliability during multi-step task execution. This guide explores how these manifest specifically in Semantic Kernel's patterns and APIs, with targeted detection and remediation strategies.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining producing cascading errors",
+        "symptom": "Sequential plugin calls fail when upstream plugin returns malformed data that downstream plugins can't parse",
+        "impact": "Complete task failure with untraceable error propagation through KernelFunction invocation chain"
+      },
+      {
+        "scenario": "Planner generating invalid execution plans",
+        "symptom": "SequentialPlanner or HandlebarsPlanner creates plans calling non-existent functions or wrong parameter types",
+        "impact": "Agent stuck in infinite planning loops or runtime FunctionInvocationException errors"
+      },
+      {
+        "scenario": "Memory recall hallucinating past interactions",
+        "symptom": "VolatileMemoryStore or ChatMemoryHistory retrieves fabricated conversation context",
+        "impact": "Agent responds with incorrect information based on hallucinated chat history"
+      },
+      {
+        "scenario": "Cross-plugin data contamination",
+        "symptom": "Shared ContextVariables between plugins cause state leakage across independent function calls",
+        "impact": "Incorrect plugin outputs due to residual data from previous executions polluting current Context"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Plugin Chain Error Tracer",
+        "description": "Detects cascading failures by monitoring KernelFunction invocation stack and input/output validation",
+        "code": "```python\nfrom semantic_kernel import Kernel\nfrom semantic_kernel.contents import ChatHistory\n\nkernel = Kernel()\n\n# Add Vex filter to trace plugin chain failures\ndef chain_error_detector(func_result):\n    if hasattr(func_result, 'error') and func_result.error:\n        # Check if error cascades from previous plugin\n        if 'SKFunctionExecutionError' in str(func_result.error):\n            print(f'🚨 CASCADE ERROR: {func_result.error}')\n            return {'status': 'error', 'chain_broken': True}\n    return {'status': 'ok'}\n\n# Register as result filter\nkernel.filters.add_result_filter(chain_error_detector)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Plan Validation Monitor",
+        "description": "Validates planner output against available functions before execution",
+        "code": "```typescript\nimport { Kernel } from '@semantic-kernel/core';\nimport { SequentialPlanner } from '@semantic-kernel/agents';\n\nconst kernel = Kernel.create();\n\nfunction validatePlan(plan: any[]) {\n  const functionNames = kernel.functions.list().map(f => f.name);\n  const invalidFunctions = plan\n    .filter((step: any) => !functionNames.includes(step.function));\n  \n  if (invalidFunctions.length > 0) {\n    console.error('🚨 INVALID PLAN:', invalidFunctions);\n    return false;\n  }\n  return true;\n}\n\nconst planner = SequentialPlanner.fromKernel(kernel);\nconst plan = await planner.createPlan(['task']);\nvalidatePlan(plan);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Hallucination Detector",
+        "description": "Compares memory recall against conversation history for factual consistency",
+        "code": "```python\nfrom semantic_kernel.memory import SemanticTextMemory\nfrom semantic_kernel.contents import ChatHistory\n\ndef detect_memory_hallucination(history: ChatHistory, recalled: str):\n    # Extract actual conversation facts\n    actual_facts = [msg.content for msg in history if msg.role == 'user']\n    \n    hallucinated = False\n    for fact in actual_facts:\n        if fact.lower() not in recalled.lower():\n            hallucinated = True\n            print(f'🚨 MEMORY HALLUCINATION: Expected {fact}, got {recalled}')\n    \n    return hallucinated\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Input Validation Middleware",
+        "description": "Adds schema validation to all plugin inputs to prevent cascading failures",
+        "code": "```python\nfrom semantic_kernel import KernelFunction\nfrom pydantic import BaseModel, ValidationError\nfrom typing import Any\n\ndef validate_plugin_input(input_schema: type[BaseModel]):\n    def decorator(func: KernelFunction):\n        async def wrapper(*args, context: Any, **kwargs):\n            try:\n                validated = input_schema(**context.variables)\n                return await func(*args, context=context, **kwargs)\n            except ValidationError as e:\n                context.variables['error'] = f'Input validation failed: {e}'\n                return None\n        return wrapper\n    return decorator\n\n# Usage\n@kernel.register_function('plugins', 'process_data')\n@validate_plugin_input(ProcessDataInput)  # Pydantic model\nasync def process_data(context: Any) -> str:\n    pass\n```",
+        "language": "python"
+      },
+      {
+        "name": "Safe Planner with Fallback",
+        "description": "Implements retry logic and fallback plans for planner failures",
+        "code": "```typescript\nimport { Kernel } from '@semantic-kernel/core';\nimport { SequentialPlanner } from '@semantic-kernel/agents';\n\nasync function safePlan(kernel: Kernel, goal: string, maxRetries = 3): Promise<any> {\n  const planner = SequentialPlanner.fromKernel(kernel);\n  \n  for (let i = 0; i < maxRetries; i++) {\n    try {\n      const plan = await planner.createPlan([goal]);\n      if (await validatePlan(plan, kernel)) {\n        return plan;\n      }\n    } catch (error) {\n      console.warn(`Plan attempt ${i + 1} failed:`, error);\n    }\n  }\n  \n  // Fallback to single function\n  return [{ function: 'default_handler', input: goal }];\n}\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Isolated Context Execution",
+        "description": "Creates fresh Context for each plugin to prevent data contamination",
+        "code": "```python\nfrom semantic_kernel import ContextVariables\n\ndef isolated_plugin_call(kernel, function_name: str, input_data: dict):\n    # Fresh context per call - no contamination\n    clean_context = ContextVariables()\n    for key, value in input_data.items():\n        clean_context[key] = value\n    \n    result = kernel.invoke(function_name, clean_context)\n    return result\n\n# Usage\nresult1 = isolated_plugin_call(kernel, 'plugin_a', {'data': 'clean'})\nresult2 = isolated_plugin_call(kernel, 'plugin_b', {'data': 'isolated'})  # No contamination\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates seamlessly as a Kernel filter to automatically detect all four AI Agent failure modes in Semantic Kernel applications. By monitoring function results, plan execution, memory retrieval, and context state, Vex provides real-time alerts and automated remediation workflows. The Vex SDK hooks into Semantic Kernel's filter pipeline, enabling comprehensive observability across plugin chains, planner decisions, and memory operations without code changes.\n\nVex's AI-powered analysis identifies cascading errors before they propagate, validates plans against function registries, detects memory hallucinations through semantic similarity scoring, and traces cross-plugin contamination patterns. Integration takes minutes via pip install vex-sdk, with automatic dashboard setup and remediation recommendations. Teams gain instant visibility into agent reliability metrics and can enforce testing thresholds across deployments.",
+      "code": "```python\nfrom semantic_kernel import Kernel\nfrom vex_sdk import VexMonitor\n\n# Install: pip install semantic-kernel vex-sdk\n\nkernel = Kernel()\n\n# Vex auto-detects all 4 failure modes\nvex = VexMonitor(\n    project_id=\"your-project\",\n    monitor_name=\"semantic-kernel-agent-testing\"\n)\n\n# Single line integration as result filter\nkernel.filters.add_result_filter(vex.filter_handler)\n\n# Vex now monitors:\n# ✅ Plugin chaining errors\n# ✅ Invalid execution plans\n# ✅ Memory hallucinations\n# ✅ Cross-plugin contamination\n\n# Run your agent normally\nresult = await kernel.invoke(\"planner\", \"complex task\")\n\n# Vex dashboard shows issues + auto-fixes\nprint(vex.get_issues())  # ['cascading_error', 'memory_hallucination']\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now to eliminate AI Agent testing failures in Semantic Kernel with one line of code."
+    }
+  }
+}

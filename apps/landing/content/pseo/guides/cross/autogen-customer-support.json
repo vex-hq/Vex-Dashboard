@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with AutoGen + Vex Guardrails",
+    "description": "Learn how to build customer support with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen customer support",
+      "AutoGen guardrails",
+      "customer support reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support systems with AutoGen enables multi-agent collaboration for handling inquiries via RAG, CRM integration, and tool-calling. However, conversational agents risk infinite loops, unsafe code execution, hallucinated responses, and policy violations in high-stakes interactions. Vex provides essential guardrails to verify response accuracy, filter PII, ensure tone consistency, and trigger escalations.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with AutoGen",
+      "description": "The architecture features a Supervisor Agent that routes customer queries to specialized agents: a RAG Agent for knowledge base retrieval, a CRM Agent for order lookup and ticket creation, and a Policy Agent for compliance checks. Agents communicate via AutoGen's group chat manager, with tools for external API calls to CRM systems like Salesforce. Human-in-the-loop escalation occurs when verification fails or complex issues arise.\n\nRetrieval starts with embedding customer queries against a knowledge base, followed by LLM synthesis. CRM tools use function calling for safe data access, while Vex filters replies to prevent PII leakage and ensure professional tone. Multi-turn debates are bounded to avoid token waste.",
+      "diagram": "Customer Query --> Supervisor Agent\n                   |\n             +-----+-----+\n             |           |\n        RAG Agent   CRM Agent\n             |           |\n      KnowledgeBase   CRM API\n             |           |\n             +-----+-----+\n                   |\n             Policy Agent --> Vex Guardrails\n                   |\n              Group Chat Manager --> Response"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops",
+        "description": "Agents ping-pong between RAG and CRM without converging on ticket resolution",
+        "severity": "critical",
+        "mitigation": "Vex detects repetitive patterns and forces termination or escalation"
+      },
+      {
+        "name": "PII leakage in responses",
+        "description": "CRM lookups expose customer phone/email in agent replies",
+        "severity": "critical",
+        "mitigation": "Vex PII filtering redacts sensitive data before final output"
+      },
+      {
+        "name": "Incorrect ticket creation",
+        "description": "Agents agree on wrong order details leading to bad CRM updates",
+        "severity": "high",
+        "mitigation": "Vex verifies factual accuracy against CRM data before tool calls"
+      },
+      {
+        "name": "Unprofessional tone",
+        "description": "Multi-turn debates produce sarcastic or off-brand responses",
+        "severity": "medium",
+        "mitigation": "Vex enforces brand tone guidelines in every reply"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Core AutoGen Group Chat Setup",
+        "description": "Initialize agents and group chat with customer support roles",
+        "code": "from autogen import AssistantAgent, GroupChat, GroupChatManager\n\nllm_config = {\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": os.environ[\"OPENAI_API_KEY\"]}]}\n\nrag_agent = AssistantAgent(name=\"RAG\", llm_config=llm_config, system_message=\"Retrieve from knowledge base using RAG.\")\ncrm_agent = AssistantAgent(name=\"CRM\", llm_config=llm_config, system_message=\"Handle order lookup and ticket creation.\")\npolicy_agent = AssistantAgent(name=\"Policy\", llm_config=llm_config, system_message=\"Check compliance and tone.\")\n\nsupervisor = AssistantAgent(name=\"Supervisor\", llm_config=llm_config, is_leader=True)\ngroupchat = GroupChat(agents=[supervisor, rag_agent, crm_agent, policy_agent], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Knowledge Base Retrieval",
+        "description": "Implement vector search for customer support docs",
+        "code": "import chromadb\nfrom langchain.embeddings import OpenAIEmbeddings\n\nclient = chromadb.Client()\ncollection = client.get_or_create_collection(\"support_kb\")\nembeddings = OpenAIEmbeddings()\n\ndef retrieve_docs(query):\n    query_embedding = embeddings.embed_query(query)\n    results = collection.query(query_embeddings=[query_embedding], n_results=3)\n    return results['documents'][0]\n\nrag_agent.register_for_llm(name=\"rag_tool\")(retrieve_docs)",
+        "language": "python"
+      },
+      {
+        "title": "CRM Tool Calling for Orders",
+        "description": "Safe function calling for CRM integration",
+        "code": "def lookup_order(order_id):\n    # Simulated CRM API\n    return {\"order_id\": order_id, \"status\": \"shipped\", \"customer\": \"john@example.com\"}\n\ndef create_ticket(summary, customer_email):\n    return f\"Ticket created: {summary} for {customer_email}\"\n\ncrm_agent.register_for_llm(name=\"lookup_order\")(lookup_order)\ncrm_agent.register_for_llm(name=\"create_ticket\")(create_ticket)",
+        "language": "python"
+      },
+      {
+        "title": "Initiate Customer Support Chat",
+        "description": "Start group chat with customer query",
+        "code": "customer_query = \"My order #12345 hasn't shipped, can you check?\"\nmanager.initiate_chat(supervisor, message=customer_query)\nprint(manager.last_message()['content'])",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex as Reply Filter",
+        "description": "Install and configure Vex to filter all agent replies",
+        "code": "import vex\n\n# pip install autogen vex-sdk\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n@vex_client.guardrail(\n    checks=[\n        \"response-accuracy\",\n        \"pii-filtering\",\n        \"tone-consistency:professional\",\n        \"policy-compliance:support\",\n        \"escalation-trigger:refund_request\"\n    ]\n)\ndef vex_filtered_reply(sender, recipient, message):\n    verified = vex_client.verify(\n        message,\n        context={\"domain\": \"customer_support\", \"risk_profile\": \"high\"}\n    )\n    if verified:\n        return message\n    else:\n        return \"Escalating to human agent due to verification failure.\"\n\n# Register with all agents\nfor agent in [rag_agent, crm_agent, policy_agent, supervisor]:\n    agent.register_reply([GroupChatManager], reply_func=vex_filtered_reply)",
+        "language": "python"
+      },
+      {
+        "title": "Loop Detection Guardrail",
+        "description": "Prevent infinite conversations with Vex state tracking",
+        "code": "@vex_client.guardrail(name=\"loop-detection\", checks=[\"conversation-loop\"])\ndef detect_loops(sender, recipient, message, chat_history):\n    if len([m for m in chat_history[-10:] if \"order status\" in m]) > 3:\n        return \"LOOP_DETECTED: Force escalate\"\n    return message\n\nmanager.register_reply(supervisor, reply_func=detect_loops)",
+        "language": "python"
+      },
+      {
+        "title": "PII Redaction Before CRM Calls",
+        "description": "Filter customer data before tool execution",
+        "code": "@vex_client.guardrail(checks=[\"pii-filtering\"])\ndef safe_crm_call(func_name, *args):\n    redacted_args = vex_client.redact(str(args))\n    result = globals()[func_name](*args)\n    return vex_client.scrub_pii(result)\n\n# Wrap CRM tools\nsafe_lookup = lambda order_id: safe_crm_call('lookup_order', order_id)\ncrm_agent.register_for_llm(name=\"safe_lookup\")(safe_lookup)\ncrm_agent.register_for_llm(name=\"safe_create_ticket\")(lambda s,e: safe_crm_call('create_ticket', s, e))",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Customer Support",
+      "description": "Get started with Vex guardrails today - sign up for a free trial at vex.ai to protect your customer support agents."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "voice-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Voice Agents with CrewAI + Vex Guardrails",
+    "description": "Learn how to build voice agents with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI voice agents",
+      "CrewAI guardrails",
+      "voice agents reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building voice agents with CrewAI enables multi-agent collaboration for real-time conversational AI, processing speech-to-text inputs through orchestrated agent teams for natural, context-aware responses. Guardrails are essential due to the high-stakes nature of voice interactions, where agent delegation loops, hallucinations, and task drift can cause incoherent conversations or safety violations. Vex integration ensures sub-second latency, response appropriateness, and conversation coherence in production deployments.",
+    "architectureOverview": {
+      "heading": "Voice Agents Architecture with CrewAI",
+      "description": "Voice agents follow a real-time pipeline: audio input is transcribed via speech-to-text (e.g., Deepgram or Whisper), fed into a CrewAI crew of specialized agents (listener, reasoner, responder), and output is synthesized via text-to-speech (e.g., ElevenLabs). Agents collaborate sequentially or hierarchically, with a manager agent coordinating delegation to meet sub-second end-to-end latency. Vex guardrails wrap each task execution to verify outputs against safety, coherence, and performance budgets before TTS.\n\nThe crew typically includes a 'Listener Agent' for intent extraction, 'Context Keeper' for conversation history, 'Reasoner' for logic, and 'Responder' for natural language generation. Tasks are chained with strict delegation rules to prevent loops, and Vex callbacks enforce verification at each handoff. This architecture demands precise latency monitoring as transcription (~150ms) + LLM inference (~300ms) + synthesis (~200ms) must stay under 1s.\n\nCrewAI's task delegation is instrumented with Vex to catch common failures like hallucinated facts propagating through agents or role reinterpretation causing objective drift.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Microphone     │───▶│ Speech-to-Text   │───▶│ CrewAI Crew     │\n│     Input        │    │   (Deepgram)     │    │  + Vex Guard    │\n└─────────────────┘    └──────────────┬───┘    │  (Listener/     │\n                                     │        │   Reasoner/     │\n                        ┌─────────────▼───┐    │   Responder)    │\n                        │ Conversation    │    └─────────────────┘\n                        │   State (Redis) │             │\n                        └─────────────────┘             ▼\n                                     │        ┌─────────────────┐\n                                     ▼        │ Text-to-Speech  │\n                               ┌──────────────▼──────────────┐│ ElevenLabs)    │\n                               │ Vex Verification            ││   Output       │\n                               │ (latency/coherence/safety)   │└─────────────────┘\n                               └────────────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "Agents endlessly pass tasks between crew members due to ambiguous delegation rules, violating sub-second latency",
+        "severity": "critical",
+        "mitigation": "Vex task callback enforces max delegation depth and timeout enforcement"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "Agents fabricate tool responses (e.g., fake user context) passed to TTS, eroding conversation trust",
+        "severity": "high",
+        "mitigation": "Vex verifies tool outputs against ground truth schemas before agent handoff"
+      },
+      {
+        "name": "Task drift in conversation",
+        "description": "Agents reinterpret conversation objectives, generating off-topic responses that break coherence",
+        "severity": "high",
+        "mitigation": "Vex coherence checks against conversation history and user intent"
+      },
+      {
+        "name": "Latency budget violations",
+        "description": "Crew execution exceeds 800ms threshold, causing unnatural conversation pauses",
+        "severity": "critical",
+        "mitigation": "Vex latency guards with agent-specific budgets and early termination"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "CrewAI Voice Agent Crew Setup",
+        "description": "Define specialized agents for voice pipeline with Vex-ready task callbacks",
+        "code": "from crewai import Agent, Task, Crew\nfrom vex import Vex\nfrom pydantic import BaseModel\n\n# Voice agent roles\nlistener = Agent(\n    role='Listener',\n    goal='Extract user intent from transcript maintaining conversation context',\n    backstory='You\\'re the first point of contact preserving conversation flow',\n    verbose=True\n)\n\nreasoner = Agent(\n    role='Reasoner',\n    goal='Apply domain logic to user intent without hallucinating facts',\n    backstory='You verify all outputs against conversation history',\n    verbose=True\n)\n\nclass VoiceResponse(BaseModel):\n    response: str\n    confidence: float\n    intent: str\n\n# Vex client for voice verification\nvex = Vex(api_key='your-vex-key')\n\nlistener_task = Task(\n    description='Analyze: {transcript} | History: {history}',\n    agent=listener,\n    output_pydantic=VoiceResponse,\n    context=[\"user_history\"]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Real-time Speech Pipeline",
+        "description": "Integrate STT → CrewAI → TTS with latency monitoring",
+        "code": "import asyncio\nimport deepgram\nfrom crewai import Crew\nimport elevenlabs\n\nasync def voice_pipeline(audio_data: bytes, conversation_history: list) -> str:\n    # Speech-to-text (~150ms)\n    stt_result = await deepgram.transcribe(audio_data)\n    transcript = stt_result['transcript']\n    \n    # CrewAI execution with Vex (~400ms)\n    crew = Crew(agents=[listener, reasoner], tasks=[listener_task])\n    result = await crew.kickoff(inputs={\n        'transcript': transcript,\n        'history': conversation_history\n    })\n    \n    # Verify latency budget\n    if asyncio.get_event_loop().time() - start_time > 0.8:\n        return 'Processing... (please repeat)'\n    \n    # Text-to-speech (~200ms)\n    tts_audio = elevenlabs.generate(result.response)\n    return tts_audio\n\n# Latency-tracked execution\nstart_time = asyncio.get_event_loop().time()\nresponse = await voice_pipeline(audio_chunk, history)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation State Management",
+        "description": "Maintain coherence across agent handoffs using Redis",
+        "code": "import redis\nimport json\n\nr = redis.Redis(host='localhost', port=6379, db=0)\n\nclass ConversationState:\n    def __init__(self, session_id: str):\n        self.session_id = f'voice:{session_id}'\n    \n    def append(self, transcript: str, response: str, intent: str):\n        state = {\n            'turns': r.lrange(self.session_id, 0, 99),\n            'latest_intent': intent,\n            'timestamp': time.time()\n        }\n        r.lpush(self.session_id, json.dumps({\n            'transcript': transcript,\n            'response': response,\n            'intent': intent\n        }))\n        r.ltrim(self.session_id, 0, 99)  # Keep last 100 turns\n    \n    def get_context(self) -> str:\n        turns = r.lrange(self.session_id, 0, 9)\n        return ' | '.join([json.loads(t)['transcript'] for t in turns])\n\n# Usage in task\nstate = ConversationState('user_123')\ncontext = state.get_context()\nlistener_task.description += f' | Context: {context}'",
+        "language": "python"
+      },
+      {
+        "title": "Safety Filtering Wrapper",
+        "description": "Pre-TTS safety check for all crew outputs",
+        "code": "import re\n\nHAZARDOUS_PATTERNS = [\n    r'\\b(kill|die|suicide)\\b',\n    r'\\b(hate|racist|terror)\\w*\\b',\n    r'http\\S+\\.(exe|bat|sh|py)\\b'\n]\n\nclass SafetyFilter:\n    @staticmethod\n    def check(response: str, intent: str) -> bool:\n        # Content safety\n        for pattern in HAZARDOUS_PATTERNS:\n            if re.search(pattern, response, re.IGNORECASE):\n                return False\n        \n        # Intent drift check\n        safe_intents = ['greeting', 'question', 'request', 'confirmation']\n        if intent not in safe_intents:\n            return False\n        \n        # Length limits for voice\n        return len(response) < 200\n\n# Wrap crew output\nif SafetyFilter.check(result.response, result.intent):\n    tts_audio = elevenlabs.generate(result.response)\nelse:\n    tts_audio = elevenlabs.generate('I can\\'t help with that request.')",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Task Callback for Delegation Loops",
+        "description": "Prevent infinite agent handoffs with delegation depth tracking",
+        "code": "from vex import Vex, Guardrail\n\nvex = Vex(api_key='your-vex-key')\n\ndef vex_task_callback(task, output, **context):\n    # Track delegation depth\n    delegation_depth = context.get('delegation_depth', 0)\n    \n    guardrail = Guardrail(\n        name='no_loops',\n        spec={\n            'max_delegations': 3,\n            'latency_budget_ms': 300,\n            'output': output.model_dump()\n        }\n    )\n    \n    result = vex.verify(guardrail)\n    if not result.pass:\n        raise Exception(f'Guardrail failed: {result.reason}')\n    \n    return {\n        'output': output,\n        'delegation_depth': delegation_depth + 1,\n        'verified': True\n    }\n\n# Attach to CrewAI task\nlistener_task.callback = vex_task_callback",
+        "language": "python"
+      },
+      {
+        "title": "Coherence + Latency Verification",
+        "description": "Ensure conversation continuity and sub-second response times",
+        "code": "def coherence_guardrail(task_output, history: str):\n    import time\n    \n    start_time = time.time()\n    \n    guardrail = Guardrail(\n        name='voice_coherence',\n        spec={\n            'metrics': {\n                'latency_ms': (time.time() - start_time) * 1000,\n                'max_latency': 800\n            },\n            'semantic_similarity': {\n                'reference': history[-200:],\n                'candidate': task_output.response,\n                'min_score': 0.7\n            },\n            'appropriateness': {\n                'categories': ['safe', 'on_topic'],\n                'min_score': 0.9\n            }\n        }\n    )\n    \n    return vex.verify(guardrail)\n\n# Pipeline integration\nresult = crew.kickoff(inputs=inputs)\nif not coherence_guardrail(result, state.get_context()):\n    result.response = 'Let me clarify that for you.'",
+        "language": "python"
+      },
+      {
+        "title": "Safety + Hallucination Filter",
+        "description": "Block unsafe content and verify factual outputs before TTS",
+        "code": "def safety_hallucination_guard(task_output: VoiceResponse):\n    guardrail = Guardrail(\n        name='voice_safety',\n        spec={\n            'toxicity': {\n                'max_score': 0.1,\n                'categories': ['hate', 'harassment', 'sexual']\n            },\n            'factuality': {\n                'output': task_output.response,\n                'ground_truth': conversation_state.get_context(),\n                'min_consistency': 0.85\n            },\n            'pii_redaction': True,\n            'output_schema': VoiceResponse.model_json_schema()\n        }\n    )\n    \n    verification = vex.verify(guardrail)\n    return {\n        'safe': verification.pass,\n        'redacted_response': verification.output.get('response'),\n        'issues': verification.issues\n    }\n\n# Final verification before TTS\nsafe_output = safety_hallucination_guard(result)\nif safe_output['safe']:\n    tts_audio = elevenlabs.generate(safe_output['redacted_response'])\nelse:\n    logger.warning(f'Safety block: {safe_output[\"issues\"]}')",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI Voice Agents",
+      "description": "Add Vex guardrails today to achieve production-grade reliability for your real-time voice agents."
+    }
+  }
+}

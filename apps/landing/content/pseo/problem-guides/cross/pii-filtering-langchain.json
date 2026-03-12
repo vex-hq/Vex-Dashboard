@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in LangChain Agents",
+    "description": "How to detect and fix pii filtering for ai agents in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "LangChain pii-filtering",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangChain agents, PII Filtering failures occur when conversational agents or RAG chains inadvertently expose sensitive user data like emails, phone numbers, or SSNs in tool calls, chain outputs, or retrieved documents. This manifests uniquely in LangChain due to its agent executor patterns where tools like web search or database queries process unfiltered user inputs, and output parsers fail to redact PII before final responses. Without proper guards around chain.invoke() and agent.run(), PII leaks propagate through multi-step reasoning traces.",
+    "howItManifests": [
+      {
+        "scenario": "Conversational Agent with User Profile Tools",
+        "symptom": "Agent echoes raw user PII in tool arguments and final response",
+        "impact": "SSN and email addresses exposed in chat history and logs"
+      },
+      {
+        "scenario": "RAG Chain with Document Retrieval",
+        "symptom": "Retrieved docs containing PII not filtered before LLM context",
+        "impact": "Sensitive customer data hallucinated into agent responses"
+      },
+      {
+        "scenario": "Multi-Tool Agent Executor Loop",
+        "symptom": "PII compounds across repeated tool calls without sanitization",
+        "impact": "Escalating data exposure in infinite reasoning loops"
+      },
+      {
+        "scenario": "Output Parser in Sequential Chains",
+        "symptom": "Structured output parser formats PII without redaction",
+        "impact": "JSON responses leak unfiltered personal identifiers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex PII Scanner for Agent Outputs",
+        "description": "Scan agent executor traces for common PII patterns in tool calls and responses",
+        "code": "import re\n\nfrom langchain.agents import AgentExecutor, create_openai_tools_agent\nfrom langchain_openai import ChatOpenAI\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b\\d{3}[\\s-]?\\d{3}[\\s-]?\\d{4}\\b'\n]\n\ndef scan_for_pii(text: str) -> list[str]:\n    found = []\n    for pattern in PII_PATTERNS:\n        matches = re.finditer(pattern, text)\n        found.extend([m.group() for m in matches])\n    return found\n\n# Usage in LangChain agent\ndef safe_agent_run(agent: AgentExecutor, input: str):\n    result = agent.invoke({\"input\": input})\n    trace = str(result)\n    pii = scan_for_pii(trace)\n    if pii:\n        raise ValueError(f\"PII detected: {pii}\")\n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Argument Inspector",
+        "description": "Intercept and validate tool arguments before execution in LangChain agents",
+        "code": "from langchain.tools import tool\nfrom typing import Any\n\ndef validate_tool_args(**kwargs: Any) -> bool:\n    text = ' '.join(str(v) for v in kwargs.values())\n    import re\n    email_pattern = r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'\n    if re.search(email_pattern, text):\n        print(\"⚠️ PII (email) detected in tool args\")\n        return False\n    return True\n\n@tool\ndef search_user_profile(query: str) -> str:\n    \"\"\"Search user profiles - validate PII first\"\"\"\n    if not validate_tool_args(query=query):\n        return \"Blocked: PII detected in query\"\n    # Real implementation\n    return f\"Found: {query}\"",
+        "language": "python"
+      },
+      {
+        "name": "Chain Trace PII Monitor",
+        "description": "Monitor intermediate chain steps for PII leakage using LangChain callbacks",
+        "code": "from langchain.callbacks.base import BaseCallbackHandler\nimport re\n\nclass PIILeakDetector(BaseCallbackHandler):\n    def __init__(self):\n        self.pii_patterns = [r'\\b\\d{3}-\\d{2}-\\d{4}\\b']\n    \n    def on_chain_start(self, serialized, inputs, **kwargs):\n        for input_val in inputs.values():\n            text = str(input_val)\n            for pattern in self.pii_patterns:\n                if re.search(pattern, text):\n                    print(f\"🚨 PII detected in chain input: {text[:50]}...\")\n\n# Usage\nllm = ChatOpenAI()\nchain = prompt | llm\ncallback = PIILeakDetector()\nchain.invoke({\"input\": \"Call 555-123-4567\"}, callbacks=[callback])",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Presidio PII Redactor Wrapper",
+        "description": "Wrap LangChain chains with Microsoft Presidio for automatic PII anonymization",
+        "code": "from presidio_analyzer import AnalyzerEngine\nfrom presidio_anonymizer import AnonymizerEngine\nfrom langchain.schema import BaseMessage\n\nanalyzer = AnalyzerEngine()\nanonymizer = AnonymizerEngine()\n\ndef redact_pii(text: str) -> str:\n    results = analyzer.analyze(text=text, language='en')\n    return anonymizer.anonymize(text=text, analyzer_results=results).text\n\nclass PIIRedactingRunnable:\n    def __init__(self, chain):\n        self.chain = chain\n    \n    def invoke(self, input, config=None):\n        result = self.chain.invoke(input, config)\n        if isinstance(result, str):\n            return redact_pii(result)\n        elif hasattr(result, 'content'):\n            result.content = redact_pii(result.content)\n        return result\n\n# Wrap your agent\nagent = create_openai_tools_agent(llm, tools)\nagent_executor = AgentExecutor(agent=agent)\nsafe_agent = PIIRedactingRunnable(agent_executor)",
+        "language": "python"
+      },
+      {
+        "name": "PII-Safe Tool Input Sanitizer",
+        "description": "Sanitize tool inputs before agent executor processes them",
+        "code": "from langchain.agents import AgentExecutor\nfrom langchain_core.messages import HumanMessage\n\nimport re\n\ndef sanitize_tool_input(message: str) -> str:\n    # Replace common PII patterns\n    replacements = {\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b': '[EMAIL]',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b': '[SSN]',\n        r'\\b\\d{10}\\b': '[PHONE]'\n    }\n    for pattern, replacement in replacements.items():\n        message = re.sub(pattern, replacement, message)\n    return message\n\nclass SanitizedAgentExecutor(AgentExecutor):\n    def _call(self, *args, **kwargs):\n        if 'input' in kwargs:\n            kwargs['input'] = sanitize_tool_input(kwargs['input'])\n        return super()._call(*args, **kwargs)\n\n# Usage\nsafe_agent = SanitizedAgentExecutor(agent=agent, tools=tools)",
+        "language": "python"
+      },
+      {
+        "name": "Output Parser with PII Guardrails",
+        "description": "Extend LangChain output parsers to block PII in structured responses",
+        "code": "from langchain.output_parsers import PydanticOutputParser\nfrom pydantic import BaseModel, Field\nimport re\n\nclass SafeOutputParser(PydanticOutputParser):\n    def parse(self, text: str):\n        if self._detect_pii(text):\n            raise ValueError(\"PII detected in parsed output\")\n        return super().parse(text)\n    \n    def _detect_pii(self, text: str) -> bool:\n        patterns = [r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b']\n        return any(re.search(p, text) for p in patterns)\n\nclass CustomerResponse(BaseModel):\n    name: str = Field(description=\"Customer name\")\n    action: str = Field(description=\"Recommended action\")\n\nparser = SafeOutputParser(pydantic_object=CustomerResponse)\n\nprompt = ChatPromptTemplate.from_template(\n    \"Answer about customer {input}. {format_instructions}\",\n    partial_variables={\"format_instructions\": parser.get_format_instructions()}\n)\nchain = prompt | llm | parser",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex automatically detects PII leakage in LangChain agents by wrapping chain.invoke() and agent.executor calls with vex.verify(), scanning all intermediate traces, tool arguments, and final outputs against comprehensive PII pattern libraries including emails, SSNs, phone numbers, and custom regex patterns. When PII is detected, Vex provides precise remediation traces showing exactly which chain step or tool call introduced the leak, along with automatic fixes like input sanitization or output redaction.\n\nThe platform continuously monitors production LangChain deployments, catching PII issues before they reach users. Vex integrates seamlessly with LangChain's callback system and agent executors, providing zero-overhead monitoring that scales to high-volume agent traffic. Remediation is one-click: Vex generates patched chain configurations with PII guards pre-applied.",
+      "code": "from vex import verify\nfrom langchain.agents import AgentExecutor, create_openai_tools_agent\nfrom langchain_openai import ChatOpenAI\nfrom langchain_core.prompts import ChatPromptTemplate\n\nllm = ChatOpenAI(model=\"gpt-4o\")\nagent = create_openai_tools_agent(llm, tools, prompt)\nagent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)\n\n@verify(\n    guards=[\n        \"vex.pii.email\",\n        \"vex.pii.ssn\", \n        \"vex.pii.phone\",\n        \"vex.custom_regex('\\\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Z|a-z]{2,}\\\\b')\"\n    ],\n    remediation=\"redact\"\n)\ndef safe_agent_query(user_input: str):\n    return agent_executor.invoke({\"input\": user_input})\n\n# Production usage\nresult = safe_agent_query(\"Find contact info for john.doe@company.com SSN 123-45-6789\")\n# Vex auto-redacts: \"Find contact info for [EMAIL] SSN [SSN]\"",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LangChain agents to eliminate PII leaks instantly."
+    }
+  }
+}

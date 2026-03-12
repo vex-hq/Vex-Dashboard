@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build research agents with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack research agents",
+      "Llama Stack guardrails",
+      "research agents reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Llama Stack provides a standardized Python interface for building sophisticated Llama-powered research agents that handle web search, synthesis, and summarization workflows. Integrating Vex guardrails ensures reliability by verifying agent outputs against source accuracy, recency, and bias risks inherent in multi-step research pipelines. This guide shows how to wrap Llama Stack agent turns with vex.verify() to mitigate common failure modes in production research agents.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Llama Stack",
+      "description": "Research agents built with Llama Stack follow a modular architecture featuring a central LlamaModel for inference, SafetyShield for content filtering, MemoryBank for conversation history and document retrieval, and ToolRegistry for web search and analysis tools. The agent operates in a loop: receiving user queries, retrieving relevant memory/documents, calling tools like web search APIs, processing responses through the Llama model, and applying safety checks before returning synthesized outputs.\n\nTypical workflow involves query parsing → memory retrieval → tool execution (e.g., SerpAPI search) → multi-turn reasoning → final summary generation. MemoryBank maintains source documents and conversation context, while SafetyShield filters potentially harmful content. Vex integrates as post-processing to verify claims against retrieved sources.\n\nThis architecture excels at complex research tasks but introduces risks like hallucinated source associations and schema mismatches in tool responses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Llama Stack     │\n│                 │    │  Agent Loop      │\n└─────────────────┘    │                  │\n                       │ ┌──────────────┐ │\n                       │ │ LlamaModel   │ │\n                       │ └──────────────┘ │\n                       │ ┌──────────────┐ │\n                       │ │ SafetyShield │ │──┐\n                       │ └──────────────┘ │  │\n                       │ ┌──────────────┐ │  │\n                       │ │ MemoryBank   │ │  │\n                       │ │ ToolRegistry │ │  │\n                       │ └──────────────┘ │  ▼\n                       │                  │┌─────────────────┐\n                       └──────────────────┘│   Vex.verify()  │\n                                            │  (Source/Claim  │\n                                            │   Verification) │\n                                            └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Safety shield filtering producing false positives on benign content",
+        "description": "Research queries about medical or controversial topics trigger false positives, blocking legitimate analysis",
+        "severity": "high",
+        "mitigation": "Wrap SafetyShield calls with Vex context-aware verification to override false positives on verified sources"
+      },
+      {
+        "name": "Agentic loop turn limits exceeded without meaningful resolution",
+        "description": "Multi-step research exceeds turn limits before converging on actionable insights",
+        "severity": "medium",
+        "mitigation": "Use Vex to monitor reasoning progress and early-terminate unproductive loops"
+      },
+      {
+        "name": "Tool runtime responses not conforming to expected schema",
+        "description": "Web search APIs return malformed JSON, breaking agent parsing and synthesis",
+        "severity": "critical",
+        "mitigation": "Validate tool responses with Vex schema enforcement before feeding to LlamaModel"
+      },
+      {
+        "name": "Memory bank retrieval hallucinating document associations",
+        "description": "Agent incorrectly associates claims with irrelevant or outdated retrieved documents",
+        "severity": "high",
+        "mitigation": "Vex source verification cross-checks claims against actual MemoryBank document content"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Llama Stack Research Agent Setup",
+        "description": "Initialize Llama Stack client with memory and tools for research workflow",
+        "code": "from llama_stack_client import LlamaStack\nfrom llama_stack_client.types import GenerateConfig\n\n# Initialize stack with research capabilities\nstack = LlamaStack(\n    model='llama-3.2-11b-vision-instruct',\n    memory_bank=True,\n    safety_shield=True,\n    tools=['serpapi_search', 'document_analyzer']\n)\n\nconfig = GenerateConfig(\n    temperature=0.1,\n    max_tokens=2048,\n    tool_choice='auto'\n)\n\nresponse = stack.generate(\n    'Research latest developments in quantum computing hardware',\n    config=config\n)\nprint(response.content)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Turn Research Loop with Tool Calls",
+        "description": "Implement agent loop handling web search and iterative refinement",
+        "code": "def research_agent_loop(stack, query, max_turns=10):\n    conversation = [{'role': 'user', 'content': query}]\n    \n    for turn in range(max_turns):\n        response = stack.chat(\n            conversation,\n            tools=['serpapi_search'],\n            tool_choice='auto'\n        )\n        \n        conversation.append({\n            'role': 'assistant',\n            'content': response.content,\n            'tool_calls': response.tool_calls\n        })\n        \n        # Execute tools and append results\n        if response.tool_calls:\n            for tool_call in response.tool_calls:\n                result = execute_tool(tool_call)\n                conversation.append({\n                    'role': 'tool',\n                    'content': result,\n                    'tool_call_id': tool_call.id\n                })\n        \n        if response.finish_reason == 'stop':\n            return response.content\n    \n    return 'Research exceeded turn limit'",
+        "language": "python"
+      },
+      {
+        "title": "Memory Bank Integration for Source Tracking",
+        "description": "Store and retrieve research documents with source metadata",
+        "code": "def store_research_sources(stack, query, sources):\n    documents = []\n    for source in sources:\n        doc = {\n            'content': source['text'],\n            'metadata': {\n                'url': source['url'],\n                'date': source['date'],\n                'title': source['title']\n            }\n        }\n        stack.memory_bank.store(doc)\n    \n    # Retrieve relevant context for next turn\n    context = stack.memory_bank.retrieve(query, limit=5)\n    return context\n\n# Usage in agent loop\nsources = [{'url': 'arxiv.org/...', 'text': '...', 'date': '2024-10-01'}]\ncontext = store_research_sources(stack, query, sources)",
+        "language": "python"
+      },
+      {
+        "title": "Safety Shield with Custom Research Prompts",
+        "description": "Configure safety shield for research-specific content",
+        "code": "safety_config = {\n    'harm_categories': ['harmful_content'],\n    'thresholds': {'low': 0.7, 'medium': 0.5, 'high': 0.3},\n    'research_mode': True  # Custom mode for academic content\n}\n\nresponse = stack.generate(\n    research_prompt,\n    safety_config=safety_config,\n    tools=['web_search']\n)\n\nif response.safety_status == 'blocked':\n    print('Safety shield blocked research output')\nelse:\n    print(response.content)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Source Verification Post-Processing",
+        "description": "Verify agent claims against MemoryBank retrieved documents",
+        "code": "from vex_sdk import verify\n\n# After Llama Stack agent turn\nagent_output = stack.chat(conversation)\n\n# Extract claims and sources from response\nclaims = extract_claims(agent_output.content)\nsources = stack.memory_bank.retrieve(agent_output.content, limit=10)\n\nverification = verify(\n    claims=claims,\n    sources=[doc['content'] for doc in sources],\n    check_types=['source_verification', 'claim_accuracy'],\n    context={'task': 'research_synthesis'}\n)\n\nif verification.passed:\n    final_output = agent_output.content\nelse:\n    final_output = f\"VERIFIED SUMMARY: {verification.summary}\"",
+        "language": "python"
+      },
+      {
+        "title": "Recency and Bias Detection Wrapper",
+        "description": "Check source dates and detect biased language patterns",
+        "code": "def vex_research_guardrails(stack_output, sources):\n    verification = verify(\n        text=stack_output.content,\n        sources=[s['content'] for s in sources],\n        metadata=[{'recency': s['date']} for s in sources],\n        check_types=[\n            'recency_checks',\n            'bias_detection',\n            'claim_accuracy'\n        ],\n        risk_profile='medium',\n        domain='academic_research'\n    )\n    \n    if not verification.passed:\n        return {\n            'status': 'rejected',\n            'issues': verification.failures,\n            'corrected': verification.suggested_fix\n        }\n    \n    return {'status': 'approved', 'output': stack_output.content}\n\n# Wrap every agent turn\nguarded_output = vex_research_guardrails(response, retrieved_sources)",
+        "language": "python"
+      },
+      {
+        "title": "Loop Termination with Vex Progress Monitoring",
+        "description": "Prevent infinite research loops using Vex reasoning quality scores",
+        "code": "def monitored_research_loop(stack, query, max_turns=10):\n    conversation = [{'role': 'user', 'content': query}]\n    progress_scores = []\n    \n    for turn in range(max_turns):\n        response = stack.chat(conversation)\n        \n        # Vex monitors reasoning progress\n        progress = verify(\n            text=response.content,\n            previous_turns=conversation[-3:],  # Last 3 turns\n            check_types=['reasoning_progress'],\n            score_threshold=0.7\n        )\n        \n        progress_scores.append(progress.score)\n        \n        if progress.passed and 'complete' in progress.categories:\n            return response.content\n        elif turn > 3 and sum(progress_scores[-3:]) / 3 < 0.6:\n            return 'Research stalled - insufficient progress'\n        \n        conversation.extend([{'role': 'assistant', 'content': response.content}])\n    \n    return 'Turn limit exceeded'",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack Research Agents",
+      "description": "Install Vex SDK today and wrap your research agents with production-grade verification: pip install vex-sdk"
+    }
+  }
+}

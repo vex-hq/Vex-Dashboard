@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Vercel AI SDK Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Vercel AI SDK multi-agent-coordination",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in Vercel AI SDK occurs when multiple agents fail to synchronize state, leading to conflicting tool calls, duplicated actions, or lost task handoffs during streaming responses. This manifests as agents overriding each other's decisions in `generateText`/`streamText` chains, incomplete task delegation in agentic workflows, and race conditions in parallel tool execution. The problem is exacerbated by Vercel's edge runtime constraints and inconsistent structured output parsing across LLM providers.",
+    "howItManifests": [
+      {
+        "scenario": "Parallel researcher agents calling the same tool",
+        "symptom": "Multiple identical API calls in streamObject output with conflicting results",
+        "impact": "Wasted compute, inconsistent final response, rate limit exhaustion"
+      },
+      {
+        "scenario": "Task handoff between planner and executor agents",
+        "symptom": "Executor agent receives incomplete or corrupted task context from streamText handoff",
+        "impact": "Failed task execution, hallucinated actions, broken workflows"
+      },
+      {
+        "scenario": "Supervisor agent fails to coordinate specialist agents",
+        "symptom": "Agents ignore routing decisions, all respond simultaneously in streaming UI",
+        "impact": "UI shows garbled interleaved responses, user confusion"
+      },
+      {
+        "scenario": "Shared memory state corruption during concurrent updates",
+        "symptom": "Agents read stale state from previous `generateObject` calls",
+        "impact": "Infinite loops, incorrect decisions, edge function timeouts"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Duplicate Tool Call Monitor",
+        "description": "Detects when multiple agents call the same tool within 5 seconds using Vercel AI SDK's tool call tracking",
+        "code": "import { generateText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst researchTool = tool({\n  description: 'Research a topic',\n  parameters: z.object({ query: z.string() }),\n  execute: async ({ query }) => ({ result: `Researched: ${query}` })\n});\n\nfunction detectCoordinationFailure(toolCalls: any[]) {\n  const toolUsage = new Map();\n  const duplicates = [];\n  \n  for (const call of toolCalls) {\n    const key = `${call.name}:${JSON.stringify(call.args)}`;\n    if (toolUsage.has(key)) {\n      duplicates.push({ tool: key, count: toolUsage.get(key) + 1 });\n    }\n    toolUsage.set(key, (toolUsage.get(key) || 0) + 1);\n  }\n  \n  return duplicates.length > 0;\n}\n\nconst result = await generateText({\n  model: 'gpt-4o',\n  tools: { researchTool },\n  onToolCall: (call) => {\n    if (detectCoordinationFailure(call)) {\n      console.error('COORDINATION FAILURE: Duplicate tool calls detected');\n    }\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Agent Context Corruption Detector",
+        "description": "Tracks task handoff state between agents to detect corrupted context passing",
+        "code": "import { streamText, createStreamableValue } from 'ai/rsc';\nimport { z } from 'zod';\n\nfunction validateAgentHandoff(prevState: any, newState: any) {\n  const requiredKeys = ['task_id', 'current_step', 'dependencies'];\n  const missing = requiredKeys.filter(key => !newState[key] || newState[key] !== prevState[key]);\n  \n  if (missing.length > 0) {\n    throw new Error(`Context corruption detected: missing ${missing.join(', ')}`);\n  }\n  return true;\n}\n\nexport async function agentWorkflow(task: string) {\n  let agentState = { task_id: '123', current_step: 0, dependencies: [] };\n  \n  const plannerResult = await streamText({\n    model: 'gpt-4o',\n    prompt: `Plan: ${task}`,\n    onFinish: (result) => {\n      const newState = { ...agentState, plan: result.text, current_step: 1 };\n      validateAgentHandoff(agentState, newState);\n      agentState = newState;\n    }\n  });\n  \n  // Continue with executor agent...\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Concurrent Stream Collision Logger",
+        "description": "Monitors overlapping streamObject responses from multiple agents",
+        "code": "import { streamObject } from 'ai';\nimport { useStreamableValue } from 'ai/rsc';\n\nfunction monitorStreamCollisions(streams: any[]) {\n  const activeStreams = new Set();\n  const collisions = [];\n  \n  streams.forEach((stream, index) => {\n    const streamId = `agent-${index}`;\n    if (activeStreams.has(streamId)) {\n      collisions.push({ streamId, timestamp: Date.now(), error: 'Concurrent stream collision' });\n    }\n    activeStreams.add(streamId);\n  });\n  \n  if (collisions.length > 0) {\n    console.error('STREAM COLLISION:', collisions);\n  }\n}\n\nconst researcherStream = streamObject({ model: 'gpt-4o', schema: z.object({ findings: z.string() }) });\nconst validatorStream = streamObject({ model: 'gpt-4o', schema: z.object({ valid: z.boolean() }) });\n\nmonitorStreamCollisions([researcherStream, validatorStream]);",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Centralized Coordination Lock",
+        "description": "Implements a task queue with locking to prevent concurrent tool calls",
+        "code": "import { generateText } from 'ai';\nimport pino from 'pino';\n\nconst logger = pino();\nconst taskLocks = new Map<string, Promise<any>>();\n\nclass AgentCoordinator {\n  static async executeWithLock(taskId: string, fn: () => Promise<any>) {\n    if (taskLocks.has(taskId)) {\n      await taskLocks.get(taskId);\n    }\n    \n    const promise = fn();\n    taskLocks.set(taskId, promise);\n    \n    try {\n      return await promise;\n    } finally {\n      taskLocks.delete(taskId);\n    }\n  }\n}\n\nexport async function coordinatedResearch(query: string) {\n  return AgentCoordinator.executeWithLock(`research-${query}`, async () => {\n    const result = await generateText({\n      model: 'gpt-4o',\n      tools: {\n        research: tool({\n          parameters: z.object({ q: z.string() }),\n          execute: async ({ q }) => ({ data: `Result for ${q}` })\n        })\n      }\n    });\n    return result;\n  });\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Structured Handoff Protocol",
+        "description": "Uses consistent JSON schema for agent-to-agent context passing",
+        "code": "import { generateObject, streamObject } from 'ai';\nimport { z } from 'zod';\n\nconst TaskHandoffSchema = z.object({\n  task_id: z.string(),\n  status: z.enum(['pending', 'in_progress', 'completed']),\n  context: z.record(z.any()),\n  next_agent: z.string(),\n  timestamp: z.number()\n});\n\ntype Handoff = z.infer<typeof TaskHandoffSchema>;\n\nexport async function agentHandoff(currentTask: Handoff) {\n  const handoff = await generateObject({\n    model: 'gpt-4o',\n    schema: TaskHandoffSchema,\n    prompt: `Complete this task handoff: ${JSON.stringify(currentTask)}`\n  });\n  \n  // Validate before passing to next agent\n  const validated = TaskHandoffSchema.parse(handoff);\n  \n  return validated;\n}\n\nexport async function* multiAgentStream(initialTask: any) {\n  let task = initialTask;\n  \n  while (task.status !== 'completed') {\n    task = await agentHandoff(task);\n    yield task;\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Sequential Stream Orchestrator",
+        "description": "Forces sequential execution of agent streams with completion barriers",
+        "code": "import { streamText } from 'ai';\n\nclass SequentialOrchestrator {\n  private activeAgent: string | null = null;\n  \n  async runAgentSequentially(agentId: string, fn: () => Promise<any>) {\n    if (this.activeAgent && this.activeAgent !== agentId) {\n      throw new Error(`Agent ${agentId} cannot run while ${this.activeAgent} is active`);\n    }\n    \n    this.activeAgent = agentId;\n    try {\n      return await fn();\n    } finally {\n      this.activeAgent = null;\n    }\n  }\n}\n\nconst orchestrator = new SequentialOrchestrator();\n\nexport async function coordinatedAgentWorkflow() {\n  const plannerResult = await orchestrator.runAgentSequentially('planner', () =>\n    streamText({ model: 'gpt-4o', prompt: 'Create plan' })\n  );\n  \n  const executorResult = await orchestrator.runAgentSequentially('executor', () =>\n    streamText({ \n      model: 'gpt-4o', \n      prompt: `Execute: ${plannerResult.text}` \n    })\n  );\n  \n  return executorResult;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex provides middleware for Vercel AI SDK that automatically detects coordination failures by monitoring tool call patterns, stream overlaps, and state consistency across agent interactions. The SDK wraps `generateText` and `streamText` calls, capturing metrics on duplicate tool usage, context corruption, and concurrent stream collisions. Vex generates remediation code snippets and configuration for coordination locks and handoff protocols.\n\nIntegration requires adding Vex middleware to your AI SDK calls, which injects validation layers without modifying core agent logic. The platform provides real-time dashboards showing coordination health metrics and automatic rollbacks for detected failures. Vex also learns from your specific agent patterns to create custom detection rules.\n\nFor complex multi-agent systems, Vex's agent topology mapper visualizes coordination paths and pinpoints failure points, generating targeted fixes like sequential orchestration wrappers or state validation schemas.",
+      "code": "import { generateText, streamText } from 'ai';\nimport { createVexMiddleware } from '@vex_dev/sdk';\n\n// Initialize Vex middleware for coordination monitoring\ninitVex({\n  projectId: 'your-project-id',\n  detectors: ['multi-agent-coordination'],\n  autoFix: true\n});\n\nconst vexGenerateText = createVexMiddleware(generateText);\nconst vexStreamText = createVexMiddleware(streamText);\n\nexport async function safeMultiAgentWorkflow() {\n  // Vex automatically detects coordination issues\n  const plan = await vexGenerateText({\n    model: 'gpt-4o',\n    tools: { research: researchTool },\n    vex: { agentId: 'planner' }\n  });\n  \n  const execution = await vexStreamText({\n    model: 'gpt-4o',\n    prompt: `Execute: ${plan.text}`,\n    vex: { agentId: 'executor', dependsOn: ['planner'] }\n  });\n  \n  return execution;\n}\n\n// Vex will log violations and suggest fixes",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to eliminate multi-agent coordination failures in 5 minutes - start your free trial now."
+    }
+  }
+}

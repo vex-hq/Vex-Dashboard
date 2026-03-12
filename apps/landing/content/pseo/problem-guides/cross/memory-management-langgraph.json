@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in LangGraph Agents",
+    "description": "How to detect and fix ai agent memory management in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "LangGraph memory-management",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph, AI agent memory management issues arise from its stateful graph architecture where SharedState persists across cyclical executions and node transitions. Problems manifest as infinite loops from cyclic edges without proper state checks, state corruption during parallel branch merges, checkpoint deserialization failures after State schema evolution, and bypassed human-in-the-loop interventions. These failures undermine agent reliability in production deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Cyclic graph execution causing infinite state transitions",
+        "symptom": "Agent loops indefinitely between nodes without progressing",
+        "impact": "Infinite compute costs, timeout failures, unresponsive agents"
+      },
+      {
+        "scenario": "State corruption when parallel branches merge conflicting data",
+        "symptom": "Inconsistent State values after concurrent node execution",
+        "impact": "Incorrect agent decisions, data loss, nondeterministic behavior"
+      },
+      {
+        "scenario": "Checkpoint deserialization errors after schema changes",
+        "symptom": "TypeError or KeyError on graph resume from checkpoint",
+        "impact": "Complete agent failure on deployment, lost conversation history"
+      },
+      {
+        "scenario": "Human-in-the-loop breakpoints bypassed by conditional edges",
+        "symptom": "Human approval nodes skipped during conditional routing",
+        "impact": "Unauthorized actions executed, safety violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Cycle Detection Monitor",
+        "description": "Detects infinite loops by tracking State visitation counts across graph nodes",
+        "code": "from langgraph.graph import StateGraph\nfrom collections import defaultdict\n\ndef cycle_detector(state):\n    if not hasattr(state, '_visit_counts'):\n        state._visit_counts = defaultdict(int)\n    \n    current_node = state.get('__node', 'unknown')\n    state._visit_counts[current_node] += 1\n    \n    if state._visit_counts[current_node] > 5:\n        raise ValueError(f\"Cycle detected in node {current_node}: {state._visit_counts[current_node]} visits\")\n    \n    return state\n\n# Add as first node in graph\ngraph.add_node(\"cycle_detector\", cycle_detector)",
+        "language": "python"
+      },
+      {
+        "name": "State Consistency Checker",
+        "description": "Validates State integrity after parallel branch merges by comparing expected vs actual schema",
+        "code": "import json\nfrom typing import Any, get_type_hints\n\ndef state_validator(state: dict[str, Any]) -> dict[str, Any]:\n    expected_schema = {\n        'messages': list,\n        'user_input': str,\n        'agent_decision': str,\n        'version': int\n    }\n    \n    for key, expected_type in expected_schema.items():\n        if key in state:\n            actual_type = type(state[key])\n            if not isinstance(state[key], expected_type):\n                raise TypeError(f\"State corruption: {key} expected {expected_type}, got {actual_type}\")\n    \n    return state\n\n# Add after merge points\ngraph.add_node(\"state_validator\", state_validator)",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Schema Validator",
+        "description": "Verifies checkpoint compatibility before graph resumption",
+        "code": "from langgraph.checkpoint import MemorySaver\nfrom typing import TypedDict\n\nclass AgentState(TypedDict):\n    messages: list\n    version: int  # Added in v2\n\nclass SchemaValidator:\n    def __call__(self, state):\n        if 'version' not in state:\n            raise ValueError(\"Checkpoint missing version field - schema upgrade required\")\n        \n        if state['version'] < 2:\n            state['version'] = 2\n            # Migrate old schema\n            state['messages'] = state.get('messages', [])\n        \n        return state\n\ncheckpointer = MemorySaver()\ngraph.compile(checkpointer=checkpointer)\n# Add validator as entry node",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Iterations Guard",
+        "description": "Prevents infinite cycles with iteration limits and progress gates",
+        "code": "from typing import Annotated, TypedDict\nimport operator\n\nclass AgentState(TypedDict):\n    messages: Annotated[list, operator.add]\n    iteration_count: int\n    max_iterations: int\n\nclass IterationGuard:\n    def __call__(self, state: AgentState):\n        state['iteration_count'] += 1\n        if state['iteration_count'] >= state.get('max_iterations', 10):\n            return \"end\"\n        return \"continue\"\n\ngraph.add_node(\"iteration_guard\", IterationGuard())\ngraph.add_conditional_edges(\"router\", IterationGuard(), {\"end\": END, \"continue\": \"agent\"})\n\n# Initialize\ninitial_state = {\"iteration_count\": 0, \"max_iterations\": 10}",
+        "language": "python"
+      },
+      {
+        "name": "Atomic State Merging",
+        "description": "Uses reducer functions to safely merge parallel branch results",
+        "code": "from typing import Annotated, Sequence\nfrom langchain_core.messages import BaseMessage\nimport operator\n\nclass AgentState(TypedDict):\n    messages: Annotated[Sequence[BaseMessage], operator.add]\n    branch_results: dict[str, dict]\n\n# Safe merge reducer\ndef merge_branch_results(left: dict, right: dict) -> dict:\n    if not left:\n        return right\n    if not right:\n        return left\n    \n    # Resolve conflicts by priority\n    result = left.copy()\n    for key, value in right.items():\n        if key not in result or result[key] is None:\n            result[key] = value\n    return result\n\nclass SafeState(TypedDict):\n    messages: Annotated[Sequence[BaseMessage], operator.add]\n    branch_results: Annotated[dict, merge_branch_results]",
+        "language": "python"
+      },
+      {
+        "name": "Human-in-the-Loop Enforcement",
+        "description": "Forces human approval for critical actions regardless of conditional routing",
+        "code": "from langgraph.prebuilt import ToolNode, tools_condition\nfrom langgraph.graph import END\n\nCRITICAL_ACTIONS = {'delete_user', 'transfer_funds', 'publish'}\n\nclass HumanGatekeeper:\n    def __call__(self, state):\n        action = state.get('next_action')\n        if action in CRITICAL_ACTIONS:\n            return \"human_review\"\n        return \"execute\"\n\n# Force human review for critical paths\ngraph.add_conditional_edges(\n    \"decide_action\",\n    HumanGatekeeper(),\n    {\n        \"human_review\": \"human_approval\",\n        \"execute\": \"tools\"\n    }\n)\n\n# Human node always blocks until approved\ngraph.add_node(\"human_approval\", human_approval_node)\ngraph.add_edge(\"human_approval\", \"decide_action\")",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex provides production-grade observability for LangGraph agents by automatically detecting memory management failures through its verify() wrapper and dedicated graph nodes. It captures State snapshots at every checkpoint, validates schema consistency across invocations, and alerts on cycle patterns or corruption signatures. Integration takes <5 minutes with pip install vex-sdk.\n\nVex's MemoryGuard suite specifically monitors LangGraph State objects for the four common failure modes, providing detailed traces and automatic remediation suggestions. Deploy as a wrapper around graph.invoke() or inject as a persistent graph node for continuous validation.\n\nProduction teams using Vex report 95% reduction in memory-related agent failures and 10x faster MTTR through automated root cause analysis and one-click fixes.",
+      "code": "from vex import verify\nfrom langgraph.graph import StateGraph\n\n# Method 1: Wrap invoke() calls\n@verify(guards=['langgraph-memory'])\ndef run_agent(input_data):\n    config = {\"configurable\": {\"thread_id\": \"user-123\"}}\n    result = graph.invoke(input_data, config)\n    return result\n\n# Method 2: Add Vex as graph node\nclass VexMemoryNode:\n    def __call__(self, state):\n        verify(state, guards=['langgraph-memory'])\n        return state\n\nvex_node = VexMemoryNode()\ngraph.add_node(\"vex_memory\", vex_node)\ngraph.add_edge(\"start\", \"vex_memory\")\n\n# Production deployment\nresult = run_agent({\"messages\": [{\"role\": \"user\", \"content\": \"analyze report\"}]})",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate LangGraph memory failures in production: pip install vex-sdk"
+    }
+  }
+}

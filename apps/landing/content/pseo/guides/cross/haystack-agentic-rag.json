@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Haystack + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack agentic rag",
+      "Haystack guardrails",
+      "agentic rag reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Agentic RAG with Haystack enables sophisticated multi-step retrieval agents that plan queries, fetch from diverse sources, and synthesize grounded responses. However, the autonomous nature amplifies risks like hallucination, irrelevant retrievals, and planning failures that can erode trust in production. Vex integration provides runtime verification for source faithfulness, consistency, and accuracy, ensuring reliable outputs.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Haystack",
+      "description": "Agentic RAG in Haystack uses a Pipeline with a RouterAgent that decomposes user queries into sub-queries via an LLM planner. Sub-queries route to specialized retrievers (e.g., vector DB for semantic search, SQL for structured data, web search for current events). Retrieved contexts feed a Reranker and multi-source Synthesizer that generates final responses with citations.\n\nThe agent loop iterates until convergence, with tools for self-reflection and replanning. Custom components handle source attribution and multi-hop reasoning. Haystack's composable nodes make it ideal for production but expose failure modes in type mismatches and silent errors.\n\nVex slots in as a verification component post-retrieval and post-generation to catch deviations before user exposure.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ RouterAgent   │───▶│ Query Planner    │\n└─────────────────┘    │ (GPT-4o)      │    │ (Decompose)      │\n                       └──────────────┘    └──────────────────┘\n                              │                    │\n                ┌─────────────▼──────┐    ┌────────▼──────────┐\n                │   Sub-Queries      │    │   Vex Verify      │\n                │                    │◀──▶│ (Planning Acc.)   │\n                └─────────────┬──────┘    └──────────────────┘\n                              │                    ▲\n                ┌─────────────▼──────┐    ┌────────┼──────────┐\n    ┌──────────▶│ Vector Retriever   │    │ Hybrid │SQL/Web   │\n    │           │   (FAISS)          │◀───▼Retriever│Retriever│\n┌───▼──┐       └─────────────┬──────┘    └────────┬──────────┘\n│Hybrid│                      │                     │\n│Search│       ┌─────────────▼──────┐    ┌────────▼──────────┐\n└───▲──┘       │   Vex Verify      │    │   Cross-Source    │\n                │(Relevance+Faith)  │◀──▶│   Consistency     │\n                └─────────────┬──────┘    └──────────────────┘\n                              │                    ▲\n                       ┌──────▼──────┐    ┌────────┼──────────┐\n                       │   Reranker  │    │ Citation│Verifier │\n                       │ (CohereRerank)│◀──▶│ (Vex)  │          │\n                       └─────────────┘    └──────────────────┘\n                              │\n                       ┌──────▼──────┐\n                       │ Synthesizer │───▶┌─────────────────┐\n                       │ (GPT-4o)    │    │ Final Response   │\n                       │+Citation    │    │ w/ Sources       │\n                       └─────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever returns Document objects but downstream generator expects string context, causing silent TypeError",
+        "severity": "critical",
+        "mitigation": "Vex schema validation component enforces type contracts between nodes"
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Agent plans correct sub-query but vector retriever surface low-quality matches due to embedding drift",
+        "severity": "high",
+        "mitigation": "Vex relevance scoring + reranking verification rejects <0.8 cosine similarity contexts"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "Synthesizer fabricates details not grounded in any retrieved source despite citation formatting",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks trace every claim to specific document spans"
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "Agent reflection loop fails on malformed tool output but pipeline continues with stale state",
+        "severity": "high",
+        "mitigation": "Vex error boundary component surfaces and classifies all custom node exceptions"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Agentic Query Planner Pipeline",
+        "description": "Core routing agent that decomposes queries and dispatches to retrievers with Vex planning verification",
+        "code": "from haystack import Pipeline, component\n\nfrom haystack.components.builders import PromptBuilder\n\nfrom haystack.components.agents import InitializeAgent, AgentSchema\n\nfrom vex import VexVerifier\n\n@component\nclass PlanningVerifier:\n    @component.output_types(approved=bool, feedback=str)\n    def run(self, plan: str) -> dict:\n        verifier = VexVerifier(api_key=\"your-vex-key\")\n        result = verifier.verify_query_plan(\n            query_plan=plan,\n            verification_type=\"query_planning_accuracy\"\n        )\n        return {\"approved\": result.score > 0.9, \"feedback\": result.reasoning}\n\nplanning_pipe = Pipeline()\nplanning_pipe.add_component(\"prompt_builder\", PromptBuilder(\"agent_prompt.jinja\"))\nplanning_pipe.add_component(\"llm\", OpenAI())\nplanning_pipe.add_component(\"planner\", InitializeAgent())\nplanning_pipe.add_component(\"vex_planning\", PlanningVerifier())\n\nplanning_pipe.connect(\"prompt_builder\", \"llm\")\nplanning_pipe.connect(\"llm\", \"planner\")\nplanning_pipe.connect(\"planner\", \"vex_planning\")",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Retriever Fusion with Reranking",
+        "description": "Parallel retrievers with Vex relevance verification and Cohere reranking for optimal context selection",
+        "code": "from haystack.components.retrievers import InMemoryEmbeddingRetriever\nfrom haystack.components.rankers import CohereRerank\n\nfrom vex import VexContextVerifier\n\nretrieval_pipe = Pipeline()\n\nretrieval_pipe.add_component(\n    \"vector_retriever\", \n    InMemoryEmbeddingRetriever(document_store, embedding_model=\"text-embedding-ada-002\")\n)\nretrieval_pipe.add_component(\n    \"sql_retriever\", \n    SQLRetriever(connection_string=\"postgresql://...\")\n)\nretrieval_pipe.add_component(\"vex_relevance\", VexContextVerifier())\nretrieval_pipe.add_component(\"reranker\", CohereRerank(model=\"rerank-multilingual-v2.0\"))\n\nretrieval_pipe.connect(\"input\", \"vector_retriever\")\nretrieval_pipe.connect(\"input\", \"sql_retriever\")\nretrieval_pipe.connect(\"vector_retriever.documents\", \"vex_relevance\")\nretrieval_pipe.connect(\"sql_retriever\", \"vex_relevance\")\nretrieval_pipe.connect(\"vex_relevance\", \"reranker.documents\")\n\nresult = retrieval_pipe.run({\n    \"vector_retriever.query_embedding\": query_embedding,\n    \"sql_retriever.query\": sub_query\n})",
+        "language": "python"
+      },
+      {
+        "title": "Faithful Response Synthesizer",
+        "description": "Final generation with citation tracking and Vex hallucination detection",
+        "code": "from haystack.components.generators import OpenAIGenerator\n\nfrom vex import VexFaithfulnessVerifier\n\n@component\nclass CitingSynthesizer:\n    @component.output_types(response=str, citations=list)\n    def run(self, contexts: list, query: str) -> dict:\n        generator = OpenAIGenerator(model=\"gpt-4o\")\n        \n        prompt = f\"\"\"Answer using ONLY these sources:\n        {format_sources(contexts)}\n        Query: {query}\n        Use [citation_id] format.\"\"\"\n        \n        result = generator.run(prompt)\n        \n        # Vex faithfulness check\n        verifier = VexFaithfulnessVerifier()\n        faith_score = verifier.verify(\n            response=result[\"generation\"],\n            contexts=contexts,\n            query=query\n        )\n        \n        if faith_score < 0.95:\n            raise ValueError(f\"Low faithfulness: {faith_score}\")\n        \n        return {\n            \"response\": result[\"generation\"],\n            \"citations\": extract_citations(result[\"generation\"])\n        }\n\nsynth_pipe.add_component(\"synthesizer\", CitingSynthesizer())",
+        "language": "python"
+      },
+      {
+        "title": "Cross-Source Consistency Check",
+        "description": "Vex verifies factual alignment across multiple retrieval sources before synthesis",
+        "code": "from typing import List\nfrom haystack.dataclasses import Document\n\nfrom vex import VexConsistencyChecker\n\n@component\nclass MultiSourceVerifier:\n    @component.output_types(consistent=bool, conflicts=list)\n    def run(self, documents: List[Document]) -> dict:\n        checker = VexConsistencyChecker()\n        \n        # Group by source type\n        sources = {\n            'vector': [d for d in documents if d.meta.get('source') == 'vector'],\n            'sql': [d for d in documents if d.meta.get('source') == 'sql'],\n            'web': [d for d in documents if d.meta.get('source') == 'web']\n        }\n        \n        result = checker.verify_cross_source(\n            sources=sources,\n            checks=[\"factual_consistency\", \"temporal_consistency\"]\n        )\n        \n        return {\n            \"consistent\": result.all_pass,\n            \"conflicts\": result.conflicts\n        }\n\nconsistency_pipe.add_component(\"multi_verifier\", MultiSourceVerifier())\nconsistency_pipe.connect(\"retrievers\", \"multi_verifier.documents\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Custom Pipeline Component",
+        "description": "Install and register Vex as a Haystack component for schema-enforced verification",
+        "code": "from haystack import component\nfrom typing import Any, Dict\nfrom vex import VexClient\n\n@component\nclass VexPipelineVerifier:\n    \"\"\"\n    Vex verification component for Haystack pipelines\n    \"\"\"\n    def __init__(self, api_key: str, verifications: list):\n        self.client = VexClient(api_key=api_key)\n        self.verifications = verifications\n    \n    @component.input_types(query=str, contexts=list, response=str)\n    @component.output_types(valid=bool, score=float, issues=list)\n    def run(\n        self, \n        query: str, \n        contexts: list, \n        response: str = None\n    ) -> Dict[str, Any]:\n        \n        results = self.client.batch_verify({\n            \"query_planning\": query,\n            \"source_faithfulness\": {\"response\": response, \"contexts\": contexts},\n            \"relevance\": {\"query\": query, \"contexts\": contexts}\n        })\n        \n        return {\n            \"valid\": results.all_pass,\n            \"score\": results.aggregate_score,\n            \"issues\": results.issues\n        }\n\n# Install: pip install haystack-ai vex-sdk\nfrom haystack import Pipeline\npipe = Pipeline()\npipe.add_component(\"vex\", VexPipelineVerifier(api_key=\"vex_...\", verifications=[\"faithfulness\", \"relevance\"]))",
+        "language": "python"
+      },
+      {
+        "title": "Agent Loop with Vex Guardrails",
+        "description": "Wrap agent iterations with Vex verification to prevent divergence",
+        "code": "from haystack.agents import Agent\nfrom haystack.components.agents import AgentSchema\n\nclass GuardedAgent(Agent):\n    def __init__(self, *args, vex_client=None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.vex = vex_client\n    \n    def _run_once(self, query, max_iterations=5):\n        for i in range(max_iterations):\n            plan = self.planner.generate(query)\n            \n            # Vex planning check\n            plan_valid = self.vex.verify_query_plan(plan)\n            if not plan_valid:\n                query = self.vex.suggested_replan(query, plan)\n                continue\n            \n            contexts = self.retrieve_multi(plan)\n            response = self.synthesize(contexts)\n            \n            # Final verification\n            final_check = self.vex.verify_final({\n                'query': query,\n                'contexts': contexts,\n                'response': response\n            })\n            \n            if final_check.passed:\n                return response\n        \n        raise ValueError(\"Agent failed convergence after max iterations\")\n\n# Usage\nagent = GuardedAgent(\n    tools=[vector_tool, sql_tool],\n    llm=gpt4o,\n    vex_client=VexClient(\"your-key\")\n)\nresult = agent.run(\"Complex multi-hop query\")",
+        "language": "python"
+      },
+      {
+        "title": "Production Monitoring Integration",
+        "description": "Stream verification telemetry to Vex dashboard for Haystack pipelines",
+        "code": "from vex import VexMonitor\nfrom haystack import Pipeline\n\nclass MonitoredPipeline(Pipeline):\n    def __init__(self, *args, vex_project_id: str = None, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.monitor = VexMonitor(project_id=vex_project_id)\n    \n    def run(self, **inputs):\n        query_id = self.monitor.start_session(inputs.get('query', 'unknown'))\n        \n        try:\n            result = super().run(**inputs)\n            \n            # Log full trace\n            self.monitor.log_pipeline_run(\n                query_id=query_id,\n                inputs=inputs,\n                outputs=result,\n                components=self.components.keys(),\n                latency=result.get('runtime', 0)\n            )\n            \n            return result\n        \n        except Exception as e:\n            self.monitor.log_error(query_id, str(e))\n            raise\n\n# Production deployment\nprod_pipe = MonitoredPipeline(\n    vex_project_id=\"prj_haystack-agentic-rag\",\n    components=full_agent_pipeline\n)\n\n# Dashboard: https://app.vex.im/projects/prj_haystack-agentic-rag",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Agentic RAG",
+      "description": "Get your Vex API key at vex.im and add production-grade verification to your pipelines in <5 minutes"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Mastra Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Mastra multi-agent-coordination",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Multi-Agent Coordination Failure in Mastra occurs when agents in a workflow fail to properly synchronize state, validate outputs, or share context, leading to cascading errors across the pipeline. This manifests as agents misinterpreting malformed data from previous steps, stale memory retrievals disrupting decision-making, or sync integrations flooding agents with conflicting information. These failures are particularly acute in Mastra's workflow-driven architecture where agent transitions depend heavily on structured handoffs between steps.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent B receives incomplete `WorkflowContext` from Agent A, causing null reference errors",
+        "impact": "Pipeline halts mid-execution with unhandled TypeErrors"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "Tool response fails Zod schema validation but gets passed downstream anyway",
+        "impact": "Subsequent agents crash parsing invalid JSON structures"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent pulls outdated `KnowledgeBase` entries from previous sessions",
+        "impact": "Agents make decisions based on obsolete user preferences or data"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Real-time Slack/CRM sync floods workflow with duplicate or conflicting events",
+        "impact": "Agents enter infinite loops processing the same integration payload"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Context Validation Monitor",
+        "description": "Detects missing required fields in WorkflowContext transitions between Mastra agents",
+        "code": "import { WorkflowContext } from 'mastra';\n\nconst validateWorkflowContext = (ctx: WorkflowContext): boolean => {\n  const requiredFields = ['agentId', 'stepId', 'sessionId', 'output'];\n  const missing = requiredFields.filter(field => !ctx[field]);\n  \n  if (missing.length > 0) {\n    console.error('❌ WorkflowContext missing fields:', missing);\n    return false;\n  }\n  \n  // Check output schema compliance\n  if (ctx.output && typeof ctx.output !== 'object') {\n    console.error('❌ Invalid output structure:', ctx.output);\n    return false;\n  }\n  \n  return true;\n};\n\n// Hook into Mastra workflow transitions\nworkflow.onTransition((fromCtx, toCtx) => {\n  if (!validateWorkflowContext(toCtx)) {\n    throw new Error('Workflow coordination failure detected');\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Schema Breaker",
+        "description": "Monitors Mastra agent tool calls for Zod validation failures",
+        "code": "import { z } from 'zod';\nimport { AgentToolCall } from 'mastra/agent';\n\nconst toolResponseSchema = z.object({\n  success: z.boolean(),\n  data: z.record(z.unknown()),\n  error: z.string().optional()\n});\n\nconst monitorToolCalls = (toolCall: AgentToolCall): void => {\n  const result = toolResponseSchema.safeParse(toolCall.result);\n  \n  if (!result.success) {\n    console.error('🔥 Tool response validation failed:', {\n      tool: toolCall.toolName,\n      errors: result.error.errors,\n      rawResult: toolCall.result\n    });\n    \n    // Flag coordination failure\n    toolCall.metadata = { ...toolCall.metadata, vexIssue: 'malformed-tool-response' };\n  }\n};\n\nagent.onToolCall(monitorToolCalls);",
+        "language": "typescript"
+      },
+      {
+        "name": "Stale Memory Context Detector",
+        "description": "Identifies when Mastra agents retrieve memory older than session TTL",
+        "code": "import { MemoryEntry, KnowledgeBase } from 'mastra/memory';\n\nconst STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes\n\nconst detectStaleContext = (memory: MemoryEntry[]): boolean => {\n  const now = Date.now();\n  const staleEntries = memory.filter(entry => \n    now - new Date(entry.timestamp).getTime() > STALE_THRESHOLD_MS\n  );\n  \n  if (staleEntries.length > 0) {\n    console.warn('⚠️ Stale memory detected:', {\n      count: staleEntries.length,\n      oldest: staleEntries[0].timestamp,\n      keys: staleEntries.map(e => e.key)\n    });\n    return true;\n  }\n  \n  return false;\n};\n\nknowledgeBase.onRetrieve((entries) => {\n  if (detectStaleContext(entries)) {\n    throw new Error('Multi-agent coordination failure: stale context');\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Strict Workflow Context Guard",
+        "description": "Enforce validation middleware in Mastra workflow transitions",
+        "code": "import { WorkflowContext, Workflow } from 'mastra';\n\nconst contextGuard = (ctx: WorkflowContext): WorkflowContext => {\n  const validators = {\n    agentId: (v: any) => typeof v === 'string',\n    stepId: (v: any) => typeof v === 'string',\n    output: (v: any) => v && typeof v === 'object'\n  };\n  \n  for (const [field, validator] of Object.entries(validators)) {\n    if (!validator(ctx[field])) {\n      throw new Error(`Invalid ${field} in workflow context`);\n    }\n  }\n  \n  return ctx;\n};\n\nconst safeWorkflow = new Workflow({\n  transitions: {\n    validate: (ctx) => contextGuard(ctx),\n    // ... other transitions\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Normalizer",
+        "description": "Auto-fix malformed tool responses before Mastra agent processing",
+        "code": "import { Agent, ToolResponse } from 'mastra/agent';\nimport { z } from 'zod';\n\nconst TOOL_SCHEMA = z.object({\n  success: z.boolean().default(false),\n  data: z.record(z.unknown()).default({}),\n  error: z.string().optional()\n});\n\nconst normalizeToolResponse = (raw: any): ToolResponse => {\n  const parsed = TOOL_SCHEMA.parse(raw);\n  \n  return {\n    ...parsed,\n    metadata: {\n      normalized: true,\n      originalShape: raw,\n      timestamp: Date.now()\n    }\n  };\n};\n\nconst robustAgent = new Agent({\n  tools: {\n    call: async (toolName, params) => {\n      const rawResult = await callTool(toolName, params);\n      return normalizeToolResponse(rawResult);\n    }\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Fresh Context Memory Filter",
+        "description": "Filter stale entries from Mastra knowledge base retrievals",
+        "code": "import { KnowledgeBase } from 'mastra/memory';\n\nconst FRESHNESS_WINDOW_MS = 5 * 60 * 1000;\n\nconst freshContextFilter = (entries: MemoryEntry[]): MemoryEntry[] => {\n  const now = Date.now();\n  return entries.filter(entry => \n    now - new Date(entry.timestamp).getTime() < FRESHNESS_WINDOW_MS\n  );\n};\n\nconst reliableKnowledgeBase = new KnowledgeBase({\n  retrieve: async (query) => {\n    const allEntries = await this.storage.retrieve(query);\n    const freshEntries = freshContextFilter(allEntries);\n    \n    if (freshEntries.length !== allEntries.length) {\n      console.log(`Filtered ${allEntries.length - freshEntries.length} stale entries`);\n    }\n    \n    return freshEntries;\n  }\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates as middleware directly into Mastra's agent pipeline, automatically detecting coordination failures across workflow transitions, tool calls, and memory retrievals. It monitors context validation, schema compliance, and data freshness in real-time, providing structured error reports with remediation suggestions. Vex's agent reliability scoring flags problematic workflows before they impact production, while its auto-remediation can inject validation guards and context filters without code changes.\n\nThe Vex SDK hooks into Mastra's core event emitters (workflow transitions, tool calls, memory access), capturing failure patterns across multi-agent interactions. It generates reliability heatmaps showing which agents most frequently cause coordination failures, enabling targeted fixes. Vex also auto-generates test cases reproducing detected failures for regression testing.\n\nIntegration requires adding Vex middleware to your Mastra workflow constructor - a single line change that provides enterprise-grade reliability monitoring without refactoring existing agent logic.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { MastraWorkflow, Agent } from 'mastra';\n\n// Initialize Vex middleware for Mastra\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  autoRemediate: true,\n  failureTypes: ['coordination', 'schema', 'stale-context']\n});\n\n// Single-line integration into Mastra workflow\nconst monitoredWorkflow = new MastraWorkflow({\n  middleware: [vex.mastraMiddleware()],\n  agents: [\n    new Agent({\n      name: 'coordinator',\n      vexMonitor: true  // Auto-detects coordination failures\n    })\n  ]\n});\n\n// Vex auto-generates reliability dashboard and alerts\nvex.on('coordinationFailure', (issue) => {\n  console.log('🛑 Auto-detected:', issue.type, issue.severity);\n  vex.applyFix(issue.recommendedFix);\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to your Mastra workflows today and eliminate multi-agent coordination failures automatically."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build workflow automation with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents workflow automation",
+      "n8n AI Agents guardrails",
+      "workflow automation reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "n8n AI Agents enable powerful workflow automation by combining AI decision-making with API integrations, conditional logic, and human approvals for multi-step task execution. However, complex agent chains introduce risks like recursive loops, unvalidated outputs, and credential leaks that can lead to costly errors or security breaches. Vex provides essential guardrails to verify action correctness, permissions, and idempotency before execution.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with n8n AI Agents",
+      "description": "n8n workflows typically start with a trigger node (webhook, schedule, or event) that feeds into AI Agent nodes configured with tools for API calls, data processing, and decision logic. These agents maintain conversation memory and route outputs through conditional nodes, action nodes (HTTP Request, database ops), and human-in-the-loop approval nodes. The architecture supports branching logic where agent decisions determine workflow paths, culminating in final actions like notifications or data persistence.\n\nKey components include AI Agent nodes with custom tools, memory window nodes for context retention, IF nodes for conditional routing, and webhook nodes for external verification. Failures often occur when AI outputs bypass validation before triggering expensive API calls or when memory injects outdated context, leading to incorrect branching or recursive execution.\n\nVex integrates as a verification webhook immediately after AI Agent nodes, intercepting tool calls and decisions for policy enforcement before they reach action nodes.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│   Trigger       │───▶│   AI Agent Node  │───▶│   Vex Webhook │\n│ (Webhook/Sched) │    │ (w/ Tools+Memory)│    │ (Guardrails)  │\n└─────────────────┘    └──────────────────┘    └──────────────┘\n                                   │                       │\n                                   ▼                       ▼\n                          ┌──────────────────┐    ┌──────────────────┐\n                          │  Conditional IF  │    │   APPROVED       │\n                          │     Nodes        │◀───│  Action Nodes    │\n                          └──────────────────┘    │ (API/DB Calls)   │\n                                                  └──────────────────┘\n                                                             │\n                                                             ▼\n                                                     ┌─────────────────┐\n                                                     │   Human Approval │\n                                                     │     (Optional)   │\n                                                     └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI agents calling webhooks that retrigger the same workflow create infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex verifies recursion depth and blocks self-triggering tool calls"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unstructured or hallucinated AI responses execute invalid API parameters",
+        "severity": "high",
+        "mitigation": "Vex schemas validate outputs against expected action formats"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI agents log or expose API keys/secrets in tool call payloads",
+        "severity": "critical",
+        "mitigation": "Vex redacts and audits sensitive parameters before execution"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated memory causes agents to make decisions based on obsolete data",
+        "severity": "medium",
+        "mitigation": "Vex timestamps and freshness-checks context before agent processing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n AI Agent with Vex-Verified Tool Calls",
+        "description": "Configure AI Agent node to route all tool calls through Vex webhook for validation",
+        "code": "import { Client } from '@vex_dev/sdk';\n\nconst vex = new Client({\n  projectId: 'your-project-id',\n  secret: process.env.VEX_SECRET\n});\n\n// n8n AI Agent Tool Definition\nconst tools = [\n  {\n    name: 'verified_api_call',\n    description: 'Make verified API call through Vex',\n    parameters: {\n      type: 'object',\n      properties: {\n        url: { type: 'string' },\n        method: { type: 'string', enum: ['GET', 'POST'] },\n        body: { type: 'object' }\n      }\n    },\n    execute: async ({ url, method, body }) => {\n      const result = await vex.verify({\n        action: 'api_call',\n        input: { url, method, body },\n        policies: ['action_correctness', 'permission_check']\n      });\n      return result.output;\n    }\n  }\n];",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Webhook Node After AI Agent",
+        "description": "Add HTTP Request node pointing to Vex webhook URL after every AI Agent",
+        "code": "// n8n Webhook Node Configuration\nconst webhookUrl = 'https://api.vex.dev/v1/verify/your-project-id';\n\nconst verifyPayload = {\n  input: $json, // AI Agent output\n  context: {\n    workflowId: $workflow.id,\n    executionId: $execution.id,\n    recursionDepth: $vars.recursionDepth || 0\n  },\n  policies: [\n    'prevent_recursion',\n    'validate_schema',\n    'check_permissions',\n    'ensure_idempotency'\n  ]\n};\n\n// Set headers\nconst headers = {\n  'Authorization': `Bearer ${$env.VEX_SECRET}`,\n  'Content-Type': 'application/json'\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Approval with Rollback",
+        "description": "Route Vex verification results to IF node for approval/rollback logic",
+        "code": "// n8n IF Node Expression (after Vex webhook)\nconst vexResult = $json;\n\nif (vexResult.status === 'approved' && !vexResult.risks.length) {\n  // Proceed to action nodes\n  return 'approved_path';\n} else if (vexResult.risks.includes('recursion')) {\n  // Rollback and notify\n  await $executeWorkflow('rollback_workflow', {\n    originalExecutionId: $execution.id\n  });\n  return 'rollback_path';\n} else {\n  // Human approval\n  return 'human_review_path';\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Freshness Check",
+        "description": "Validate conversation memory age before AI Agent processing",
+        "code": "import { z } from 'zod';\n\nconst memorySchema = z.object({\n  messages: z.array(z.object({\n    timestamp: z.number(),\n    role: z.enum(['user', 'assistant']),\n    content: z.string()\n  })),\n  maxAgeMinutes: z.number().default(60)\n});\n\nconst verifyMemory = async (memory: any) => {\n  const parsed = memorySchema.parse(memory);\n  const now = Date.now() / 1000;\n  const staleMessages = parsed.messages.filter(\n    m => (now - m.timestamp / 1000) > parsed.maxAgeMinutes * 60\n  );\n  \n  if (staleMessages.length > 3) {\n    throw new Error('Stale memory detected');\n  }\n  \n  return vex.verify({\n    action: 'use_memory',\n    input: { memory: parsed, staleCount: staleMessages.length },\n    policies: ['context_freshness']\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Setup Vex Webhook in n8n Workflow",
+        "description": "Create Vex verification policy specifically for n8n workflows",
+        "code": "// Vex Dashboard Policy Configuration (TypeScript SDK)\nawait vex.policies.create({\n  name: 'n8n-workflow-safety',\n  rules: [\n    {\n      name: 'prevent_recursion',\n      type: 'guardrail',\n      condition: 'context.recursionDepth > 5',\n      action: 'block',\n      message: 'Recursion depth exceeded'\n    },\n    {\n      name: 'validate_api_params',\n      type: 'schema',\n      schema: {\n        url: { type: 'string', pattern: '^https?://' },\n        method: { enum: ['GET', 'POST', 'PUT', 'DELETE'] },\n        headers: { redact: ['Authorization'] }\n      }\n    }\n  ]\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Idempotency Key Generation",
+        "description": "Generate idempotency keys for all API actions in workflow",
+        "code": "// n8n Function Node - Generate Idempotency Key\nconst crypto = require('crypto');\n\nconst idempotencyKey = crypto\n  .createHash('sha256')\n  .update(JSON.stringify({\n    workflowId: $workflow.id,\n    executionId: $execution.id,\n    stepHash: $json.input_hash || $json.toString()\n  }))\n  .digest('hex');\n\nreturn {\n  ...$json,\n  idempotency_key: idempotencyKey,\n  verification_id: `n8n-${idempotencyKey.slice(0, 8)}`\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Human-in-the-Loop Integration",
+        "description": "Route high-risk decisions to Slack/Email for human approval",
+        "code": "// Vex Policy with Human Review\nconst humanReviewPolicy = {\n  name: 'medium_risk_human_review',\n  riskProfile: 'medium',\n  rules: [\n    {\n      condition: 'risks.length > 2 || risks.includes(\"credential\")',\n      action: 'human_review',\n      channels: ['slack:#ai-ops', 'email:approvers@company.com'],\n      message: `Review required: ${{input.action}}\\nRisks: ${{risks.join(', ')}}`\n    }\n  ]\n};\n\n// n8n Wait Node after Vex\nconst waitForApproval = {\n  resume: 'webhook',\n  webhookUrl: `${$env.N8N_BASE_URL}/webhook/approval-${$execution.id}`,\n  timeout: 3600 // 1 hour\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Workflow Automation",
+      "description": "Add Vex guardrails to your n8n workflows today and prevent costly agent failures - start with our free tier."
+    }
+  }
+}

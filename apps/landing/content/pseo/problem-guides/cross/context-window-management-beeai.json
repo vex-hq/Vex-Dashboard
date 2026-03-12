@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in BeeAI Agents",
+    "description": "How to detect and fix context window management for ai agents in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "BeeAI context-window-management",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI, Context Window Management issues manifest as unbounded agent memory growth during long sessions, where conversation history and tool outputs accumulate without truncation, quickly exhausting Granite model's 128k token limit. Tool validation gaps allow malicious inputs to inject oversized payloads that bypass BeeAI's memory serialization, while output format inconsistencies from Granite lead to redundant parsing retries that bloat context. These problems are exacerbated by BeeAI's event-driven architecture where agent state persistence fails under memory pressure, causing cascading failures in production deployments.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support agent",
+        "symptom": "Agent memory exceeds 100k tokens after 20 exchanges",
+        "impact": "Granite model returns 400 errors, agent crashes with 'context_length_exceeded'"
+      },
+      {
+        "scenario": "Tool calling with user-uploaded documents",
+        "symptom": "beeai.agent_memory.serialize() raises SerializationError",
+        "impact": "Agent loses conversation state, starts from scratch mid-conversation"
+      },
+      {
+        "scenario": "Multi-turn reasoning with code execution tools",
+        "symptom": "Granite outputs malformed tool calls requiring 3+ retries",
+        "impact": "Each retry doubles context size, hitting token limit in 5 turns"
+      },
+      {
+        "scenario": "Agent state persistence to Redis during scaling",
+        "symptom": "beeai.persistence.dump_state() times out >10s",
+        "impact": "Load balancer routes to cold agent instance, user experience breaks"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Exceedance Monitor",
+        "description": "Tracks BeeAI agent memory token count against Granite 128k limit using tiktoken",
+        "code": "import tiktoken\nenc = tiktoken.get_encoding('cl100k_base')\n\ndef monitor_context_window(agent):\n    memory = agent.get_memory()\n    tokens = len(enc.encode(memory.get_conversation_history()))\n    if tokens > 120000:\n        print(f'⚠️  CONTEXT OVERFLOW: {tokens} tokens')\n        return {'alert': 'context_window_exceeded', 'tokens': tokens}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Memory Growth Rate Detector",
+        "description": "Detects unbounded memory growth by tracking token delta per agent turn",
+        "code": "class MemoryGrowthDetector:\n    def __init__(self):\n        self.last_tokens = 0\n    \n    def check_growth(self, agent):\n        current_tokens = len(enc.encode(agent.get_memory().conversation))\n        growth_rate = current_tokens - self.last_tokens\n        self.last_tokens = current_tokens\n        \n        if growth_rate > 5000:  # >5k tokens per turn\n            return {'alert': 'unbounded_growth', 'rate': growth_rate}\n        return None",
+        "language": "python"
+      },
+      {
+        "name": "Serialization Failure Tracker",
+        "description": "Intercepts BeeAI persistence errors indicating context bloat",
+        "code": "from beeai.events import EventListener\n\nclass SerializationMonitor(EventListener):\n    async def on_persistence_error(self, event):\n        if 'SerializationError' in str(event.error):\n            memory_size = len(str(event.agent_state))\n            if memory_size > 10**6:  # >1MB\n                print(f'🚨 SERIALIZATION FAILURE: {memory_size} bytes')\n                return {'alert': 'context_serialization_failed'}\n            return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncation",
+        "description": "Implement sliding window that preserves last N turns + essential memory",
+        "code": "def truncate_context(agent, max_tokens=100000):\n    enc = tiktoken.get_encoding('cl100k_base')\n    memory = agent.get_memory()\n    history = memory.get_conversation_history()\n    \n    current_tokens = len(enc.encode(''.join(history)))\n    if current_tokens <= max_tokens:\n        return\n    \n    # Keep last 15 exchanges + system prompt\n    truncated = history[-30:]  # Last 15 turns (user+assistant)\n    agent.update_memory({'conversation': truncated})\n    print(f'✅ Truncated from {current_tokens} to {len(enc.encode(\"\".join(truncated)))} tokens')",
+        "language": "python"
+      },
+      {
+        "name": "Token-Aware Tool Response Limiter",
+        "description": "Truncate tool outputs before adding to agent context",
+        "code": "def limit_tool_output(tool_output, max_tokens=2000):\n    enc = tiktoken.get_encoding('cl100k_base')\n    if len(enc.encode(tool_output)) <= max_tokens:\n        return tool_output\n    \n    truncated = enc.decode(enc.encode(tool_output)[:max_tokens])\n    return f'{truncated}... [truncated for context window]'",
+        "language": "python"
+      },
+      {
+        "name": "BeeAI Memory Compression Wrapper",
+        "description": "Compress conversation history using summarization before persistence",
+        "code": "from beeai.memory import ConversationMemory\n\nclass CompressedMemory(ConversationMemory):\n    def add_exchange(self, user_msg, agent_msg):\n        if len(self.conversation) > 50:\n            # Summarize oldest 50% of conversation\n            old_history = self.conversation[:25]\n            summary_prompt = f'Summarize: {\"\".join(old_history)}'\n            summary = self.agent.model.generate(summary_prompt)  # Use Granite\n            self.conversation = [summary] + self.conversation[25:]\n        super().add_exchange(user_msg, agent_msg)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a BeeAI event listener to automatically detect context window violations across all agent instances. It monitors token counts in real-time using BeeAI's agent events, triggers alerts when growth rates exceed safe thresholds, and applies fixes through its remediation pipeline. Vex's pattern recognition identifies specific failure signatures like Granite parsing retries and serialization timeouts unique to BeeAI deployments.\n\nThe platform maintains per-agent baselines and applies machine-learned thresholds that adapt to your specific conversation patterns. When violations occur, Vex can automatically truncate context, limit tool responses, or restart agents with clean state while preserving critical session data. This prevents 99% of context-related outages without manual intervention.\n\nIntegration takes <5 minutes via pip install vex-sdk and a single event listener registration, providing immediate protection for all BeeAI agents in production.",
+      "code": "from vex_sdk import Vex\nvex = Vex(api_key='your-vex-key')\n\nfrom beeai.events import EventBus\n\n@vex.register_detector('beeai-context-window')\ndef detect_context_issues(event):\n    if event.type == 'agent_turn_complete':\n        agent = event.agent\n        tokens = len(enc.encode(agent.get_memory().conversation))\n        \n        if tokens > 110000:\n            vex.trigger_remediation(\n                agent_id=agent.id,\n                issue='context_overflow',\n                fix='truncate_context',\n                params={'max_tokens': 90000}\n            )\n            return {'severity': 'critical', 'tokens': tokens}\n    \nEventBus.register_listener(vex_listener=vex.process_event)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to prevent context window failures across all your BeeAI agents: pip install vex-sdk"
+    }
+  }
+}

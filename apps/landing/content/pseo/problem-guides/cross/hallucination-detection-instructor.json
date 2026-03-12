@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "hallucination-detection",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Hallucination Detection in Instructor Agents",
+    "description": "How to detect and fix ai agent hallucination detection in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-hallucination-detection-guide",
+      "Instructor hallucination-detection",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Instructor, AI agent hallucinations manifest as the LLM generating invalid Pydantic models despite strict schema enforcement, often exhausting retry mechanisms or producing fabricated enum values and inconsistent nested structures. These failures appear as `ValidationError` exceptions during `client.chat.completions.create()` calls, where structured extraction fails to produce complete, valid outputs. Instructor's patching of OpenAI clients makes these hallucinations particularly visible through explicit validation failures rather than silent incorrect outputs.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor retries maxed out with `PydanticCustomError` after 3-5 attempts",
+        "impact": "Agent workflow halts completely, no partial results returned"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "`mode='json'`, `response_model` specifies required fields but some are `None` or missing",
+        "impact": "Downstream agent logic fails due to incomplete data structures"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "`ValueError: Input should be 'valid_enum_value'`, LLM generates 'invalid_hallucinated_value'",
+        "impact": "Strict enum validation blocks all responses, zero successful extractions"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "`Field required` errors in deeply nested optional fields that LLM inconsistently populates",
+        "impact": "Complex agent state management fails due to unpredictable data shapes"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's `max_retries` are exhausted by catching `InstructorError` with retry metadata",
+        "code": "from instructor import InstructorError\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ntry:\n    result = client.chat.completions.create(\n        model='gpt-4o',\n        response_model=YourPydanticModel,\n        max_retries=3\n    )\nexcept InstructorError as e:\n    if hasattr(e, 'attempts') and e.attempts >= 3:\n        print(f'Hallucination detected: {e.attempts} retries exhausted')\n        raise\n",
+        "language": "python"
+      },
+      {
+        "name": "Enum Hallucination Validator",
+        "description": "Inspects validation errors for enum value mismatches indicating LLM fabrication",
+        "code": "from pydantic import ValidationError\nfrom instructor import InstructorError\n\ntry:\n    result = client.with_structured_output(YourModel).chat('...')\nexcept (InstructorError, ValidationError) as e:\n    if 'Input should be' in str(e) and 'valid_enum_value' in str(e):\n        print('Enum hallucination detected: fabricated invalid enum value')\n        # Log specific hallucinated value\n        hallucinated_value = str(e).split('\"')[1]\n        print(f'Hallucinated: {hallucinated_value}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Partial Field Coverage Check",
+        "description": "Validates that all required fields in Pydantic model are populated post-extraction",
+        "code": "def check_field_coverage(model_instance, required_fields):\n    missing = []\n    for field in required_fields:\n        if getattr(model_instance, field) is None:\n            missing.append(field)\n    if missing:\n        print(f'Hallucination: Missing required fields {missing}')\n        return False\n    return True\n\n# Usage\nresult = client.chat.completions.create(response_model=AgentState)\nif not check_field_coverage(result, ['action', 'confidence', 'next_state']):\n    raise ValueError('Partial hallucination detected')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Strict Enum Constraints with Examples",
+        "description": "Provide explicit few-shot examples in system prompt to anchor LLM to valid enum values",
+        "code": "from pydantic import BaseModel, Field\nfrom enum import Enum\nfrom instructor import from_openai\n\nclass ActionType(str, Enum):\n    SEARCH = 'search'\n    WRITE = 'write'\n    END = 'end'\n\nclass AgentResponse(BaseModel):\n    action: ActionType\n    query: str = Field(..., description='Only used when action=search')\n\nclient = from_openai(OpenAI())\n\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=AgentResponse,\n    messages=[\n        {'role': 'system', 'content': \"\"\"You are an agent. ONLY use these actions:\n- action: 'search' → set query\n- action: 'write' → set query to content\n- action: 'end' → no query needed\nExamples:\n```json\n{\"action\": \"search\", \"query\": \"weather\"}\n{\"action\": \"end\"}\n```\"\"\"},\n        {'role': 'user', 'content': 'What's the weather?'}\n    ]\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Partial Validation",
+        "description": "Use `partial=True` and custom validation to accept incomplete but usable outputs",
+        "code": "from instructor.mode import partial\n\nclass SafeAgentState(BaseModel):\n    action: str\n    confidence: float | None = None\n    next_state: dict | None = None\n\n# Allow partial extraction with validation\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=partial(SafeAgentState, fields=['action']),\n    max_retries=1\n)\n\n# Post-validate critical path\nif response.action not in ['search', 'write', 'end']:\n    raise ValueError(f'Invalid action: {response.action}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Nested Schema Flattening",
+        "description": "Replace deeply nested objects with explicit union types to prevent inconsistent depth",
+        "code": "from typing import Union, Literal\nfrom pydantic import BaseModel\n\nclass SearchState(BaseModel):\n    type: Literal['search']\n    query: str\n\nclass EndState(BaseModel):\n    type: Literal['end']\n\nclass AgentState(BaseModel):\n    state: Union[SearchState, EndState]\n\nresponse = client.chat.completions.create(\n    model='gpt-4o',\n    response_model=AgentState,\n    messages=[...]\n)\n\n# Type narrowing\nmatch response.state:\n    case SearchState():\n        print(f'Searching: {response.state.query}')\n    case EndState():\n        print('Agent finished')\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Hallucination Detection with Vex",
+      "description": "Vex automatically wraps Instructor's `client.chat.completions.create()` calls with `vex.verify()`, providing production-grade hallucination detection without code changes. It captures `InstructorError`, `ValidationError`, and retry exhaustion patterns, classifying them as hallucinations and triggering automated remediation workflows. Vex's observability dashboard shows hallucination rates by prompt, model, and schema complexity, while its remediation engine can dynamically adjust temperature, add few-shot examples, or route to more reliable models.\n\nIntegration takes <5 minutes: install `vex-sdk`, wrap your client, and Vex handles the rest. It detects all four Instructor hallucination patterns (retry exhaustion, partial extraction, enum fabrication, nested inconsistency) and provides one-click fixes including prompt optimization and schema simplification. Vex's ML-powered analysis learns your agent's failure patterns, proactively preventing hallucinations before they impact production workflows.",
+      "code": "import vex\n\nfrom instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Initialize Vex (sets VEX_API_KEY env var)\nvex.init()\n\n# Your existing Instructor client\nclient = from_openai(OpenAI())\n\n# Vex automatically wraps ALL chat.completions.create calls\n@ vex.verify(test_name='agent-hallucination-check')\ndef agent_step(prompt: str) -> AgentResponse:\n    return client.chat.completions.create(\n        model='gpt-4o',\n        response_model=AgentResponse,\n        messages=[{'role': 'user', 'content': prompt}],\n        max_retries=3\n    )\n\n# Vex auto-detects Instructor hallucination patterns\n# Triggers alerts, records spans, applies remediations\nresult = agent_step('Plan website redesign')\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 5 minutes to eliminate Instructor hallucinations across your entire agent fleet: `pip install vex-sdk`"
+    }
+  }
+}

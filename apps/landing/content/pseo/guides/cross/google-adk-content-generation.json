@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "content-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Content Generation with Google ADK + Vex Guardrails",
+    "description": "Learn how to build content generation with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK content generation",
+      "Google ADK guardrails",
+      "content generation reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building content generation agents with Google's Agent Development Kit (ADK) enables powerful multi-agent workflows powered by Gemini models, handling brand voice enforcement, fact-checking, and editorial guidelines. However, multi-agent delegation often leads to circular dependencies, model inconsistencies, and state corruption, risking brand misalignment and factual errors. Vex provides essential guardrails to verify brand consistency, factual accuracy, originality, tone adherence, and SEO compliance before content reaches production.",
+    "architectureOverview": {
+      "heading": "Content Generation Architecture with Google ADK",
+      "description": "The typical Google ADK content generation architecture features a coordinator agent that delegates to specialized sub-agents: a Brand Voice Agent for style enforcement, Research Agent for fact-gathering, Content Writer for drafting, Fact-Checker for validation, and SEO Optimizer for keyword integration. These agents communicate via ADK's session state and tool calling, with Gemini models handling reasoning across the pipeline. Long conversations maintain context through session persistence, but this introduces risks of state corruption and delegation loops.\n\nThe workflow begins with a topic input triggering the coordinator, which orchestrates parallel research and voice profiling before sequential drafting and review. Each agent uses ADK's before_agent_callback hooks for instrumentation, making Vex integration seamless. Output flows through final editorial gates ensuring compliance before delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐\n│   User Input    │───▶│ Coordinator   │\n│   (Topic)       │    │ Agent         │\n└─────────────────┘    │ (Gemini 1.5)  │\n                       └──────┬───────┘\n                              │\n                ┌─────────────┼───────┐\n                │             │       │\n    ┌───────────▼──────────┐  ▼──────▼────────┐\n    │ Brand Voice Agent    │  │ Research Agent │\n    │ (Style Profile)     │  │ (Fact Gather)  │\n    └───────────┬──────────┘  └──────┬─────────┘\n               │                     │\n               └──────────┬──────────┘\n                          │\n                  ┌───────▼───────┐\n                  │ Content Writer│ ──Vex──▶\n                  │   (Drafting)  │  Guardrails\n                  └───────┬───────┘\n                         │\n                ┌────────▼────────┐\n                │ Fact-Checker +  │\n                │   SEO Optimizer │\n                └─────────────────┘\n                           │\n                    ┌──────▼──────┐\n                    │ Final Output │\n                    │   (Content)  │\n                    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent delegation creating circular dependencies",
+        "description": "Coordinator endlessly delegates between Research and Fact-Checker agents due to incomplete tool responses",
+        "severity": "critical",
+        "mitigation": "Vex detects delegation loops via session state analysis and enforces max delegation depth"
+      },
+      {
+        "name": "Gemini model switching causing output inconsistency",
+        "description": "Different Gemini variants (1.5 Flash vs Pro) produce varying brand voice interpretations across agents",
+        "severity": "high",
+        "mitigation": "Vex standardizes outputs against brand voice embeddings before agent handoff"
+      },
+      {
+        "name": "Session state corruption in long conversations",
+        "description": "Extended content generation corrupts ADK session state, causing factual drift in later editorial stages",
+        "severity": "high",
+        "mitigation": "Vex validates session integrity and resets corrupted state with fresh context injection"
+      },
+      {
+        "name": "Tool response format mismatches across agents",
+        "description": "Research Agent's JSON facts incompatible with Fact-Checker's expected schema breaks pipeline",
+        "severity": "medium",
+        "mitigation": "Vex normalizes tool outputs to consistent schemas before agent consumption"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Content Generation Pipeline Setup",
+        "description": "Initialize Google ADK coordinator with content generation sub-agents for brand voice and research",
+        "code": "from google_adk import Agent, Coordinator\nfrom vex import VexClient\n\n# Initialize Vex client\nvex = VexClient(api_key=\"vex-your-key\")\n\n# Brand Voice Agent\nbrand_agent = Agent(\n    name=\"brand_voice\",\n    model=\"gemini-1.5-pro\",\n    instructions=\"Enforce brand voice: conversational, expert, optimistic\"\n)\n\n# Research Agent\nresearch_agent = Agent(\n    name=\"research\",\n    model=\"gemini-1.5-flash\",\n    tools=[\"web_search\", \"fact_lookup\"]\n)\n\n# Coordinator\ncoordinator = Coordinator(\n    agents=[brand_agent, research_agent],\n    before_agent_callback=vex.guardrail_callback\n)\n\nresult = coordinator.run(\"Write blog post about AI content generation trends\")",
+        "language": "python"
+      },
+      {
+        "title": "Brand Voice Enforcement Agent",
+        "description": "Specialized agent that scores content against brand guidelines using embeddings",
+        "code": "from google_adk import Agent\nimport vex\n\nBRAND_GUIDELINES = \"\"\"\nTone: Professional yet approachable\nVoice: Expert authority with optimism\nLength: 800-1200 words\nStructure: Problem-Solution-CTA\n\"\"\"\n\nbrand_voice_agent = Agent(\n    name=\"brand_voice_enforcer\",\n    model=\"gemini-1.5-pro\",\n    instructions=f\"\"\"\nAnalyze content against these brand guidelines:\n{BRAND_GUIDELINES}\n\nScore 1-10 for:\n1. Tone adherence\n2. Voice consistency\n3. Structure compliance\n\nRespond with JSON: {{\"scores\": {{...}}, \"revision_suggestions\": \"...\"}}\n    \"\"\"\n)\n\n# Vex verification before proceeding\n@vex.guard(\"brand_consistency\")\ndef verify_brand_scores(content):\n    return content['scores']['tone'] >= 8 and content['scores']['voice'] >= 8",
+        "language": "python"
+      },
+      {
+        "title": "Fact-Checking Pipeline Integration",
+        "description": "Research agent gathers facts, fact-checker validates using Vex before content writer proceeds",
+        "code": "from google_adk import Agent, Coordinator\n\nresearch_agent = Agent(\n    name=\"fact_research\",\n    tools=[\"web_search\", \"wikipedia\"],\n    instructions=\"Extract 5 key facts with sources in JSON format\"\n)\n\nfact_checker = Agent(\n    name=\"fact_checker\",\n    instructions=\"Verify each fact against sources. Flag LOW/MEDIUM/HIGH confidence\"\n)\n\ncontent_writer = Agent(\n    name=\"content_writer\",\n    before_agent_callback=lambda x: vex.guard(\"factual_accuracy\", x)\n)\n\npipeline = Coordinator(\n    agents=[research_agent, fact_checker, content_writer],\n    delegation_rules={\n        \"research_agent\": [\"fact_checker\"],\n        \"fact_checker\": [\"content_writer\"]\n    }\n)",
+        "language": "python"
+      },
+      {
+        "title": "SEO Compliance Checker",
+        "description": "Final agent ensures keyword density, readability, and structure before publication",
+        "code": "import re\nfrom google_adk import Agent\n\ndef seo_compliance_check(content, keywords, target_density=0.02):\n    word_count = len(content.split())\n    keyword_count = sum(1 for kw in keywords if re.findall(rf'\\b{kw}\\b', content, re.IGNORECASE))\n    density = keyword_count / word_count if word_count else 0\n    return {\n        'keyword_density': density,\n        'readability_score': len(content.split()) / len(content.split('.')) > 15,\n        'h1_present': bool(re.search(r'<h1>', content)),\n        'compliant': density >= target_density\n    }\n\nseo_agent = Agent(\n    name=\"seo_optimizer\",\n    instructions=\"Optimize for SEO: keyword placement, readability, headers\",\n    before_agent_callback=lambda x: vex.guard(\"seo_compliance\", seo_compliance_check(x, ['content generation', 'AI writing']))\n)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "before_agent_callback Guardrail Setup",
+        "description": "Add Vex verification to every ADK agent execution preventing bad handoffs",
+        "code": "from vex import VexClient\nfrom google_adk import Coordinator\n\nvex = VexClient(api_key=\"your-vex-key\")\n\n@vex.guard(\"brand_consistency\")\ndef check_brand_voice(content):\n    return (\n        'professional' in content.lower() or \n        'expert' in content.lower() and\n        len(content.split()) > 200\n    )\n\n@vex.guard(\"factual_accuracy\")\ndef verify_facts(content):\n    facts = [s for s in content.split() if s.startswith('Fact:')]\n    return len(facts) >= 3\n\n# Apply to coordinator\ncoordinator = Coordinator(\n    agents=[brand_agent, research_agent],\n    before_agent_callback=vex.multi_guard([\n        check_brand_voice,\n        verify_facts\n    ])\n)\n\nresult = coordinator.run(\"Generate marketing content\")",
+        "language": "python"
+      },
+      {
+        "title": "Session State Protection",
+        "description": "Prevent circular dependencies and state corruption in long conversations",
+        "code": "from vex import VexClient\n\nvex = VexClient(api_key=\"your-key\")\n\n@vex.guard(\"no_circular_deps\")\ndef detect_loops(session_state):\n    agent_history = session_state.get('agent_calls', [])\n    recent_agents = agent_history[-5:]\n    return len(set(recent_agents)) > 2  # Not looping same 2 agents\n\n@vex.guard(\"session_integrity\")\ndef validate_state(session):\n    return (\n        len(session['context']) < 10000 and  # Prevent token bloat\n        'facts_verified' in session  # Required state present\n    )\n\ncoordinator = Coordinator(\n    before_agent_callback=vex.multi_guard([\n        detect_loops,\n        validate_state\n    ]),\n    max_iterations=10\n)",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Verification Content Output",
+        "description": "Final verification suite before content publication ensuring all requirements met",
+        "code": "from vex import VexClient, GuardrailSuite\n\nvex = VexClient(api_key=\"your-key\")\n\ncontent_suite = GuardrailSuite([\n    vex.guard(\"brand_consistency\", lambda x: score_brand_voice(x) >= 8.5),\n    vex.guard(\"factual_accuracy\", lambda x: fact_confidence(x) > 0.9),\n    vex.guard(\"originality\", lambda x: plagiarism_score(x) < 5),\n    vex.guard(\"tone_adherence\", lambda x: sentiment_analysis(x)['positivity'] > 0.7),\n    vex.guard(\"seo_compliance\", lambda x: seo_score(x) >= 85)\n])\n\n# Integrate with ADK final output\nfinal_content_agent = Agent(\n    name=\"editorial_final\",\n    after_agent_callback=lambda output: content_suite.verify(output)\n)\n\n# Usage\ncontent = final_content_agent.run(draft)\nif content_suite.passed():\n    publish(content)\nelse:\n    print(content_suite.failures())",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Content Generation",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your brand with production-grade guardrails."
+    }
+  }
+}

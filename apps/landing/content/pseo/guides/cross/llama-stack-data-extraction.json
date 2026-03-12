@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build data extraction with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack data extraction",
+      "Llama Stack guardrails",
+      "data extraction reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Llama Stack provides a standardized Python interface for building robust Llama-powered agents with built-in safety, memory, and tool capabilities, making it ideal for data extraction from unstructured documents. Data extraction use cases demand precise schema compliance and field accuracy, where even small errors can cascade through downstream systems. Vex guardrails wrap agent responses to verify schema adherence, completeness, and data integrity, preventing costly extraction failures.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Llama Stack",
+      "description": "The typical Llama Stack data extraction pipeline starts with document ingestion into the memory bank, followed by schema-guided agent calls that leverage Llama 3.2 models for structured extraction. The agent uses the LlamaStackClient to orchestrate turns between reasoning, tool calls (like document retrieval), and final JSON output generation. Safety shields filter responses while memory retrieval provides context from prior extractions.\n\nThe core flow involves: 1) Loading documents into memory, 2) Creating extraction schemas with Pydantic models, 3) Running agentic loops with turn limits, and 4) Post-processing outputs for validation. This architecture handles complex documents like invoices or contracts by breaking extraction into multi-turn reasoning paths.\n\nVex integration occurs post-agent as a verification layer, checking extracted JSON against expected schemas before persisting results.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Unstructured  │───▶│ LlamaStackClient │───▶│   Vex Verify    │\n│     Documents   │    │ - Memory Bank    │    │ - Schema Check  │\n└─────────────────┘    │ - Safety Shield  │    │ - Field Accuracy│\n                       │ - Agent Loop     │    └───────────────┘\n                       │ - Tool Calls     │           │\n                       └──────────────────┘           ▼\n                                                      ┌─────────────────┐\n                                                      │ Validated JSON  │\n                                                      │   Extraction    │\n                                                      └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Safety shield filtering producing false positives on benign content",
+        "description": "Llama Stack's safety filters may block legitimate extraction outputs containing financial terms or addresses mistaken for sensitive data",
+        "severity": "high",
+        "mitigation": "Configure Vex custom safety rules that whitelist extraction schemas and validate business context before filtering"
+      },
+      {
+        "name": "Agentic loop turn limits exceeded without meaningful resolution",
+        "description": "Complex documents exhaust turn limits during iterative extraction refinement, producing incomplete schemas",
+        "severity": "medium",
+        "mitigation": "Vex monitors loop progress and validates partial outputs against completeness criteria, forcing early termination with error signals"
+      },
+      {
+        "name": "Tool runtime responses not conforming to expected schema",
+        "description": "Document retrieval tools return malformed JSON or missing fields expected by the extraction agent",
+        "severity": "critical",
+        "mitigation": "Vex schema enforcement wraps all tool responses, rejecting non-conformant outputs before agent processing"
+      },
+      {
+        "name": "Memory bank retrieval hallucinating document associations",
+        "description": "Agent incorrectly associates extracted fields with wrong documents due to fuzzy memory retrieval",
+        "severity": "high",
+        "mitigation": "Vex validates document IDs and metadata consistency between memory context and extraction output"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Llama Stack Client",
+        "description": "Set up the LlamaStackClient with memory bank and safety shield for document processing",
+        "code": "from llama_stack_client import LlamaStackClient\nfrom llama_stack_client.types import ModelConfig\n\nclient = LlamaStackClient(\n    model_config=ModelConfig(model=\"llama-3.2-11b-vision-instruct\"),\n    memory_bank=True,\n    safety_shield=True\n)\n\n# Load document into memory\nclient.memory.store(\n    doc_id=\"invoice_123\",\n    content=\"Invoice #123 from Acme Corp...\",\n    metadata={\"type\": \"invoice\"}\n)",
+        "language": "python"
+      },
+      {
+        "title": "Define Extraction Schema with Pydantic",
+        "description": "Create structured output schema for invoice data extraction using Pydantic models",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional\nfrom llama_stack_client.types import ToolSchema\n\nclass InvoiceData(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date in YYYY-MM-DD\")\n    total_amount: float = Field(..., description=\"Total invoice amount\")\n    vendor_name: str = Field(..., description=\"Vendor/Supplier name\")\n    line_items: list[dict] = Field(default_factory=list)\n\nextraction_schema = ToolSchema(\n    name=\"extract_invoice\",\n    pydantic_model=InvoiceData,\n    description=\"Extract structured invoice data\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Run Agentic Extraction Loop",
+        "description": "Execute schema-guided extraction with turn limits and tool integration",
+        "code": "response = client.chat(\n    messages=[\n        {\"role\": \"user\", \"content\": \"Extract invoice data from this document: \" + doc_content}\n    ],\n    tools=[extraction_schema],\n    max_turns=8,\n    temperature=0.1\n)\n\nextracted_data = response.tool_calls[0].result\nprint(f\"Extracted: {extracted_data.model_dump_json(indent=2)}\")",
+        "language": "python"
+      },
+      {
+        "title": "Handle Multi-Document Batch Extraction",
+        "description": "Process multiple documents with memory context preservation",
+        "code": "def batch_extract_invoices(doc_ids: list[str]) -> list[InvoiceData]:\n    results = []\n    for doc_id in doc_ids:\n        # Retrieve from memory\n        doc_context = client.memory.retrieve(doc_id)\n        \n        response = client.chat(\n            messages=[{\"role\": \"user\", \"content\": f\"Extract from {doc_id}: {doc_context}\"}],\n            tools=[extraction_schema],\n            memory_context=[doc_id]\n        )\n        \n        if response.tool_calls:\n            results.append(InvoiceData.model_validate(response.tool_calls[0].result))\n    return results",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Agent Response with Schema Verification",
+        "description": "Use Vex to validate extraction output against Pydantic schema post-agent",
+        "code": "import vex\n\n# After llama stack agent response\nraw_extraction = response.tool_calls[0].result\n\nverified = vex.verify(\n    data=raw_extraction,\n    checks=[\n        vex.schema(InvoiceData),\n        vex.field_accuracy([\n            vex.field(\"invoice_number\").regex(r'^INV-\\d{6}$'),\n            vex.field(\"total_amount\").gt(0)\n        ])\n    ]\n)\n\nif verified.valid:\n    save_extraction(verified.data)\nelse:\n    logger.error(f\"Extraction failed: {verified.errors}\")",
+        "language": "python"
+      },
+      {
+        "title": "Complete Extraction with Field Completeness Check",
+        "description": "Verify all required fields present and validate business rules",
+        "code": "verified = vex.verify(\n    data=extracted_data,\n    checks=[\n        vex.completeness([\n            \"invoice_number\",\n            \"date\",\n            \"total_amount\",\n            \"vendor_name\"\n        ]),\n        vex.type_consistency({\n            \"total_amount\": \"float\",\n            \"date\": \"date\"\n        }),\n        vex.custom(lambda data: len(data.line_items) > 0, \"Must have line items\")\n    ],\n    risk_profile=\"medium\"\n)\n\nassert verified.valid, f\"Incomplete extraction: {verified.errors}\"",
+        "language": "python"
+      },
+      {
+        "title": "Batch Verification with Memory Association Check",
+        "description": "Validate document ID consistency across memory retrieval and extraction",
+        "code": "def safe_batch_extract(doc_ids: list[str]):\n    results = []\n    for doc_id in doc_ids:\n        extraction = client.chat(...).tool_calls[0].result\n        \n        verified = vex.verify(\n            data=extraction,\n            context={\"doc_id\": doc_id},\n            checks=[\n                vex.schema(InvoiceData),\n                vex.field(\"doc_id\").eq(doc_id, \"Document ID mismatch\"),\n                vex.field_accuracy([\n                    vex.field(\"total_amount\").range(0, 1000000)\n                ])\n            ]\n        )\n        \n        if verified.valid:\n            results.append(verified.data)\n    return results",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack Data Extraction",
+      "description": "Install Vex SDK today and wrap your extraction pipeline to achieve 99.9% schema compliance with zero-downtime verification."
+    }
+  }
+}

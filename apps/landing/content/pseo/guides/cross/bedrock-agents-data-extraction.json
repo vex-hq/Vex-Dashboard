@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "bedrock-agents",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Amazon Bedrock Agents + Vex Guardrails",
+    "description": "Learn how to build data extraction with Amazon Bedrock Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Amazon Bedrock Agents data extraction",
+      "Amazon Bedrock Agents guardrails",
+      "data extraction reliability",
+      "Vex Amazon Bedrock Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Amazon Bedrock Agents enable structured data extraction from unstructured documents using schema-guided LLM calls, action groups, and knowledge bases for enterprise-scale deployments. Integrating Vex provides runtime verification to ensure schema compliance, field accuracy, and completeness amid common agent failures like malformed Lambda responses and session state loss. Guardrails are critical to mitigate risks in production data extraction pipelines.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Amazon Bedrock Agents",
+      "description": "The architecture starts with document ingestion into a Bedrock Knowledge Base, where RAG retrieves relevant chunks for the Agent. The Agent uses schema-guided prompts and action groups (Lambda functions) to invoke foundation models like Claude for structured extraction. Guardrails pre- and post-process inputs/outputs for PII and policy compliance.\n\nMulti-turn conversations maintain session state via Bedrock's memory, with Lambda actions handling complex parsing or validation. Outputs are verified for schema adherence before storage in DynamoDB or S3. This setup scales for high-volume document processing but risks hallucinations or incomplete extractions without verification.\n\nVex wraps agent invocations to verify extracted JSON against predefined schemas, catching issues like missing fields or type mismatches post-inference.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐\n│   Documents     │───▶│ Knowledge Base   │───▶│ Bedrock Agent   │\n│   (S3)          │    │ (OpenSearch)     │    │ + Action Groups │\n└─────────────────┘    └──────────────────┘    │ (Lambda)        │\n                                               │ + Guardrails    │\n                                               └────────┼────────┘\n                                                        │\n                                               ┌────────▼────────┐\n                                               │ Vex.verify()    │\n                                               │ (Schema Check)  │\n                                               └────────┼────────┘\n                                                        │\n                                               ┌────────▼────────┐\n                                               │   Storage       │\n                                               │ (DynamoDB/S3)   │\n                                               └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Action group Lambda functions returning malformed responses",
+        "description": "Lambda functions in action groups often return non-JSON or incomplete responses, breaking downstream parsing.",
+        "severity": "high",
+        "mitigation": "Wrap invoke_agent() with Vex.verify() using JSON schema validation on action outputs."
+      },
+      {
+        "name": "Knowledge base retrieval missing relevant documents due to chunking",
+        "description": "Poor chunking strategies cause incomplete context, leading to missing fields in extractions.",
+        "severity": "medium",
+        "mitigation": "Verify extraction completeness against expected field sets using Vex field presence checks."
+      },
+      {
+        "name": "Agent guardrails not catching domain-specific policy violations",
+        "description": "Bedrock guardrails miss business-specific rules like required field formats or value ranges.",
+        "severity": "high",
+        "mitigation": "Layer Vex custom assertions for domain policies beyond Bedrock's generic filters."
+      },
+      {
+        "name": "Session state loss between multi-turn agent invocations",
+        "description": "Multi-turn extractions lose context, causing inconsistent field values across interactions.",
+        "severity": "medium",
+        "mitigation": "Use Vex session tracking to validate field consistency across agent turns."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Create Bedrock Agent with Data Extraction Schema",
+        "description": "Define agent with knowledge base and action group for schema-guided extraction.",
+        "code": "import boto3\nimport json\n\nbedrock_agent = boto3.client('bedrock-agent-runtime')\n\nagent_config = {\n    'agentId': 'your-agent-id',\n    'agentAliasId': 'your-alias-id',\n    'sessionId': 'extraction-session-123',\n    'inputText': 'Extract invoice data: {{document_content}}',\n    'enableTrace': True\n}\n\nresponse = bedrock_agent.invoke_agent(**agent_config)\n\n# Stream response\nstream = bedrock_agent.invoke_agent_stream(**agent_config)\nfor event in stream:\n    if 'completion' in event:\n        chunk = event['completion']['chunk']['bytes'].decode()\n        print(chunk, end='')",
+        "language": "python"
+      },
+      {
+        "title": "Lambda Action Group for Complex Parsing",
+        "description": "Action group Lambda validates and formats extracted data.",
+        "code": "def lambda_handler(event, context):\n    try:\n        extracted_data = event['input']['extractedJson']\n        # Domain-specific validation\n        if not (100 <= extracted_data['amount'] <= 1000000):\n            raise ValueError('Invalid amount range')\n        \n        return {\n            'response': {\n                'actionGroup': 'extraction',\n                'apiPath': '/validate',\n                'httpStatusCode': 200,\n                'completion': json.dumps(extracted_data)\n            }\n        }\n    except Exception as e:\n        return {\n            'response': {\n                'actionGroup': 'extraction',\n                'apiPath': '/validate',\n                'httpStatusCode': 400,\n                'completion': f'Error: {str(e)}'\n            }\n        }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Client for Agent Invocation",
+        "description": "Node.js client wrapper for Bedrock agent calls.",
+        "code": "import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';\n\nconst client = new BedrockAgentRuntimeClient({ region: 'us-east-1' });\n\nasync function invokeExtractionAgent(document: string) {\n  const input = {\n    agentId: 'your-agent-id',\n    agentAliasId: 'your-alias-id',\n    sessionId: `session-${Date.now()}`,\n    inputText: `Extract structured data from: ${document}`,\n    enableTrace: true\n  };\n\n  const command = new InvokeAgentCommand(input);\n  const response = await client.send(command);\n  return response.completion;\n}\n\nexport { invokeExtractionAgent };",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Setup for Documents",
+        "description": "Configure OpenSearch knowledge base for document retrieval.",
+        "code": "import boto3\n\nkb_client = boto3.client('bedrock-agent')\n\nresponse = kb_client.create_knowledge_base(\n    name='invoice-extraction-kb',\n    roleArn='arn:aws:iam::123:role/BedrockKBRole',\n    knowledgeBaseConfiguration={\n        'type': 'VECTOR',\n        'vectorKnowledgeBaseConfiguration': {\n            'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'\n        }\n    },\n    storageConfiguration={\n        'type': 'OPENSEARCH_SERVERLESS',\n        'opensearchServerlessConfiguration': {\n            'collectionArn': 'arn:aws:aoss:us-east-1:123:collection/your-collection',\n            'vectorIndexName': 'invoice-index',\n            'fieldMapping': {\n                'vectorField': 'embedding',\n                'textField': 'content',\n                'metadataField': 'metadata'\n            }\n        }\n    }\n)\n\nprint(f'Knowledge Base ID: {response[\"knowledgeBaseId\"]}')",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap invoke_agent() with Schema Verification",
+        "description": "Verify extracted JSON matches invoice extraction schema.",
+        "code": "import vex\n\nEXTRACTED_SCHEMA = {\n    'type': 'object',\n    'properties': {\n        'invoice_number': {'type': 'string'},\n        'date': {'type': 'string', 'format': 'date'},\n        'amount': {'type': 'number', 'minimum': 0},\n        'vendor': {'type': 'string', 'minLength': 2}\n    },\n    'required': ['invoice_number', 'amount']\n}\n\n# Wrap Bedrock agent call\nresponse = bedrock_agent.invoke_agent(**agent_config)\n\n# Vex verification\ntry:\n    verified_data = vex.verify(\n        response,\n        schema=EXTRACTED_SCHEMA,\n        assertions=[\n            lambda data: data['amount'] <= 1000000,\n            'invoice_number must be alphanumeric'\n        ]\n    )\n    print('✅ Verified extraction:', verified_data)\nexcept vex.VexError as e:\n    print('❌ Verification failed:', e.errors)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Wrapper for Agent Response",
+        "description": "Verify TypeScript agent responses with Zod-like schema.",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nconst invoiceSchema = {\n  type: 'object',\n  properties: {\n    invoiceNumber: { type: 'string', pattern: '^[A-Z0-9-]{8,}$' },\n    date: { type: 'string', format: 'date' },\n    amount: { type: 'number', minimum: 0, maximum: 1000000 },\n    vendor: { type: 'string', minLength: 2 }\n  },\n  required: ['invoiceNumber', 'amount']\n};\n\nasync function verifiedAgentCall(document: string) {\n  const agentResponse = await invokeExtractionAgent(document);\n  \n  const verified = await vex.verify(agentResponse, {\n    schema: invoiceSchema,\n    assertions: [\n      (data: any) => data.amount > 0 || 'Amount must be positive',\n      'All required fields present'\n    ]\n  });\n  \n  return verified;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Turn Session Consistency Check",
+        "description": "Verify field consistency across agent conversation turns.",
+        "code": "import vex\n\nsession_state = {}\n\nasync def verified_multi_turn_extraction(session_id: str, turn_input: str):\n    global session_state\n    \n    response = bedrock_agent.invoke_agent(\n        agentId='your-agent-id',\n        sessionId=session_id,\n        inputText=turn_input\n    )\n    \n    # Verify session consistency\n    verified = vex.verify(\n        response,\n        session=session_state,\n        assertions=[\n            # Check amount consistency across turns\n            lambda data: 'amount' not in session_state or \n                        abs(data['amount'] - session_state['amount']) < 0.01,\n            # Ensure incremental completeness\n            lambda data: len(data.keys()) >= len(session_state.keys())\n        ]\n    )\n    \n    session_state.update(verified)\n    return verified",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Amazon Bedrock Agents Data Extraction",
+      "description": "Add Vex verification to your Bedrock Agents in 5 minutes - start with our free tier today."
+    }
+  }
+}

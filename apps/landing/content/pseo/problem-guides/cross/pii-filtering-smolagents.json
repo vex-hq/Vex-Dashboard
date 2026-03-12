@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Smolagents Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Smolagents pii-filtering",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, PII Filtering for AI Agents manifests as lightweight agents generating code or tool calls that inadvertently extract, log, or transmit sensitive user data like emails, phone numbers, or addresses due to the framework's emphasis on simple code-based reasoning without built-in safeguards. This is exacerbated by minimal error handling in generated code, allowing PII leaks to propagate silently during multi-step tasks. Common failure modes like code agents producing unsafe Python execution amplify risks when agents parse unstructured inputs without validation.",
+    "howItManifests": [
+      {
+        "scenario": "Code agent extracting user profile data",
+        "symptom": "Generated Python code uses regex to parse emails from input text and prints them unfiltered",
+        "impact": "Exposes email addresses in logs or returns, risking data breaches"
+      },
+      {
+        "scenario": "Tool agent calling external APIs with raw user input",
+        "symptom": "Agent passes unredacted phone numbers or SSNs directly to search/email tools",
+        "impact": "Transmits PII to third-party services without consent or anonymization"
+      },
+      {
+        "scenario": "Multi-step reasoning chaining PII across tasks",
+        "symptom": "First step identifies names/addresses, subsequent steps log them in generated files",
+        "impact": "Compounds exposure as PII persists through agent workflow"
+      },
+      {
+        "scenario": "Minimal error handling in PII parsing code",
+        "symptom": "Agent code fails to validate input patterns, dumping raw PII on exceptions",
+        "impact": "Error logs contain full PII, accessible to developers or monitoring"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Static PII Regex Scan in Generated Code",
+        "description": "Scans agent-generated Python code for common PII patterns like emails, phones, SSNs before execution",
+        "code": "import re\n\ndef detect_pii_in_code(code_str):\n    pii_patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b'\n    ]\n    findings = []\n    for pattern in pii_patterns:\n        matches = re.finditer(pattern, code_str)\n        for match in matches:\n            findings.append({\n                'type': 'PII Regex Match',\n                'match': match.group(),\n                'line': code_str[:match.start()].count('\\n') + 1\n            })\n    return findings\n\n# Example usage\ncode = 'print(\"Contact: user@example.com, Phone: 123-456-7890\")'\nprint(detect_pii_in_code(code))",
+        "language": "python"
+      },
+      {
+        "name": "Runtime Output PII Monitor",
+        "description": "Intercepts agent.run() stdout/stderr and runtime variables for PII leakage",
+        "code": "import re\nimport sys\nfrom io import StringIO\n\ndef monitor_pii_output(func, *args, **kwargs):\n    old_stdout = sys.stdout\n    old_stderr = sys.stderr\n    captured_output = StringIO()\n    sys.stdout = captured_output\n    sys.stderr = captured_output\n    \n    result = func(*args, **kwargs)\n    \n    sys.stdout = old_stdout\n    sys.stderr = old_stderr\n    output = captured_output.getvalue()\n    \n    pii_matches = re.findall(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', output)\n    return {'result': result, 'pii_detected': bool(pii_matches), 'pii_samples': pii_matches[:3]}\n\n# Wrap smolagents run\n# result = monitor_pii_output(agent.run, 'Find emails in: john@example.com')",
+        "language": "python"
+      },
+      {
+        "name": "Smolagents Tool Call PII Inspector",
+        "description": "Inspects tool arguments passed by agents for embedded PII before execution",
+        "code": "import re\nfrom smolagents import Agent\n\ndef inspect_tool_calls_for_pii(agent):\n    original_call_tool = agent.call_tool\n    \n    def wrapped_call_tool(tool_name, args):\n        pii_detected = False\n        for arg_name, arg_value in args.items():\n            if isinstance(arg_value, str) and re.search(\n                r'\\b(?:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}|[0-9]{3}[-.]?[0-9]{3}[-.]?[0-9]{4})\\b',\n                arg_value\n            ):\n                print(f'PII detected in {tool_name}.{arg_name}: {arg_value[:20]}...')\n                pii_detected = True\n        if pii_detected:\n            raise ValueError('PII found in tool arguments')\n        return original_call_tool(tool_name, args)\n    \n    agent.call_tool = wrapped_call_tool\n    return agent\n\n# Usage: agent = inspect_tool_calls_for_pii(MySmolAgent())",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redaction Filter Wrapper",
+        "description": "Wraps agent inputs/outputs with regex-based PII redaction before processing",
+        "code": "import re\n\ndef redact_pii(text):\n    patterns = {\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b': '[EMAIL]',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b': '[PHONE]',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b': '[SSN]',\n        r'\\b\\d{5}\\b': '[ZIP]'\n    }\n    for pattern, replacement in patterns.items():\n        text = re.sub(pattern, replacement, text)\n    return text\n\nclass PIIProtectedAgent:\n    def __init__(self, agent):\n        self.agent = agent\n    \n    def run(self, input_text):\n        safe_input = redact_pii(input_text)\n        result = self.agent.run(safe_input)\n        return redact_pii(str(result))\n\n# Usage\nfrom smolagents import Agent\nagent = PIIProtectedAgent(Agent(...))\nresult = agent.run('Contact john@example.com at 555-123-4567')",
+        "language": "python"
+      },
+      {
+        "name": "Safe Code Generation Validator",
+        "description": "Validates and sanitizes Python code generated by code agents before exec()",
+        "code": "import ast\nimport re\n\ndef validate_safe_code(code):\n    tree = ast.parse(code)\n    pii_patterns = [r'@\\w+', r'\\d{3}[-]?\\d{3}[-]?\\d{4}', r'\\d{3}-\\d{2}-\\d{4}']\n    \n    # Check for dangerous exec/eval\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Exec) or isinstance(node, ast.Eval):\n            raise ValueError('Unsafe code: exec/eval detected')\n    \n    # Scan for PII patterns\n    if any(re.search(pattern, code) for pattern in pii_patterns):\n        raise ValueError('PII patterns detected in code')\n    \n    return code\n\n# Wrap smolagents code generation\ndef safe_exec_agent_code(agent_code):\n    validated = validate_safe_code(agent_code)\n    exec(validated, {'__builtins__': {}})\n\n# Usage: safe_exec_agent_code(generated_code)",
+        "language": "python"
+      },
+      {
+        "name": "PII-Aware Tool Argument Sanitizer",
+        "description": "Automatically sanitizes tool call arguments in Smolagents before dispatch",
+        "code": "import re\nfrom smolagents.tools import tool\n\ndef sanitize_tool_args(args):\n    sanitized = {}\n    for key, value in args.items():\n        if isinstance(value, str):\n            # Replace PII with tokens\n            value = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]', value)\n            value = re.sub(r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b', '[PHONE]', value)\n        sanitized[key] = value\n    return sanitized\n\n# Monkey patch smolagents tool calling\noriginal_tool_call = None\n\ndef safe_tool_call(self, tool_name, **kwargs):\n    sanitized_kwargs = sanitize_tool_args(kwargs)\n    return original_tool_call(self, tool_name, **sanitized_kwargs)\n\n# Apply to agent: agent.call_tool = safe_tool_call.__get__(agent)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex automates PII detection in Smolagents by wrapping agent.run() calls with vex.verify(), which applies runtime behavioral analysis, PII pattern matching, and semantic understanding of generated code and tool calls. It detects leaks across code generation, tool arguments, and output streams without requiring manual regex maintenance, catching both known patterns and contextually sensitive data. Remediation is automatic through Vex's guardrails, which inject PII redaction and safe execution patterns into agent workflows. Integration takes minutes via pip install vex-sdk, transforming unsafe Smolagents deployments into production-ready systems with continuous monitoring and alerting.",
+      "code": "from smolagents import Agent\nimport vex\n\n# Initialize Smolagents agent\nagent = Agent(\n    model='gpt-4o-mini',\n    tools=[...],  # your tools\n    instructions='Extract contact info from text'\n)\n\n# Vex integration - single line protection\n@vex.verify(\n    guards=[\n        'pii-detection',\n        'code-safety',\n        'tool-argument-validation',\n        'output-sanitization'\n    ]\n)\ndef safe_agent_run(input_text):\n    return agent.run(input_text)\n\n# Usage\nresult = safe_agent_run('Contact john.doe@example.com at 555-123-4567')\n\n# Vex auto-generates report:\n# {\n#   'status': 'safe',\n#   'pii_detected': 2,\n#   'redacted': ['john.doe@example.com', '555-123-4567'],\n#   'safeguards_applied': ['pii-redaction']\n# }",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your Smolagents runs in `@vex.verify()` for instant PII protection."
+    }
+  }
+}

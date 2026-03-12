@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Instructor + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor ai email assistant",
+      "Instructor guardrails",
+      "ai email assistant reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Instructor enables reliable structured extraction for intent detection, draft generation, and attachment handling from raw email inputs. Instructor patches LLM clients to enforce Pydantic schemas, but common failures like hallucinated enums and inconsistent nested objects can lead to sending inappropriate or incorrect emails. Vex guardrails add critical verification layers for PII filtering, tone control, and recipient validation to ensure production safety.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Instructor",
+      "description": "The AI Email Assistant processes incoming emails through a multi-stage pipeline. First, Instructor extracts structured data like user intent (reply, forward, draft), recipients, attachments, and content summaries from natural language inputs. The system then generates email drafts using validated schemas, handles attachment extraction, and routes to approval workflows before sending.\n\nInstructor's client patching ensures parseable outputs, but without additional guardrails, risks like hallucinated email addresses or inappropriate tone can propagate. Vex integrates seamlessly by wrapping these Instructor calls with verification for high-risk operations like PII detection and confidentiality checks.\n\nThe architecture supports both Python (Instructor + OpenAI) and TypeScript (InstructorJS + Vercel AI SDK) implementations, with shared Pydantic/Zod schemas for cross-language consistency.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Incoming Email  │───▶│ Instructor Parse │\n│ (Raw Text)      │    │ - Intent         │\n└─────────────────┘    │ - Recipients     │\n                      │ - Attachments    │\n                      └──────┬─────────────┘\n                             │\n                      ┌──────▼─────────────┐\n                      │ Vex Verification   │\n                      │ - PII Filter       │\n                      │ - Tone Check       │\n                      │ - Recipient Valid  │\n                      └────────┬───────────┘\n                               │\n                        ┌──────▼─────────────┐\n                        │ Draft Generation   │───▶┌──────────────┐\n                        │ + Approval Flow    │    │ Send Email    │\n                        └────────────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "PII Leakage in Drafts",
+        "description": "Instructor may extract and include sensitive data (SSNs, emails) in generated drafts without filtering",
+        "severity": "critical",
+        "mitigation": "Vex PII detection policy blocks drafts containing unredacted sensitive information"
+      },
+      {
+        "name": "Inappropriate Tone Detection Failure",
+        "description": "Model generates sarcastic/offensive replies that pass Instructor validation but fail human review",
+        "severity": "high",
+        "mitigation": "Vex sentiment analysis ensures professional tone across all generated content"
+      },
+      {
+        "name": "Invalid Recipient Extraction",
+        "description": "Hallucinated or malformed email addresses from Instructor's nested recipient parsing",
+        "severity": "high",
+        "mitigation": "Vex email format validation + domain reputation checks before send approval"
+      },
+      {
+        "name": "Confidentiality Breaches",
+        "description": "Internal-only content included in external email drafts due to extraction context loss",
+        "severity": "critical",
+        "mitigation": "Vex confidentiality classifier prevents sensitive internal data in outbound emails"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Detection with Instructor",
+        "description": "Parse incoming email to extract structured intent, action type, and priority using Pydantic models",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom openai import OpenAI\nfrom typing import Literal\n\nclass EmailIntent(BaseModel):\n    action: Literal['reply', 'forward', 'draft', 'archive'] = Field(..., description=\"User's desired email action\")\n    priority: Literal['low', 'medium', 'high'] = 'medium'\n    recipients: list[str] = Field(default_factory=list)\n\nclient = from_openai(OpenAI())\nraw_email = \"Please reply to john@company.com about the Q4 budget ASAP\"\nintent = client.chat.completions.create(\n    model=\"gpt-4o-mini\",\n    response_model=EmailIntent,\n    messages=[{\"role\": \"user\", \"content\": raw_email}]\n)\nprint(intent.action, intent.recipients)",
+        "language": "python"
+      },
+      {
+        "title": "Email Draft Generation",
+        "description": "Generate complete email drafts with validated structure for send approval workflow",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\nfrom typing import Optional\n\nclass EmailDraft(BaseModel):\n    subject: str\n    body: str\n    to: list[str]\n    cc: Optional[list[str]] = None\n    attachments: list[str] = Field(default_factory=list)\n\nclient = from_openai(OpenAI())\ndraft = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=EmailDraft,\n    messages=[\n        {\"role\": \"system\", \"content\": \"Generate professional email drafts\"},\n        {\"role\": \"user\", \"content\": \"Draft reply confirming Q4 budget approval for John\"}\n    ]\n)\nprint(f\"Subject: {draft.subject}\")\nprint(f\"To: {', '.join(draft.to)}\")",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Intent Parsing",
+        "description": "InstructorJS equivalent for Node.js/TypeScript environments with Zod schemas",
+        "code": "import { fromOpenai } from 'instructor';\nimport { OpenAI } from 'openai';\nimport { z } from 'zod';\n\nconst EmailIntent = z.object({\n  action: z.enum(['reply', 'forward', 'draft', 'archive']),\n  priority: z.enum(['low', 'medium', 'high']).default('medium'),\n  recipients: z.array(z.string())\n});\n\nconst client = fromOpenai(new OpenAI());\nconst rawEmail = \"Please reply to john@company.com about Q4 budget\";\nconst intent = await client.chat.completions.create({\n  model: 'gpt-4o-mini',\n  messages: [{ role: 'user', content: rawEmail }],\n  responseModel: EmailIntent\n});\nconsole.log(intent.action, intent.recipients);",
+        "language": "typescript"
+      },
+      {
+        "title": "Attachment Handler",
+        "description": "Extract and validate attachment references from email context",
+        "code": "import { fromOpenai } from 'instructor';\nimport { z } from 'zod';\n\nconst AttachmentInfo = z.object({\n  filename: z.string(),\n  content_type: z.enum(['pdf', 'docx', 'xlsx', 'image/png']),\n  size_kb: z.number().int().min(1).max(25000),\n  description: z.string().optional()\n});\n\nconst client = fromOpenai(new OpenAI());\nconst attachments = await client.chat.completions.create({\n  model: 'gpt-4o-mini',\n  messages: [{ role: 'user', content: 'Email mentions Q4_budget.pdf and org_chart.xlsx' }],\n  responseModel: z.array(AttachmentInfo)\n});\nconsole.log(attachments.map(a => a.filename));",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "PII Filtering Wrapper",
+        "description": "Wrap Instructor calls with Vex to block PII in generated email drafts",
+        "code": "from vex import verify\nfrom instructor import from_openai\nfrom pydantic import BaseModel\n\nclass EmailDraft(BaseModel):\n    subject: str\n    body: str\n    to: list[str]\n\n@verify(policies=[\"block-pii\", \"professional-tone\"])\ndef generate_draft(intent: str) -> EmailDraft:\n    client = from_openai(OpenAI())\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=EmailDraft,\n        messages=[{\"role\": \"user\", \"content\": intent}]\n    )\n\n# Usage with automatic retries/blocking\ndraft = generate_draft(\"Reply to John about SSN 123-45-6789\")\n# Vex blocks PII automatically",
+        "language": "python"
+      },
+      {
+        "title": "Recipient Validation Guardrail",
+        "description": "Verify extracted recipients before approval workflow using Vex email validation",
+        "code": "from vex import verify, Policy\nfrom instructor import from_openai\nfrom typing import Literal\n\n@verify(policies=[\n    Policy(name=\"valid_email\", prompt=\"Validate all email addresses are properly formatted\"),\n    Policy(name=\"domain_whitelist\", prompt=\"Only allow company.com and partner domains\")\n])\ndef extract_recipients(raw_email: str) -> list[str]:\n    client = from_openai(OpenAI())\n    class Recipients(BaseModel):\n        to: list[str]\n    result = client.chat.completions.create(\n        model=\"gpt-4o-mini\",\n        response_model=Recipients,\n        messages=[{\"role\": \"user\", \"content\": raw_email}]\n    )\n    return result.to\n\nrecipients = extract_recipients(\"Send to john@gmail.com, jane@company.com\")",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex + InstructorJS",
+        "description": "Production TypeScript integration with comprehensive email verification",
+        "code": "import { verify } from 'vex-sdk';\nimport { fromOpenai } from 'instructor';\nimport { z } from 'zod';\n\nconst EmailDraftSchema = z.object({\n  subject: z.string(),\n  body: z.string(),\n  to: z.array(z.string().email())\n});\n\nconst generateDraft = verify(\n  async (prompt: string) => {\n    const client = fromOpenai(new OpenAI());\n    return client.chat.completions.create({\n      model: 'gpt-4o',\n      messages: [{ role: 'user', content: prompt }],\n      responseModel: EmailDraftSchema\n    });\n  },\n  {\n    policies: ['block-pii', 'professional-tone', 'valid-emails'],\n    maxRetries: 3\n  }\n);\n\nconst draft = await generateDraft('Draft professional reply about budget');",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor AI Email Assistant",
+      "description": "Add Vex guardrails today to prevent PII leaks and inappropriate emails with one line of code."
+    }
+  }
+}

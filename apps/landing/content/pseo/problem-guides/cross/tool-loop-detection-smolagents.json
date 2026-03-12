@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Smolagents Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Smolagents tool-loop-detection",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, Tool Loop Detection identifies when lightweight agents get trapped in repetitive tool calls due to the framework's simple code-based reasoning and minimal built-in safeguards. This manifests as agents endlessly cycling between tools like web search and code execution without progressing toward task completion. The framework's emphasis on simplicity exacerbates this issue, as agents lack sophisticated state tracking or loop-breaking mechanisms.",
+    "howItManifests": [
+      {
+        "scenario": "Web search → code execution ping-pong",
+        "symptom": "Agent alternates between searching for data and generating code to process it, repeating identical queries",
+        "impact": "Infinite loop consumes API credits without producing results"
+      },
+      {
+        "scenario": "Calculator tool overuse",
+        "symptom": "Agent calls calculator for every arithmetic operation, including trivial ones like 1+1",
+        "impact": "Performance degradation from unnecessary tool calls"
+      },
+      {
+        "scenario": "File read/write cycles",
+        "symptom": "Agent repeatedly reads a file, modifies it slightly, then re-reads to verify changes",
+        "impact": "Disk I/O exhaustion and potential data corruption"
+      },
+      {
+        "scenario": "Multi-tool validation loops",
+        "symptom": "Agent calls one tool then immediately calls another to 'verify' the first tool's output",
+        "impact": "Exponential tool call growth blocking task completion"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Sequence Analysis",
+        "description": "Tracks tool call sequences to detect repetition patterns across multiple invocations",
+        "code": "from collections import defaultdict, deque\n\ndef detect_tool_loops(agent):\n    tool_history = defaultdict(deque)\n    max_history = 10\n    \n    def wrapper(run):\n        result = run()\n        call_log = agent._last_tool_calls or []\n        \n        for call in call_log[-max_history:]:\n            tool_name = call.get('name', 'unknown')\n            tool_history[tool_name].append(call)\n            \n            if len(tool_history[tool_name]) > 3:\n                recent_calls = list(tool_history[tool_name])[-3:]\n                if all(c.get('args') == recent_calls[0].get('args') for c in recent_calls):\n                    raise LoopDetected(f\"Tool '{tool_name}' repeating with identical args\")\n        \n        return result\n    \n    return wrapper",
+        "language": "python"
+      },
+      {
+        "name": "State Hash Monitoring",
+        "description": "Monitors agent state hashes to detect when the same state repeats across iterations",
+        "code": "import hashlib\n\nclass StateLoopDetector:\n    def __init__(self, window=5):\n        self.state_hashes = deque(maxlen=window)\n        self.window = window\n    \n    def check(self, agent_state):\n        state_str = str(agent_state)\n        state_hash = hashlib.md5(state_str.encode()).hexdigest()\n        \n        if state_hash in self.state_hashes:\n            repeat_count = self.state_hashes.count(state_hash)\n            if repeat_count >= 2:\n                raise LoopDetected(f\"State hash {state_hash} repeated {repeat_count} times\")\n        \n        self.state_hashes.append(state_hash)",
+        "language": "python"
+      },
+      {
+        "name": "Token Budget Exceeded",
+        "description": "Tracks cumulative tool call tokens to detect runaway reasoning loops",
+        "code": "class TokenBudgetDetector:\n    def __init__(self, max_tokens=10000):\n        self.total_tokens = 0\n        self.max_tokens = max_tokens\n    \n    def track_call(self, tool_call):\n        # Estimate tokens: tool name (10) + args (avg 50 per arg)\n        tokens = 10 + len(str(tool_call.get('args', {}))) // 4\n        self.total_tokens += tokens\n        \n        if self.total_tokens > self.max_tokens:\n            raise LoopDetected(f\"Exceeded token budget: {self.total_tokens}/{self.max_tokens}\")\n        \n        return tokens",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication",
+        "description": "Prevents identical tool calls within a short window using call signature caching",
+        "code": "from functools import lru_cache\nimport json\n\n@lru_cache(maxsize=100)\ndef cached_tool_call(tool_name, args_hash):\n    \"\"\"Skip identical tool calls within cache lifetime\"\"\"\n    pass\n\ndef safe_agent_run(agent):\n    call_cache = set()\n    \n    original_call = agent._call_tool\n    \n    def deduped_call(tool_name, args):\n        args_str = json.dumps(args, sort_keys=True)\n        call_key = f\"{tool_name}:{hash(args_str)}\"\n        \n        if call_key in call_cache:\n            print(f\"Skipping duplicate call: {call_key}\")\n            return {'cached': True, 'result': 'skipped duplicate'}\n        \n        call_cache.add(call_key)\n        return original_call(tool_name, args)\n    \n    agent._call_tool = deduped_call\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Max Iterations Guard",
+        "description": "Hard limit on total tool calls per agent run with graceful termination",
+        "code": "class IterationGuard:\n    def __init__(self, max_calls=20):\n        self.call_count = 0\n        self.max_calls = max_calls\n    \n    def __call__(self, func):\n        def wrapper(*args, **kwargs):\n            nonlocal self\n            self.call_count += 1\n            if self.call_count > self.max_calls:\n                return {\n                    'error': 'Max tool calls exceeded',\n                    'call_count': self.call_count,\n                    'suggestion': 'Consider simplifying task or providing more context'\n                }\n            return func(*args, **kwargs)\n        return wrapper\n\n# Usage\nguarded_agent = IterationGuard(20)(agent.run)",
+        "language": "python"
+      },
+      {
+        "name": "Progress Checkpointing",
+        "description": "Requires measurable progress between tool calls to break trivial loops",
+        "code": "class ProgressChecker:\n    def __init__(self):\n        self.last_output_hash = None\n        self.progress_threshold = 0.1  # 10% token change minimum\n    \n    def check_progress(self, new_output):\n        if self.last_output_hash is None:\n            self.last_output_hash = hash(new_output)\n            return True\n        \n        current_hash = hash(new_output)\n        if current_hash == self.last_output_hash:\n            raise LoopDetected(\"No progress detected in output\")\n        \n        self.last_output_hash = current_hash\n        return True\n\n# Wrap agent output\nchecker = ProgressChecker()\ndef progressive_run():\n    result = agent.run()\n    checker.check_progress(str(result))\n    return result",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade tool loop detection for Smolagents through its verify() wrapper, automatically instrumenting agent runs to catch repetition patterns without code changes. It monitors tool call sequences, state transitions, and token consumption in real-time, surfacing actionable alerts with stack traces and loop visualizations. Beyond detection, Vex's remediation engine can automatically inject loop-breaking interventions or fallback strategies.\n\nIntegration takes <5 minutes: wrap your agent.run() calls with vex.verify(). Vex handles the heavy lifting of pattern matching across thousands of Smolagents deployments, using ML models trained on real loop failures. The platform provides dashboards showing loop frequency by tool/agent type, helping teams prioritize fixes.\n\nVex's auto-remediation can inject max-iteration guards, deduplicate calls, or even rewrite problematic tool chains, reducing MTTR from hours to seconds while preserving agent functionality.",
+      "code": "from smolagents import CodeAgent\nfrom vex_sdk import verify\n\n# Your existing Smolagents setup\nagent = CodeAgent(\n    tools=[web_search, calculator, file_reader],\n    model='gpt-4o-mini'\n)\n\n# Vex automation - 1 line integration\n@verify(test_name=\"smolagents-tool-loop-detection\")\ndef safe_agent_task(task: str):\n    \"\"\"Run agent with automatic loop protection\"\"\"\n    return agent.run(task)\n\n# Vex auto-detects loops and provides:\n# ✅ Tool call repetition patterns\n# ✅ State cycle visualization\n# ✅ Auto-remediation suggestions\n# ✅ Performance impact metrics\n\nresult = safe_agent_task(\"Calculate fibonacci(30) using available tools\")\n\n# Vex dashboard shows:\n# - Loop frequency by tool\n# - Most expensive loops\n# - Auto-fix success rate",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install smolagents vex-sdk` and wrap your agent.run() calls today."
+    }
+  }
+}

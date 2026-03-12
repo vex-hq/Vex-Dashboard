@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in Pydantic AI Agents",
+    "description": "How to detect and fix ai agent drift monitoring in Pydantic AI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "Pydantic AI drift-monitoring",
+      "Pydantic AI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in Pydantic AI manifests as structured output validators silently rejecting valid but semantically drifted responses, causing silent failures in production agents. Tool retry logic often masks persistent drift by resubmitting identical prompts, while nested tool calls lose dependency context leading to inconsistent structured outputs. Streaming validation failures mid-generation compound the issue, breaking type-safe response pipelines without clear error signals.",
+    "howItManifests": [
+      {
+        "scenario": "Result validator rejecting drifted but valid outputs",
+        "symptom": "Agent returns None despite model generating plausible text",
+        "impact": "Silent failures cascade through dependent tools and workflows"
+      },
+      {
+        "scenario": "Tool retry logic masking semantic drift",
+        "symptom": "Repeated tool calls with identical inputs after max_retries",
+        "impact": "Infinite loops or stalled workflows consuming LLM quota"
+      },
+      {
+        "scenario": "Dependency injection lost in nested tool calls",
+        "symptom": "Child tools receive None context from parent agent state",
+        "impact": "Inconsistent structured outputs across agent conversation"
+      },
+      {
+        "scenario": "Streaming validation failing mid-generation",
+        "symptom": "Partial stream validation errors abort complete responses",
+        "impact": "Incomplete structured data breaks downstream consumers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Validator Rejection Rate Monitor",
+        "description": "Tracks percentage of agent calls rejected by Pydantic result validators",
+        "code": "from pydantic_ai import Agent\nfrom vex_sdk import VexMonitor\n\n@VexMonitor.track('validator_rejection_rate')\ndef create_agent():\n    agent = Agent(\n        'openai:gpt-4o',\n        result_validator=UserResponse,\n        max_retries=3\n    )\n    return agent\n\n# Detect drift when >10% rejection rate\nagent = create_agent()\nresult = agent.run('Analyze this market data')\nif result is None:\n    VexMonitor.log_drift('validator_rejection')"
+      },
+      {
+        "name": "Tool Retry Loop Detector",
+        "description": "Identifies excessive retries indicating underlying semantic drift",
+        "code": "from pydantic_ai import Tool, Agent\n\nclass MarketAnalyzer(Agent):\n    def __init__(self):\n        super().__init__(\n            'openai:gpt-4o',\n            tools=[self.get_market_data],\n            result_validator=MarketReport\n        )\n    \n    @Tool()\n    def get_market_data(self, ticker: str) -> MarketData:\n        # Track retry attempts\n        retries = getattr(self, '_retry_count', 0)\n        if retries > 3:\n            VexMonitor.log_drift('excessive_tool_retries', {'ticker': ticker})\n        self._retry_count = retries + 1\n        return fetch_market_data(ticker)"
+      },
+      {
+        "name": "Streaming Validation Failure Tracker",
+        "description": "Monitors partial stream rejections during structured generation",
+        "code": "from pydantic_ai.streaming import StreamingAgent\n\nstreaming_agent = StreamingAgent(\n    'openai:gpt-4o',\n    result_validator=StreamingReport\n)\n\nasync def detect_stream_drift():\n    stream = streaming_agent.stream('Generate quarterly report')\n    async for chunk in stream:\n        if chunk.validation_error:\n            VexMonitor.log_drift(\n                'streaming_validation_failure',\n                {'error': str(chunk.validation_error)}\n            )\n            break"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fallback Validator with Drift Logging",
+        "description": "Graceful degradation with comprehensive drift capture",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional, Any\nfrom vex_sdk import VexDriftCapture\n\nclass DriftAwareResponse(BaseModel):\n    content: str\n    is_drifted: bool = False\n    drift_reason: Optional[str] = None\n\nclass SafeAgent(Agent):\n    def __init__(self):\n        super().__init__(\n            result_validator=self._drift_aware_validator\n        )\n    \n    def _drift_aware_validator(self, response: Any) -> Optional[DriftAwareResponse]:\n        try:\n            return StrictReport.model_validate(response)\n        except Exception as e:\n            VexDriftCapture.log_raw_response(response, str(e))\n            return DriftAwareResponse(\n                content=str(response),\n                is_drifted=True,\n                drift_reason=str(e)\n            )"
+      },
+      {
+        "name": "Context-Preserving Nested Tool Calls",
+        "description": "Maintains dependency injection across agent tool hierarchy",
+        "code": "from pydantic_ai import Agent, Context\nfrom vex_sdk import VexContextManager\n\nclass ContextAwareAgent(Agent):\n    def __init__(self):\n        super().__init__(\n            context_providers=[VexContextManager()]\n        )\n    \n    @Tool()\n    def analyze_with_context(self, data: str) -> Analysis:\n        # Context automatically injected from parent\n        user_context = Context.current().user_profile\n        market_context = Context.current().market_data\n        \n        return Analysis(\n            insights=process_with_context(data, user_context, market_context)\n        )"
+      },
+      {
+        "name": "Progressive Streaming Validation",
+        "description": "Validates streaming chunks incrementally with recovery",
+        "code": "from pydantic_ai.streaming import StreamingAgent\n\nclass ResilientStreamer(StreamingAgent):\n    async def _validate_stream_chunk(self, chunk: str, partial: bool = False):\n        if partial:\n            # Lenient validation for partial chunks\n            return PartialReport.try_validate(chunk)\n        return StreamingReport.model_validate(chunk)\n    \n    async def stream_with_recovery(self, prompt: str):\n        buffer = ''\n        async for chunk in self._raw_stream(prompt):\n            buffer += chunk\n            validated = await self._validate_stream_chunk(buffer, partial=True)\n            if validated:\n                yield validated\n                buffer = ''  # Reset on successful validation"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates directly as Pydantic AI result_validators, automatically capturing drifted responses before they're silently dropped. It establishes behavioral baselines during agent warmup, then flags semantic drift when validation rejection rates exceed 5% or tool retry patterns deviate from norms. Vex's production monitoring dashboard provides real-time drift alerts with raw response captures for immediate debugging.\n\nRemediation workflows trigger automatically: fallback validators activate on detected drift, A/B testing deploys conservative prompts, and dependency context is auto-injected into failing tool chains. Vex maintains full observability across nested agent calls and streaming pipelines, ensuring type-safe outputs remain reliable at scale.",
+      "code": "from pydantic_ai import Agent\nfrom vex_sdk import VexAgentMonitor\n\n# Single line integration\nagent = Agent(\n    'openai:gpt-4o',\n    result_validator=VexAgentMonitor('market-analyzer-v1')\n)\n\n# Vex auto-detects all 4 failure modes\nresult = agent.run('Analyze Q4 earnings')\n\n# Dashboard shows:\n# - 12% validator rejection rate (Drift Alert)\n# - Tool 'get_financials' retrying 5x avg (Drift Alert)\n# - Streaming failures at 23% (Drift Alert)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and add one line to production Pydantic AI agents for complete drift monitoring"
+    }
+  }
+}

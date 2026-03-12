@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "pydantic-ai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in Pydantic AI Agents",
+    "description": "How to detect and fix ai agent testing strategies in Pydantic AI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "Pydantic AI testing-strategies",
+      "Pydantic AI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Pydantic AI, AI Agent Testing Strategies challenges arise from the tension between structured output validation and the unpredictable nature of LLM responses, leading to brittle tests that fail on semantically correct but structurally deviant outputs. Common issues include overly strict result validators rejecting valid responses, tool retry logic hiding persistent errors, missing dependency contexts in nested calls, and streaming validation failures. These manifest specifically in Pydantic AI's agent patterns and APIs, requiring targeted testing approaches.",
+    "howItManifests": [
+      {
+        "scenario": "Result validator rejecting valid but unexpected model outputs",
+        "symptom": "Pydantic's `result_validator` raises `ValidationError` on semantically correct JSON that doesn't match exact Pydantic model fields",
+        "impact": "False negatives in agent testing block deployment of working agents"
+      },
+      {
+        "scenario": "Tool retry logic masking persistent underlying errors",
+        "symptom": "`@agent.tool` retry decorators succeed after 3 attempts despite consistent LLM hallucination in tool parameter parsing",
+        "impact": "Silent failures in production where errors appear resolved but outputs remain incorrect"
+      },
+      {
+        "scenario": "Dependency injection context not available in nested tool calls",
+        "symptom": "Nested `@agent.tool` calls fail with `ContextMissingError` because `agent.context` isn't propagated through tool chains",
+        "impact": "Complex multi-tool workflows fail unpredictably in testing"
+      },
+      {
+        "scenario": "Streaming structured responses failing mid-generation validation",
+        "symptom": "`agent.stream()` with `response_model` aborts early when partial JSON tokens don't validate against Pydantic schema",
+        "impact": "Real-time UIs show incomplete responses or connection errors"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Validator Rejection Rate Monitor",
+        "description": "Capture `ValidationError` frequency in `result_validator` to detect over-constrained schemas",
+        "code": "from pydantic_ai import Agent\nfrom vex_sdk import monitor\n\n@monitor.capture_errors()\ndef test_agent_validation(agent: Agent):\n    try:\n        result = agent.run('Generate user profile for John Doe')\n        assert result is not None\n    except ValidationError as e:\n        print(f'Validation failed: {e}')\n        monitor.record_metric('validator_rejections', 1)\n\ntest_agent_validation(my_agent)",
+        "language": "python"
+      },
+      {
+        "name": "Tool Retry Failure Detector",
+        "description": "Track retry counts in `@agent.tool` decorators to identify masked persistent errors",
+        "code": "from pydantic_ai import Agent\nimport pytest\n\n@pytest.mark.parametrize('input', test_cases)\ndef test_tool_reliability(agent: Agent, input):\n    retry_counts = []\n    \n    @agent.tool(retries=3, on_retry=lambda c: retry_counts.append(c))\n    def flaky_tool():\n        pass\n    \n    result = agent.run(input)\n    assert max(retry_counts) < 2, 'Excessive retries detected'",
+        "language": "python"
+      },
+      {
+        "name": "Streaming Validation Breakpoint Finder",
+        "description": "Detect where streaming validation fails by capturing partial token errors",
+        "code": "from pydantic_ai import Agent\nfrom typing import Iterator\n\nclass StreamValidator:\n    def __init__(self, agent: Agent):\n        self.agent = agent\n        self.failures = []\n    \n    def validate_stream(self, prompt: str) -> Iterator[str]:\n        try:\n            for chunk in self.agent.stream(prompt):\n                yield chunk\n        except ValidationError as e:\n            self.failures.append(f'Failed at token {len(chunk)}: {e}')\n            raise\n\nvalidator = StreamValidator(agent)\nlist(validator.validate_stream('complex query'))",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fuzzy Validator with Semantic Fallback",
+        "description": "Use `field_validator` with semantic similarity check before strict validation",
+        "code": "from pydantic import BaseModel, field_validator\nfrom pydantic_ai import Agent\nfrom semantic_similarity import cosine_sim\n\nclass FlexibleResponse(BaseModel):\n    @field_validator('content')\n    @classmethod\n    def fuzzy_validate(cls, v, info):\n        expected_schema = info.context.get('expected_schema')\n        if cosine_sim(v, expected_schema) > 0.8:\n            return v  # Accept semantically similar\n        raise ValueError('Semantic mismatch')\n\nagent = Agent(response_model=FlexibleResponse)",
+        "language": "python"
+      },
+      {
+        "name": "Transparent Retry with Failure Logging",
+        "description": "Replace silent retries with observable failure tracking",
+        "code": "from pydantic_ai import Agent\nfrom functools import wraps\n\ndef observable_retry(max_retries=3):\n    def decorator(func):\n        @wraps(func)\n        async def wrapper(*args, **kwargs):\n            for attempt in range(max_retries):\n                try:\n                    return await func(*args, **kwargs)\n                except Exception as e:\n                    if attempt == max_retries - 1:\n                        raise\n                    print(f'Retry {attempt + 1}: {e}')\n        return wrapper\n    return decorator\n\n@agent.tool(observable_retry())\ndef reliable_tool(params):\n    pass",
+        "language": "python"
+      },
+      {
+        "name": "Context Propagation Middleware",
+        "description": "Ensure `agent.context` flows through nested tool calls",
+        "code": "from pydantic_ai import Agent\n\nclass ContextMiddleware:\n    def __init__(self, agent: Agent):\n        self.agent = agent\n    \n    async def __call__(self, tool_call):\n        # Propagate context to nested calls\n        tool_call.context = self.agent.context.copy()\n        result = await tool_call.execute()\n        self.agent.context.update(result.context)\n        return result\n\nagent = Agent(middleware=[ContextMiddleware(agent)])",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates directly as a `result_validator` in Pydantic AI agents, automatically capturing validation failures, retry patterns, context propagation issues, and streaming errors across all agent runs. It employs mutation testing to inject edge-case LLM outputs, measuring how often your validators reject valid responses versus catching true errors. Vex's agent-specific detectors analyze `@agent.tool` retry decorators and nested call patterns, providing coverage metrics and auto-generated test cases.\n\nThe platform generates remediation code snippets tailored to Pydantic AI patterns, including fuzzy validators, context middleware, and observable retry logic. Vex continuously monitors production agent runs, alerting on regression in testing strategies and suggesting schema relaxations based on real usage patterns. Integration requires only adding `vex.result_validator()` to your agent definition.",
+      "code": "from pydantic_ai import Agent\nfrom vex_sdk import Vex\n\n# Install: pip install pydantic-ai vex-sdk\nvex = Vex(project='pydantic-ai-agent')\n\nclass TestedAgent(Agent):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        # Vex auto-detects all 4 failure modes\n        self.result_validator = vex.result_validator(\n            detect=['validator_rejection', 'retry_masking', \n                   'context_loss', 'stream_validation']\n        )\n\nagent = TestedAgent(\n    model='gpt-4o',\n    tools=[search_tool, db_tool]\n)\n\n# Vex auto-generates tests and fixes\nvex.scan_agent(agent)\nresult = agent.run('complex query')\nvex.record_result(result)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex integration to your Pydantic AI agents and eliminate testing strategy failures forever."
+    }
+  }
+}

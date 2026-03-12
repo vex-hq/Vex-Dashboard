@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Instructor Agents",
+    "description": "How to detect and fix ai agent memory management in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Instructor memory-management",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Memory Management in Instructor manifests as unreliable state persistence during structured output extraction, leading to validation retries exhausting when agents fail to recall or update memory fields correctly. Agents often produce partial memory objects missing required fields like session_history or context_vector, or hallucinate invalid enum values for memory types such as 'short_term' instead of schema-defined 'transient'|'persistent'. Nested memory structures suffer from inconsistent depth, causing cascading failures in long-running agent conversations.",
+    "howItManifests": [
+      {
+        "scenario": "Agent fails to append new messages to session_history during multi-turn conversations",
+        "symptom": "Structured output validation retries exhausted after 3 attempts",
+        "impact": "Conversation context lost, agent responds without memory of prior interactions"
+      },
+      {
+        "scenario": "Memory extraction missing required context_vector field",
+        "symptom": "Partial extraction missing required fields: ['context_vector']",
+        "impact": "Agent lacks semantic understanding of conversation embeddings"
+      },
+      {
+        "scenario": "Model generates invalid memory_type enum values",
+        "symptom": "Model hallucinating enum values outside schema: 'short_term' not in ['transient', 'persistent']",
+        "impact": "Memory classification fails, wrong retention policy applied"
+      },
+      {
+        "scenario": "Nested conversation_memory structure has inconsistent depth",
+        "symptom": "Nested object extraction producing inconsistent depth in recent_interactions",
+        "impact": "Recent conversation history truncated or malformed"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Instructor Retry Exhaustion",
+        "description": "Detect memory management failures by catching Instructor's MaxRetriesError during structured extraction",
+        "code": "from instructor import InstructorMaxRetriesError\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ntry:\n    memory_state = client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=AgentMemory,\n        messages=messages\n    )\nexcept InstructorMaxRetriesError as e:\n    print(f\"Memory extraction failed: {e}\")\n    # Log memory management failure\n    failed_fields = [field for field in e.model_fields if not getattr(e.output, field, None)]\n    print(f\"Missing memory fields: {failed_fields}\")",
+        "language": "python"
+      },
+      {
+        "name": "Validate Memory Schema Completeness",
+        "description": "Check if extracted memory objects contain all required fields using Pydantic validation",
+        "code": "from pydantic import BaseModel\nfrom typing import List\n\nclass AgentMemory(BaseModel):\n    session_history: List[str]\n    context_vector: List[float]\n    memory_type: Literal['transient', 'persistent']\n\n# After extraction\nmemory = client.chat.completions.create(\n    model=\"gpt-4o\",\n    response_model=AgentMemory,\n    messages=messages\n)\n\n# Detection\nmissing_fields = []\nif not memory.session_history:\n    missing_fields.append('session_history')\nif not memory.context_vector:\n    missing_fields.append('context_vector')\n\nif missing_fields:\n    print(f\"Incomplete memory state: {missing_fields}\")",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Instructor Retry Detection",
+        "description": "Catch Zod parsing errors indicating memory extraction failures in TypeScript",
+        "code": "import { patch } from '@instructor-ai/patch';\nimport OpenAI from 'openai';\n\nconst openai = patch(new OpenAI());\n\ntype AgentMemory = {\n  sessionHistory: string[];\n  contextVector: number[];\n  memoryType: 'transient' | 'persistent';\n};\n\ntry {\n  const memory = await openai.chat.completions.create({\n    model: 'gpt-4o',\n    response_model: AgentMemory,\n    messages,\n  });\n} catch (error: any) {\n  if (error.message.includes('Max retries exceeded')) {\n    console.log('Memory extraction failed:', error);\n    // Parse missing fields from error\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Memory Context Injection",
+        "description": "Fix partial extraction by injecting current memory state into system prompt before extraction",
+        "code": "from pydantic import BaseModel\nfrom typing import List, Literal\n\nclass AgentMemory(BaseModel):\n    session_history: List[str]\n    context_vector: List[float]\n    memory_type: Literal['transient', 'persistent']\n\n# Fix: Inject current memory into prompt\ndef extract_memory_with_context(client, messages, current_memory=None):\n    system_prompt = \"\"\"You are maintaining agent memory state.\n    Current memory: {current_memory}\n    Always include ALL required fields: session_history, context_vector, memory_type.\n    memory_type must be 'transient' or 'persistent' only.\"\"\"\n    \n    if current_memory:\n        system_prompt = system_prompt.format(current_memory=str(current_memory))\n    \n    messages_with_context = [{\"role\": \"system\", \"content\": system_prompt}] + messages\n    \n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=AgentMemory,\n        messages=messages_with_context,\n        max_retries=2\n    )",
+        "language": "python"
+      },
+      {
+        "name": "Fallback Memory Merging",
+        "description": "Merge partial memory extractions with existing state to prevent data loss",
+        "code": "def merge_memory_states(new_memory: AgentMemory, existing_memory: AgentMemory):\n    # Preserve existing data when new extraction is partial\n    merged = existing_memory.copy(update={\n        'session_history': new_memory.session_history + existing_memory.session_history,\n        'context_vector': new_memory.context_vector or existing_memory.context_vector,\n        'memory_type': new_memory.memory_type or existing_memory.memory_type\n    })\n    return merged\n\n# Usage\ntry:\n    new_memory = client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=AgentMemory,\n        messages=messages\n    )\nexcept InstructorMaxRetriesError:\n    # Fallback: use partial extraction or existing memory\n    new_memory = merge_memory_states(partial_memory, existing_memory)",
+        "language": "python"
+      },
+      {
+        "name": "TypeScript Enum Constraint Fix",
+        "description": "Enforce valid memory_type enums using Zod refinement in TypeScript",
+        "code": "import { z } from 'zod';\n\nconst AgentMemorySchema = z.object({\n  sessionHistory: z.array(z.string()),\n  contextVector: z.array(z.number()),\n  memoryType: z.enum(['transient', 'persistent']).refine(\n    (val) => ['transient', 'persistent'].includes(val),\n    { message: \"memoryType must be 'transient' or 'persistent'\" }\n  ),\n});\n\ntype AgentMemory = z.infer<typeof AgentMemorySchema>;\n\n// Usage with explicit enum guidance\nconst memory = await openai.chat.completions.create({\n  model: 'gpt-4o',\n  response_model: AgentMemorySchema,\n  messages: [\n    {\n      role: 'system',\n      content: \"memoryType must be exactly 'transient' or 'persistent'. No other values.\"\n    },\n    ...messages\n  ],\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex automatically detects Instructor memory management failures by monitoring validation retry patterns, missing field errors, and schema violations during structured extraction. It captures specific failure signatures like MaxRetriesError, partial field extraction, and enum hallucinations, then applies targeted remediation strategies including context injection and fallback merging. Vex's agent reliability platform provides real-time observability into memory state degradation and automatically patches failing extraction flows with memory-aware prompts and validation logic.",
+      "code": "from vex import verify\nfrom instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\nfrom typing import List, Literal\n\nclass AgentMemory(BaseModel):\n    session_history: List[str]\n    context_vector: List[float]\n    memory_type: Literal['transient', 'persistent']\n\nclient = from_openai(OpenAI())\n\n@vex.verify(\n    failure_modes=[\n        \"InstructorMaxRetriesError\",\n        \"missing-required-fields\",\n        \"enum-validation-failure\"\n    ],\n    remediation=[\n        \"inject-memory-context\",\n        \"merge-fallback-state\",\n        \"enum-constraint-prompt\"\n    ]\n)\ndef extract_agent_memory(messages, current_memory=None):\n    \"\"\"Vex-monitored memory extraction with auto-remediation\"\"\"\n    return client.chat.completions.create(\n        model=\"gpt-4o\",\n        response_model=AgentMemory,\n        messages=messages,\n        max_retries=3\n    )\n\n# Usage\nmemory_state = extract_agent_memory(messages, existing_memory)\n# Vex automatically detects and fixes memory failures",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today to automatically detect and remediate AI agent memory management failures in Instructor: pip install vex-sdk"
+    }
+  }
+}

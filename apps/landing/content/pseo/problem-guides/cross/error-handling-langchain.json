@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "langchain",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in LangChain Agents",
+    "description": "How to detect and fix ai agent error handling patterns in LangChain agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "LangChain error-handling",
+      "LangChain reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangChain, AI Agent Error Handling Patterns manifest as unreliable agent executors that fail silently on tool errors, hallucinate in RAG chains, loop infinitely on tool calls, and overflow context windows during long conversations. These issues arise from LangChain's flexible but unopinionated chaining and agent patterns, where errors propagate unpredictably through `AgentExecutor` and `LLMChain` components. Without structured error boundaries, agents produce inconsistent outputs that break downstream parsing and business logic.",
+    "howItManifests": [
+      {
+        "scenario": "Tool call loops in agent executors",
+        "symptom": "Agent repeatedly calls the same tool with identical inputs, consuming tokens without progress",
+        "impact": "Infinite loops crash production systems, exhaust token budgets, and return timeouts"
+      },
+      {
+        "scenario": "Hallucination in RAG retrieval chains",
+        "symptom": "Agent generates fabricated citations or references non-existent documents from retrieval",
+        "impact": "Users receive confidently wrong answers, eroding trust in RAG-powered search agents"
+      },
+      {
+        "scenario": "Context window overflow in long conversations",
+        "symptom": "Conversation history exceeds LLM context limit, causing truncation or 400 errors",
+        "impact": "Agents lose conversation context mid-thread, producing incoherent or repetitive responses"
+      },
+      {
+        "scenario": "Inconsistent output formatting across chain steps",
+        "symptom": "Agent outputs malformed JSON or varying Pydantic schemas between runs",
+        "impact": "Downstream parsers fail, breaking API integrations and structured data extraction"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Detect Tool Call Loops",
+        "description": "Monitor AgentExecutor runs for repeated tool calls with identical arguments exceeding 3 iterations",
+        "code": "from langchain.agents import AgentExecutor\nfrom collections import defaultdict\n\nclass LoopDetector:\n    def __init__(self, max_iterations=3):\n        self.tool_calls = defaultdict(list)\n        self.max_iterations = max_iterations\n    \n    def check_loop(self, tool_call):\n        tool_name = tool_call['name']\n        args_hash = hash(str(tool_call['args']))\n        self.tool_calls[tool_name].append(args_hash)\n        recent_calls = self.tool_calls[tool_name][-self.max_iterations:]\n        return len(set(recent_calls)) < len(recent_calls)\n\n# Usage\ndetector = LoopDetector()\nagent_executor = AgentExecutor(...)\ndef safe_invoke(input):\n    result = agent_executor.invoke(input)\n    if detector.check_loop(result.get('tool_call', {})):\n        raise ValueError('Tool call loop detected')\n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Validate RAG Citation Consistency",
+        "description": "Check if agent-cited documents actually exist in retrieved context",
+        "code": "from langchain.schema import BaseRetriever\n\ndef validate_rag_citations(response, retriever, query):\n    cited_docs = extract_cited_sources(response)  # Custom extraction\n    retrieved_docs = retriever.get_relevant_documents(query)\n    doc_sources = {doc.metadata.get('source', '') for doc in retrieved_docs}\n    hallucinated = [doc for doc in cited_docs if doc not in doc_sources]\n    if hallucinated:\n        raise ValueError(f'RAG hallucination: {hallucinated}')\n    return True\n\n# Usage\nresult = rag_chain.invoke({\"query\": user_input})\nvalidate_rag_citations(result, retriever, user_input)",
+        "language": "python"
+      },
+      {
+        "name": "Monitor Context Window Usage",
+        "description": "Track token usage against LLM context limits in conversational chains",
+        "code": "from langchain.callbacks import BaseCallbackHandler\nfrom tiktoken import get_encoding\n\nclass ContextMonitor(BaseCallbackHandler):\n    def __init__(self, model_name='gpt-4', max_tokens=128000):\n        self.encoder = get_encoding('cl100k_base')\n        self.max_tokens = max_tokens\n        self.total_tokens = 0\n    \n    def on_llm_start(self, prompts, **kwargs):\n        prompt_tokens = sum(len(self.encoder.encode(p)) for p in prompts)\n        self.total_tokens += prompt_tokens\n        if self.total_tokens > self.max_tokens * 0.9:\n            raise ValueError(f'Context window overflow: {self.total_tokens} tokens')\n\n# Usage\nchain = ConversationalRetrievalChain.from_llm(llm, retriever)\nchain.invoke(input, callbacks=[ContextMonitor()])",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Iterations with Early Termination",
+        "description": "Configure AgentExecutor with strict iteration limits and fallback responses",
+        "code": "from langchain.agents import AgentExecutor, create_react_agent\n\nagent = create_react_agent(llm, tools, prompt)\nagent_executor = AgentExecutor(\n    agent=agent,\n    tools=tools,\n    max_iterations=5,\n    max_execution_time=30,\n    handle_parsing_errors=True,\n    return_intermediate_steps=True\n)\n\ntry:\n    result = agent_executor.invoke({\"input\": user_input})\nexcept Exception as e:\n    result = {'output': 'Sorry, I encountered an error processing your request.'}\n\nprint(result['output'])",
+        "language": "python"
+      },
+      {
+        "name": "Structured Output with Pydantic",
+        "description": "Enforce consistent JSON output using LangChain's Pydantic output parsers",
+        "code": "from langchain.output_parsers import PydanticOutputParser\nfrom pydantic import BaseModel, Field\nfrom langchain.prompts import PromptTemplate\n\nclass AgentResponse(BaseModel):\n    answer: str = Field(description='Final answer')\n    citations: list[str] = Field(description='Document sources')\n\nparser = PydanticOutputParser(pydantic_object=AgentResponse)\nprompt = PromptTemplate(\n    template='Answer in JSON: {format_instructions}',\n    input_variables=[],\n    partial_variables={'format_instructions': parser.get_format_instructions()}\n)\n\nchain = prompt | llm | parser\nresult = chain.invoke({})\nprint(result.dict())",
+        "language": "python"
+      },
+      {
+        "name": "Conversation Summary Buffer",
+        "description": "Automatically summarize long conversations to prevent context overflow",
+        "code": "from langchain.memory import ConversationSummaryBufferMemory\nfrom langchain.chains import ConversationChain\n\nmemory = ConversationSummaryBufferMemory(\n    llm=llm,\n    max_token_limit=2000,\n    return_messages=True\n)\n\nconversation = ConversationChain(\n    llm=llm,\n    memory=memory,\n    verbose=True\n)\n\nresponse = conversation.predict(input=user_input)\nprint(response)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex automatically detects LangChain agent failures by wrapping `chain.invoke()` and `agent_executor.invoke()` calls with `vex.verify()`, providing real-time monitoring of tool loops, RAG hallucinations, context overflows, and output inconsistencies. Vex's agent-specific detectors analyze intermediate steps, token usage, and output schemas without requiring manual callback handlers or custom monitoring logic. \n\nWhen issues are detected, Vex provides automated remediation through fallback chains, output correction, and agent retry logic tailored to LangChain patterns. The platform captures full execution traces including tool calls, retrieved documents, and LLM prompts for root-cause analysis. \n\nIntegration takes <5 minutes and works across LangChain Expression Language (LCEL), AgentExecutor, and custom chains, ensuring production-grade reliability for agentic applications.",
+      "code": "import vex\nfrom langchain.agents import AgentExecutor\n\n# Initialize Vex client\nvex.init(api_key='your-vex-api-key')\n\nagent_executor = AgentExecutor(agent=agent, tools=tools)\n\n# Wrap with vex.verify() - detects loops, hallucinations, overflows automatically\n@ vex.verify(\n    agent_errors=True,\n    rag_hallucinations=True,\n    context_overflow=True,\n    output_schema='AgentResponse'\n)\ndef safe_agent_run(user_input):\n    return agent_executor.invoke({\"input\": user_input})\n\n# Production usage\ntry:\n    result = safe_agent_run('What\\'s the weather in SF?')\n    print(result['output'])\nexcept Exception as e:\n    print(f'Vex blocked: {e}')  # Includes remediation suggestions",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install langchain vex-sdk` and wrap your chains with `vex.verify()` for instant agent reliability."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "agno",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Agno + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Agno + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Agno ai email assistant",
+      "Agno guardrails",
+      "ai email assistant reliability",
+      "Vex Agno",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Agno enables intelligent email processing, intent detection, draft generation, and approval workflows in a lightweight, model-agnostic framework. Guardrails are essential due to the high-risk nature of email handling, where failures can lead to PII leaks, inappropriate communications, or confidentiality breaches. Vex provides runtime verification to ensure safe, reliable agent behavior.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Agno",
+      "description": "The AI Email Assistant uses Agno's Agent class to create a multi-modal pipeline that processes incoming emails. It starts with intent detection via LLM calls, extracts attachments using vision models, generates draft responses, and routes to approval workflows. Memory is maintained across sessions for context-aware replies, with tools for email sending and recipient validation.\n\nKey components include a RouterAgent for intent classification, WorkerAgents for drafting and attachment handling, and a SupervisorAgent for final approval. Structured outputs enforce email schemas, while multi-modal inputs handle images/PDFs in attachments. This modular design scales but introduces risks in memory recall and output validation.\n\nVex integration wraps critical agent.run() calls to verify PII filtering, tone, accuracy, and confidentiality before execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Incoming Email  │───▶│ Agno RouterAgent │\n│ (Text+Attach)   │    │ (Intent Detect)  │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │ DraftAgent + VisionAgent  │\n                │ (Generate Reply+Extract)  │\n                └─────────────┬─────────────┘\n                              │\n                       ┌──────▼──────┐\n                       │Supervisor   │───▶ Send Approval\n                       │(Vex Verify) │\n                       └─────────────┘"
+    },
+    "risks": [
+      {
+        "name": "PII Leakage in Drafts",
+        "description": "Agent includes sensitive data like SSNs or emails in generated responses",
+        "severity": "critical",
+        "mitigation": "Vex PII entity extraction and redaction before sending"
+      },
+      {
+        "name": "Inappropriate Tone",
+        "description": "Sarcastic or aggressive language in professional email contexts",
+        "severity": "high",
+        "mitigation": "Tone analysis guardrail with professional sentiment scoring"
+      },
+      {
+        "name": "Invalid Recipients",
+        "description": "Agent suggests or sends to incorrect/unverified email addresses",
+        "severity": "high",
+        "mitigation": "Recipient domain validation and internal directory lookup"
+      },
+      {
+        "name": "Fabricated Context Recall",
+        "description": "Memory recalls non-existent prior conversations leading to errors",
+        "severity": "medium",
+        "mitigation": "Session memory verification against email thread history"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Core Email Processing Agent",
+        "description": "Basic Agno agent setup for email intent detection and routing",
+        "code": "from agno.agent import Agent\nfrom agno.models.openai import OpenAIChat\n\nemail_agent = Agent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    name=\"EmailIntentAgent\",\n    instructions=\"Classify email intent: reply, forward, delete, archive. Extract key facts.\",\n    add_base_tools=False\n)\n\ndef process_email(email_content: str):\n    result = email_agent.run(email_content)\n    return result",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation with Structured Output",
+        "description": "Agent generates email drafts with Pydantic schema validation",
+        "code": "from agno.tools.pydantic import PydanticTool\nfrom pydantic import BaseModel, Field\n\nclass EmailDraft(BaseModel):\n    subject: str = Field(..., description=\"Professional subject line\")\n    body: str = Field(..., description=\"Polite, accurate response\")\n    recipients: list[str]\n\nclass EmailDraftTool(PydanticTool):\n    name: str = \"email_draft\"\n    description: str = \"Generate professional email draft\"\n    args_schema = EmailDraft\n\n draft_agent = Agent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    tools=[EmailDraftTool()],\n    instructions=\"Always generate professional drafts with correct recipients\"\n )",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Processing with Vision",
+        "description": "Multi-modal handling for image/PDF attachments",
+        "code": "from agno.agent import VisionAgent\n\nattachment_agent = VisionAgent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    name=\"AttachmentProcessor\",\n    instructions=\"\"\"Extract text from attachments. Identify: invoices, signatures, \n    contracts, images. Summarize content and flag sensitive data.\"\"\"\n)\n\ndef process_attachment(file_path: str):\n    with open(file_path, 'rb') as f:\n        result = attachment_agent.run(f.read())\n    return result",
+        "language": "python"
+      },
+      {
+        "title": "Approval Workflow Supervisor",
+        "description": "Final supervisor agent for send approval",
+        "code": "from agno.agent import Agent\n\nsupervisor = Agent(\n    model=OpenAIChat(id=\"gpt-4o\"),\n    name=\"EmailSupervisor\",\n    instructions=\"Review drafts for: PII, tone, accuracy, confidentiality. Approve or reject.\"\n)\n\ndef approve_draft(draft: dict, original_email: str):\n    context = f\"Original: {original_email}\\nDraft: {draft}\"\n    decision = supervisor.run(context)\n    return 'approved' in decision.lower()",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "PII Filtering Guardrail",
+        "description": "Wrap agent execution with PII detection and redaction",
+        "code": "from vex import verify, Guardrail\n\npii_guardrail = Guardrail(\n    name=\"pii_filter\",\n    checks=[\n        \"detect_pii(entities=['SSN', 'EMAIL', 'PHONE', 'ADDRESS'])\"\n    ]\n)\n\n@verify(guards=[pii_guardrail])\ndef safe_draft_generation(email_content: str) -> dict:\n    result = draft_agent.run(email_content)\n    return result\n\n# Usage\nclean_draft = safe_draft_generation(raw_email)",
+        "language": "python"
+      },
+      {
+        "title": "Tone & Appropriateness Check",
+        "description": "Verify professional tone before sending",
+        "code": "tone_guardrail = Guardrail(\n    name=\"tone_check\",\n    checks=[\n        \"sentiment(toxicity<0.1, confidence>0.8, professional=True)\",\n        \"regex(toxicity_phrases, match=none)\"\n    ]\n)\n\n@verify(guards=[tone_guardrail])\ndef verify_tone(draft: dict):\n    result = supervisor.run(f\"Review tone: {draft['body']}\")\n    return result\n\napproved = verify_tone(draft_output)",
+        "language": "python"
+      },
+      {
+        "title": "Full Pipeline Verification",
+        "description": "Comprehensive verification wrapping entire email workflow",
+        "code": "full_pipeline = Guardrail(\n    name=\"email_pipeline\",\n    checks=[\n        \"pii_filter\",\n        \"tone_check\",\n        \"recipient_validation(domain=['company.com', 'partner.org'])\",\n        \"accuracy_check(factual_consistency>0.9)\"\n    ]\n)\n\n@vex.verify(guards=[full_pipeline])\ndef process_complete_email(email_data: dict):\n    intent = email_agent.run(email_data['content'])\n    draft = draft_agent.run(email_data['content'])\n    approved = supervisor.run(str(draft))\n    return {'intent': intent, 'draft': draft, 'approved': approved}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Agno AI Email Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your agents to prevent costly email failures."
+    }
+  }
+}

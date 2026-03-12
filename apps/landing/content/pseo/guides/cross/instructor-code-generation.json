@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "instructor",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Instructor + Vex Guardrails",
+    "description": "Learn how to build code generation with Instructor + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Instructor code generation",
+      "Instructor guardrails",
+      "code generation reliability",
+      "Vex Instructor",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Instructor simplifies structured code generation by patching LLM clients to return validated Pydantic models, enabling reliable extraction of code snippets, tests, and metadata from LLM responses. When building code generation agents that iterate through sandbox execution and refinement, guardrails are essential to prevent syntax errors, security vulnerabilities, and credential leaks. Vex provides runtime verification to ensure generated code meets safety and functional requirements before execution.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Instructor",
+      "description": "The typical architecture starts with an Instructor-patched LLM client generating structured outputs like code, test cases, and execution plans as Pydantic models. The agent receives a task, calls the LLM to produce code with accompanying tests, then executes it in a sandboxed environment (e.g., Docker or E2B). Results from execution feed back into the LLM for refinement iterations until tests pass or limits are hit.\n\nInstructor ensures consistent extraction of nested fields like code language, dependencies, and test assertions, while Vex verifies runtime properties like syntax validity and safety. This closed-loop system handles complex tasks like algorithm implementation or data processing pipelines.\n\nKey components include the Instructor client wrapper, sandbox executor, test validator, and Vex verification layer that gates execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Task     │───▶│ Instructor LLM   │\n│   (e.g. sort    │    │ (Pydantic Code   │\n│    algorithm)   │    │  + Tests Model)  │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                       ┌───────▼───────┐\n                       │ Vex Verify    │\n                       │ (safety,      │\n                       │  syntax, deps)│\n                       └───────┬───────┘\n                              │\n                    ┌─────────▼─────────┐\n                    │ Sandbox Executor  │\n                    │ (Docker/E2B)      │──┐\n                    │ + Test Runner     │  │\n                    └─────────┬─────────┘  │\n                             │            │\n                       ┌─────▼──────┐    │\n                       │ Tests Pass?│    │\n                       │   Y/N       │◀──┘\n                       └──────┬──────┘\n                              │\n                         ┌────▼────┐\n                         │Refine   │\n                         │(LLM)    │\n                         └─────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious code injection",
+        "description": "LLM generates code with system calls, file writes, or network requests that escape sandbox",
+        "severity": "critical",
+        "mitigation": "Vex static analysis + sandbox syscall filtering"
+      },
+      {
+        "name": "Credential leakage in code",
+        "description": "Instructor extracts code containing hardcoded API keys or secrets from training data",
+        "severity": "critical",
+        "mitigation": "Vex regex pattern matching + secret scanning"
+      },
+      {
+        "name": "Unsafe dependency installation",
+        "description": "Generated requirements.txt includes malicious packages or version conflicts",
+        "severity": "high",
+        "mitigation": "Vex dependency graph validation + allowlist"
+      },
+      {
+        "name": "Syntax errors halting execution",
+        "description": "Partial code extraction fails syntax checks, breaking iteration loop",
+        "severity": "high",
+        "mitigation": "Vex AST parsing + syntax validation before sandbox"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Instructor Pydantic Model for Code Generation",
+        "description": "Define structured output model with code, tests, and metadata for reliable extraction",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom typing import List\nimport openai\n\nclass CodeGenerationResponse(BaseModel):\n    language: str = Field(..., description=\"Programming language\")\n    code: str = Field(..., description=\"Complete executable code\")\n    tests: List[str] = Field(..., description=\"Pytest test functions\")\n    dependencies: List[str] = Field(default=[], description=\"Required packages\")\n    description: str = Field(..., max_length=200)\n\nclient = from_openai(openai.OpenAI())\n\nresponse = client.messages.create(\n    model=\"gpt-4o\",\n    response_model=CodeGenerationResponse,\n    messages=[{\"role\": \"user\", \"content\": \"Write Python quicksort with tests\"}]\n)\nprint(response.code)",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution with Test Validation",
+        "description": "Execute generated code in isolated environment and validate tests",
+        "code": "import subprocess\nimport tempfile\nimport os\n\ndef execute_sandboxed(code: str, tests: List[str], deps: List[str]):\n    with tempfile.TemporaryDirectory() as tmpdir:\n        # Install dependencies\n        if deps:\n            subprocess.run([\"pip\", \"install\", *deps], cwd=tmpdir, check=True)\n        \n        # Write code and tests\n        with open(os.path.join(tmpdir, \"solution.py\"), \"w\") as f:\n            f.write(code)\n        with open(os.path.join(tmpdir, \"test_solution.py\"), \"w\") as f:\n            f.write(\"import pytest\\n\" + \"\\n\".join(tests))\n        \n        # Run tests\n        result = subprocess.run([\n            \"pytest\", \"test_solution.py\", \"-v\"\n        ], cwd=tmpdir, capture_output=True, text=True)\n        \n        return {\n            \"passed\": result.returncode == 0,\n            \"output\": result.stdout,\n            \"error\": result.stderr\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Instructor from Zod (TypeScript)",
+        "description": "TypeScript equivalent using Zod schemas with Instructor",
+        "code": "import { fromOpenAI } from '@instructor-ai/instructor';\nimport { OpenAI } from 'openai';\nimport { z } from ‘zod';\n\nconst CodeGenerationSchema = z.object({\n  language: z.enum(['python', 'javascript', 'typescript']),\n  code: z.string().min(1),\n  tests: z.array(z.string()),\n  dependencies: z.array(z.string()).default([]),\n  description: z.string().max(200)\n});\n\ntype CodeGenerationResponse = z.infer<typeof CodeGenerationSchema>;\n\nconst client = fromOpenAI(new OpenAI());\n\nconst response = await client.chat.completions.create({\n  model: 'gpt-4o',\n  messages: [{ role: 'user', content: 'Write TypeScript binary search' }],\n  response_model: CodeGenerationSchema\n}) as CodeGenerationResponse;\n\nconsole.log(response.code);",
+        "language": "typescript"
+      },
+      {
+        "title": "Iteration Loop with Instructor",
+        "description": "Refine code based on test failures using Instructor structured feedback",
+        "code": "def iterate_refinement(task: str, max_iterations: int = 5):\n    feedback = \"\"\n    for i in range(max_iterations):\n        response = client.messages.create(\n            model=\"gpt-4o\",\n            response_model=CodeGenerationResponse,\n            messages=[\n                {\"role\": \"user\", \"content\": task},\n                {\"role\": \"system\", \"content\": f\"Previous feedback: {feedback}\"}\n            ]\n        )\n        \n        exec_result = execute_sandboxed(response.code, response.tests, response.dependencies)\n        \n        if exec_result[\"passed\"]:\n            return response\n        \n        feedback = f\"Tests failed: {exec_result['error']}\"\n    \n    raise Exception(\"Max iterations exceeded\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Safety Verification Before Execution",
+        "description": "Wrap Instructor response with Vex to verify code safety before sandbox",
+        "code": "from vex import verify\n\n@verify(guards=[\n    \"no_exec\", \"no_open\", \"no_requests\",\n    \"no_subprocess\", \"no_eval\", \"no_os_system\",\n    \"no_secret_patterns\"\n])\ndef safe_code_execution(code: str, tests: List[str]):\n    \"\"\"Execute only verified safe code\"\"\"\n    return execute_sandboxed(code, tests, [])\n\n# Usage in iteration loop\nresponse = client.messages.create(...)  # Instructor call\nresult = safe_code_execution(response.code, response.tests)",
+        "language": "python"
+      },
+      {
+        "title": "Syntax + Dependency Validation",
+        "description": "Vex checks syntax validity and dependency safety before installation",
+        "code": "from vex import verify\nimport ast\n\n@verify(guards=[\n    \"python_syntax_valid\",\n    \"no_malicious_packages\",\n    \"dependency_allowlist:requests,numpy,pandas\"\n])\ndef validate_and_execute(response: CodeGenerationResponse):\n    # Vex validates syntax + deps\n    result = execute_sandboxed(\n        response.code, \n        response.tests, \n        response.dependencies\n    )\n    return result\n\n# Integrates seamlessly with Instructor\nresponse = client.messages.create(...)\nresult = validate_and_execute(response)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Vex verification wrapper for TypeScript Instructor responses",
+        "code": "import { verify } from '@vex-ai/sdk';\n\nconst safeExecutor = verify({\n  guards: [\n    'no_eval',\n    'no_fs_write',\n    'no_network',\n    'typescript_syntax',\n    'no_secret_patterns',\n    'npm_allowlist:lodash,ramda'\n  ]\n})(\n  async (response: CodeGenerationResponse) => {\n    // Execute in sandbox (e.g., isolated VM)\n    const result = await sandboxExecute(response.code, response.tests);\n    return result;\n  }\n);\n\n// Usage\nconst response = await client.chat.completions.create(...) as CodeGenerationResponse;\nconst result = await safeExecutor(response);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Instructor Code Generation",
+      "description": "Install Vex today to protect your code generation agents from safety and reliability failures."
+    }
+  }
+}

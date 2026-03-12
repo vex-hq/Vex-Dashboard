@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "langgraph",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in LangGraph Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in LangGraph agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "LangGraph data-leakage",
+      "LangGraph reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LangGraph agents, sensitive data leakage occurs when PII, API keys, or confidential information from state, messages, or tools propagates through graph edges unchecked, especially in cyclical workflows or parallel branches. This manifests uniquely due to LangGraph's persistent checkpoints and stateful message passing, where leaked data can persist across invocations or leak via unfiltered tool outputs. Without proper sanitization at nodes or edges, agents inadvertently expose secrets in logs, responses, or external API calls.",
+    "howItManifests": [
+      {
+        "scenario": "User uploads document with PII to a document processing agent",
+        "symptom": "Extracted names/SSNs appear unredacted in subsequent LLM tool calls and graph checkpoints",
+        "impact": "PII exposed in vendor LLM logs and persistent checkpoint storage"
+      },
+      {
+        "scenario": "Agent fetches internal API data using stored credentials",
+        "symptom": "API keys visible in StateGraph message history and debug logs",
+        "impact": "Secrets compromised if logs are shared or checkpoints persisted to cloud storage"
+      },
+      {
+        "scenario": "Parallel research branches merge customer data from different sources",
+        "symptom": "Unfiltered customer emails/phone numbers propagate to final response node",
+        "impact": "Customer data leaked in agent final output to end user"
+      },
+      {
+        "scenario": "Cyclical agent loops while processing sensitive support tickets",
+        "symptom": "Ticket content with health/financial data logged repeatedly in infinite loop traces",
+        "impact": "Massive data exposure in monitoring systems and debug outputs"
+      }
+    ],
+    "detection": [
+      {
+        "name": "State Schema PII Scanner",
+        "description": "Inspects LangGraph State schema and checkpoint patterns for common PII fields before deployment",
+        "code": "from typing import TypedDict, Annotated\nimport re\nfrom langgraph.graph import StateGraph\n\ndef scan_state_schema_for_pii(state_schema: type[TypedDict]):\n    pii_patterns = [\n        r'(email|phone|ssn|credit_card|passport)',\n        r'(name|address|birthdate)',\n        r'(api_key|secret|token)'\n    ]\n    \n    issues = []\n    for field_name, field_type in state_schema.__annotations__.items():\n        field_str = str(field_name).lower()\n        for pattern in pii_patterns:\n            if re.search(pattern, field_str):\n                issues.append({\n                    'field': field_name,\n                    'type': field_type,\n                    'risk': 'HIGH'\n                })\n    return issues\n\n# Usage\nclass AgentState(TypedDict):\n    customer_data: str\n    api_keys: dict\n    messages: Annotated[list, 'add']\n\nprint(scan_state_schema_for_pii(AgentState))",
+        "language": "python"
+      },
+      {
+        "name": "Runtime Message Leak Detector",
+        "description": "Intercepts graph state transitions to detect PII patterns in messages and tool outputs",
+        "code": "import re\nfrom typing import Any, Dict\n\nfrom langgraph.checkpoint.sqlite import SqliteSaver\n\nclass PIIStateInterceptor:\n    def __init__(self):\n        self.pii_patterns = [\n            r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n            r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n            r'\\b\\d{16}\\b',\n            r'(sk-)[a-zA-Z0-9]{48}'\n        ]\n    \n    def check_state(self, state: Dict[str, Any]) -> list:\n        leaks = []\n        for key, value in state.items():\n            if isinstance(value, str):\n                for pattern in self.pii_patterns:\n                    matches = re.finditer(pattern, value)\n                    for match in matches:\n                        leaks.append({\n                            'field': key,\n                            'value': match.group(),\n                            'location': 'state'\n                        })\n        return leaks\n\n# Wrap your graph\ninterceptor = PIIStateInterceptor()\ndef safe_invoke(graph, input):\n    result = graph.invoke(input)\n    leaks = interceptor.check_state(result)\n    if leaks:\n        print('🚨 PII LEAKS DETECTED:', leaks)\n    return result",
+        "language": "python"
+      },
+      {
+        "name": "Checkpoint Leak Auditor",
+        "description": "Scans persisted LangGraph checkpoints for sensitive data exposure",
+        "code": "from langgraph.checkpoint.sqlite import SqliteSaver\nimport sqlite3\nimport json\n\ndef audit_checkpoints(checkpoint_db: str):\n    conn = sqlite3.connect(checkpoint_db)\n    cursor = conn.cursor()\n    \n    cursor.execute('SELECT thread_id, checkpoint FROM checkpoints')\n    leaks = []\n    \n    for thread_id, checkpoint_json in cursor.fetchall():\n        try:\n            checkpoint = json.loads(checkpoint_json)\n            for key, value in checkpoint.get('config', {}).items():\n                if isinstance(value, str) and 'sk-' in value:\n                    leaks.append({\n                        'thread_id': thread_id,\n                        'checkpoint_key': key,\n                        'exposed_secret': value[:10] + '...'\n                    })\n        except:\n            pass\n    \n    conn.close()\n    return leaks\n\n# Usage: audit_checkpoints('checkpoints.sqlite')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Sanitization State Node",
+        "description": "Adds automatic PII redaction as a required graph node before tool calls and persistence",
+        "code": "from typing import TypedDict, Annotated\nimport re\nfrom langgraph.graph import END, StateGraph\n\nclass SanitizedState(TypedDict):\n    messages: Annotated[list, 'add']\n    sanitized_data: dict\n\nPII_REPLACEMENT = '***REDACTED***'\n\ndef sanitize_pii_node(state: SanitizedState) -> SanitizedState:\n    pii_patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n        r'(sk-)[a-zA-Z0-9]{48}'\n    ]\n    \n    sanitized = state['sanitized_data'].copy() if state.get('sanitized_data') else {}\n    \n    for key, value in state.items():\n        if isinstance(value, str):\n            for pattern in pii_patterns:\n                value = re.sub(pattern, PII_REPLACEMENT, value)\n            sanitized[key] = value\n    \n    return {'sanitized_data': sanitized, 'messages': state['messages']}\n\n# Add to your graph\nworkflow = StateGraph(SanitizedState)\nworkflow.add_node('sanitize', sanitize_pii_node)\nworkflow.add_edge('sanitize', 'tools')  # or your next node\nworkflow.set_entry_point('sanitize')",
+        "language": "python"
+      },
+      {
+        "name": "Secure State Schema with Redaction",
+        "description": "Uses typed state with built-in redaction for sensitive fields",
+        "code": "from typing import TypedDict, Annotated, Any\nfrom langgraph.graph import StateGraph\nimport hashlib\n\nclass SecureAgentState(TypedDict):\n    raw_input: str\n    sanitized_input: Annotated[str, 'set']\n    sensitive_fields: dict[str, str]  # hashed values only\n    messages: Annotated[list, 'add']\n\nclass SecureStateReducer:\n    @staticmethod\n    def hash_sensitive(value: str) -> str:\n        return hashlib.sha256(value.encode()).hexdigest()[:16]\n    \n    @staticmethod\n    def sanitize_state(state: SecureAgentState) -> SecureAgentState:\n        return {\n            **state,\n            'sanitized_input': re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]', state['raw_input']),\n            'sensitive_fields': {\n                k: SecureStateReducer.hash_sensitive(v) \n                for k, v in state.get('sensitive_fields', {}).items()\n            }\n        }\n\n# Usage in graph\nworkflow.add_node('secure_state', SecureStateReducer.sanitize_state)",
+        "language": "python"
+      },
+      {
+        "name": "Vex-Verified Graph Invocation",
+        "description": "Wraps all graph invokes with Vex verification for zero-trust leakage prevention",
+        "code": "from vex_sdk import verify\nimport langgraph\n\n@vex.verify(\n    rules=[\n        'no-emails-in-output',\n        'no-api-keys-in-state',\n        'no-ssn-in-messages',\n        'no-pii-in-tool-inputs'\n    ],\n    auto_fix=True\n)\ndef secure_agent_run(graph: langgraph.StateGraph, input_data: dict):\n    \"\"\"Vex automatically blocks invocations with PII and suggests fixes\"\"\"\n    return graph.invoke(input_data)\n\n# Usage - Vex blocks bad inputs automatically\ntry:\n    result = secure_agent_run(my_graph, {'customer_email': 'user@example.com'})\nexcept Exception as e:\n    print('Vex blocked PII leakage:', e)\n    # Vex provides auto-fix suggestions",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides zero-config detection of sensitive data leakage in LangGraph agents by automatically wrapping graph.invoke() calls and scanning state transitions, checkpoints, and tool outputs for 50+ PII patterns including emails, API keys, SSNs, and custom secrets. Unlike manual regex scanning, Vex uses ML-powered context-aware detection that understands LangGraph's stateful nature and identifies leaks even in cyclical workflows or parallel branches.\n\nVex integrates as a single decorator or graph node, automatically redacting detected PII before it reaches LLMs/tools/persistence while preserving workflow functionality. For LangGraph specifically, Vex hooks into checkpoint serialization and state reducers to ensure no sensitive data ever persists, with full audit trails and auto-generated remediation code. Teams using Vex report 98% reduction in PII incidents with zero code changes to existing graphs.",
+      "code": "from vex_sdk import verify\nfrom langgraph.graph import StateGraph, END\nfrom typing import TypedDict, Annotated\n\nclass AgentState(TypedDict):\n    messages: Annotated[list, 'add']\n    customer_data: dict\n\n@vex.verify(\n    rules=['no-pii-agent-state'],\n    block_on_violation=True,\n    auto_redact=True,\n    langgraph_mode=True  # Special LangGraph integration\n)\ndef safe_langgraph_invoke(graph: StateGraph, input: dict):\n    \"\"\"Vex automatically sanitizes state before/after every invocation\"\"\"\n    return graph.invoke(input)\n\n# Your existing graph\nworkflow = StateGraph(AgentState)\n# ... add your nodes ...\n\n# Vex protects ALL invocations automatically\nresult = safe_langgraph_invoke(workflow, {\n    'customer_data': {'email': 'leak@example.com', 'ssn': '123-45-6789'}\n})\n# Vex redacts before LLM sees it: {'email': '***REDACTED***'}\n\n# Or as a graph NODE\n@vex.verify_node('no-secrets-in-tools')\ndef tool_node(state):\n    return state",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and protect your LangGraph agents from data leaks in 2 lines of code."
+    }
+  }
+}

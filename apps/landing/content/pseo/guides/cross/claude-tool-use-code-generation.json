@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "claude-tool-use",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Claude Tool Use + Vex Guardrails",
+    "description": "Learn how to build code generation with Claude Tool Use + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Claude Tool Use code generation",
+      "Claude Tool Use guardrails",
+      "code generation reliability",
+      "Vex Claude Tool Use",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with Claude's Tool Use enables powerful LLM-driven development workflows, where Claude generates, tests, and refines code iteratively. However, without proper guardrails, these agents can produce unsafe code, leak credentials, or execute malicious dependencies. Vex integration ensures reliable code generation by verifying safety, syntax, and sandbox execution at every step.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Claude Tool Use",
+      "description": "The architecture centers on Claude as the core agent using tool_use for code generation, sandbox execution, and test validation. Claude receives a task, generates code via tools like `generate_code`, executes it in a sandbox via `execute_code`, validates tests with `run_tests`, and iterates based on feedback. This loop continues until tests pass or max iterations are reached.\n\nTool definitions include code generation (Python/JS), sandbox execution (Docker/VM isolation), and test runners. Messages are wrapped with vex.verify() to catch failures early. Parallel tool calls handle dependency resolution and multi-language support, with Vex resolving conflicts.\n\nThe agent maintains state via conversation history, with Vex persisting verified checkpoints to prevent cascading errors from early tool failures.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Task     │───▶│  Claude Agent    │\n│  (Generate     │    │  (Tool Use)      │\n│   Fibonacci)    │    │                  │\n└─────────────────┘    │  ┌─────────────┐  │\n                       │  │generate_code│  │\n                       │  │execute_code │◀─┼─Vex.verify()\n                       │  │run_tests    │  │\n                       │  └─────────────┘  │\n                       │                  │\n                       └──────────────────┘\n                                   │\n                        ┌──────────────────┐\n                        │  Sandbox Exec    │\n                        │   + Test Runner  │\n                        └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious code generation",
+        "description": "Claude generates code with syscalls, file deletion, or network requests exploiting sandbox weaknesses",
+        "severity": "critical",
+        "mitigation": "Vex code_safety scan blocks dangerous patterns before sandbox execution"
+      },
+      {
+        "name": "Credential leakage in generated code",
+        "description": "Code embeds API keys, passwords, or secrets from training data or context",
+        "severity": "critical",
+        "mitigation": "Vex credential scanner redacts and flags leaked secrets in generated code"
+      },
+      {
+        "name": "Dependency supply chain attacks",
+        "description": "Generated code installs malicious pip/npm packages via dynamic imports",
+        "severity": "high",
+        "mitigation": "Vex dependency_safety verifies package provenance and blocks known malicious deps"
+      },
+      {
+        "name": "Cascading sandbox escapes",
+        "description": "Early tool failures compound, allowing privilege escalation through repeated execution attempts",
+        "severity": "high",
+        "mitigation": "Vex wraps each tool_use response, preventing error propagation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Claude Tool Use Setup",
+        "description": "Initialize Anthropic client and define core code generation tools",
+        "code": "import anthropic\nimport vex\n\nclient = anthropic.Anthropic(api_key=\"your_key\")\n\ncode_tools = [\n    {\n        \"name\": \"generate_code\",\n        \"description\": \"Generate Python code for a task\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"task\": {\"type\": \"string\"},\n                \"language\": {\"type\": \"string\", \"enum\": [\"python\", \"javascript\"]}\n            }\n        }\n    },\n    {\n        \"name\": \"execute_code\",\n        \"description\": \"Execute code in sandbox\",\n        \"input_schema\": {\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\"}}}\n    }\n]",
+        "language": "python"
+      },
+      {
+        "title": "Agent Loop with Tool Calls",
+        "description": "Main iteration loop handling Claude's tool_use responses",
+        "code": "async def agent_loop(task: str, max_iters: int = 5):\n    messages = [{\"role\": \"user\", \"content\": task}]\n    \n    for i in range(max_iters):\n        response = client.messages.create(\n            model=\"claude-3-5-sonnet-20240620\",\n            max_tokens=1024,\n            messages=messages,\n            tools=code_tools\n        )\n        \n        if response.stop_reason == \"tool_use\":\n            tool_calls = response.tool_use\n            for tool_call in tool_calls:\n                if tool_call.name == \"generate_code\":\n                    # Handle code generation\n                    pass\n        \n        messages.append({\"role\": \"assistant\", \"content\": response.content})\n        \n    return messages[-1]",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Tool Definitions",
+        "description": "Define tools using Anthropic TypeScript SDK",
+        "code": "import { Anthropic } from '@anthropic-ai/sdk';\n\nconst client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });\n\nconst codeTools = [\n  {\n    name: 'generate_code',\n    description: 'Generate Python code for a task',\n    inputSchema: {\n      type: 'object',\n      properties: {\n        task: { type: 'string' },\n        language: { type: 'string', enum: ['python', 'javascript'] }\n      }\n    }\n  },\n  {\n    name: 'execute_code',\n    description: 'Execute code in sandbox',\n    inputSchema: { type: 'object', properties: { code: { type: 'string' } } }\n  }\n] as const;",
+        "language": "typescript"
+      },
+      {
+        "title": "Sandbox Execution Handler",
+        "description": "Execute generated code with timeout and resource limits",
+        "code": "import subprocess\nimport tempfile\nimport os\n\ndef sandbox_execute(code: str, timeout: int = 30) -> dict:\n    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:\n        f.write(code.encode())\n        f_path = f.name\n    \n    try:\n        result = subprocess.run(\n            ['docker', 'run', '--rm', '--memory=256m', '--cpus=1',\n             '-v', f'{f_path}:/code.py', 'python:3.11-slim',\n             'python', '/code.py'],\n            capture_output=True,\n            timeout=timeout,\n            text=True\n        )\n        return {'success': True, 'stdout': result.stdout, 'stderr': result.stderr}\n    finally:\n        os.unlink(f_path)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Tool Use with Vex Verify",
+        "description": "Protect messages.create() responses with comprehensive verification",
+        "code": "import vex\n\n@ vex.verify([\n    vex.code_safety(),\n    vex.syntax_validity(),\n    vex.no_credential_leakage(),\n    vex.execution_sandboxing(),\n    vex.dependency_safety()\n])\ndef safe_claude_call(task: str):\n    response = client.messages.create(\n        model=\"claude-3-5-sonnet-20240620\",\n        max_tokens=1024,\n        messages=[{\"role\": \"user\", \"content\": task}],\n        tools=code_tools\n    )\n    \n    # Extract and verify generated code from tool calls\n    for tool_use in response.tool_use:\n        if tool_use.name == \"generate_code\":\n            code = tool_use.input[\"code\"]\n            verified_code = vex.verify(code, checks=[\n                \"code_safety\",\n                \"syntax_validity\",\n                \"no_credential_leakage\"\n            ])\n            return verified_code\n    \n    return response",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Verification Pipeline",
+        "description": "Verify parallel tool calls and resolve conflicts",
+        "code": "import { Vex } from 'vex-sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY });\n\nasync function safeToolCall(response: any) {\n  const verifications = await Promise.all(\n    response.toolUses.map(async (toolUse: any) => {\n      if (toolUse.name === 'generate_code') {\n        return vex.verify(toolUse.input.code, {\n          checks: [\n            'code_safety',\n            'syntax_validity',\n            'no_credential_leakage',\n            'dependency_safety'\n          ]\n        });\n      }\n    })\n  );\n  \n  // Resolve conflicts\n  const safeCode = vex.resolveConflicts(verifications);\n  return safeCode;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Production Agent with Vex Guardrails",
+        "description": "Complete production-ready agent with full Vex integration",
+        "code": "class CodeGenAgent:\n    def __init__(self):\n        self.vex = vex.Vex(api_key=os.getenv('VEX_API_KEY'))\n        self.client = anthropic.Anthropic()\n    \n    async def generate_and_verify(self, task: str):\n        response = await self._call_claude(task)\n        \n        for tool_use in response.tool_use:\n            if tool_use.name == 'generate_code':\n                code = tool_use.input['code']\n                \n                # Multi-stage verification\n                safety_check = self.vex.verify(code, 'code_safety')\n                syntax_check = self.vex.verify(code, 'syntax_validity')\n                deps_check = self.vex.verify(code, 'dependency_safety')\n                \n                if all([safety_check, syntax_check, deps_check]):\n                    result = self.sandbox_execute(code)\n                    return {'code': code, 'execution': result}\n                \n        raise ValueError('Code verification failed')\n    \n    async def _call_claude(self, task):\n        return self.client.messages.create(\n            model='claude-3-5-sonnet-20240620',\n            messages=[{'role': 'user', 'content': task}],\n            tools=code_tools\n        )",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Claude Tool Use Code Generation",
+      "description": "Add Vex verification to your Claude agents today with `pip install vex-sdk` and start blocking malicious code generation."
+    }
+  }
+}

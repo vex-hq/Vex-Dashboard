@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "research-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Research Agents with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build research agents with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK research agents",
+      "Vercel AI SDK guardrails",
+      "research agents reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Research Agents with Vercel AI SDK enables powerful multi-step web search and synthesis capabilities directly in your Next.js apps. These agents fetch real-time data, analyze sources, and generate summaries, but face risks like hallucinations, unverified claims, and inconsistent tool outputs across LLM providers. Vex guardrails ensure source accuracy, claim validation, and bias detection for reliable research outputs.",
+    "architectureOverview": {
+      "heading": "Research Agents Architecture with Vercel AI SDK",
+      "description": "Research Agents typically start with a user query routed through Vercel AI SDK's generateText or streamText to an LLM like OpenAI or Anthropic. The agent uses tools for web search (e.g., Tavily or SerpAPI), fetches results, and iterates through analysis steps: source extraction, claim verification, recency checks, and synthesis. Responses stream back to React Server Components for real-time UI updates, with structured outputs ensuring consistent JSON for downstream processing.\n\nThe flow handles complex reasoning chains where partial tool results might lead to early hallucinations. Edge functions manage timeouts for long-running searches, while provider-specific formatting differences are normalized via SDK's useChat hook. Vex integrates as middleware to validate each step without blocking the streaming UX.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│ Vercel AI SDK    │\n│   (Next.js RSC) │    │ generateText()   │\n└─────────────────┘    │ + Vex Middleware  │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │   LLM Agent       │◀──┐\n                       │ (gpt-4o/anthropic)│   │\n                       └────────┬──────────┘   │\n                                │              │\n                       ┌────────▼──────────┐   │\n                       │ Web Search Tools  │◀──┘\n                       │ (Tavily/SerpAPI)  │\n                       └────────┬──────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Vex Verification  │\n                       │ (Sources/Claims)  │\n                       └───────────────────┘\n                                │\n                       ┌────────▼──────────┐\n                       │ Streamed Response │\n                       │   (React UI)      │\n                       └───────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Agents generate plausible but incorrect summaries mid-stream before full tool results arrive",
+        "severity": "high",
+        "mitigation": "Vex claim verification middleware pauses streaming until key facts validated"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Raw search snippets displayed without source credibility or recency checks",
+        "severity": "critical",
+        "mitigation": "Vex source verification intercepts tool outputs before UI rendering"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "Different LLMs format JSON research results differently, breaking frontend parsing",
+        "severity": "medium",
+        "mitigation": "Vex normalizes structured outputs to consistent schemas across providers"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Multi-step research exceeds Vercel edge runtime limits (30s default)",
+        "severity": "high",
+        "mitigation": "Vex async verification offloads heavy checks, preserving streaming responsiveness"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Research Agent with Web Search",
+        "description": "Core agent using generateText with Tavily search tool for initial research",
+        "code": "import { generateText } from 'ai';\nimport { createTavilyClient } from './tools/tavily';\n\nconst tavily = createTavilyClient();\n\nexport async function researchAgent(query: string) {\n  const { text } = await generateText({\n    model: 'openai/gpt-4o',\n    prompt: `Research this topic thoroughly: ${query}. Use web search and cite sources.`,\n    tools: {\n      search: {\n        description: 'Search the web for recent information',\n        parameters: z.object({\n          query: z.string().describe('search query'),\n        }),\n        execute: async ({ query }) => {\n          const results = await tavily.search(query);\n          return {\n            sources: results.results,\n            summary: results.answer\n          };\n        },\n      },\n    },\n  });\n  return text;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Streaming Research UI with useChat",
+        "description": "React Server Component streaming research results with tool calls",
+        "code": "import { useChat } from 'ai/react';\n\nexport function ResearchChat() {\n  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({\n    api: '/api/research',\n    initialMessages: [\n      {\n        role: 'assistant',\n        content: 'Ask me to research any topic!',\n      },\n    ],\n  });\n\n  return (\n    <div className=\"research-chat\">\n      {messages.map((m) => (\n        <div key={m.id}>{m.content}</div>\n      ))}\n      <form onSubmit={handleSubmit}>\n        <input\n          value={input}\n          onChange={handleInputChange}\n          placeholder=\"Research: latest AI regulations\"\n        />\n      </form>\n    </div>\n  );\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Step Synthesis Agent",
+        "description": "Agent that searches, verifies sources, then synthesizes final report",
+        "code": "import { generateObject } from 'ai';\nimport { z } from 'zod';\n\nconst ResearchReportSchema = z.object({\n  summary: z.string(),\n  key_findings: z.array(z.string()),\n  sources: z.array(z.object({\n    title: z.string(),\n    url: z.string(),\n    recency: z.string(),\n  })),\n});\n\nexport async function synthesizeResearch(query: string) {\n  const { object } = await generateObject({\n    model: 'anthropic/claude-3-5-sonnet-20240620',\n    schema: ResearchReportSchema,\n    prompt: `Conduct thorough research on: ${query}. Verify source recency and credibility.`,\n    tools: { /* search tools */ },\n  });\n  return object;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "API Route for Research Endpoint",
+        "description": "Vercel API route handling research requests with streaming",
+        "code": "import { createStreamableValue } from 'ai/rsc';\nimport { NextRequest } from 'next/server';\n\nexport const runtime = 'edge';\n\nexport async function POST(req: NextRequest) {\n  const { prompt } = await req.json();\n\n  const stream = createStreamableValue();\n\n  (async () => {\n    const result = await researchAgent(prompt);\n    stream.update(result);\n    stream.done();\n  })();\n\n  return stream.value;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText",
+        "description": "Wrap generateText with Vex for source verification and claim checks",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { generateText } from 'ai';\n\nconst vex = createVex({\n  apiKey: process.env.VEX_API_KEY!,\n  project: 'research-agent',\n});\n\nexport async function verifiedResearch(query: string) {\n  return generateText({\n    model: 'openai/gpt-4o',\n    // Vex middleware validates streaming chunks\n    ...vex.middleware({\n      verifications: ['source_verification', 'claim_accuracy'],\n      riskProfile: 'medium',\n    }),\n    prompt: `Research: ${query}`,\n    tools: { search: /* ... */ },\n  });\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "StreamText with Recency & Bias Checks",
+        "description": "Protect streaming UI from stale or biased research outputs",
+        "code": "import { streamText } from 'ai';\nimport { createVex } from '@vex_dev/sdk';\n\nconst vex = createVex();\n\nexport async function streamResearch(query: string) {\n  const result = await streamText({\n    model: 'anthropic/claude-3-5-sonnet-20240620',\n    ...vex.middleware({\n      verifications: [\n        'recency_checks',\n        'bias_detection',\n        'source_verification',\n      ],\n      maxLatency: 5000, // Non-blocking\n    }),\n    prompt: `Latest research on: ${query}`,\n  });\n\n  return result;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Structured Output Normalization",
+        "description": "Ensure consistent JSON schemas across LLM providers with Vex",
+        "code": "import { generateObject } from 'ai';\nimport { createVex } from '@vex_dev/sdk';\n\nconst ResearchSchema = z.object({ /* ... */ });\n\nconst vex = createVex();\n\nexport async function safeResearchReport(query: string) {\n  const result = await generateObject({\n    model: openaiModel, // or any provider\n    schema: ResearchSchema,\n    ...vex.middleware({\n      verifications: ['claim_accuracy'],\n      normalizeOutput: true, // Fixes provider inconsistencies\n    }),\n    prompt: `Generate research report: ${query}`,\n  });\n\n  return vex.validated(result.object);\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Research Agents",
+      "description": "Add Vex middleware in 5 minutes to eliminate hallucinations and unverified claims - start your 14-day free trial today."
+    }
+  }
+}

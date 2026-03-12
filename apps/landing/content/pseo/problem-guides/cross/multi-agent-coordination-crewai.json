@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in CrewAI Agents",
+    "description": "How to detect and fix multi-agent coordination failure in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "CrewAI multi-agent-coordination",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, Multi-Agent Coordination Failure occurs when agents in a crew miscommunicate or misinterpret shared tasks, leading to breakdowns in collaborative workflows. Common manifestations include infinite delegation loops, propagation of hallucinated tool outputs, task objective drift across agents, and inconsistent output quality between roles. These failures disrupt the orchestrated flow, causing stalled processes or unreliable results in multi-agent systems.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Agents repeatedly delegate the same task back and forth without resolution",
+        "impact": "Infinite loops consume API credits and timeout executions"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "One agent fabricates tool response data that propagates as fact to downstream agents",
+        "impact": "Cascading errors lead to completely fabricated final outputs"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Each agent subtly rephrases the original task, diverging from core objectives",
+        "impact": "Final deliverables miss key requirements despite individual agent competence"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Researcher agent produces detailed analysis but Writer agent generates superficial summaries",
+        "impact": "Uneven work quality undermines overall crew performance"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Delegation Loop Detector",
+        "description": "Monitors task delegation patterns to identify circular handoffs between agents",
+        "code": "from crewai import Agent, Task, Crew\nfrom collections import defaultdict\n\ndef detect_delegation_loops(crew):\n    delegation_graph = defaultdict(list)\n    for task in crew.tasks:\n        if hasattr(task, 'delegate_to'):\n            delegation_graph[task.agent.name].append(task.delegate_to.name)\n    \n    visited = set()\n    def has_cycle(node):\n        if node in visited:\n            return True\n        visited.add(node)\n        for neighbor in delegation_graph[node]:\n            if has_cycle(neighbor):\n                return True\n        visited.remove(node)\n        return False\n    \n    for agent in crew.agents:\n        if has_cycle(agent.name):\n            return f\"LOOP DETECTED: {agent.name} -> cycle\"\n    return \"No loops detected\"",
+        "language": "python"
+      },
+      {
+        "name": "Hallucination Propagation Tracer",
+        "description": "Tracks tool call outputs across agents to detect fabricated responses passed downstream",
+        "code": "def trace_hallucinated_outputs(task_history):\n    hallucinations = []\n    for i, task in enumerate(task_history):\n        if 'tools_used' in task.output:\n            for tool_call in task.output['tools_used']:\n                if 'hallucinated' in tool_call.get('response', '').lower() or len(tool_call.get('response', '')) < 10:\n                    hallucinations.append({\n                        'task': i,\n                        'agent': task.agent,\n                        'tool': tool_call['name'],\n                        'suspicious_output': tool_call['response'][:100]\n                    })\n    return hallucinations if hallucinations else []",
+        "language": "python"
+      },
+      {
+        "name": "Task Drift Analyzer",
+        "description": "Compares original task description against agent interpretations across the crew",
+        "code": "from difflib import SequenceMatcher\n\ndef analyze_task_drift(original_task, agent_interpretations):\n    original_text = original_task.description\n    drift_scores = []\n    for agent_name, interpretation in agent_interpretations.items():\n        similarity = SequenceMatcher(None, original_text, interpretation).ratio()\n        if similarity < 0.7:\n            drift_scores.append({\n                'agent': agent_name,\n                'drift_score': similarity,\n                'original': original_text[:50],\n                'interpretation': interpretation[:50]\n            })\n    return drift_scores",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Strict Delegation Limits",
+        "description": "Prevents loops by limiting maximum delegation depth per task",
+        "code": "from crewai import Task\n\nclass LoopProofTask(Task):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n        self.max_delegations = 3\n        self.delegation_count = 0\n    \n    def should_delegate(self):\n        if self.delegation_count >= self.max_delegations:\n            return False\n        self.delegation_count += 1\n        return super().should_delegate()\n\n# Usage\nresearch_task = LoopProofTask(\n    description=\"...\",\n    agent=researcher,\n    context=[...]\n)",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validation Guard",
+        "description": "Validates tool outputs before passing to next agent with structured verification",
+        "code": "from crewai import Agent\nfrom pydantic import BaseModel, Field\n\nclass ValidatedToolOutput(BaseModel):\n    is_valid: bool = Field(..., description=\"Must confirm output validity\")\n    confidence: float = Field(ge=0.0, le=1.0)\n    raw_output: str\n    validation_reason: str\n\nclass ToolValidatorAgent(Agent):\n    def validate_tool_output(self, tool_output):\n        validation = self.execute_task(f\"Validate this tool output: {tool_output}\")\n        return ValidatedToolOutput.parse_raw(validation)\n\n# In crew workflow\nvalidator = ToolValidatorAgent(...)\nif not validator.validate_tool_output(tool_result).is_valid:\n    raise ValueError(\"Invalid tool output detected\")",
+        "language": "python"
+      },
+      {
+        "name": "Objective Alignment Enforcer",
+        "description": "Forces agents to acknowledge original objectives before task execution",
+        "code": "from crewai import Task\n\ndef create_aligned_task(original_objective, agent, context):\n    alignment_prompt = f\"\"\"\nCRITICAL: Your ONE objective is: '{original_objective}'\n\nDo NOT reinterpret, expand, or modify this objective.\n\nBefore proceeding, state: 'OBJECTIVE CONFIRMED: {original_objective}'\n\nTask: {context}\n\"\"\"\n    \n    return Task(\n        description=alignment_prompt,\n        agent=agent,\n        context=context,\n        expected_output=\"Must start with 'OBJECTIVE CONFIRMED:'\"\n    )",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback in CrewAI workflows, automatically detecting coordination failures in real-time. By monitoring agent interactions, delegation patterns, and output consistency across the crew, Vex identifies issues like loops, hallucinations, and drift before they cascade. The platform provides actionable remediation suggestions and can auto-apply fixes through its agent reliability layer.\n\nInstallation is simple: `pip install crewai vex-sdk`. Vex hooks into CrewAI's task execution lifecycle, analyzing intermediate states without modifying core agent logic. It generates comprehensive failure reports with root cause analysis and automatically suggests configuration adjustments for optimal crew performance.\n\nVex's ML-powered detectors catch subtle coordination issues that manual monitoring misses, such as gradual task drift or inconsistent role specialization. Remediation happens automatically through dynamic task re-orchestration, delegation limits, and output validation layers injected at runtime.",
+      "code": "pip install crewai vex-sdk\n\nfrom crewai import Agent, Task, Crew\nfrom vex_sdk import VexMonitor\n\n# Initialize Vex monitor\nvex = VexMonitor(api_key=\"your-vex-key\")\n\nresearcher = Agent(\n    role='Researcher',\n    goal='...',\n    callbacks=[vex.agent_callback]  # Vex integration\n)\n\nwriter = Agent(\n    role='Writer',\n    goal='...',\n    callbacks=[vex.agent_callback]\n)\n\ntasks = [\n    Task(description='...', agent=researcher, callbacks=[vex.task_callback]),\n    Task(description='...', agent=writer, callbacks=[vex.task_callback])\n]\n\ncrew = Crew(\n    agents=[researcher, writer],\n    tasks=tasks,\n    verbose=True,\n    callbacks=[vex.crew_callback]  # Monitors full crew execution\n)\n\nresult = crew.kickoff()\n\n# Vex auto-generates report\nprint(vex.get_failure_report())",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex today and eliminate multi-agent coordination failures with one line of code."
+    }
+  }
+}

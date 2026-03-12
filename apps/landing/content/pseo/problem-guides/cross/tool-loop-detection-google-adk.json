@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in Google ADK Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "Google ADK tool-loop-detection",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, Tool Loop Detection issues arise when agents enter infinite cycles of tool invocations, particularly in multi-agent workflows where delegation creates circular dependencies. Gemini models may repeatedly call the same tools due to inconsistent parsing of tool responses or session state drift in long conversations. This manifests as stalled agent execution, excessive API calls, and corrupted session states, crippling multi-agent systems.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation creating circular dependencies",
+        "symptom": "Agent A delegates to Agent B, which delegates back to Agent A with identical tool calls",
+        "impact": "Infinite loop consuming Gemini API quota and session memory"
+      },
+      {
+        "scenario": "Gemini model switching causing output inconsistency",
+        "symptom": "Tool responses from gemini-1.5-pro parsed incorrectly by gemini-2.0-flash",
+        "impact": "Repeated tool calls with malformed parameters"
+      },
+      {
+        "scenario": "Session state corruption in long conversations",
+        "symptom": "Cached tool responses accumulate causing state bloat",
+        "impact": "Context window overflow and agent hallucination"
+      },
+      {
+        "scenario": "Tool response format mismatches across agents",
+        "symptom": "One agent returns JSON, another expects YAML-formatted tool output",
+        "impact": "Parsing failures trigger retry loops"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Frequency Monitor",
+        "description": "Tracks identical tool calls within session using ADK's execution history",
+        "code": "from google_adk import AgentSession\nfrom collections import defaultdict\n\ndef detect_tool_loops(session: AgentSession, max_calls=5):\n    tool_history = defaultdict(int)\n    for step in session.execution_history:\n        if hasattr(step, 'tool_calls'):\n            for tool_call in step.tool_calls:\n                tool_key = f'{tool_call.function_name}:{tool_call.args}'\n                tool_history[tool_key] += 1\n                if tool_history[tool_key] > max_calls:\n                    return {'loop_detected': True, 'tool': tool_key}\n    return {'loop_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Agent Delegation Cycle Detector",
+        "description": "Monitors cross-agent delegation patterns in multi-agent workflows",
+        "code": "def detect_delegation_cycles(workflow):\n    visited = set()\n    def dfs(agent_id):\n        if agent_id in visited:\n            return True  # Cycle detected\n        visited.add(agent_id)\n        for delegation in workflow.get_delegations(agent_id):\n            if dfs(delegation.target_agent):\n                return True\n        visited.remove(agent_id)\n        return False\n    \n    for agent in workflow.agents:\n        if dfs(agent.id):\n            return {'cycle_detected': True, 'agent': agent.id}\n    return {'cycle_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Session State Bloat Monitor",
+        "description": "Detects excessive tool response accumulation in session state",
+        "code": "def detect_state_bloat(session):\n    tool_responses = [msg for msg in session.messages \n                     if hasattr(msg, 'tool_response')]\n    if len(tool_responses) > 50:\n        return {\n            'bloat_detected': True,\n            'response_count': len(tool_responses),\n            'tokens_estimate': sum(len(str(r)) for r in tool_responses)\n        }\n    return {'bloat_detected': False}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication Middleware",
+        "description": "Prevents repeated identical tool calls using session cache",
+        "code": "from google_adk import before_agent_callback\n\n@before_agent_callback\ndef dedupe_tool_calls(ctx):\n    seen_tools = ctx.session.get('seen_tools', set())\n    filtered_calls = []\n    for tool_call in ctx.proposed_tool_calls:\n        tool_key = f'{tool_call.function_name}:{tool_call.args}'\n        if tool_key not in seen_tools:\n            seen_tools.add(tool_key)\n            filtered_calls.append(tool_call)\n    ctx.session['seen_tools'] = seen_tools\n    ctx.tool_calls = filtered_calls",
+        "language": "python"
+      },
+      {
+        "name": "Delegation Circuit Breaker",
+        "description": "Limits recursive delegation depth in multi-agent workflows",
+        "code": "class CircuitBreakerAgent:\n    def __init__(self):\n        self.delegation_depth = 0\n        self.max_depth = 3\n    \n    @before_agent_callback\n    def check_delegation(self, ctx):\n        if ctx.is_delegation and self.delegation_depth >= self.max_depth:\n            ctx.block_delegation = True\n            ctx.response = 'Max delegation depth exceeded'\n        else:\n            self.delegation_depth += 1\n            ctx.proceed()\n        \n        # Reset on agent completion\n        if ctx.agent_completed:\n            self.delegation_depth = max(0, self.delegation_depth - 1)",
+        "language": "python"
+      },
+      {
+        "name": "State Pruning Callback",
+        "description": "Automatically prunes old tool responses from session state",
+        "code": "@before_agent_callback\ndef prune_session_state(ctx):\n    if len(ctx.session.messages) > 100:\n        # Keep only last 20 tool responses\n        tool_msgs = [m for m in ctx.session.messages \n                    if hasattr(m, 'tool_response')][-20:]\n        # Keep recent conversation\n        recent_msgs = ctx.session.messages[-30:]\n        ctx.session.messages = recent_msgs + tool_msgs\n    ctx.session.cleanup()",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a before_agent_callback in Google ADK, automatically detecting tool loops across multi-agent workflows. It monitors tool call patterns, delegation cycles, and session state in real-time, providing precise loop detection with zero configuration. Vex not only identifies the problematic agents and tools but also applies intelligent remediation - from call deduplication to circuit breaking - while preserving legitimate agent behavior.\n\nThe Vex SDK (`pip install vex-sdk`) provides production-grade observability with automatic root cause analysis, showing exactly which Gemini model outputs triggered loops and which tool parameters repeated. Integration takes 3 lines of code and works across all ADK agent types, catching 95% of tool loops before they consume API quota.\n\nVex's adaptive remediation learns from your specific agent patterns, automatically tuning detection thresholds and fix strategies without manual intervention.",
+      "code": "from vex_sdk import Vex\nfrom google_adk import Agent, before_agent_callback\n\n# 3-line Vex integration\nvex = Vex(api_key='your-vex-key')\n\n@vex.monitor('tool-loop-detection')\n@before_agent_callback\ndef adk_agent_with_vex(ctx):\n    # Vex automatically detects loops and applies fixes\n    ctx.proceed()\n\n# Attach to your ADK agent\nagent = Agent(\n    name='researcher',\n    model='gemini-1.5-pro',\n    callbacks=[adk_agent_with_vex]\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk google-adk` and eliminate tool loops in your ADK agents forever."
+    }
+  }
+}

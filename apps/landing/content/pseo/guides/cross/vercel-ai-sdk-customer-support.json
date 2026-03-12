@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "vercel-ai-sdk",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Vercel AI SDK + Vex Guardrails",
+    "description": "Learn how to build customer support with Vercel AI SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Vercel AI SDK customer support",
+      "Vercel AI SDK guardrails",
+      "customer support reliability",
+      "Vex Vercel AI SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Vercel AI SDK enables real-time, streaming conversational UIs powered by leading LLMs, perfect for handling inquiries, ticket creation, and order lookups. However, in high-risk scenarios like RAG agents with CRM integration, failures such as partial hallucinations, unvalidated tool calls, and inconsistent outputs can lead to misinformation, policy violations, or PII leaks. Vex provides essential guardrails to verify response accuracy, filter sensitive data, ensure tone consistency, and trigger escalations before responses reach customers.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Vercel AI SDK",
+      "description": "The typical architecture starts with a React Server Component or Next.js API route using Vercel AI SDK's `generateText` or `streamText` to power a conversational UI. User queries trigger a RAG pipeline: semantic search against a knowledge base (e.g., Vercel Postgres or Pinecone), followed by LLM augmentation with retrieved context. The LLM may invoke tools for CRM actions like ticket creation via HubSpot/Zendesk APIs or order lookup in Stripe/Shopify, with responses streamed back to the client for low-latency UX.\n\nTool calling introduces risks as results must be validated before display, and edge functions can timeout on complex multi-step reasoning. Structured output parsing varies across providers (OpenAI vs Anthropic), requiring normalization. PII from CRM data demands filtering, while tone and policy compliance ensure brand safety.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   React UI      │───▶│ Vercel Edge Fn   │\n│ (Streaming Chat)│    │  + Vex Middleware │\n└─────────────────┘    │                   │\n                       │  generateText()   │\n                       │     streamText()  │\n                       │                   │\n                       ▼                   │\n┌─────────────────┐    │   ┌─────────────┐ │\n│ Knowledge Base  │◄───┼──▶│   LLM       │ │\n│   (Pinecone)    │    │   │ (OpenAI/GPT)│ │\n└─────────────────┘    │   └─────────────┘ │\n                       │                   │\n                       ▼                   │\n┌─────────────────┐    └──────────────────┘\n│ CRM Tools       │\n│ (HubSpot/Stripe)│\n└─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Streaming responses with partial hallucinations",
+        "description": "Incomplete RAG context causes fabricated details about orders or policies mid-stream",
+        "severity": "critical",
+        "mitigation": "Vex verifies factual accuracy against knowledge base before streaming chunks"
+      },
+      {
+        "name": "Tool call results not validated before display",
+        "description": "Unverified CRM data (e.g., wrong order details) shown to customers",
+        "severity": "critical",
+        "mitigation": "Vex schema validates tool outputs and cross-checks against source APIs"
+      },
+      {
+        "name": "Inconsistent structured output across providers",
+        "description": "OpenAI vs Anthropic tool call formats break ticket creation parsing",
+        "severity": "high",
+        "mitigation": "Vex normalizes structured outputs to consistent TypeScript interfaces"
+      },
+      {
+        "name": "Edge function timeouts on complex agent tasks",
+        "description": "Multi-tool CRM workflows exceed Vercel edge limits, dropping conversations",
+        "severity": "high",
+        "mitigation": "Vex async verification offloads heavy checks, preserving streaming perf"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Streaming Chat with RAG",
+        "description": "Core Vercel AI SDK setup for customer support with knowledge base retrieval",
+        "code": "import { streamText } from 'ai';\nimport { openai } from '@ai-sdk/openai';\nimport { createRAGRetriever } from './rag';\n\nexport async function streamSupportResponse(query: string) {\n  const retriever = createRAGRetriever();\n  const context = await retriever.retrieve(query);\n\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    prompt: `Context: ${context}\\n\\nCustomer: ${query}\\nSupport Agent:`,\n    maxTokens: 1000,\n  });\n\n  return result.toAIStreamResponse();\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Calling for CRM Actions",
+        "description": "Define tools for ticket creation and order lookup with structured outputs",
+        "code": "import { streamText, tool } from 'ai';\nimport { z } from 'zod';\n\nconst tools = {\n  createTicket: tool({\n    description: 'Create support ticket',\n    parameters: z.object({\n      customerId: z.string(),\n      issue: z.string(),\n      priority: z.enum(['low', 'medium', 'high']),\n    }),\n    execute: async ({ customerId, issue, priority }) => {\n      // Call HubSpot/Zendesk API\n      return { ticketId: 'TICKET_123' };\n    },\n  }),\n  lookupOrder: tool({\n    description: 'Lookup customer order',\n    parameters: z.object({ orderId: z.string() }),\n    execute: async ({ orderId }) => {\n      // Call Stripe/Shopify API\n      return { status: 'shipped', items: ['Product A'] };\n    },\n  }),\n};\n\nexport async function streamWithTools(query: string) {\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    tools,\n    prompt: `Handle customer support: ${query}`,\n  });\n  return result.toAIStreamResponse();\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Edge Runtime API Route",
+        "description": "Next.js API route for streaming support conversations",
+        "code": "import { NextRequest } from 'next/server';\nimport { streamSupportResponse } from './support-agent';\n\nexport const runtime = 'edge';\n\nexport async function POST(req: NextRequest) {\n  try {\n    const { messages } = await req.json();\n    const lastMessage = messages[messages.length - 1].content;\n\n    const stream = await streamSupportResponse(lastMessage);\n\n    return new Response(stream, {\n      headers: {\n        'Access-Control-Allow-Origin': '*',\n        'Content-Type': 'text/plain; charset=utf-8',\n      },\n    });\n  } catch (error) {\n    return new Response('Error', { status: 500 });\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Knowledge Base Integration",
+        "description": "RAG retriever for support documentation and policies",
+        "code": "import { Pinecone } from '@pinecone-database/pinecone';\n\nexport async function createRAGRetriever() {\n  const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! });\n  const index = pinecone.index('support-docs');\n\n  return {\n    async retrieve(query: string) {\n      const queryEmbedding = await getEmbedding(query);\n      const results = await index.query({\n        vector: queryEmbedding,\n        topK: 5,\n        includeMetadata: true,\n      });\n      return results.matches.map((m) => m.metadata?.text).join('\\n');\n    },\n  };\n}\n\nfunction getEmbedding(text: string) {\n  // OpenAI embeddings call\n  return [0.1, 0.2, /* ... */];\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for generateText",
+        "description": "Wrap generateText calls to verify response accuracy and PII before returning",
+        "code": "import { createVex } from '@vex_dev/sdk';\nimport { generateText } from 'ai';\n\nconst vex = createVex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!,\n});\n\nexport async function safeGenerateText(prompt: string, context: string) {\n  const rawResult = await generateText({\n    model: openai('gpt-4o'),\n    prompt: `${context}\\n\\n${prompt}`,\n  });\n\n  const verified = await vex.verify({\n    input: prompt + context,\n    output: rawResult.text,\n    checks: {\n      accuracy: { against: context },\n      pii: { block: true },\n      tone: { consistent: 'professional,empathetic' },\n      policy: { support: true },\n    },\n  });\n\n  if (!verified.pass) {\n    throw new Error(`Vex blocked: ${verified.issues.join(', ')}`);\n  }\n\n  return rawResult;\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Streaming Middleware",
+        "description": "Protect streamText with real-time chunk verification for hallucinations",
+        "code": "import { streamText } from 'ai';\nimport { createVexStreamMiddleware } from '@vex_dev/sdk';\n\nconst vexMiddleware = createVexStreamMiddleware({\n  projectId: 'your-project-id',\n  checks: {\n    partialHallucination: { threshold: 0.8 },\n    pii: { stream: true },\n    escalation: { keywords: ['refund', 'cancel', 'urgent'] },\n  },\n});\n\nexport async function safeStreamText(query: string, context: string) {\n  return streamText({\n    model: openai('gpt-4o'),\n    prompt: `Context: ${context}\\nCustomer: ${query}`,\n    middleware: [vexMiddleware],\n  }).pipeThrough(vexMiddleware.transformStream);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Call Validation with Vex",
+        "description": "Verify CRM tool outputs before displaying to customers",
+        "code": "import { tool } from 'ai';\nimport { createVex } from '@vex_dev/sdk';\n\nconst vex = createVex({ projectId: 'your-project-id' });\n\nconst createTicket = tool({\n  description: 'Create support ticket',\n  parameters: z.object({\n    customerId: z.string(),\n    issue: z.string().max(500),\n    priority: z.enum(['low', 'medium', 'high']),\n  }),\n  async execute({ customerId, issue, priority }) {\n    const ticket = await crm.createTicket({ customerId, issue, priority });\n    \n    // Vex validates tool output\n    const verified = await vex.verify({\n      input: `${customerId}-${issue}`,\n      output: JSON.stringify(ticket),\n      checks: {\n        schema: { type: 'ticket' },\n        pii: { filter: ['customerId'] },\n        policy: { noEscalationKeywords: issue },\n      },\n    });\n\n    if (!verified.pass) {\n      throw new Error('Vex blocked unsafe ticket data');\n    }\n\n    return ticket;\n  },\n});",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Vercel AI SDK Customer Support",
+      "description": "Add Vex middleware today to protect your RAG agents from hallucinations, PII leaks, and policy violations."
+    }
+  }
+}

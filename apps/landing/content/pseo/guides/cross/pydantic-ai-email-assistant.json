@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "pydantic-ai",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with Pydantic AI + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with Pydantic AI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Pydantic AI ai email assistant",
+      "Pydantic AI guardrails",
+      "ai email assistant reliability",
+      "Vex Pydantic AI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with Pydantic AI enables type-safe, structured email processing workflows including intent detection, draft generation, and approval flows. Guardrails are essential due to the high-risk nature of email handling, where errors can lead to PII leaks, inappropriate tone, or unauthorized sends. Vex integration provides robust verification against these failure modes, ensuring production reliability.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with Pydantic AI",
+      "description": "The AI Email Assistant follows a modular pipeline: incoming emails trigger an IntentDetector agent that classifies actions (reply, forward, archive). DraftGenerator creates context-aware responses using Pydantic models for structured output. AttachmentHandler extracts and validates files, while ApprovalWorkflow enforces human review for high-risk actions like external sends. All agents leverage Pydantic AI's result validators for type safety.\n\nAgents communicate via dependency injection, with shared context for email metadata and user preferences. Streaming responses enable real-time draft previews, but require mid-generation validation to prevent partial invalid outputs. Tool calls handle external APIs (SMTP, file storage) with retry logic that Vex monitors for persistent failures.\n\nThe architecture scales via async processing, with Vex checkpoints at each agent's result_validator to catch validator rejections, tool masking, and context loss.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Incoming Email  │───▶│ Intent Detector  │\n│     Parser      │    │   (Pydantic AI)  │\n└──────────┬──────┘    └──────┬─────────────┘\n           │                  │\n           ▼                  ▼\n┌─────────────────┐    ┌──────────────────┐\n│ Attachment      │    │ Draft Generator   │───▶┌──────────────┐\n│   Handler       │    │   (Pydantic AI)  │    │ Approval     │\n└──────────┬──────┘    └──────┬─────────────┘    │ Workflow     │\n           │                  │                   └──────────────┘\n           └──────────┬───────┘                           │\n                      │                                   ▼\n                 ┌────▼────┐                         ┌──────────────┐\n                 │ Vex     │                         │ SMTP Send    │\n                 │ Guard   │◀────────────────────────┤ (w/ Vex)    │\n                 │ rails  │                         └──────────────┘\n                 └────────┘"
+    },
+    "risks": [
+      {
+        "name": "PII Leakage in Drafts",
+        "description": "Agent generates responses containing unfiltered personal data from email context",
+        "severity": "critical",
+        "mitigation": "Vex PII filtering verifier scans all outputs before approval workflow"
+      },
+      {
+        "name": "Inappropriate Tone Detection Failure",
+        "description": "Sarcastic or aggressive language slips through validator due to model variance",
+        "severity": "high",
+        "mitigation": "Vex tone analysis checkpoint with customizable sentiment thresholds"
+      },
+      {
+        "name": "Invalid Recipient Expansion",
+        "description": "Agent suggests incorrect email addresses during CC/BCC generation",
+        "severity": "high",
+        "mitigation": "Vex recipient validation against corporate directory before send"
+      },
+      {
+        "name": "Confidentiality Breach",
+        "description": "Internal-only content forwarded externally without approval",
+        "severity": "critical",
+        "mitigation": "Vex confidentiality classifier blocks sensitive content in external flows"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Intent Detection Agent",
+        "description": "Core agent that classifies email intent using Pydantic models with Vex result validator",
+        "code": "from pydantic_ai import Agent, ResultValidator\nfrom vex import Vex\nfrom pydantic import BaseModel\n\nclass EmailIntent(BaseModel):\n    action: str  # 'reply', 'forward', 'archive', 'delegate'\n    priority: str  # 'low', 'medium', 'high', 'urgent'\n    confidence: float\n\n@vex.guard(  # Vex integration\n    verifiers=[\n        'pii_filter',\n        'tone_check',\n        {'name': 'intent_accuracy', 'threshold': 0.8}\n    ]\n)\ndef intent_detector_agent():\n    agent = Agent(\n        model='gpt-4o',\n        result_model=EmailIntent,\n        result_validator=VexResultValidator()\n    )\n    return agent\n\nclass VexResultValidator(ResultValidator):\n    async def __call__(self, output: EmailIntent) -> bool:\n        vex_client = Vex(client_id='your-key')\n        result = await vex_client.verify({\n            'output': output.model_dump(),\n            'context': {'domain': 'email_intent'}\n        })\n        return result.passed",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation with Structured Output",
+        "description": "Generates email drafts with Pydantic validation and streaming support",
+        "code": "from pydantic_ai import StreamingAgent\nfrom pydantic import BaseModel, Field\n\nclass EmailDraft(BaseModel):\n    subject: str = Field(..., max_length=100)\n    body: str = Field(..., max_length=5000)\n    recipients: list[str]\n    attachments: list[str] = []\n    tone: str  # 'professional', 'friendly', 'urgent'\n\nasync def draft_generator(email_context: str, intent: EmailIntent):\n    agent = StreamingAgent(\n        model='gpt-4o',\n        result_model=EmailDraft,\n        result_validator=VexResultValidator(),\n        system_prompt=f\"\"\"\n        Generate professional email draft for intent: {intent.action}\n        Context: {email_context}\n        Ensure tone: {intent.priority}\n        \"\"\"\n    )\n    \n    async for chunk in agent.run_stream(email_context):\n        if chunk.is_complete:\n            yield chunk.data\n\n# Usage\nintent = EmailIntent(action='reply', priority='high', confidence=0.92)\ndraft_stream = draft_generator(raw_email, intent)",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Handler with Validation",
+        "description": "Processes email attachments with security scanning via Vex",
+        "code": "import asyncio\nfrom pydantic_ai import Agent\nfrom vex import Vex\n\nclass AttachmentResult(BaseModel):\n    filename: str\n    size_kb: int\n    safe_to_attach: bool\n    mime_type: str\n    pii_detected: bool\n\n@vex.guard(verifiers=['file_security', 'pii_scan'])\ndef attachment_handler_agent():\n    agent = Agent(\n        model='gpt-4o-mini',\n        result_model=AttachmentResult,\n        tools=[\n            {'name': 'scan_file', 'description': 'Scan attachment for malware/PII'}\n        ]\n    )\n    return agent\n\nasync def process_attachments(email_attachments: list[bytes]):\n    vex = Vex(client_id='your-key')\n    results = []\n    \n    for attachment in email_attachments:\n        result = await attachment_handler_agent().run({\n            'attachments': [attachment],\n            'vex_context': {'verifiers': ['malware_scan', 'pii_filter']}\n        })\n        \n        # Vex double-check\n        vex_result = await vex.verify({\n            'attachment_analysis': result.model_dump(),\n            'file_content': attachment[:1024]  # sample\n        })\n        \n        if vex_result.passed and not result.pii_detected:\n            results.append(result)\n    \n    return results",
+        "language": "python"
+      },
+      {
+        "title": "Approval Workflow Orchestrator",
+        "description": "Final decision gate with human-in-loop for high-risk emails",
+        "code": "from pydantic_ai import Agent\nfrom vex import Vex\nfrom enum import Enum\n\nclass SendDecision(str, Enum):\n    APPROVE = 'approve'\n    REJECT = 'reject'\n    ESCALATE = 'escalate'\n\nclass ApprovalContext(BaseModel):\n    draft: EmailDraft\n    risk_score: float\n    requires_human_review: bool\n    suggested_action: SendDecision\n\nasync def approval_orchestrator(draft: EmailDraft, intent: EmailIntent):\n    vex = Vex(client_id='your-key')\n    \n    # Risk assessment\n    risk_result = await vex.verify({\n        'draft': draft.model_dump(),\n        'intent': intent.model_dump(),\n        'verifiers': ['confidentiality', 'recipient_validation', 'tone_appropriateness']\n    })\n    \n    agent = Agent(\n        model='gpt-4o',\n        result_model=ApprovalContext,\n        system_prompt=\"Conservative approval - escalate uncertain cases\"\n    )\n    \n    context = ApprovalContext(\n        draft=draft,\n        risk_score=risk_result.score,\n        requires_human_review=risk_result.score > 0.7,\n        suggested_action=SendDecision.APPROVE if risk_result.passed else SendDecision.ESCALATE\n    )\n    \n    return await agent.run(context.model_dump())",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Result Validator Wrapper",
+        "description": "Custom Pydantic AI result validator that integrates Vex verification",
+        "code": "from pydantic_ai import ResultValidator\nfrom vex import Vex, Verifier\nfrom pydantic import BaseModel\n\nclass VexResultValidator(ResultValidator):\n    def __init__(self, verifiers: list[str] = None):\n        self.vex = Vex(client_id='vex-your-key')\n        self.verifiers = verifiers or [\n            'pii_filter',\n            'tone_check',\n            'confidentiality'\n        ]\n    \n    async def __call__(self, output: BaseModel) -> bool:\n        result = await self.vex.verify({\n            'output': output.model_dump(),\n            'verifiers': self.verifiers,\n            'context': {'use_case': 'email_assistant'}\n        })\n        return result.passed\n\n# Usage in Pydantic AI agent\nagent = Agent(\n    result_model=EmailDraft,\n    result_validator=VexResultValidator([\n        'pii_filter',\n        'tone_check',\n        'recipient_validation'\n    ])\n)",
+        "language": "python"
+      },
+      {
+        "title": "Streaming Validation Middleware",
+        "description": "Handles mid-stream validation failures common in Pydantic AI streaming",
+        "code": "from pydantic_ai import StreamingAgent\nfrom vex import Vex\n\nclass VexStreamingValidator:\n    def __init__(self):\n        self.vex = Vex(client_id='vex-your-key')\n    \n    async def validate_stream_chunk(self, chunk: dict, context: dict):\n        if 'content' in chunk:\n            result = await self.vex.verify({\n                'partial_content': chunk['content'],\n                'verifiers': ['pii_filter', 'tone_check'],\n                'context': context\n            })\n            return result.passed\n        return True\n\n# Integration with streaming agent\nasync def safe_streaming_draft():\n    validator = VexStreamingValidator()\n    agent = StreamingAgent(result_model=EmailDraft)\n    \n    async for chunk in agent.run_stream(email_context):\n        if not await validator.validate_stream_chunk(chunk, {'intent': 'reply'}):\n            raise ValueError('Stream validation failed')\n        yield chunk",
+        "language": "python"
+      },
+      {
+        "title": "Tool Call Monitoring Wrapper",
+        "description": "Prevents tool retry logic from masking persistent Vex failures",
+        "code": "from pydantic_ai import Agent, tool\nfrom vex import Vex\n\nvex_client = Vex(client_id='vex-your-key')\n\n@tool\ndef send_email(draft: dict):\n    \"\"\"Send email with Vex pre-flight check\"\"\"\n    # Vex verification before SMTP call\n    result = vex_client.verify({\n        'email_draft': draft,\n        'verifiers': ['final_pii_scan', 'confidentiality', 'recipient_validation'],\n        'max_retries': 1  # Fail fast on persistent errors\n    })\n    \n    if not result.passed:\n        raise ValueError(f'Vex blocked send: {result.issues}')\n    \n    # Actual SMTP send\n    return {'status': 'sent', 'message_id': 'abc123'}\n\n# Agent with monitored tools\nagent = Agent(\n    model='gpt-4o',\n    tools=[send_email],\n    result_validator=VexResultValidator()\n)\n\n# Vex monitors tool retry patterns\nresult = await agent.run({'draft': email_draft})",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Pydantic AI Email Assistant",
+      "description": "Add Vex guardrails today to protect against PII leaks and compliance violations - start with our free tier."
+    }
+  }
+}

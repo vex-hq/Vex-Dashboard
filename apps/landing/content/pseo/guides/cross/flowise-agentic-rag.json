@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with Flowise + Vex Guardrails",
+    "description": "Learn how to build agentic rag with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise agentic rag",
+      "Flowise guardrails",
+      "agentic rag reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of Agentic RAG systems through its drag-and-drop interface, allowing multi-step retrieval agents that plan queries, fetch from multiple sources, and synthesize attributed responses. However, the complexity of autonomous query planning, multi-source retrieval, and agent handoffs introduces significant risks like hallucinations, poor source relevance, and context loss. Vex provides runtime verification to ensure source faithfulness, citation accuracy, and cross-source consistency in these high-risk pipelines.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with Flowise",
+      "description": "A typical Flowise Agentic RAG flow starts with a Query Planner Agent that decomposes user questions into sub-queries using an LLM node. These sub-queries feed into parallel Vector Store Tool nodes that retrieve from multiple sources (e.g., internal docs, web search, knowledge base). Retrieved chunks pass through a Relevance Reranker node, then a Synthesis Agent combines results with source attribution. The final Answer Generator produces cited responses while a Custom Tool node handles external API calls.\n\nThe flow uses Sequential and Parallel chains extensively, with agent handoffs between planning, retrieval, and synthesis stages. Context management happens via Memory Buffer nodes, but intermediate outputs often lack validation. Custom tools for web search or database queries frequently fail silently without error propagation to upstream agents.\n\nVex integrates as a callback handler that intercepts outputs at critical checkpoints: query plans, retrieved documents, tool responses, and final answers for comprehensive verification.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Query Planner   │\n│                 │    │   Agent (LLM)    │\n└─────────────────┘    └──────┬──────────────┘\n                             │\n                ┌────────────┼──────┐\n                │            │      │\n    ┌───────────▼──────────┐ │ ┌───▼──────────────┐\n    │ Vector Store Tool 1  │ │ │ Vector Store Tool │\n    │ (Internal Docs)     │ │ │   (Web Search)    │\n    └───────────┬──────────┘ │ └─┬─────────────────┘\n                │             │   │\n                └─────────────┼───┼──────────────┐\n                              │   │              │\n                    ┌─────────▼───┼───▼──────────┐\n                    │ Relevance  │   │ Custom     │\n                    │ Reranker   │   │ Tool Node  │\n                    └──────┬─────┘   └─────┬─────┘\n                           │               │\n                    ┌──────┼───────────────▼──────┐\n                    │      │ Synthesis Agent     │\n                    │  Vex │ (Multi-source       │\n                    │Guard │  attribution)       │\n                    └──────┼──────────────────────┘\n                           │\n                      ┌────▼────┐\n                      │ Final  │\n                      │Answer  │\n                      │w/Cites │\n                      └────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated Query Plans",
+        "description": "Planner agent generates irrelevant or malformed sub-queries that cascade poor retrieval results",
+        "severity": "critical",
+        "mitigation": "Vex verifies query relevance and decomposition accuracy before retrieval"
+      },
+      {
+        "name": "Low-Relevance Document Retrieval",
+        "description": "Vector stores return semantically drifted chunks lacking query alignment",
+        "severity": "high",
+        "mitigation": "Vex scores document relevance and filters chunks below threshold"
+      },
+      {
+        "name": "Silent Tool Failures",
+        "description": "Custom tool nodes (web search, APIs) fail without propagating errors to synthesis agent",
+        "severity": "high",
+        "mitigation": "Vex monitors tool execution and injects fallback responses"
+      },
+      {
+        "name": "Context Loss in Agent Handoffs",
+        "description": "Sequential agent flows lose retrieval context between planning, retrieval, and synthesis",
+        "severity": "medium",
+        "mitigation": "Vex persists and validates context across agent boundaries"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Query Planner with Vex Validation",
+        "description": "Add Vex callback to LLM Chain node to verify query decomposition produces relevant sub-queries",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-agentic-rag'\n});\n\nconst queryPlannerCallback = async (context: any, cb: any) => {\n  const { input, output } = context;\n  \n  const result = await vex.verify({\n    session: input.sessionId,\n    step: 'query_planning',\n    input: input.question,\n    output: output.subQueries,\n    checks: [\n      {\n        type: 'query_planning_accuracy',\n        threshold: 0.8,\n        config: { originalQuery: input.question }\n      }\n    ]\n  });\n  \n  if (!result.pass) {\n    cb(null, { error: 'Invalid query plan', subQueries: [] });\n    return;\n  }\n  \n  cb(null, output);\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store Retrieval Guard",
+        "description": "Intercept retrieval outputs to filter low-relevance documents before synthesis",
+        "code": "const retrievalCallback = async (context: any, cb: any) => {\n  const { input, output } = context;\n  \n  const verification = await vex.verify({\n    session: input.sessionId,\n    step: 'document_retrieval',\n    input: input.query,\n    output: output.documents,\n    checks: [\n      {\n        type: 'source_relevance',\n        threshold: 0.7,\n        config: { query: input.query, minDocs: 3 }\n      },\n      {\n        type: 'source_diversity',\n        threshold: 0.6\n      }\n    ]\n  });\n  \n  if (verification.pass) {\n    cb(null, { documents: verification.filteredOutput });\n  } else {\n    cb(null, { documents: [], warning: 'Insufficient relevant sources' });\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Multi-Source Consistency Check",
+        "description": "Verify synthesis agent maintains consistency across retrieved sources",
+        "code": "const synthesisCallback = async (context: any, cb: any) => {\n  const result = await vex.verify({\n    session: context.sessionId,\n    step: 'multi_source_synthesis',\n    input: {\n      sources: context.sources,\n      query: context.originalQuery\n    },\n    output: context.synthesizedAnswer,\n    checks: [\n      {\n        type: 'cross_source_consistency',\n        threshold: 0.75,\n        config: { sources: context.sources }\n      },\n      {\n        type: 'hallucination_detection',\n        threshold: 0.9\n      }\n    ]\n  });\n  \n  cb(null, {\n    answer: result.pass ? context.synthesizedAnswer : null,\n    citations: result.citations,\n    score: result.score\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Citation Verification Handler",
+        "description": "Final check ensures all claims in answer trace back to verified sources",
+        "code": "const citationCallback = async (context: any, cb: any) => {\n  const finalCheck = await vex.verify({\n    session: context.sessionId,\n    step: 'citation_verification',\n    input: context.answer,\n    output: context.citations,\n    checks: [\n      {\n        type: 'source_faithfulness',\n        threshold: 0.85,\n        config: { requireCoverage: 0.9 }\n      },\n      {\n        type: 'citation_accuracy',\n        threshold: 0.95\n      }\n    ]\n  });\n  \n  if (finalCheck.pass) {\n    cb(null, {\n      finalAnswer: context.answer,\n      verifiedCitations: finalCheck.validCitations,\n      confidence: finalCheck.overallScore\n    });\n  } else {\n    cb(null, {\n      finalAnswer: 'Unable to verify response with sufficient evidence',\n      citations: [],\n      confidence: 0\n    });\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Flowise Callback Registration",
+        "description": "Register Vex handlers in Flowise chatflow configuration for all critical nodes",
+        "code": "// flowise.config.ts\nconst flowiseConfig = {\n  chatflows: {\n    agenticRAG: {\n      nodes: {\n        'query-planner': {\n          callbacks: [queryPlannerCallback]\n        },\n        'vector-store-1': {\n          callbacks: [retrievalCallback]\n        },\n        'vector-store-2': {\n          callbacks: [retrievalCallback]\n        },\n        'synthesis-agent': {\n          callbacks: [synthesisCallback]\n        },\n        'final-answer': {\n          callbacks: [citationCallback]\n        }\n      }\n    }\n  }\n};\n\n// Initialize Vex globally\nVex.init({\n  apiKey: process.env.VEX_API_KEY!,\n  projectId: 'flowise-agentic-rag',\n  autoSession: true\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Custom Tool Node with Error Recovery",
+        "description": "Wrap custom tools with Vex monitoring and automatic fallback handling",
+        "code": "class VexGuardedToolNode {\n  async executeTool(input: any, sessionId: string) {\n    try {\n      const toolResult = await this.originalTool(input);\n      \n      const verified = await vex.verify({\n        session: sessionId,\n        step: 'custom_tool',\n        input,\n        output: toolResult,\n        checks: [{ type: 'tool_output_validity', threshold: 0.8 }]\n      });\n      \n      return verified.pass ? verified.output : this.getFallback(input);\n    } catch (error) {\n      await vex.captureError({\n        session: sessionId,\n        step: 'custom_tool',\n        error: error.message,\n        input\n      });\n      return this.getFallback(input);\n    }\n  }\n  \n  private getFallback(input: any) {\n    return {\n      content: 'Tool temporarily unavailable. Using cached knowledge.',\n      source: 'fallback',\n      confidence: 0.3\n    };\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Session-Level Guardrail Dashboard",
+        "description": "Track verification metrics across entire Agentic RAG sessions",
+        "code": "const sessionMetrics = async (sessionId: string) => {\n  const metrics = await vex.getSessionMetrics(sessionId, {\n    timeWindow: '1h',\n    filters: {\n      useCase: 'agentic_rag',\n      checks: ['source_faithfulness', 'hallucination_detection']\n    }\n  });\n  \n  return {\n    overallPassRate: metrics.passRate,\n    criticalFailures: metrics.checks['source_faithfulness'].failures,\n    avgConfidence: metrics.avgScore,\n    topIssues: metrics.issues.slice(0, 5),\n    recommendation: metrics.autoFixes\n  };\n};\n\n// Usage in Flowise API endpoint\napp.post('/chat', async (req, res) => {\n  const sessionId = req.body.sessionId;\n  const response = await chatflow.chat(req.body);\n  \n  const metrics = await sessionMetrics(sessionId);\n  \n  res.json({\n    ...response,\n    _vexMetrics: metrics\n  });\n});",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Agentic RAG",
+      "description": "Deploy Vex guardrails today to eliminate hallucinations and ensure citation accuracy in production."
+    }
+  }
+}

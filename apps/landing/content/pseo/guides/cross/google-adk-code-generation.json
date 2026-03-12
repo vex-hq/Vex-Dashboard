@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "google-adk",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Google ADK + Vex Guardrails",
+    "description": "Learn how to build code generation with Google ADK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Google ADK code generation",
+      "Google ADK guardrails",
+      "code generation reliability",
+      "Vex Google ADK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building code generation agents with Google's Agent Development Kit (ADK) enables powerful LLM-driven development workflows using Gemini models. However, multi-agent delegation, sandbox execution, and iterative refinement introduce critical risks like circular dependencies, credential leakage, and unsafe code execution. Vex provides essential guardrails to ensure reliability, safety, and consistency in these high-risk scenarios.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Google ADK",
+      "description": "The typical Google ADK code generation architecture features a lead agent powered by Gemini that receives requirements and delegates to specialized sub-agents: a code generator, executor, tester, and reviewer. The code generator produces Python/JavaScript code, which the executor runs in a sandboxed environment. Test validation agents check functionality while a reviewer ensures safety and best practices. Iterative refinement loops continue until requirements are met.\n\nSession state management across agents is critical, with shared memory storing code versions, test results, and execution logs. Gemini model switching between agents can cause output inconsistencies, while tool response mismatches between executor and tester agents create integration failures. Vex monitoring at the before_agent_callback ensures each agent's inputs/outputs remain consistent and safe.\n\nThe workflow handles dependency management, credential isolation, and syntax validation through structured tool calls, making it powerful but requiring robust reliability layers.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Request  │───▶│ Lead ADK Agent   │\n│   (Requirements)│    │ (Gemini 1.5 Pro) │\n└─────────────────┘    │                   │\n                       │  before_agent_    │\n                       │     callback      │\n                       │     (Vex)         │\n                       └────────┬──────────┘\n                                │\n                ┌───────────────▼───────────────┐\n                │ Multi-Agent Delegation        │\n                │ ┌────────────┐ ┌────────────┐ │\n                │ │ Code Gen   │ │ Sandbox    │ │\n                │ │ Agent      │ │ Executor   │ │\n                │ └────────────┘ └────────────┘ │\n                │ ┌────────────┐ ┌────────────┐ │\n                │ │ Test Agent │ │ Reviewer   │ │\n                │ │            │ │ Agent      │ │\n                │ └────────────┘ └────────────┘ │\n                └───────────────▲───────────────┘\n                                │\n                       ┌────────▼────────┐\n                       │  Iterative     │\n                       │  Refinement    │\n                       │   Loop         │\n                       └────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Multi-agent circular dependencies",
+        "description": "Code generator delegates to executor, which calls back to generator creating infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex dependency graph analysis in before_agent_callback blocks circular delegation"
+      },
+      {
+        "name": "Unsafe code execution",
+        "description": "Generated code contains syscalls, file writes, or credential access bypassing sandbox",
+        "severity": "critical",
+        "mitigation": "Vex code safety scanner rejects dangerous patterns before sandbox execution"
+      },
+      {
+        "name": "Credential leakage in generated code",
+        "description": "Agents embed API keys or secrets in code during iterative refinement",
+        "severity": "high",
+        "mitigation": "Vex credential detector strips secrets from code and agent memory"
+      },
+      {
+        "name": "Gemini output inconsistency",
+        "description": "Model switching between agents produces different code styles and formats",
+        "severity": "high",
+        "mitigation": "Vex output normalization enforces consistent code structure across agents"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic ADK Code Generation Agent",
+        "description": "Core agent structure with code generation, execution, and validation workflow",
+        "code": "from google_adk.agents import Agent\nfrom google_adk.tools import Tool\n\nclass CodeExecutor(Tool):\n    def execute(self, code: str) -> dict:\n        # Sandbox execution\n        result = sandbox_exec(code)\n        return {'success': result.success, 'output': result.stdout}\n\nclass CodeGenerator(Agent):\n    def __init__(self):\n        super().__init__(\n            model='gemini-1.5-pro',\n            tools=[CodeExecutor()],\n            instructions='Generate clean, safe Python code meeting requirements.'\n        )\n\n    async def generate_and_test(self, requirements: str):\n        code = await self.run(f'Write Python code for: {requirements}')\n        result = await self.tools[0].execute(code)\n        return {'code': code, 'test_result': result}",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Agent Delegation Setup",
+        "description": "Lead agent coordinates generator, executor, tester, and reviewer sub-agents",
+        "code": "from google_adk.orchestrator import Orchestrator\n\norchestrator = Orchestrator([\n    CodeGenerator(),\n    CodeExecutor(),\n    TestValidator(),\n    CodeReviewer()\n])\n\nasync def code_generation_pipeline(requirements: str):\n    workflow = orchestrator.create_workflow([\n        ('generate', 'CodeGenerator'),\n        ('execute', 'CodeExecutor'),\n        ('validate', 'TestValidator'),\n        ('review', 'CodeReviewer'),\n    ])\n    result = await workflow.run(requirements)\n    return result",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Execution Tool",
+        "description": "Secure execution environment with dependency and safety checks",
+        "code": "import docker\n\nclass SecureSandbox(Tool):\n    def __init__(self):\n        self.client = docker.from_env()\n\n    def execute(self, code: str, deps: list = None) -> dict:\n        deps = deps or ['numpy==1.24.0']\n        \n        # Safety check\n        if self._contains_dangerous_code(code):\n            return {'success': False, 'error': 'Unsafe code detected'}\n        \n        container = self.client.containers.run(\n            'python:3.11-slim',\n            command=f'pip install {' '.join(deps)} && python -c \"{code}\"',\n            detach=True,\n            remove=True,\n            mem_limit='256m'\n        )\n        result = container.wait()\n        logs = container.logs().decode()\n        return {'success': result['StatusCode'] == 0, 'output': logs}",
+        "language": "python"
+      },
+      {
+        "title": "Iterative Refinement Loop",
+        "description": "Continues refinement until tests pass and safety checks complete",
+        "code": "async def iterative_code_gen(requirements: str, max_iterations: int = 5):\n    state = {'code': '', 'tests_passed': False, 'iteration': 0}\n    \n    while not state['tests_passed'] and state['iteration'] < max_iterations:\n        state['iteration'] += 1\n        \n        # Generate\n        code = await code_generator.generate(requirements, state)\n        \n        # Execute & Test\n        exec_result = await sandbox.execute(code)\n        test_result = await validator.test(code, exec_result)\n        \n        if test_result['passes']:\n            state['tests_passed'] = True\n            state['code'] = code\n        else:\n            requirements += f\" Fix: {test_result['errors']}\"\n    \n    return state",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex before_agent_callback Setup",
+        "description": "Install Vex and configure as callback to monitor all agent interactions",
+        "code": "import vex\n\nfrom google_adk.orchestrator import Orchestrator\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n@vex_client.guardrail(\n    risk_profile=\"high\",\n    verifications=[\n        \"code_safety\",\n        \"syntax_validity\",\n        \"no_credential_leakage\",\n        \"execution_sandboxing\",\n        \"dependency_safety\"\n    ]\n)\ndef before_agent_callback(agent_id: str, input_data: dict) -> dict:\n    \"\"\"Vex guardrail for all ADK agents\"\"\"\n    \n    # Check for circular dependencies\n    if vex_client.detect_circular_dependency(agent_id, input_data):\n        raise Exception(\"Circular dependency detected\")\n    \n    # Code safety scan\n    if 'code' in input_data:\n        vex_client.scan_code_safety(input_data['code'])\n    \n    return input_data\n\n# Apply to orchestrator\norchestrator = Orchestrator(agents, before_agent_callback=before_agent_callback)",
+        "language": "python"
+      },
+      {
+        "title": "Session State Protection",
+        "description": "Prevents corruption across long code generation conversations",
+        "code": "@vex_client.guardrail(\"session_state\")\ndef protect_session_state(session_id: str, state_update: dict) -> dict:\n    \"\"\"Validate session state updates\"\"\"\n    \n    # Check state size limits\n    if len(str(state_update)) > 100_000:\n        raise Exception(\"Session state exceeds size limit\")\n    \n    # Prevent credential accumulation\n    credentials = vex_client.extract_credentials(state_update)\n    if credentials:\n        vex_client.log_security_event(session_id, \"credentials_in_state\", credentials)\n        state_update = vex_client.sanitize_state(state_update)\n    \n    # Validate code versions\n    if 'code_versions' in state_update:\n        for version in state_update['code_versions']:\n            vex_client.validate_code_syntax(version)\n    \n    return state_update\n\n# Integrate with ADK session management\norchestrator.session_manager.state_update_callback = protect_session_state",
+        "language": "python"
+      },
+      {
+        "title": "Tool Response Normalization",
+        "description": "Ensures consistent formats across executor, tester, and reviewer tools",
+        "code": "@vex_client.guardrail(\"output_consistency\")\ndef normalize_tool_response(tool_name: str, response: dict) -> dict:\n    \"\"\"Normalize tool outputs for consistent agent communication\"\"\"\n    \n    schema = {\n        'CodeExecutor': {'success': bool, 'output': str, 'error': str | None},\n        'TestValidator': {'passes': bool, 'coverage': float, 'errors': list},\n        'CodeReviewer': {'safety_score': float, 'issues': list, 'approved': bool}\n    }\n    \n    expected = schema.get(tool_name, {'result': str})\n    normalized = vex_client.validate_and_normalize(response, expected)\n    \n    # Gemini consistency check\n    if 'code' in normalized:\n        vex_client.enforce_code_style(normalized['code'])\n    \n    return normalized\n\n# Apply to all tools\nfor tool in orchestrator.tools:\n    tool.post_execute_callback = normalize_tool_response",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Google ADK Code Generation",
+      "description": "Add Vex guardrails today to protect your code generation pipeline from critical failures."
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "industry": "fintech",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "n8n AI Agents Guardrails for Fintech",
+    "description": "Compliance guide for n8n AI Agents agents in fintech. Meet SOX, PCI DSS requirements with Vex guardrails.",
+    "keywords": [
+      "n8n AI Agents fintech",
+      "fintech AI compliance",
+      "n8n AI Agents guardrails",
+      "fintech AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Fintech teams using n8n AI Agents face heightened compliance risks due to the platform's flexible workflow automation handling sensitive financial data, transaction processing, and customer interactions. Without proper guardrails, common issues like unvalidated AI outputs, recursive executions, and credential leaks can lead to regulatory violations under SOX, PCI DSS, GDPR, and SEC rules. Vex provides essential runtime checks as a webhook node to ensure agent behaviors align with fintech regulations before actions execute.",
+    "complianceRequirements": [
+      {
+        "regulation": "PCI DSS",
+        "description": "Protects cardholder data requiring encryption in transit/rest and strict access controls on payment workflows.",
+        "howVexHelps": "Scans AI node outputs and tool parameters for unencrypted PAN, CVV, or auth tokens before action nodes; blocks workflows exposing credentials."
+      },
+      {
+        "regulation": "SOX",
+        "description": "Mandates internal controls over financial reporting and audit trails for automated decision processes.",
+        "howVexHelps": "Logs all AI decisions with explainability metadata and validates workflow integrity against recursive execution patterns."
+      },
+      {
+        "regulation": "GDPR",
+        "description": "Requires data minimization, consent tracking, and right to explanation for automated decisions affecting EU customers.",
+        "howVexHelps": "Detects PII leakage in agent memory windows and enforces consent checks in conversational flows."
+      },
+      {
+        "regulation": "SEC Reg BI / BSA-AML",
+        "description": "Requires best interest standards for advice and suspicious activity monitoring in transactions.",
+        "howVexHelps": "Validates financial advice outputs contain required disclaimers and flags anomalous transaction patterns."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI agents trigger infinite loops processing trades or payments, exhausting quotas and causing fund mismanagement.",
+        "severity": "critical",
+        "example": "Risk scoring agent re-triggers on every validation failure, executing 1000+ unauthorized API calls to brokerage."
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unfiltered LLM responses containing malicious payloads execute in banking APIs.",
+        "severity": "critical",
+        "example": "Agent generates SQL injection payload passed to transaction node, draining customer accounts."
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "API keys and auth tokens logged in plain-text or returned in agent responses.",
+        "severity": "high",
+        "example": "Fintech agent tool call includes Stripe secret key in n8n execution log, leading to PCI violation."
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated KYC data or stale balances used for credit decisions.",
+        "severity": "high",
+        "example": "Agent approves loan using 90-day-old income verification from memory node."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Add Vex Webhook After AI Agent Nodes",
+        "description": "Insert Vex as webhook node immediately after every AI Agent node to validate outputs before action nodes execute.",
+        "code": "// n8n webhook node configuration\nconst vexSDK = require('@vex_dev/sdk');\n\nconst policyId = 'fintech-n8n-agent'; // Your Vex policy ID\nconst workflowData = $input.all();\nconst aiOutput = $json.aiResponse; // From previous AI Agent node\n\nconst result = await vexSDK.evaluate({\n  policyId,\n  context: {\n    workflowId: $workflow.id,\n    nodeName: $node.name,\n    aiOutput,\n    userId: $json.userId,\n    hasConsent: $json.gdprConsent,\n    isProduction: $env.PRODUCTION\n  },\n  evidence: {\n    fullPayload: workflowData,\n    executionTrace: $execution\n  }\n});\n\nif (!result.compliant) {\n  throw new Error(`Vex blocked: ${result.reason}`);\n}\n\nreturn [{ json: { vexPassed: true, score: result.score } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "PCI Token Scanning Policy",
+        "description": "Custom Vex policy detects payment credentials in AI tool calls using regex patterns.",
+        "code": "// Vex policy configuration for n8n webhook\n// Deploy via Vex dashboard or API\nconst policy = {\n  name: 'PCI Token Scanner',\n  rules: [\n    {\n      id: 'no-payment-creds',\n      type: 'regex',\n      pattern: /(?i)(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\d{3})\\d{11}|(?:5[1-5][0-9]{2}|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720)[0-9]{12}|sk_live_|pk_live_)/,\n      description: 'PCI card numbers or Stripe keys',\n      severity: 'critical',\n      action: 'block'\n    },\n    {\n      id: 'financial-disclaimer',\n      type: 'contains',\n      pattern: 'NOT FINTECH DISCLAIMER: Not financial advice',\n      description: 'Missing required disclaimer',\n      severity: 'high',\n      action: 'block'\n    }\n  ]\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Recursion Detection Middleware",
+        "description": "Prevents infinite loops by tracking execution depth in n8n workflow state.",
+        "code": "// Add to Vex webhook node for recursion protection\nconst MAX_DEPTH = 5;\nconst currentDepth = $json.executionDepth || 0;\n\nconst recursionCheck = await vexSDK.evaluate({\n  policyId: 'n8n-recursion-guard',\n  context: {\n    workflowId: $workflow.id,\n    currentDepth,\n    nodeHistory: $json.nodeHistory || [],\n    triggerChain: $json.triggerChain\n  }\n});\n\nif (currentDepth > MAX_DEPTH || !recursionCheck.compliant) {\n  return [{ json: { blocked: true, reason: 'Recursion detected' } }];\n}\n\n// Pass execution depth to next node\nconst nextData = { ...$json, executionDepth: currentDepth + 1 };\nreturn [{ json: nextData }];",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "n8n AI Agents in Fintech: A Scenario",
+      "scenario": "A digital neobank builds customer service agents in n8n to handle account inquiries, transaction disputes, and loan pre-approvals. The primary workflow uses AI Agent nodes connected to memory windows storing KYC data, connected to tool nodes calling their core banking API and third-party credit bureaus. Agents analyze transaction patterns for fraud detection and generate personalized financial advice. However, without validation, AI outputs containing unredacted account numbers flow directly to action nodes, memory windows inject stale verification data, and complex trigger chains risk recursive execution during peak dispute volumes.",
+      "outcome": "After adding Vex webhook nodes post every AI Agent, the team caught 847 PCI violations from exposed card data in agent responses and blocked 23 recursive loops averaging 47 executions each. Financial advice now consistently includes SEC-compliant disclaimers, reducing regulatory exposure. The Vex audit trail provided explainability for 100% of credit decisions, passing internal SOX controls during their annual audit with zero findings."
+    },
+    "cta": {
+      "heading": "Comply with Fintech Regulations Using Vex",
+      "description": "Add Vex webhook nodes to your n8n workflows today and eliminate compliance gaps in AI agent execution."
+    }
+  }
+}

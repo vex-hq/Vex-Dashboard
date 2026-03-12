@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in LlamaIndex Agents",
+    "description": "How to detect and fix context window management for ai agents in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "LlamaIndex context-window-management",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex, Context Window Management for AI Agents manifests as challenges in balancing retrieved node contexts within token limits while ensuring relevance and completeness for agent reasoning. Agents using query engines often face token overflow from excessive retrieved nodes, irrelevant chunks polluting the context, or chunking artifacts splitting critical information across boundaries. This leads to degraded agent performance, hallucinations, and incomplete task execution in RAG pipelines.",
+    "howItManifests": [
+      {
+        "scenario": "Agent receives 15+ irrelevant nodes exceeding 128k token window",
+        "symptom": "Query engine returns 'context too long' error or truncated response",
+        "impact": "Agent fails to answer simple queries, high latency, token waste"
+      },
+      {
+        "scenario": "Synthesizer processes mixed relevant/irrelevant chunks in agent context",
+        "symptom": "Agent confidently cites wrong documents or fabricates details",
+        "impact": "Hallucinations appear factual, erodes user trust in agent outputs"
+      },
+      {
+        "scenario": "Vector index not refreshed after document updates",
+        "symptom": "Agent returns stale pricing/product info from old embeddings",
+        "impact": "Critical business decisions based on outdated context"
+      },
+      {
+        "scenario": "Sentence splitting chunks code block across node boundaries",
+        "symptom": "Agent misinterprets partial functions/classes, generates broken code",
+        "impact": "Developer agents produce non-compilable code suggestions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Detects when retrieved nodes exceed 80% of context window before query execution",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\nfrom llama_index.core.retrievers import VectorIndexRetriever\n\n\ndocs = SimpleDirectoryReader('data/').load_data()\nindex = VectorStoreIndex.from_documents(docs)\n\nretriever = VectorIndexRetriever(index=index, similarity_top_k=10)\n\n# Detection\nnodes = retriever.retrieve('What is the latest pricing?')\ntotal_tokens = sum(node.get_content().count(' ') for node in nodes)\n\nif total_tokens > 32000:  # 80% of 40k window\n    print(f'⚠️ TOKEN OVERFLOW: {total_tokens} tokens from {len(nodes)} nodes')\n    print(f'Query engine will truncate or fail')\nelse:\n    print(f'✅ Context OK: {total_tokens} tokens')\n",
+        "language": "python"
+      },
+      {
+        "name": "Relevance Score Drift",
+        "description": "Flags when average node similarity drops below threshold indicating irrelevant retrievals",
+        "code": "from llama_index.core.query_engine import RetrieverQueryEngine\nfrom llama_index.core.postprocessor import SimilarityPostprocessor\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=5,\n    node_postprocessors=[SimilarityPostprocessor(similarity_cutoff=0.7)]\n)\n\n# Detection\nresponse = query_engine.query('2024 pricing updates')\nnode_scores = [node.score for node in response.source_nodes]\n\navg_relevance = sum(node_scores) / len(node_scores)\nif avg_relevance < 0.75:\n    print(f'⚠️ LOW RELEVANCE: avg score {avg_relevance:.2f}')\n    print('Agent will likely hallucinate from poor context')\n",
+        "language": "python"
+      },
+      {
+        "name": "Index Freshness Check",
+        "description": "Detects documents older than threshold in retrieved context",
+        "code": "import datetime\nfrom llama_index.core.schema import TextNode\n\n# Detection\ndef check_index_staleness(nodes, max_age_days=7):\n    today = datetime.datetime.now()\n    stale_count = 0\n    \n    for node in nodes:\n        if hasattr(node.metadata, 'last_modified'):\n            doc_date = datetime.datetime.fromisoformat(node.metadata['last_modified'])\n            if (today - doc_date).days > max_age_days:\n                stale_count += 1\n                print(f'Stale node: {node.metadata.get(\"filename\", \"unknown\")}')\n    \n    if stale_count > 0:\n        print(f'⚠️ STALE CONTEXT: {stale_count}/{len(nodes)} nodes outdated')\n    return stale_count\n\n# Usage\nnodes = retriever.retrieve('current pricing')\ncheck_index_staleness(nodes)\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Context Window Compressor",
+        "description": "Automatically compresses retrieved context to fit token limits using LlamaIndex compressor",
+        "code": "from llama_index.core.indices.postprocessor import MetadataReplacementPostProcessor\nfrom llama_index.core.postprocessor import LLMMetadataExtractor, SimilarityPostprocessor\nfrom llama_index.llms.openai import OpenAI\n\nllm = OpenAI(model=\"gpt-4\")\nmetadata_extractor = LLMMetadataExtractor(\n    llm=llm, \n    prompt_template=\"Extract the relevant info about {context_str} for answering {query_str}\"\n)\n\nquery_engine = index.as_query_engine(\n    similarity_top_k=8,\n    node_postprocessors=[\n        SimilarityPostprocessor(similarity_cutoff=0.76),\n        metadata_extractor,\n        MetadataReplacementPostProcessor(target_metadata_key=\"node_info\")\n    ]\n)\n\nresponse = query_engine.query('What are current prices?')\n",
+        "language": "python"
+      },
+      {
+        "name": "Chunk Overlap Fixer",
+        "description": "Uses semantic chunking with overlap to prevent boundary errors",
+        "code": "from llama_index.core.node_parser import SentenceSplitter\nfrom llama_index.embeddings.openai import OpenAIEmbedding\n\nsplitter = SentenceSplitter(\n    chunk_size=512,\n    chunk_overlap=100,\n    paragraph_separator=\"\\n\\n\",\n    secondary_chunking_regex=r'[^\\.!?\\n]+[\\.!?]+\\s*'\n)\n\n# Rebuild with better chunking\nservice_context = ServiceContext.from_defaults(\n    embed_model=OpenAIEmbedding(),\n    llm=OpenAI(model=\"gpt-4\")\n)\n\nindex = VectorStoreIndex.from_documents(\n    docs,\n    service_context=service_context,\n    transformations=[splitter]\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Auto-Refreshing Index",
+        "description": "Implements automatic index refresh on document changes",
+        "code": "from llama_index.core import StorageContext, load_index_from_storage\nfrom pathlib import Path\n\nINDEX_DIR = Path('./storage')\n\nclass AutoRefreshIndex:\n    def __init__(self, index_dir):\n        self.index_dir = Path(index_dir)\n        self.last_docs_hash = None\n    \n    def needs_refresh(self, docs):\n        current_hash = hash(tuple(sorted([doc.text for doc in docs])))\n        return current_hash != self.last_docs_hash\n    \n    def get_query_engine(self, docs):\n        if not self.index_dir.exists() or self.needs_refresh(docs):\n            print('🔄 Rebuilding index...')\n            index = VectorStoreIndex.from_documents(docs)\n            index.storage_context.persist(persist_dir=str(self.index_dir))\n            self.last_docs_hash = hash(tuple(sorted([doc.text for doc in docs])))\n        else:\n            storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))\n            index = load_index_from_storage(storage_context)\n        \n        return index.as_query_engine()\n\nagent_index = AutoRefreshIndex(INDEX_DIR)\nquery_engine = agent_index.get_query_engine(latest_docs)\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex automatically monitors LlamaIndex query engines for context window violations, irrelevant retrievals, and index staleness during agent execution. By wrapping `query_engine.query()` with `vex.verify()`, Vex captures real-time metrics like token usage, node relevance scores, and response faithfulness, flagging issues before they impact agent performance.\n\nVex provides automated remediation through dynamic context truncation, relevance filtering, and index refresh triggers. When context overflow is detected, Vex can automatically apply compressors or reduce `similarity_top_k`. For stale indexes, Vex triggers rebuilds. The platform maintains audit trails of all context decisions, enabling teams to optimize retrieval pipelines systematically.\n\nIntegration takes <5 minutes and works across all LlamaIndex retrievers, routers, and agent workflows. Vex's observability dashboard shows context health trends, helping teams proactively tune chunk sizes, embedding models, and refresh cadences.",
+      "code": "import vex\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Install: pip install llama-index vex-sdk\n\n# Initialize your LlamaIndex agent\n\ndocs = SimpleDirectoryReader('data/').load_data()\nindex = VectorStoreIndex.from_documents(docs)\nquery_engine = index.as_query_engine(similarity_top_k=6)\n\n# Vex monitors context window, relevance, freshness\n@vex.verify(\n    checks=[\n        'context_window_overflow',\n        'retrieval_relevance_lt_0.75',\n        'index_staleness_gt_7d',\n        'response_faithfulness_lt_0.9'\n    ],\n    auto_fix=True  # Applies compressors, filters automatically\n)\ndef agent_query(question: str):\n    \"\"\"Vex-monitored agent query\"\"\"\n    response = query_engine.query(question)\n    return str(response)\n\n# Usage\nresult = agent_query('What are the 2024 product prices?')\nprint(result)\n\n# Vex dashboard: http://localhost:8080\nvex.start_dashboard()\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `vex.verify()` to your LlamaIndex agents in 2 minutes and eliminate context window failures forever."
+    }
+  }
+}

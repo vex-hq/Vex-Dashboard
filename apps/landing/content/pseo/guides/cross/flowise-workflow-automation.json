@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Flowise + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise workflow automation",
+      "Flowise guardrails",
+      "workflow automation reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of workflow automation through its drag-and-drop interface for building multi-step AI agents with API integrations and conditional logic. Guardrails are essential to prevent failures in chatflow chains, ensure action correctness, and maintain idempotency in production workflows. Vex provides runtime verification to catch issues like unvalidated outputs and lost context during agent handoffs.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Flowise",
+      "description": "Flowise workflows typically start with a Trigger Node (API/webhook) that feeds into Chatflow chains combining LLM nodes, vector stores, custom tools, and conditional branches. Multi-agent setups route tasks sequentially with human-in-the-loop approval nodes for high-risk actions. API integrations via Tool Nodes handle external calls, while memory nodes maintain context across steps.\n\nThe architecture supports complex patterns like sequential task execution (e.g., data fetch → validate → API call → approve → execute) with error handling via Try-Catch nodes. Vector stores enable RAG for decision-making, and custom JavaScript nodes add business logic. Human approval gates ensure safety for financial or permissioned actions.\n\nVex integrates as a callback handler to monitor execution at key checkpoints, verifying intermediate outputs, tool results, and final actions against predefined specs.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐\n│   Trigger Node  │───▶│  Chatflow 1   │───▶│  Conditional    │\n│   (Webhook/API) │    │ (LLM+RAG)     │    │   Branching     │\n└─────────────────┘    └──────────────┘    └──────┬──────────┐\n                                                 │          │\n                                        ┌────────▼──────────▼─────────┐\n                                        │  Tool Node + Human Approval │\n                                        │     (API Call + Vex Check)  │\n                                        └─────────────────────────────┘\n                                                        │\n                                               ┌────────▼────────┐\n                                               │   Final Action  │\n                                               │   (Execute/     │\n                                               │    Rollback)    │\n                                               └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Chatflow chains producing unvalidated intermediate outputs",
+        "description": "LLM nodes generate JSON/tools calls without schema validation, leading to malformed API requests downstream",
+        "severity": "high",
+        "mitigation": "Vex callback validates JSON outputs against Pydantic schemas at each chain step"
+      },
+      {
+        "name": "Vector store retrieval returning low-relevance documents",
+        "description": "RAG nodes fetch irrelevant context, causing agents to make decisions on wrong data",
+        "severity": "medium",
+        "mitigation": "Vex semantic similarity checks filter retrieval results before LLM consumption"
+      },
+      {
+        "name": "Custom tool nodes failing silently without error propagation",
+        "description": "API tool failures don't bubble up, causing workflows to continue with stale data",
+        "severity": "critical",
+        "mitigation": "Vex wraps tool executions with structured error monitoring and retry logic"
+      },
+      {
+        "name": "Multi-agent sequential flow losing context between agent handoffs",
+        "description": "Memory nodes fail to persist full context, breaking conditional logic chains",
+        "severity": "high",
+        "mitigation": "Vex state persistence verification ensures context integrity across handoffs"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Workflow Trigger with Vex Callback",
+        "description": "Configure Flowise Chatflow with Vex callback handler for monitoring trigger inputs",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\n// Flowise Chatflow configuration\nexport const chatflowConfig = {\n  flowData: {\n    nodes: {\n      trigger: {\n        type: 'trigger',\n        data: {\n          callbacks: {\n            onStart: async (input: any) => {\n              await vex.checkpoint('workflow_trigger', {\n                input,\n                metadata: { workflow_id: input.workflowId }\n              });\n            }\n          }\n        }\n      }\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Node with Action Verification",
+        "description": "Wrap API tool calls with Vex action correctness checks and idempotency",
+        "code": "// Custom Tool Node in Flowise\nconst apiToolNode = {\n  type: 'tool',\n  data: {\n    func: async (input: any) => {\n      const checkpoint = await vex.checkpoint('api_tool_call', {\n        action: 'create_order',\n        params: input,\n        idempotencyKey: input.orderId,\n        verify: {\n          correctness: {\n            schema: {\n              type: 'object',\n              properties: { status: { const: 'success' } }\n            }\n          }\n        }\n      });\n      \n      if (!checkpoint.passed) {\n        throw new Error('Action verification failed');\n      }\n      \n      return await fetch('/api/orders', {\n        method: 'POST',\n        body: JSON.stringify(input),\n        headers: { 'Idempotency-Key': input.orderId }\n      });\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Branch with Permission Check",
+        "description": "Verify user permissions before routing to high-risk workflow branches",
+        "code": "// Conditional Logic Node\nconst conditionalNode = {\n  type: 'condition',\n  data: {\n    condition: async (input: any) => {\n      const result = await vex.checkpoint('permission_check', {\n        action: 'high_risk_branch',\n        userId: input.userId,\n        requiredRole: 'admin',\n        verify: {\n          permission: {\n            roles: ['admin', 'manager'],\n            userId: input.userId\n          }\n        }\n      });\n      \n      return result.passed ? 'approved_branch' : 'rejected_branch';\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Human-in-the-Loop with Rollback Safety",
+        "description": "Implement rollback capability for approved actions with Vex state tracking",
+        "code": "// Human Approval Node with Rollback\nconst approvalNode = {\n  type: 'human-approval',\n  data: {\n    onApprove: async (input: any) => {\n      // Track successful execution for rollback\n      await vex.checkpoint('action_executed', {\n        action: 'process_payment',\n        transactionId: input.txId,\n        rollbackEnabled: true,\n        state: { amount: input.amount, status: 'completed' }\n      });\n      return { status: 'approved', txId: input.txId };\n    },\n    onReject: async (input: any) => {\n      // Trigger rollback if partially executed\n      await vex.rollback('process_payment', { transactionId: input.txId });\n      return { status: 'rolled_back' };\n    }\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Global Flowise Callback Handler",
+        "description": "Add Vex as universal callback across all Flowise chatflows",
+        "code": "// flowise-vex-handler.ts\nimport { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ projectId: 'flowise-prod' });\n\n// Global callback for all Flowise executions\nexport const vexCallbackHandler = {\n  onChatFlowStart: async (data: any) => {\n    await vex.checkpoint('flow_start', {\n      flowId: data.flowId,\n      input: data.input,\n      riskProfile: 'medium'\n    });\n  },\n  \n  onNodeExecute: async (nodeData: any) => {\n    await vex.checkpoint(`node_${nodeData.nodeId}`, {\n      nodeType: nodeData.type,\n      input: nodeData.input,\n      output: nodeData.output\n    });\n  },\n  \n  onChatFlowEnd: async (result: any) => {\n    await vex.checkpoint('flow_complete', {\n      success: result.success,\n      finalOutput: result.output\n    });\n  }\n};\n\n// Register in Flowise server\nexport default vexCallbackHandler;",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG Retrieval Quality Monitor",
+        "description": "Verify vector store relevance before LLM consumption",
+        "code": "// Vector Store Node wrapper\nconst ragMonitor = async (retrievedDocs: any[], query: string) => {\n  const checkpoint = await vex.checkpoint('rag_retrieval', {\n    query,\n    docs: retrievedDocs.map(d => ({ content: d.pageContent, score: d.metadata.score })),\n    verify: {\n      relevance: {\n        minScore: 0.7,\n        semanticThreshold: 0.8,\n        maxDocs: 5\n      }\n    }\n  });\n  \n  if (!checkpoint.passed) {\n    console.warn('Low relevance docs filtered:', checkpoint.failures);\n    return retrievedDocs.filter(doc => doc.metadata.score > 0.7);\n  }\n  \n  return retrievedDocs;\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Handoff Integrity Check",
+        "description": "Ensure memory/context preserved between multi-agent steps",
+        "code": "// Multi-agent handoff verification\nconst handoffVerifier = async (fromAgent: string, toAgent: string, context: any) => {\n  const result = await vex.checkpoint('agent_handoff', {\n    from: fromAgent,\n    to: toAgent,\n    contextKeys: Object.keys(context),\n    requiredKeys: ['userId', 'sessionId', 'workflowState'],\n    verify: {\n      contextIntegrity: {\n        requiredFields: ['userId', 'sessionId'],\n        maxAgeMinutes: 30\n      }\n    }\n  });\n  \n  return result.passed ? context : null;\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Workflow Automation",
+      "description": "Get started with Vex in 5 minutes - npm install @vex_dev/sdk and add one callback to protect your production workflows today."
+    }
+  }
+}

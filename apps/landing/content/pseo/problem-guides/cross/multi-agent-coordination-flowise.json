@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in Flowise Agents",
+    "description": "How to detect and fix multi-agent coordination failure in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "Flowise multi-agent-coordination",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, Multi-Agent Coordination Failure occurs when drag-and-drop chatflows with multiple agent nodes lose synchronization, leading to agents operating on stale or missing context from prior handoffs. This manifests as sequential agent chains where intermediate outputs from one agent node fail to propagate correctly to the next due to unvalidated JSON parsing or missing memory context injection. The low-code nature of Flowise exacerbates this as visual flow connections don't guarantee runtime data consistency between custom tool nodes and LLM agent handoffs.",
+    "howItManifests": [
+      {
+        "scenario": "Sequential Agent Handoff Without Context Propagation",
+        "symptom": "Second agent responds with 'I don't have context about the previous conversation' despite visual flow connection",
+        "impact": "Complete conversation breakdown; users must restart flows"
+      },
+      {
+        "scenario": "Custom Tool Node Returns Unvalidated JSON",
+        "symptom": "Agent receives malformed JSON from tool node, causing parsing errors in downstream LLMChain nodes",
+        "impact": "Silent failures cascade through entire multi-agent pipeline"
+      },
+      {
+        "scenario": "Vector Store Retrieval in Agent Loop Returns Irrelevant Docs",
+        "symptom": "Agents hallucinate answers despite connected vector store nodes showing retrieval activity",
+        "impact": "Poor answer quality across multi-agent RAG workflows"
+      },
+      {
+        "scenario": "Chatflow Memory Not Shared Between Parallel Agent Branches",
+        "symptom": "Parallel agent branches produce conflicting analysis on same input data",
+        "impact": "Inconsistent outputs requiring manual reconciliation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Context Loss Detector",
+        "description": "Monitor chatflow execution traces for missing session memory between sequential agent nodes",
+        "code": "import { ChatFlow } from 'flowise/dist';\n\nconst detectContextLoss = (chatflow: ChatFlow, executionTrace: any[]) => {\n  const agentNodes = chatflow.nodes.filter(node => node.type === 'ChatOpenAI' || node.type === 'ConversationalAgent');\n  \n  for (let i = 1; i < agentNodes.length; i++) {\n    const prevAgentOutput = executionTrace.find(trace => \n      trace.nodeId === agentNodes[i-1].id && trace.type === 'output'\n    );\n    const currentAgentInput = executionTrace.find(trace => \n      trace.nodeId === agentNodes[i].id && trace.type === 'input'\n    );\n    \n    if (!currentAgentInput?.input?.includes(prevAgentOutput?.output?.sessionHistory)) {\n      return {\n        error: 'CONTEXT_LOSS',\n        message: `Agent ${agentNodes[i].data.label} missing context from ${agentNodes[i-1].data.label}`\n      };\n    }\n  }\n  return null;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "JSON Validation Monitor",
+        "description": "Validate JSON outputs from custom tool nodes before agent consumption",
+        "code": "const validateToolJSON = (toolOutput: any): boolean => {\n  try {\n    if (typeof toolOutput === 'string') {\n      JSON.parse(toolOutput);\n    } else if (toolOutput.content) {\n      JSON.parse(toolOutput.content);\n    }\n    return true;\n  } catch (e) {\n    console.error('Invalid JSON from tool:', toolOutput);\n    return false;\n  }\n};\n\nconst monitorToolOutputs = (executionTrace: any[]) => {\n  const toolNodes = executionTrace.filter(trace => trace.nodeType === 'CustomTool');\n  return toolNodes.some(tool => !validateToolJSON(tool.output));\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Relevance Score Checker",
+        "description": "Verify vector store retrieval relevance scores in agent loops",
+        "code": "const checkVectorRelevance = (retrievalTrace: any[]) => {\n  const lowRelevanceDocs = retrievalTrace.filter(trace => {\n    return trace.metadata?.relevanceScore && trace.metadata.relevanceScore < 0.7;\n  });\n  \n  if (lowRelevanceDocs.length > 0) {\n    return {\n      error: 'LOW_RELEVANCE_RETRIEVAL',\n      docs: lowRelevanceDocs.map(doc => doc.metadata),\n      count: lowRelevanceDocs.length\n    };\n  }\n  return null;\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Explicit Context Bridge Node",
+        "description": "Add Memory Bridge node between agents to ensure context propagation",
+        "code": "// Add this custom node between agent handoffs\nconst ContextBridgeNode = {\n  type: 'customNode',\n  data: {\n    label: 'Context Bridge',\n    type: 'ContextBridge',\n    inputs: ['agent1_output'],\n    outputs: ['context_payload'],\n  },\n  process: async (input: any) => {\n    const sessionHistory = input.sessionHistory || [];\n    const currentContext = input.output;\n    \n    return {\n      context: {\n        sessionHistory,\n        previousOutput: currentContext,\n        timestamp: new Date().toISOString()\n      }\n    };\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "JSON Validation Wrapper",
+        "description": "Wrap custom tool outputs with JSON validation and error handling",
+        "code": "const SafeToolWrapper = (toolNode: any) => {\n  return async (...args: any[]) => {\n    try {\n      const result = await toolNode(...args);\n      \n      // Ensure JSON output\n      const jsonResult = typeof result === 'string' \n        ? JSON.parse(result)\n        : result;\n        \n      return {\n        success: true,\n        data: jsonResult,\n        schema: typeof jsonResult === 'object' ? Object.keys(jsonResult) : []\n      };\n    } catch (error) {\n      return {\n        success: false,\n        error: error.message,\n        fallback: {}\n      };\n    }\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Shared Memory Manager",
+        "description": "Centralize memory management for multi-branch agent flows",
+        "code": "class SharedMemoryManager {\n  private memoryStore = new Map<string, any>();\n  \n  async getSessionMemory(sessionId: string) {\n    return this.memoryStore.get(sessionId) || { history: [], context: {} };\n  }\n  \n  async updateSessionMemory(sessionId: string, update: any) {\n    const current = await this.getSessionMemory(sessionId);\n    this.memoryStore.set(sessionId, {\n      ...current,\n      history: [...current.history, update],\n      context: { ...current.context, ...update.context },\n      updatedAt: new Date().toISOString()\n    });\n  }\n  \n  // Use in agent nodes\n  const memoryManager = new SharedMemoryManager();\n  const sessionMemory = await memoryManager.getSessionMemory(chatflow.sessionId);",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex integrates directly into Flowise chatflows as a callback handler, automatically tracing execution across all agent nodes and detecting coordination failures in real-time. It monitors context propagation between sequential agents, validates JSON outputs from custom tools, and scores vector store retrieval relevance without requiring code changes to your drag-and-drop flows. When failures are detected, Vex provides structured remediation payloads with exact node IDs, missing context data, and suggested flow corrections.\n\nThe Vex SDK hooks into Flowise's execution lifecycle through the onChatFlowExecutionComplete callback, capturing full traces including node inputs/outputs and session state. Machine learning models trained on Flowise-specific patterns identify coordination failures that visual flow validation misses, such as partial context loss or schema mismatches. Remediation is automatic: Vex can inject missing context bridges or reroute low-relevance retrievals to alternative vector stores.\n\nIntegration takes 3 lines of code in your Flowise server configuration, with zero impact on existing chatflows. Vex runs passively during production traffic, surfacing failures via dashboard alerts and API endpoints for programmatic fixes.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise/dist';\n\n// Initialize Vex in Flowise server\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!,\n});\n\n// Add Vex callback to all chatflows\nconst flowiseCallbacks = {\n  onChatFlowExecutionComplete: async (chatflow: ChatFlow, trace: any) => {\n    // Detect coordination failures\n    const issues = await vex.detect('multi-agent-coordination', {\n      chatflow,\n      executionTrace: trace,\n      sessionId: chatflow.sessionId\n    });\n    \n    if (issues.length > 0) {\n      await vex.remediate('flowise-agent-failure', {\n        issues,\n        autoFix: true,\n        flowId: chatflow.id\n      });\n    }\n  }\n};\n\n// Register with Flowise\nexport default flowiseCallbacks;",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 3 lines and eliminate multi-agent coordination failures across all your Flowise chatflows forever."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "smolagents",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Smolagents + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Smolagents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Smolagents ai coding assistant",
+      "Smolagents guardrails",
+      "ai coding assistant reliability",
+      "Vex Smolagents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Build powerful AI Coding Assistants using Smolagents, Hugging Face's lightweight Python framework for code-based reasoning and tool integration. These agents excel at repository-aware code generation, sandbox execution, and iterative debugging but face risks like unsafe code execution and security vulnerabilities. Vex provides essential guardrails to verify code correctness, security, and compliance before deployment.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Smolagents",
+      "description": "The typical AI Coding Assistant with Smolagents follows a code-aware LLM pipeline: a base model (e.g., CodeLlama) receives repository context and user tasks, generates Python code via Smolagents' agent.run(), executes it in a sandbox, validates against tests, and iterates on failures. Smolagents' simplicity enables rapid prototyping with tools for file I/O, git operations, and testing frameworks like pytest.\n\nKey components include: (1) Context retriever loading repo files/tree, (2) Smolagent with code generation tools, (3) Sandbox executor (Docker/subprocess), (4) Test validator, and (5) Feedback loop for debugging. This creates a self-improving coding agent but amplifies risks from unverified generated code.\n\nVex integration wraps agent.run() to verify outputs against code correctness, security scans, credential checks, and dependency safety before execution.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Task     │───▶│  Repo Context    │\n│  (\"Fix bug...\")  │    │  Loader          │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                       ┌───────▼───────┐\n                       │ Smolagents    │\n                       │ Code Agent    │◄──┐\n                       │ .run() ──────►│   │\n                       └───────┬───────┘   │\n                              │           │\n                    ┌─────────▼─────────┐  │\n                    │   Vex.verify()    │  │\n                    │  (Security/Code)  │◄─┘\n                    └─────────┬─────────┘\n                              │\n                       ┌───────▼───────┐\n                       │  Sandbox      │\n                       │  Executor     │\n                       └───────┬───────┘\n                              │\n                       ┌───────▼───────┐\n                       │ Test Validator│\n                       │   (pytest)    │\n                       └───────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unsafe Python Execution",
+        "description": "Agents generate code with syscalls, file overwrites, or eval() that could delete repos or access system resources.",
+        "severity": "critical",
+        "mitigation": "Vex scans for dangerous APIs and enforces sandbox policies before execution."
+      },
+      {
+        "name": "Security Vulnerabilities",
+        "description": "Generated code includes SQL injection, command injection, or hardcoded secrets from repo context.",
+        "severity": "high",
+        "mitigation": "Vex performs static analysis and credential leakage detection on all outputs."
+      },
+      {
+        "name": "Dependency Safety Issues",
+        "description": "Agents add malicious packages or vulnerable dependencies via pip installs in generated code.",
+        "severity": "high",
+        "mitigation": "Vex validates dependency trees against known vulnerability databases."
+      },
+      {
+        "name": "License Compliance Violations",
+        "description": "Code copies unlicensed snippets or mixes incompatible licenses from training data.",
+        "severity": "medium",
+        "mitigation": "Vex checks generated code against license databases and flags violations."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Smolagents Code Assistant Setup",
+        "description": "Initialize a Smolagents code agent with repository context and code generation tools.",
+        "code": "from smolagents import CodeAgent, Tool\n\nfrom vex import verify\n\n# Define code generation tools\ncode_tools = [\n    Tool(name=\"write_file\", description=\"Write code to file\"),\n    Tool(name=\"run_tests\", description=\"Execute pytest\")\n]\n\n# Initialize agent\nagent = CodeAgent(\n    model=\"codellama/CodeLlama-7b-hf\",\n    tools=code_tools,\n    system_prompt=\"You are a secure coding assistant.\"\n)\n\ndef coding_assistant(task: str, repo_path: str) -> str:\n    context = f\"Repo: {repo_path}. Task: {task}\"\n    return agent.run(context)",
+        "language": "python"
+      },
+      {
+        "title": "Repository Context Loader",
+        "description": "Load relevant files and git state for the agent to reason over repo structure.",
+        "code": "import os\nimport git\n\ndef load_repo_context(repo_path: str, file_patterns: list = ['*.py']) -> str:\n    repo = git.Repo(repo_path)\n    context = f\"Repo: {repo_path}\\nBranch: {repo.active_branch}\\n\"\n    \n    for root, dirs, files in os.walk(repo_path):\n        for file in files:\n            if any(pattern in file for pattern in file_patterns):\n                with open(os.path.join(root, file), 'r') as f:\n                    context += f\"File: {file}\\n{f.read()}\\n\\n\"\n    return context[:4000]  # Truncate for token limits",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Code Executor",
+        "description": "Execute generated code in isolated Docker container with resource limits.",
+        "code": "import docker\n\ndef execute_sandbox(code: str, timeout: int = 30) -> dict:\n    client = docker.from_env()\n    \n    with open('/tmp/agent_code.py', 'w') as f:\n        f.write(code)\n    \n    container = client.containers.run(\n        'python:3.11-slim',\n        command=['python', '/tmp/agent_code.py'],\n        detach=True,\n        mem_limit='256m',\n        network_disabled=True,\n        remove=True\n    )\n    \n    result = container.wait(timeout=timeout)\n    logs = container.logs().decode()\n    \n    return {'exit_code': result['StatusCode'], 'output': logs}",
+        "language": "python"
+      },
+      {
+        "title": "Test Suite Validator",
+        "description": "Run pytest on generated code changes and validate test coverage.",
+        "code": "import subprocess\n\nclass TestValidator:\n    def __init__(self, repo_path: str):\n        self.repo_path = repo_path\n    \n    def validate_changes(self, modified_files: list) -> dict:\n        cmd = [\n            'pytest',\n            '-v',\n            '--cov=src',\n            '--cov-report=term-missing',\n            *modified_files\n        ]\n        \n        result = subprocess.run(\n            cmd, \n            cwd=self.repo_path,\n            capture_output=True, \n            text=True\n        )\n        \n        return {\n            'passed': result.returncode == 0,\n            'coverage': self._parse_coverage(result.stdout),\n            'output': result.stdout + result.stderr\n        }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap agent.run() with Vex Verification",
+        "description": "Basic integration verifying code correctness and security before execution.",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        'code_correctness',\n        'security_vulnerabilities',\n        'no_credential_leakage'\n    ],\n    risk_profile='medium'\n)\ndef safe_coding_assistant(task: str, repo_path: str) -> str:\n    context = load_repo_context(repo_path)\n    response = agent.run(f\"Task: {task}\\n{context}\")\n    return response\n\n# Usage\nresult = safe_coding_assistant(\n    \"Fix the login bug in auth.py\",\n    \"/path/to/repo\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Dependency and License Verification",
+        "description": "Add dependency safety and license compliance checks for generated requirements.",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        'dependency_safety',\n        'license_compliance',\n        'code_correctness',\n        'security_vulnerabilities'\n    ]\n)\ndef verify_generated_requirements(code: str, requirements: str) -> bool:\n    \"\"\"Verify pip dependencies in generated code\"\"\"\n    return verify_requirements(requirements)\n\n# Extract and verify requirements from agent output\ndef process_agent_output(response: str) -> str:\n    if 'pip install' in response:\n        reqs = extract_requirements(response)\n        if verify_generated_requirements('', reqs):\n            return response\n        raise ValueError(\"Unsafe dependencies detected\")\n    return response",
+        "language": "python"
+      },
+      {
+        "title": "Full Iterative Debugging Pipeline",
+        "description": "Complete pipeline with Vex verification at each step of the debug loop.",
+        "code": "from vex import verify\n\nclass SecureCodingAssistant:\n    def __init__(self, repo_path: str):\n        self.repo_path = repo_path\n        self.agent = agent\n    \n    @verify(risk_profile='medium')\n    def debug_iteration(self, task: str, test_results: str) -> str:\n        context = load_repo_context(self.repo_path)\n        feedback = f\"Previous tests failed: {test_results[:1000]}\\nFix: {task}\"\n        return self.agent.run(context + feedback)\n    \n    def run_full_debug(self, task: str, max_iterations: int = 5) -> str:\n        for i in range(max_iterations):\n            code = self.debug_iteration(task, \"\")\n            exec_result = execute_sandbox(code)\n            \n            if exec_result['exit_code'] == 0:\n                test_result = TestValidator(self.repo_path).validate_changes([])\n                if test_result['passed']:\n                    return code\n        raise Exception(\"Max iterations reached\")",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Smolagents AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your agents to eliminate code security risks."
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "crewai",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with CrewAI + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with CrewAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "CrewAI ai email assistant",
+      "CrewAI guardrails",
+      "ai email assistant reliability",
+      "Vex CrewAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with CrewAI enables multi-agent collaboration for intent detection, draft generation, attachment handling, and approval workflows, streamlining email processing at scale. However, agent delegation loops, hallucinated outputs, and task drift can lead to sending inappropriate or inaccurate emails. Vex guardrails ensure reliability by verifying PII filtering, tone, recipient validity, content accuracy, and confidentiality before actions execute.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with CrewAI",
+      "description": "The AI Email Assistant uses CrewAI to orchestrate four specialized agents: Intent Detector classifies incoming email purpose (reply, forward, draft); Draft Generator creates contextually appropriate responses; Attachment Handler extracts, validates, and manages files; Approval Agent reviews for compliance before sending. Agents collaborate sequentially with shared context, passing email metadata, content, and decisions between tasks.\n\nEach agent leverages CrewAI's task delegation with tools for email APIs (Gmail/IMAP), PII detection, and tone analysis. The crew manager coordinates execution, but without guardrails, agents may misinterpret instructions, loop indefinitely, or generate unsafe content. Vex integrates as task callbacks to verify outputs at each handoff.\n\nThis architecture handles high-volume email (1000+/day) but demands strict verification due to confidentiality risks and recipient impact.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Incoming Email  │───▶│  Intent Detector │\n│    (IMAP/API)   │    │     (Task 1)     │\n└─────────────────┘    └────────┬──────────┘\n                               │\n                    ┌───────────▼───────────┐\n                    │   Draft Generator     │\n                    │      (Task 2)         │\n                    └──────────┬────────────┘\n                               │\n                    ┌──────────▼────────────┐\n                    │ Attachment Handler    │\n                    │      (Task 3)         │\n                    └──────────┬────────────┘\n                               │ + Vex\n                    ┌──────────▼────────────┐   ┌──────────┐\n                    │  Approval Agent       │──▶│ Send     │\n                    │      (Task 4)         │   │ Email    │\n                    └────────────────────────┘   └──────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent delegation loops",
+        "description": "Intent Detector endlessly re-queries Draft Generator for clarification, stalling email processing",
+        "severity": "critical",
+        "mitigation": "Vex task callbacks enforce max iterations and detect circular delegation patterns"
+      },
+      {
+        "name": "Hallucinated tool outputs",
+        "description": "Attachment Handler fabricates file paths or PII data passed to Approval Agent",
+        "severity": "high",
+        "mitigation": "Vex verifies tool outputs against email content and filesystem before agent handoff"
+      },
+      {
+        "name": "Task drift in tone control",
+        "description": "Draft Generator shifts from professional to casual tone across iterations",
+        "severity": "high",
+        "mitigation": "Vex sentiment analysis ensures tone consistency with original email context"
+      },
+      {
+        "name": "PII leakage in drafts",
+        "description": "Agents include unredacted personal data in response drafts",
+        "severity": "critical",
+        "mitigation": "Vex PII scanner blocks drafts containing SSNs, emails, or phone numbers"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "CrewAI Agents Setup",
+        "description": "Define the four core agents with specific roles and tools for email processing workflow",
+        "code": "from crewai import Agent, Task, Crew\nfrom vex import Vex\n\nintent_detector = Agent(\n    role='Email Intent Detector',\n    goal='Classify email intent: reply, forward, or archive',\n    backstory='Expert at understanding email communication patterns',\n    verbose=True\n)\n\ndraft_generator = Agent(\n    role='Email Draft Writer',\n    goal='Generate professional email responses matching detected intent',\n    backstory='Senior technical writer specializing in business communication',\n    verbose=True\n)\n\nattachment_handler = Agent(\n    role='Attachment Processor',\n    goal='Extract and validate email attachments for security',\n    backstory='Cybersecurity specialist for file handling',\n    verbose=True\n)\n\napproval_agent = Agent(\n    role='Compliance Reviewer',\n    goal='Verify email content meets company policy before sending',\n    backstory='Legal compliance officer for corporate communications',\n    verbose=True\n)",
+        "language": "python"
+      },
+      {
+        "title": "Task Definitions with Vex Callbacks",
+        "description": "Each task includes Vex verification before completion to catch failures early",
+        "code": "def vex_callback(task_output):\n    vex = Vex(api_key=\"your-vex-key\")\n    result = vex.verify(\n        input=task.context,\n        output=task_output,\n        checks=[\n            \"pii_filtering\",\n            \"tone_appropriateness\",\n            \"recipient_validation\"\n        ]\n    )\n    return result.approved\n\nintent_task = Task(\n    description='Analyze {email_content} and classify intent',\n    agent=intent_detector,\n    context={'email_content': '{{inputs.email}}'},\n    callback=vex_callback\n)\n\ndraft_task = Task(\n    description='Write response for intent: {intent_classification}',\n    agent=draft_generator,\n    context={'intent_classification': intent_task.output},\n    callback=vex_callback\n)",
+        "language": "python"
+      },
+      {
+        "title": "Crew Orchestration",
+        "description": "Assemble agents into crew with sequential task execution and shared memory",
+        "code": "email_crew = Crew(\n    agents=[intent_detector, draft_generator, attachment_handler, approval_agent],\n    tasks=[intent_task, draft_task, attachment_task, approval_task],\n    verbose=2,\n    memory=True,\n    max_rpm=50,\n    share_crew=False\n)\n\n# Execute with input email\nresult = email_crew.kickoff(inputs={\n    'email': 'Subject: Urgent contract review... Dear John, please review...'\n})\n\nprint('Final approved email:', result)",
+        "language": "python"
+      },
+      {
+        "title": "Email Sending with Final Vex Check",
+        "description": "Approval task integrates with email API only after Vex compliance verification",
+        "code": "def send_approved_email(email_content, recipients):\n    final_vex_check = Vex(api_key=\"your-vex-key\").verify(\n        input=email_content,\n        output={\"action\": \"send\", \"recipients\": recipients},\n        checks=[\n            \"confidentiality_enforcement\",\n            \"content_accuracy\",\n            \"recipient_validation\"\n        ]\n    )\n    \n    if final_vex_check.approved:\n        import smtplib\n        server = smtplib.SMTP('smtp.gmail.com', 587)\n        server.sendmail('sender@company.com', recipients, email_content)\n        server.quit()\n        return \"Email sent successfully\"\n    else:\n        return f\"Blocked: {final_vex_check.issues}\"",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "PII Filtering Callback",
+        "description": "Prevents PII leakage by scanning all agent outputs before task completion",
+        "code": "from vex import Vex\n\n@vex.guardrail(checks=[\"pii_filtering\", \"confidentiality_enforcement\"])\ndef safe_draft_generation(email_context, intent):\n    \"\"\"Generates email draft with automatic PII redaction\"\"\"\n    # Agent would generate draft here\n    draft = f\"Response to {intent}: {email_context['body'][:200]}...\"\n    return draft\n\n# Usage in task\nresult = safe_draft_generation(\n    email_context={\"body\": \"SSN: 123-45-6789, contact john.doe@company.com\"},\n    intent=\"reply\"\n)\n# Vex automatically redacts SSN and validates before returning",
+        "language": "python"
+      },
+      {
+        "title": "Tone Consistency Verification",
+        "description": "Ensures generated drafts maintain professional tone matching original email",
+        "code": "def verify_tone_consistency(original_email, generated_draft):\n    vex = Vex(api_key=\"your-vex-key\")\n    tone_check = vex.verify(\n        input={\n            \"original_tone\": original_email,\n            \"generated_content\": generated_draft\n        },\n        checks=[\"tone_appropriateness\"],\n        policy=\"professional_business\"\n    )\n    \n    if not tone_check.approved:\n        raise ValueError(f\"Tone violation: {tone_check.issues}\")\n    return generated_draft\n\n# Blocks casual responses to formal emails\nverify_tone_consistency(\n    original_email=\"Dear Sir, please advise on Q4 projections\",\n    generated_draft=\"Hey! Here's the deets on Q4 lol\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Recipient Validation Guardrail",
+        "description": "Prevents sending to invalid or external domains without approval",
+        "code": "def validate_recipients(recipients, company_domain=\"company.com\"):\n    vex = Vex(api_key=\"your-vex-key\")\n    validation = vex.verify(\n        input={\"recipients\": recipients, \"domain\": company_domain},\n        checks=[\"recipient_validation\"],\n        policy={\n            \"allow_internal\": True,\n            \"external_approval_required\": True,\n            \"block_blacklist\": True\n        }\n    )\n    \n    if validation.approved:\n        return recipients\n    else:\n        print(f\"Blocked recipients: {validation.blocked}\")\n        return []  # Empty list prevents sending",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your CrewAI AI Email Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your email workflows from agent failures."
+    }
+  }
+}

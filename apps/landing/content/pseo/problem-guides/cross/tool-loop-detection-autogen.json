@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "autogen",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in AutoGen Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in AutoGen agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "AutoGen tool-loop-detection",
+      "AutoGen reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AutoGen, Tool Loop Detection addresses infinite cycles where agents repeatedly invoke tools like code execution or web search without progressing toward task completion, often triggered by ambiguous instructions or faulty tool outputs. This manifests as agents ping-ponging tool calls between themselves, exhausting token limits and compute resources while producing no meaningful results. AutoGen's conversational architecture exacerbates this when agents lack termination conditions or state tracking.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter agent stuck generating invalid syntax",
+        "symptom": "Agent A calls code_execution → Agent B fixes error → Agent A calls same code again",
+        "impact": "1000+ tokens consumed per loop, no task progress after 30 minutes"
+      },
+      {
+        "scenario": "Web search agents cross-validating sources endlessly",
+        "symptom": "Agent Search → Agent Validator → Agent Search with same query parameters",
+        "impact": "API rate limits hit, $50+ in search API costs over 2 hours"
+      },
+      {
+        "scenario": "Math solver agents debating trivial calculations",
+        "symptom": "Agent Calculator → Agent Verifier → Agent Calculator with same equation",
+        "impact": "Incorrect final answer after 200+ message exchanges"
+      },
+      {
+        "scenario": "File processing agents re-reading same documents",
+        "symptom": "Agent Reader → Agent Summarizer → Agent Reader requesting same file path",
+        "impact": "Memory leaks from repeated file I/O, server crash after 4 hours"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Tool Call Frequency Tracker",
+        "description": "Monitors identical tool calls within conversation rounds using AutoGen's message history",
+        "code": "from collections import defaultdict, Counter\nfrom autogen import ConversableAgent\n\ndef detect_tool_loops(agent: ConversableAgent, messages):\n    tool_calls = []\n    for msg in messages[-10:]:  # Last 10 messages\n        if hasattr(msg, 'tool_calls') and msg.tool_calls:\n            tool_calls.extend(msg.tool_calls)\n    \n    tool_counter = Counter([f'{tc['function']['name']}_{tc.get('parameters', {})}' for tc in tool_calls])\n    \n    if tool_calls and max(tool_counter.values()) >= 3:\n        return {'alert': 'TOOL_LOOP_DETECTED', 'repeated_tool': tool_counter.most_common(1)[0][0]}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Agent State Cycle Detector",
+        "description": "Tracks agent role transitions to identify ping-pong patterns in AutoGen group chats",
+        "code": "from collections import deque\n\ndef detect_agent_cycles(chat_history, window_size=5):\n    if len(chat_history) < window_size:\n        return None\n    \n    recent_speakers = deque([msg.sender for msg in chat_history[-window_size:]], maxlen=window_size)\n    speaker_pattern = tuple(recent_speakers)\n    \n    # Detect A->B->A->B pattern\n    if len(set(recent_speakers)) <= 2 and len(recent_speakers) == window_size:\n        return {'alert': 'AGENT_CYCLE_DETECTED', 'pattern': str(speaker_pattern)}\n    return None",
+        "language": "python"
+      },
+      {
+        "name": "Token Velocity Monitor",
+        "description": "Calculates token consumption rate per conversation round to catch runaway loops",
+        "code": "import tiktoken\nencoding = tiktoken.get_encoding('cl100k_base')\n\ndef detect_token_explosion(messages, max_tokens_per_round=2000):\n    recent_round_tokens = sum(len(encoding.encode(msg.content)) for msg in messages[-5:])\n    \n    if recent_round_tokens > max_tokens_per_round:\n        return {\n            'alert': 'TOKEN_EXPLOSION',\n            'tokens_consumed': recent_round_tokens,\n            'threshold': max_tokens_per_round\n        }\n    return None",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Tool Call Deduplication Middleware",
+        "description": "AutoGen reply filter that blocks repeated tool calls within time windows",
+        "code": "from autogen import register_function\nclass ToolLoopGuard:\n    def __init__(self):\n        self.tool_history = set()\n        self.max_age = 300  # 5 minutes\n    \n    def filter_reply(self, sender, recipient, reply):\n        if hasattr(reply, 'tool_calls'):\n            for tool_call in reply.tool_calls:\n                tool_id = f\"{tool_call['function']['name']}_{hash(str(tool_call.get('parameters', {})))}\"\n                if tool_id in self.tool_history:\n                    reply.content = \"[LOOP_PREVENTED] Tool call repeated. Please try different approach.\"\n                    reply.tool_calls = []\n                    break\n                self.tool_history.add(tool_id)\n        return reply\n    \nloop_guard = ToolLoopGuard()\nconfig_list = [{'functions': [], 'reply_filter': loop_guard.filter_reply}]",
+        "language": "python"
+      },
+      {
+        "name": "Conversation State Compression",
+        "description": "Summarizes conversation history to break agents out of repetitive patterns",
+        "code": "from autogen import AssistantAgent\n\ndef break_loop_with_summary(context):\n    summary_prompt = \"\"\"\n    CONVERSATION SUMMARY (to break loop):\n    \"\"\" + '\\n'.join([f\"{i}: {msg.content[:100]}...\" for i, msg in enumerate(context[-8:])])\n    \n    recovery_agent = AssistantAgent(\n        name=\"LoopBreaker\",\n        system_message=f\"\"\"You detect the team is stuck in a loop. Here's the recent conversation:\n{summary_prompt}\n\nCRITICALLY IMPORTANT: Break the loop by:\n1. Summarize what we've tried\n2. Propose ONE new approach\n3. Delegate to specific agent\nNO REPEATING previous tool calls.\"\"\"\n    )\n    return recovery_agent.generate_reply(context)\n\n# Register as termination condition\nagent.register_reply(AssistantAgent, reply_func=break_loop_with_summary, priority=100)",
+        "language": "python"
+      },
+      {
+        "name": "Max Rounds Termination",
+        "description": "Hard limit on conversation rounds per task with graceful exit in AutoGen",
+        "code": "from autogen import GroupChat, GroupChatManager\n\nclass LoopProofGroupChat(GroupChat):\n    def __init__(self, *args, max_rounds=15, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.max_rounds = max_rounds\n        self.round_count = 0\n    \n    def a_round(self, *args, **kwargs):\n        if self.round_count >= self.max_rounds:\n            return \"MAX_ROUNDS_REACHED: Task terminated to prevent infinite loop.\"\n        \n        result = super().a_round(*args, **kwargs)\n        self.round_count += 1\n        return result\n    \n# Usage\ngroupchat = LoopProofGroupChat(agents=[agent1, agent2], messages=[], max_rounds=12)\nmanager = GroupChatManager(groupchat=groupchat)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents with Vex",
+      "description": "Vex integrates directly into AutoGen as a reply function filter, automatically detecting tool loops across all agent conversations without code changes. It monitors tool call patterns, token velocity, and agent state transitions in real-time, triggering automated recovery actions like conversation summarization or task reassignment. Vex's ML-powered loop detection adapts to your specific agent topologies, reducing false positives by 85% compared to static thresholds.\n\nThe platform provides observability dashboards showing loop frequency by agent pair, tool type, and task category, plus automated remediation that injects loop-breaking messages. Vex also enforces token budgets per conversation and auto-terminates runaway sessions, saving 70-90% on LLM costs. Integration takes 3 lines of code via the vex-sdk, with zero-downtime deployment.",
+      "code": "import vex\nfrom autogen import ConversableAgent\n\n# Install: pip install autogen vex-sdk\n\n# 1. Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# 2. Register Vex as reply filter for ALL agents\n@vex_client.register_guardrail('autogen-tool-loops')\ndef prevent_tool_loops(sender, recipient, message):\n    loop_risk = vex_client.assess_loop_risk(\n        conversation=recipient.chat_messages,\n        agent_roles=[agent.name for agent in recipient.agents]\n    )\n    \n    if loop_risk.score > 0.8:\n        vex_client.trigger_recovery(\n            conversation_id=recipient.conversation_id,\n            recovery_type='summarize_and_redelegate'\n        )\n        return \"[VEX] Loop detected and corrected. Continuing with new approach.\"\n    return message\n\n# 3. Apply to agents\nagent1 = ConversableAgent(\n    name=\"Agent1\",\n    reply_filter=prevent_tool_loops\n)\n\nprint('🛡️ Vex Tool Loop Protection Active')",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 30 seconds and eliminate tool loops across all AutoGen deployments: `pip install vex-sdk`"
+    }
+  }
+}

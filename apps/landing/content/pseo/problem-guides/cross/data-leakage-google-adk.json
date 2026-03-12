@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Google ADK Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Google ADK data-leakage",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, sensitive data leakage in AI agents often occurs during multi-agent delegation where PII from one agent's session state is inadvertently shared across agents via shared tools or state handlers. Gemini model switching exacerbates this by inconsistent redaction in outputs, while tool response format mismatches can expose raw sensitive inputs. Session state corruption in long conversations further risks leaking accumulated user data across agent handoffs.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation shares unredacted session state",
+        "symptom": "Downstream agents receive customer email/SSN from upstream agent tools",
+        "impact": "Compliance violations (GDPR/CCPA) and account takeover risks"
+      },
+      {
+        "scenario": "Gemini 1.5 Pro vs Flash model output inconsistency",
+        "symptom": "Flash model fails to redact PII that Pro model masks",
+        "impact": "Inconsistent data protection across deployment environments"
+      },
+      {
+        "scenario": "Tool response format mismatches between agents",
+        "symptom": "Raw user input passed as JSON payload to unauthorized tools",
+        "impact": "Third-party tools receive unfiltered sensitive data"
+      },
+      {
+        "scenario": "Session state corruption in long conversations",
+        "symptom": "Historical PII accumulates and gets exposed in agent responses",
+        "impact": "Complete conversation history leakage to end users"
+      }
+    ],
+    "detection": [
+      {
+        "name": "PII Regex Scanner for Agent Outputs",
+        "description": "Scans all agent responses and tool outputs for common PII patterns before returning to user",
+        "code": "import re\n\ndef detect_pii_leakage(agent_output: str) -> list:\n    patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b',\n        r'\\b\\d{16}\\b',\n        r'\\b[A-Z]{2}\\d{6}\\b'\n    ]\n    findings = []\n    for pattern in patterns:\n        matches = re.findall(pattern, agent_output)\n        if matches:\n            findings.extend(matches)\n    return findings\n\n# Usage in ADK\ndef before_agent_callback(event):\n    output = event.get('output', '')\n    pii = detect_pii_leakage(output)\n    if pii:\n        print(f'🚨 PII DETECTED: {pii}')\n        event['block'] = True\n    return event",
+        "language": "python"
+      },
+      {
+        "name": "Session State PII Auditor",
+        "description": "Audits ADK session state for accumulated PII across multi-agent conversations",
+        "code": "from typing import Dict, Any\nimport json\n\ndef audit_session_state(state: Dict[str, Any]) -> Dict[str, list]:\n    pii_findings = {'emails': [], 'ssns': [], 'cards': []}\n    state_str = json.dumps(state)\n    \n    pii_findings['emails'] = re.findall(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', state_str)\n    pii_findings['ssns'] = re.findall(r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b', state_str)\n    pii_findings['cards'] = re.findall(r'\\b\\d{16}\\b', state_str)\n    \n    return {k: v for k, v in pii_findings.items() if v}\n\n# ADK integration\ndef before_agent_callback(event):\n    if 'session_state' in event:\n        findings = audit_session_state(event['session_state'])\n        if any(findings.values()):\n            print(f'🚨 Session PII: {findings}')\n            event['quarantine_state'] = True\n    return event",
+        "language": "python"
+      },
+      {
+        "name": "Tool Input Sanitizer Check",
+        "description": "Intercepts tool calls to detect PII in parameters before execution",
+        "code": "import re\nfrom google.adk import ToolCall\n\ndef scan_tool_inputs(tool_call: ToolCall) -> bool:\n    params = tool_call.parameters\n    param_str = str(params)\n    \n    pii_patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b'\n    ]\n    \n    for pattern in pii_patterns:\n        if re.search(pattern, param_str):\n            print(f'🚨 PII in tool {tool_call.name}: {param_str[:50]}...')\n            return True\n    return False\n\n# ADK callback\ndef before_agent_callback(event):\n    if 'tool_calls' in event:\n        for tool_call in event['tool_calls']:\n            if scan_tool_inputs(tool_call):\n                event['block_tools'] = True\n                break\n    return event",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Presidio PII Redactor Integration",
+        "description": "Automatically redact PII from all agent outputs using Microsoft's Presidio",
+        "code": "from presidio_analyzer import AnalyzerEngine\nfrom presidio_anonymizer import AnonymizerEngine\n\nanalyzer = AnalyzerEngine()\nanonymizer = AnonymizerEngine()\n\ndef redact_pii(text: str) -> str:\n    results = analyzer.analyze(text=text, language='en')\n    return anonymizer.anonymize(text=text, analyzer_results=results).text\n\n# ADK integration\ndef before_agent_callback(event):\n    if 'output' in event:\n        event['output'] = redact_pii(event['output'])\n    if 'tool_calls' in event:\n        for tool_call in event['tool_calls']:\n            for key, value in tool_call.parameters.items():\n                if isinstance(value, str):\n                    tool_call.parameters[key] = redact_pii(value)\n    return event",
+        "language": "python"
+      },
+      {
+        "name": "Session State PII Partitioning",
+        "description": "Isolates sensitive data in encrypted session state partitions",
+        "code": "from cryptography.fernet import Fernet\nimport base64\nimport os\n\nkey = base64.urlsafe_b64encode(os.urandom(32))\nfernet = Fernet(key)\n\ndef partition_sensitive_state(session_state: dict) -> dict:\n    safe_state = {}\n    sensitive_state = {}\n    \n    for k, v in session_state.items():\n        if detect_pii_leakage(str(v)):\n            sensitive_state[k] = fernet.encrypt(str(v).encode())\n        else:\n            safe_state[k] = v\n    \n    return {\n        'safe': safe_state,\n        'sensitive': sensitive_state,\n        'key_id': 'pii-v1'\n    }\n\n# ADK callback\ndef before_agent_callback(event):\n    if 'session_state' in event:\n        event['session_state'] = partition_sensitive_state(event['session_state'])\n    return event",
+        "language": "python"
+      },
+      {
+        "name": "Agent-Specific Data Filters",
+        "description": "Applies role-based PII filters during multi-agent delegation",
+        "code": "PII_FILTERS = {\n    'customer_support': ['email', 'phone'],\n    'billing': ['ssn', 'card'],\n    'analytics': []\n}\n\ndef apply_agent_filter(agent_role: str, data: dict) -> dict:\n    filtered = data.copy()\n    for field in PII_FILTERS.get(agent_role, []):\n        if field in filtered:\n            filtered[field] = '[REDACTED]'\n    return filtered\n\n# ADK multi-agent fix\ndef before_agent_callback(event):\n    agent_role = event.get('agent_config', {}).get('role', 'general')\n    \n    if 'session_state' in event:\n        event['session_state'] = apply_agent_filter(agent_role, event['session_state'])\n    \n    if 'input' in event:\n        event['input'] = apply_agent_filter(agent_role, event['input'])\n    \n    return event",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates as a before_agent_callback in Google ADK to automatically scan every agent interaction for PII leakage patterns specific to multi-agent workflows. It detects session state corruption, tool input sanitization failures, and Gemini model inconsistencies in real-time, blocking risky operations before they propagate. Vex's remediation engine applies Presidio redaction, state partitioning, and agent-specific filters automatically, maintaining compliance across your entire agent fleet.\n\nThe platform provides comprehensive observability dashboards showing PII exposure trends by agent, tool, and conversation length, plus automated remediation workflows that evolve with your agent architecture. Vex handles ADK's unique challenges like circular delegation and state handoff vulnerabilities that traditional monitoring misses.",
+      "code": "# pip install google-adk vex-sdk\nfrom vex_sdk import Vex\nfrom google.adk import AgentRunner\n\nvex = Vex(api_key=\"your-vex-key\")\n\n@vex.guard(\"pii-leakage-adk\")\ndef adk_pii_guard(event):\n    # Auto-detect PII in outputs, tools, and state\n    findings = detect_pii_leakage(event.get('output', ''))\n    findings.extend(audit_session_state(event.get('session_state', {})))\n    \n    if findings:\n        # Auto-remediate with Presidio\n        if 'output' in event:\n            event['output'] = redact_pii(event['output'])\n        vex.record_violation('pii-exposure', findings)\n        return {'status': 'blocked', 'redacted': True}\n    \n    return {'status': 'pass'}\n\n# Integrate with ADK AgentRunner\nagent_runner = AgentRunner(\n    agents=[...],\n    before_agent_callback=vex.enhance_callback(adk_pii_guard)\n)\n\nrunner_result = agent_runner.run(conversation)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install vex-sdk` and one callback to protect your entire ADK agent fleet from PII leakage today."
+    }
+  }
+}

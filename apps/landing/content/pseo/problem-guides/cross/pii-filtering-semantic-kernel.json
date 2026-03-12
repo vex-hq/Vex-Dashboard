@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "semantic-kernel",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Semantic Kernel Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Semantic Kernel agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Semantic Kernel pii-filtering",
+      "Semantic Kernel reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Semantic Kernel agents, PII Filtering failures occur when plugins, planners, or memory components inadvertently expose sensitive data like emails, phone numbers, or SSNs through unfiltered LLM outputs or cross-contaminated plugin chains. This manifests uniquely in SK's plugin invocation patterns where native functions return raw PII that gets embedded in execution plans or chat history without sanitization. The KernelFunction filter pipeline provides the ideal integration point for Vex to catch these leaks before they propagate through agent workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Plugin chaining producing cascading errors",
+        "symptom": "Contact extraction plugin returns raw email addresses that get passed to downstream analysis plugins without filtering",
+        "impact": "PII cascades through entire workflow, exposing customer data in logs and final responses"
+      },
+      {
+        "scenario": "Planner generating invalid execution plans",
+        "symptom": "Handlebars planner embeds unfiltered PII from memory into function arguments and execution plans",
+        "impact": "Plans contain sensitive data visible in debug logs and planner reasoning traces"
+      },
+      {
+        "scenario": "Memory recall hallucinating past interactions",
+        "symptom": "Semantic memory retrieval returns chat history containing PII that gets injected into new conversations",
+        "impact": "Previous customer PII leaks into unrelated conversations via memory contamination"
+      },
+      {
+        "scenario": "Cross-plugin data contamination",
+        "symptom": "User profile plugin data containing SSNs gets mixed into generic response plugins",
+        "impact": "Generic chat responses accidentally include sensitive user identifiers"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Log PII Regex Scanner",
+        "description": "Scan Semantic Kernel execution logs for common PII patterns in plugin outputs and planner traces",
+        "code": "```python\nimport re\nimport semantic_kernel as sk\n\nPII_PATTERNS = [\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b\\d{3}[\\s\\-]?\\d{3}[\\s\\-]?\\d{4}\\b'\n]\n\ndef scan_kernel_logs(log_entries):\n    pii_detected = []\n    for entry in log_entries:\n        for pattern in PII_PATTERNS:\n            matches = re.finditer(pattern, entry['content'])\n            for match in matches:\n                pii_detected.append({\n                    'log_id': entry['id'],\n                    'plugin': entry.get('plugin', 'unknown'),\n                    'pii': match.group(),\n                    'location': match.span()\n                })\n    return pii_detected\n\n# Usage with SK chat history\nkernel = sk.Kernel()\nchat_history = kernel.memory.chat_history\nleaks = scan_kernel_logs([{'id': i, 'content': str(msg)} for i, msg in enumerate(chat_history)])\n```",
+        "language": "python"
+      },
+      {
+        "name": "Plugin Output Interceptor",
+        "description": "TypeScript interceptor that wraps SK plugin invocations to detect PII in function results before they propagate",
+        "code": "```typescript\nimport { KernelFunction } from '@microsoft/semantic-kernel';\n\nconst PII_REGEX = /\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b|\\b\\d{3}-\\d{2}-\\d{4}\\b/g;\n\nfunction piiInterceptor(plugin: KernelFunction) {\n  return async (...args: any[]) => {\n    const result = await plugin(...args);\n    \n    const piiMatches = result.match(PII_REGEX);\n    if (piiMatches) {\n      console.warn('PII detected in plugin output:', {\n        plugin: plugin.name,\n        pii: piiMatches,\n        result\n      });\n      throw new Error(`PII leak detected in ${plugin.name}`);\n    }\n    \n    return result;\n  };\n}\n\n// Wrap contact plugin\nconst safeContactPlugin = piiInterceptor(contactPlugin);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Store PII Audit",
+        "description": "Audit Semantic Kernel memory embeddings for PII contamination before retrieval",
+        "code": "```python\nfrom semantic_kernel.contents import ChatHistory\nfrom semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion\n\nclass PiiMemoryAuditor:\n    def __init__(self):\n        self.pii_patterns = [\n            r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n            r'\\b\\d{3}-\\d{2}-\\d{4}\\b'\n        ]\n    \n    def audit_memory(self, chat_history: ChatHistory):\n        violations = []\n        for i, message in enumerate(chat_history):\n            content = str(message.content)\n            for pattern in self.pii_patterns:\n                matches = re.findall(pattern, content)\n                if matches:\n                    violations.append({\n                        'message_index': i,\n                        'role': message.role,\n                        'pii_found': matches,\n                        'content_preview': content[:100]\n                    })\n        return violations\n\n# Usage\nauditor = PiiMemoryAuditor()\nissues = auditor.audit_memory(kernel.memory.chat_history)\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Kernel Function Result Filter",
+        "description": "Add Vex PII filter to Semantic Kernel function invocation pipeline",
+        "code": "```python\nfrom vex_sdk import VexFilter\nfrom semantic_kernel import KernelFunction\nfrom semantic_kernel.filters import KernelFunctionFilterContext\n\nclass VexPiiFilter(KernelFunctionFilterContext):\n    async def on_function_return(self, context: KernelFunctionFilterContext) -> None:\n        vex_filter = VexFilter(api_key=\"your-vex-api-key\")\n        result = context.result\n        \n        # Filter PII from function result\n        clean_result = await vex_filter.sanitize_pii(result)\n        context.result = clean_result\n\n# Register filter with kernel\nkernel = sk.Kernel()\nkernel.filters.add(VexPiiFilter())\n\n# All plugin calls now automatically filtered\nresult = await kernel.invoke(contact_plugin, input=\"John Doe <john@example.com>\")\n```",
+        "language": "python"
+      },
+      {
+        "name": "Planner PII Sanitizer",
+        "description": "Sanitize execution plans before Handlebars planner execution",
+        "code": "```typescript\nimport { HandlebarsPlanner } from '@microsoft/semantic-kernel-planner-handlebars';\nimport { VexClient } from 'vex-sdk';\n\nconst vex = new VexClient({ apiKey: 'your-vex-key' });\n\nclass SafePlanner extends HandlebarsPlanner {\n  async createPlan(goal: string): Promise<Plan> {\n    const plan = await super.createPlan(goal);\n    \n    // Sanitize all plan steps\n    for (const step of plan.steps) {\n      if (step.functionCall) {\n        const sanitizedArgs = await vex.sanitizePii(step.functionCall.arguments);\n        step.functionCall.arguments = sanitizedArgs;\n      }\n    }\n    \n    return plan;\n  }\n}\n\nconst safePlanner = new SafePlanner(kernel);\n```",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Write Filter",
+        "description": "Filter PII before storing in Semantic Kernel memory",
+        "code": "```python\nfrom vex_sdk import VexFilter\n\nclass SafeMemoryStore:\n    def __init__(self, kernel, vex_api_key):\n        self.kernel = kernel\n        self.vex_filter = VexFilter(api_key=vex_api_key)\n    \n    async def store_message(self, message):\n        # Sanitize before memory storage\n        clean_content = await self.vex_filter.sanitize_pii(message.content)\n        message.content = clean_content\n        \n        # Store sanitized version\n        await self.kernel.memory.save_chat_message(\n            message, chat_id=\"agent-chat\"\n        )\n    \n    async def safe_chat(self, user_input):\n        message = ChatMessageContent(AuthorRole.User, user_input)\n        await self.store_message(message)\n\n# Usage\nsafe_memory = SafeMemoryStore(kernel, \"vex-api-key\")\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates directly as a Semantic Kernel filter, automatically scanning all plugin results, planner plans, and memory operations for PII exposure. The SDK hooks into SK's filter pipeline (`KernelFunctionFilterContext`) to inspect every function invocation result before it propagates through agent workflows. Vex provides real-time remediation by redacting PII while preserving semantic meaning, and generates compliance reports for audit trails.\n\nFor complex agent scenarios involving plugin chaining and planners, Vex traces data flow across the entire execution graph, identifying cascading PII leaks that span multiple function calls. The platform automatically generates remediation rules based on detected patterns and deploys them across all SK agents in your organization. Integration takes minutes via `pip install vex-sdk` and a single filter registration.",
+      "code": "```python\nfrom vex_sdk.semantic_kernel import VexKernelFilter\nfrom semantic_kernel import Kernel\n\n# Install: pip install semantic-kernel vex-sdk\n\n# Initialize kernel with Vex PII protection\nkernel = Kernel()\n\n# Add Vex as result filter (catches 100% of plugin outputs)\nvex_filter = VexKernelFilter(\n    api_key=\"vex-xxxxx\",\n    rules={\n        \"block_pii\": True,\n        \"redact_emails\": True,\n        \"audit_trail\": True\n    }\n)\n\nkernel.filters.add(vex_filter)\n\n# All plugins, planners, memory now automatically protected\ncontact_plugin = kernel.import_plugin_from_prompt(\"Extract contact info\", \"{{input}}\")\n\n# PII automatically filtered\nresult = await kernel.invoke(contact_plugin, \"Call John at 555-123-4567\")\nprint(result)  # \"Call John at [PHONE_REDACTED]\"\n\n# View Vex audit dashboard at app.vex.dev\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and protect all your Semantic Kernel agents from PII leaks in 5 minutes at vex.dev"
+    }
+  }
+}

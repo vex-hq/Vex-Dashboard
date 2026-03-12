@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with LangChain + Vex Guardrails",
+    "description": "Learn how to build workflow automation with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain workflow automation",
+      "LangChain guardrails",
+      "workflow automation reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building workflow automation with LangChain enables complex multi-step agents that integrate APIs, handle conditional logic, and incorporate human approvals for reliable task execution. However, these systems are prone to hallucinations, infinite tool loops, context overflows, and formatting inconsistencies that can lead to failed workflows or security risks. Vex provides runtime verification to ensure action correctness, permissions, idempotency, and rollback capabilities, making your automations production-ready.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with LangChain",
+      "description": "A typical LangChain workflow automation architecture centers around an AgentExecutor that orchestrates tools, chains, and conditional routing. The agent receives tasks via a router chain, calls external APIs through custom tools, applies business logic via LLM-driven decision nodes, and pauses for human-in-the-loop approvals using LangGraph's checkpointing. RAG retrieval provides context for decision-making, while output parsers ensure structured responses feed into subsequent steps.\n\nThe flow typically starts with task ingestion, followed by parallel tool execution for data gathering, sequential processing for validation, and conditional branching based on LLM reasoning. Human approval gates use persistent state management to resume workflows. Observability is added via LangSmith tracing, but runtime verification requires wrapping critical invoke() calls.\n\nThis architecture scales to enterprise automation but introduces risks around tool misuse, state corruption, and unhandled edge cases that Vex mitigates through structured verification.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Task Input    │───▶│   Router Chain   │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                       ┌──────▼──────┐\n                       │ AgentExecutor│\n                       │  + Tools     │◄──┐\n                       └──────┬──────┘   │\n                              │          │\n                    ┌─────────▼─────────┐ │\n                    │ Human Approval    │ │\n                    │   Checkpoint      │─┤\n                    └─────────┬─────────┘ │\n                              │          │\n                       ┌──────▼──────┐   │\n                       │  Output     │───┘\n                       │  Parser     │\n                       └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Hallucination in RAG retrieval chains",
+        "description": "Agent hallucinates incorrect API endpoints or parameters during tool selection",
+        "severity": "high",
+        "mitigation": "Verify retrieved context relevance and tool parameter correctness before execution"
+      },
+      {
+        "name": "Tool call loops in agent executors",
+        "description": "Agent enters infinite loop calling the same API repeatedly",
+        "severity": "critical",
+        "mitigation": "Track execution state and enforce max iterations with idempotency checks"
+      },
+      {
+        "name": "Context window overflow in long conversations",
+        "description": "Accumulated conversation history exceeds token limits, causing truncation",
+        "severity": "medium",
+        "mitigation": "Monitor token usage and summarize/archive conversation state"
+      },
+      {
+        "name": "Inconsistent output formatting across chain steps",
+        "description": "Downstream steps fail due to malformed JSON from previous chain outputs",
+        "severity": "high",
+        "mitigation": "Enforce Pydantic/JSON schema validation at each chain boundary"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Multi-Step Agent with Custom Tools",
+        "description": "Create an agent executor with API tools and conditional routing for workflow steps",
+        "code": "from langchain.agents import AgentExecutor, create_react_agent\nfrom langchain.tools import tool\nfrom langchain_openai import ChatOpenAI\nfrom langchain.prompts import PromptTemplate\n\n@tool\ndef update_user_status(user_id: str, status: str) -> str:\n    \"\"\"Update user workflow status via API\"\"\"\n    return f\"Updated user {user_id} to {status}\n\nllm = ChatOpenAI(model=\"gpt-4o-mini\")\ntools = [update_user_status]\n\nprompt = PromptTemplate.from_template(\"Answer using tools: {input}\")\nagent = create_react_agent(llm, tools, prompt)\nagent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)\n\nresult = agent_executor.invoke({\"input\": \"Update user 123 to approved\"})",
+        "language": "python"
+      },
+      {
+        "title": "Human-in-the-Loop with LangGraph",
+        "description": "Implement approval checkpointing using LangGraph state persistence",
+        "code": "from langgraph.graph import StateGraph, END\nfrom typing import TypedDict, Annotated\nimport operator\n\nclass WorkflowState(TypedDict):\n    user_id: str\n    status: str\n    approved: bool\n\n    messages: Annotated[list, operator.add]\n\ndef approval_node(state: WorkflowState) -> WorkflowState:\n    return {\"messages\": [\"Pending human approval for user \" + state[\"user_id\"]]}\n\ndef human_decision_node(state: WorkflowState) -> str:\n    if state.get(\"approved\", False):\n        return \"approved\"\n    return \"pending\"\n\nworkflow = StateGraph(WorkflowState)\nworkflow.add_node(\"approval\", approval_node)\nworkflow.add_node(\"decision\", human_decision_node)\nworkflow.set_entry_point(\"approval\")\napp = workflow.compile(checkpointer=MemorySaver())",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent with Tool Binding",
+        "description": "Define workflow agent with structured tool calls in TypeScript",
+        "code": "import { ChatOpenAI } from \"@langchain/openai\";\nimport { createReactAgent } from \"@langchain/core/agents\";\nimport { tool } from \"@langchain/core/tools\";\nimport { pull } from \"langchain/hub\";\n\nconst llm = new ChatOpenAI({ model: \"gpt-4o-mini\" });\n\nconst updateStatusTool = tool(async ({ userId, status }) => {\n  console.log(`Updating user ${userId} to ${status}`);\n  return `User ${userId} status updated to ${status}`;\n}, {\n  name: \"update_user_status\",\n  description: \"Update user workflow status\",\n  schema: {\n    userId: { type: \"string\" },\n    status: { type: \"string\", enum: [\"pending\", \"approved\", \"rejected\"] }\n  }\n});\n\nconst prompt = await pull(\"hwchase17/react\");\nconst agent = await createReactAgent({ llm, tools: [updateStatusTool], prompt });\nconst result = await agent.invoke({ input: \"Approve user workflow 456\" });",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Routing Chain",
+        "description": "Route workflow steps based on LLM decision making",
+        "code": "from langchain.chains.router import MultiPromptChain\nfrom langchain.chains.llm import LLMChain\nfrom langchain.prompts import PromptTemplate\n\nllm = ChatOpenAI()\n\nrouting_prompt = PromptTemplate.from_template(\"Classify task: {input}\")\nrouting_chain = LLMChain(llm=llm, prompt=routing_prompt)\n\ndestination_chains = {\n    \"api_call\": LLMChain(...),\n    \"human_review\": LLMChain(...)\n}\n\nrouter_chain = MultiPromptChain(\n    router_chain=routing_chain,\n    destination_chains=destination_chains,\n    default_chain=LLMChain(...)\n)\n\nresult = router_chain.invoke({\"input\": \"Process payment approval\"})",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Tool Calls with Action Correctness",
+        "description": "Wrap agent invoke with Vex to validate tool parameters and permissions",
+        "code": "import vex\n\n@vex.verify({\n    \"action_correctness\": {\n        \"tool_name\": \"update_user_status\",\n        \"valid_statuses\": [\"pending\", \"approved\", \"rejected\"],\n        \"max_user_updates\": 3\n    },\n    \"permissions\": \"user:write\"\n})\ndef safe_agent_execute(input_data: dict):\n    return agent_executor.invoke(input_data)\n\n# Usage\ntry:\n    verified_result = safe_agent_execute({\n        \"input\": \"Update user 123 to approved\"\n    })\nexcept vex.VerificationError as e:\n    print(f\"Blocked: {e.message}\")\n    # Trigger rollback logic",
+        "language": "python"
+      },
+      {
+        "title": "Idempotency & Rollback Verification",
+        "description": "Ensure workflow steps are idempotent with automatic rollback",
+        "code": "import vex\n\n@vex.verify({\n    \"idempotency\": {\n        \"check_hash\": \"user_id + status\",\n        \"max_retries\": 2,\n        \"rollback\": \"revert_user_status\"\n    },\n    \"action_correctness\": True\n})\ndef workflow_step(state: WorkflowState):\n    # API call\n    result = update_user_status(state[\"user_id\"], state[\"status\"])\n    return {**state, \"result\": result}\n\n# Vex automatically handles duplicate detection and rollback",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Wrapper for Agent Execution",
+        "description": "Type-safe verification for TypeScript LangChain workflows",
+        "code": "import { verify } from \"vex-sdk\";\n\nconst safeAgentInvoke = async (input: string) => {\n  const verification = await verify({\n    actionCorrectness: {\n      toolName: \"update_user_status\",\n      validStatuses: [\"pending\", \"approved\", \"rejected\"]\n    },\n    permissions: \"user:write\",\n    idempotency: {\n      checkHash: `${input.userId}-${input.status}`,\n      maxRetries: 3\n    }\n  });\n\n  if (!verification.approved) {\n    throw new Error(`Verification failed: ${verification.reason}`);\n  }\n\n  const result = await agent.invoke({ input });\n  return result;\n};\n\n// Usage\nconst result = await safeAgentInvoke(\"Update user 789 to approved\");",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Workflow Automation",
+      "description": "Install Vex today with `pip install vex-sdk` and wrap your chain.invoke() calls to eliminate workflow failures."
+    }
+  }
+}

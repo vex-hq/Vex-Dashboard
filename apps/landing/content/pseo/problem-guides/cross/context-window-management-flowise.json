@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "flowise",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Flowise Agents",
+    "description": "How to detect and fix context window management for ai agents in Flowise agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Flowise context-window-management",
+      "Flowise reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Flowise, Context Window Management issues for AI Agents manifest as token overflow in long chatflow chains where conversational history accumulates without truncation, causing LLM API errors or incoherent responses. Drag-and-drop RAG pipelines often retrieve excessive vector documents that exceed context limits when combined with chat history. Multi-agent handoffs lose critical context between sequential nodes, while custom tool nodes append unfiltered outputs that bloat the prompt indiscriminately.",
+    "howItManifests": [
+      {
+        "scenario": "Chatflow chains with persistent memory",
+        "symptom": "LLM nodes return 'context_length_exceeded' errors after 10+ turns",
+        "impact": "Chatflow crashes mid-conversation, users must restart"
+      },
+      {
+        "scenario": "RAG pipeline with vector store retrieval",
+        "symptom": "Retriever node returns 15+ documents regardless of relevance",
+        "impact": "Prompt tokens exceed 128k limit, responses become generic"
+      },
+      {
+        "scenario": "Multi-agent sequential handoff",
+        "symptom": "Agent2 receives only last message, ignores Agent1 context",
+        "impact": "Downstream agents make decisions without full conversation state"
+      },
+      {
+        "scenario": "Custom tool nodes in workflow",
+        "symptom": "Tool outputs (JSON, tables) appended raw without summarization",
+        "impact": "Context balloons from 4k to 80k tokens after 3 tool calls"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Overflow Monitor",
+        "description": "Logs token usage per node and flags chains exceeding 80% of model limit",
+        "code": "import { ChatFlow } from 'flowise/dist';\n\nconst detectTokenOverflow = (flow: ChatFlow) => {\n  const nodes = flow.data.nodes;\n  const llmNodes = nodes.filter(n => n.data?.type?.includes('LLM'));\n  \n  llmNodes.forEach(node => {\n    const config = node.data.node?.template?.llmchain;\n    if (config?.memory?.type === 'BufferMemory') {\n      console.warn(`⚠️ BufferMemory detected in ${node.data.id} - Token overflow risk HIGH`);\n    }\n    \n    const inputEdges = flow.data.edges?.filter(e => e.target === node.data.id) || [];\n    if (inputEdges.length > 3) {\n      console.error(`🚨 ${node.data.id}: ${inputEdges.length} inputs = Context explosion risk`);\n    }\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Vector Retrieval Bloat Detector",
+        "description": "Scans retriever nodes for excessive k-value and missing relevance filtering",
+        "code": "const detectRetrievalBloat = (flow: ChatFlow) => {\n  const retrievers = flow.data.nodes.filter(n => \n    n.data?.type?.includes('Retriever') || \n    n.data?.type?.includes('Vector')\n  );\n  \n  retrievers.forEach(retriever => {\n    const config = retriever.data.node?.template;\n    const kValue = config?.k || config?.topK || 4;\n    \n    if (kValue > 5) {\n      console.error(`🚨 ${retriever.data.id}: k=${kValue} too high. Max recommended: 5`);\n    }\n    \n    if (!config?.metadataField && !config?.filter) {\n      console.warn(`⚠️ ${retriever.data.id}: No relevance filtering configured`);\n    }\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Context Handoff Breakage Scanner",
+        "description": "Identifies sequential agent flows missing shared memory context propagation",
+        "code": "const detectContextHandoffs = (flow: ChatFlow) => {\n  const agentNodes = flow.data.nodes.filter(n => \n    n.data?.type?.includes('Agent') || \n    n.data?.type?.includes('MultiAgent')\n  );\n  \n  const edges = flow.data.edges || [];\n  agentNodes.forEach((agent, idx) => {\n    const outgoing = edges.filter(e => e.source === agent.data.id);\n    const incoming = edges.filter(e => e.target === agent.data.id);\n    \n    if (incoming.length > 0 && !agent.data.node?.template?.sharedMemory) {\n      console.error(`🚨 ${agent.data.id}: Agent handoff without shared memory!`);\n    }\n    \n    if (outgoing.length > 1) {\n      console.warn(`⚠️ ${agent.data.id}: Fan-out detected - context divergence risk`);\n    }\n  });\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Truncator Node",
+        "description": "Custom Flowise node that truncates history to fit model context window",
+        "code": "// Add as Custom Function Node in Flowise\nconst truncateContext = async (input: any, modelMaxTokens: number = 128000) => {\n  const { history, currentInput, model } = input;\n  const tokenizer = require('@xenova/transformers').tokenizer;\n  \n  let totalTokens = tokenizer.encode(currentInput).length;\n  const messages = history.messages.slice().reverse();\n  \n  for (let i = 0; i < messages.length; i++) {\n    const msgTokens = tokenizer.encode(messages[i].content).length;\n    if (totalTokens + msgTokens > modelMaxTokens * 0.8) break;\n    totalTokens += msgTokens;\n  }\n  \n  return {\n    truncatedHistory: messages.slice(0, i).reverse(),\n    tokensUsed: totalTokens,\n    tokensSaved: history.messages.length - i\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Smart Retriever with Reranking",
+        "description": "Retriever node config with relevance scoring and top-3 filtering",
+        "code": "// Flowise Retriever Node Configuration\nconst smartRetrieverConfig = {\n  \"type\": \"Retriever\",\n  \"template\": {\n    \"vectorStore\": {\n      \"type\": \"HNSWLib\",\n      \"k\": 3,  // Reduced from default 4+\n      \"fetchK\": 20,\n      \"rerank\": true,\n      \"similarityThreshold\": 0.75\n    },\n    \"postProcessing\": {\n      \"filter\": \"metadata.page_content.length < 2000\",\n      \"summarizeLowRelevance\": true\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Shared Memory Handoff Wrapper",
+        "description": "Global conversation state propagation between agent nodes",
+        "code": "// Custom Tool Node for context bridging\nconst createContextBridge = (flowId: string) => {\n  return async (input: any) => {\n    const redis = require('redis').createClient();\n    const key = `flowise:context:${flowId}`;\n    \n    // Store current context\n    await redis.set(key, JSON.stringify({\n      timestamp: Date.now(),\n      history: input.history,\n      agentState: input.agentState,\n      sessionId: input.sessionId\n    }), 'EX', 3600);\n    \n    // Load for next agent\n    const downstreamContext = await redis.get(key);\n    return {\n      ...input,\n      sharedContext: JSON.parse(downstreamContext || '{}'),\n      bridgeActive: true\n    };\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a callback handler in Flowise chatflow configuration, automatically injecting token monitoring, context truncation, and retrieval optimization across all nodes. When context exceeds 80% of model limits, Vex triggers remediation workflows that rewrite prompts, summarize history, and rerank retrieved documents in real-time without breaking the conversation flow. The SDK captures Flowise's internal node execution traces, identifies the exact failure point (BufferMemory overflow, retriever bloat, or handoff drops), and applies framework-specific patches using Flowise's node templating system.\n\nVex's agent reliability layer runs parallel to Flowise execution, maintaining a shadow context window that predicts token overflow 2-3 turns ahead. When risks are detected, it injects corrective nodes dynamically via Flowise's API without requiring canvas redesign. This ensures production chatflows remain stable even as conversation length grows or document retrieval scales.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { ChatFlow } from 'flowise/dist';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\n// Add Vex callback to Flowise chatflow\nconst instrumentFlowise = (chatflow: ChatFlow) => {\n  chatflow.callbacks.push({\n    onNodeExecute: async (nodeId, input, output, tokensUsed) => {\n      const alert = await vex.check({\n        framework: 'flowise',\n        nodeId,\n        inputTokens: tokensUsed.input,\n        outputTokens: tokensUsed.output,\n        contextRatio: tokensUsed.input / 128000,\n        flowId: chatflow.id\n      });\n      \n      if (alert.severity === 'CRITICAL') {\n        // Auto-apply fix\n        await vex.remediate('context_overflow', {\n          nodeId,\n          fix: 'truncate_history',\n          maxTokens: 100000\n        });\n      }\n    },\n    onFlowComplete: (execution) => {\n      vex.reportFlowMetrics(execution);\n    }\n  });\n  \n  return chatflow;\n};\n\n// Usage in Flowise server\nexport default instrumentFlowise;",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 lines and eliminate context window failures across all Flowise flows: npm install @vex_dev/sdk"
+    }
+  }
+}

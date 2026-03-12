@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with BeeAI + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI ai email assistant",
+      "BeeAI guardrails",
+      "ai email assistant reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Email Assistant with BeeAI enables intelligent email processing, intent detection, draft generation, and approval workflows using IBM's production-ready agent framework. However, high-risk operations like PII handling, recipient validation, and content generation demand robust guardrails to prevent data leaks, inappropriate communications, and compliance violations. Vex provides runtime verification to ensure reliability across long email sessions and complex tool interactions.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with BeeAI",
+      "description": "The AI Email Assistant follows a modular BeeAI agent architecture with distinct components for email intake, intent classification, content generation, and approval workflows. Incoming emails trigger the agent via BeeAI's event bus, where the Granite model performs intent detection (reply, forward, delegate) and extracts action parameters. Tools handle attachment processing, recipient validation, and draft generation, with state persisted across multi-turn conversations.\n\nMemory management tracks conversation context and user preferences, while the approval workflow integrates human-in-the-loop for send confirmation. BeeAI's observability layer captures agent events for monitoring, where Vex registers as an event listener to enforce verifications like PII filtering and tone analysis before email transmission.\n\nThe architecture scales for high-volume inboxes with async processing and supports multiple email protocols via pluggable tools.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Email Intake  │───▶│   BeeAI Agent    │\n│   (IMAP/API)    │    │  + Intent Detect │\n└─────────────────┘    │  + Granite LLM   │\n                       │  + Memory Store  │\n                       └──────┬───────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │     Tool Execution       │\n                │ - Draft Generation       │\n                │ - Attachment Processing  │\n                │ - Recipient Validation   │\n                └─────────────┬─────────────┘\n                             │\n                    ┌────────▼────────┐\n                    │   Vex Guardrails│\n                    │ - PII Filter    │\n                    │ - Tone Check    │\n                    │ - Approval Flow │\n                    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long email threads cause memory bloat, leading to inconsistent intent detection and draft generation.",
+        "severity": "critical",
+        "mitigation": "Vex monitors memory usage and triggers context summarization after 10k tokens."
+      },
+      {
+        "name": "PII Leakage in Drafts",
+        "description": "Granite model outputs unfiltered PII from attachments or email bodies into generated responses.",
+        "severity": "critical",
+        "mitigation": "Real-time PII entity extraction and redaction before send approval."
+      },
+      {
+        "name": "Tool Injection via Malicious Emails",
+        "description": "Crafted email content bypasses tool parameter validation, enabling unauthorized actions.",
+        "severity": "high",
+        "mitigation": "Strict schema validation on all tool inputs with allowlist enforcement."
+      },
+      {
+        "name": "Tone Inappropriateness",
+        "description": "Model generates unprofessional or offensive language unsuitable for business communication.",
+        "severity": "high",
+        "mitigation": "Sentiment analysis and professionalism scoring before draft finalization."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Email Intent Detection Agent",
+        "description": "Core BeeAI agent that classifies email intent and extracts action parameters using Granite model.",
+        "code": "from beeai import Agent, Tool\nfrom beeai.models import Granite\n\nintent_agent = Agent(\n    name=\"email-intent\",\n    model=Granite(model_id=\"ibm/granite-13b-chat\"),\n    memory_size=10000\n)\n\n@intent_agent.tool()\ndef classify_intent(email_content: str, sender: str) -> dict:\n    '''Classify email intent: reply, forward, delegate, archive'''\n    return {\n        'intent': 'reply',\n        'priority': 'high',\n        'action_items': ['schedule_meeting']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Draft Generation Tool",
+        "description": "Generates email response drafts with context from conversation memory.",
+        "code": "from beeai.tools import Tool\n\nclass DraftGenerator(Tool):\n    name = \"generate_draft\"\n    description = \"Generate professional email draft\"\n    \n    def execute(self, intent: str, context: str, recipient: str) -> str:\n        prompt = f\"Write professional {intent} to {recipient}: {context}\"\n        response = self.agent.model.generate(prompt)\n        return response.text\n\nintent_agent.register_tool(DraftGenerator())",
+        "language": "python"
+      },
+      {
+        "title": "Attachment Processing Tool",
+        "description": "Safely extracts text from email attachments for intent analysis.",
+        "code": "@intent_agent.tool()\ndef process_attachment(file_path: str, file_type: str) -> str:\n    '''Extract text content from email attachments'''\n    import PyPDF2\n    if file_type == 'pdf':\n        with open(file_path, 'rb') as f:\n            pdf = PyPDF2.PdfReader(f)\n            return ' '.join(page.extract_text() for page in pdf.pages)\n    return ''",
+        "language": "python"
+      },
+      {
+        "title": "Recipient Validation Tool",
+        "description": "Validates email recipients against company directory to prevent external leaks.",
+        "code": "@intent_agent.tool()\ndef validate_recipient(email: str, company_domain: str) -> bool:\n    '''Verify recipient is within approved domain'''\n    domain = email.split('@')[-1]\n    return domain == company_domain or email in ['ceo@company.com', 'legal@company.com']",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Hook Vex into BeeAI's event system to monitor all agent actions and tool calls.",
+        "code": "from vex_sdk import Vex\nfrom beeai.events import EventBus\n\nvex = Vex(api_key=\"your-vex-key\")\n\n@vex.guardrail('pii_filtering')\ndef filter_pii(content: str) -> str:\n    return vex.pii.redact(content)\n\ndef vex_event_handler(event):\n    if event.type == 'tool_call':\n        result = event.result\n        result = filter_pii(result)\n        event.result = vex.verify('tone_check', result)\n\nEventBus.register_listener(vex_event_handler)\nintent_agent.run_with_vex(vex)",
+        "language": "python"
+      },
+      {
+        "title": "Memory Growth Guardrail",
+        "description": "Prevents unbounded memory expansion during long email conversations.",
+        "code": "@vex.guardrail('memory_management')\ndef manage_memory(agent_memory: dict, token_count: int) -> dict:\n    if token_count > 10000:\n        summary = vex.summarize_conversation(agent_memory['history'])\n        agent_memory['history'] = summary\n        agent_memory['token_count'] = len(summary)\n    return agent_memory\n\n@vex.guardrail('serialization_safety')\ndef validate_state(state: dict) -> bool:\n    return vex.schema.validate(state, 'beeai_agent_state')",
+        "language": "python"
+      },
+      {
+        "title": "Email Send Approval Workflow",
+        "description": "Final verification layer combining all checks before email transmission.",
+        "code": "@vex.guardrail('email_send_approval')\ndef approve_email(draft: str, recipient: str, attachments: list) -> dict:\n    checks = {\n        'pii_free': vex.pii.scan(draft) == [],\n        'tone_appropriate': vex.sentiment.analyze(draft)['professionality'] > 0.8,\n        'recipient_valid': vex.verify('recipient_validation', recipient),\n        'content_accurate': vex.factcheck.validate(draft)\n    }\n    return {'approved': all(checks.values()), 'checks': checks}\n\n# Integrate with send workflow\nresult = approve_email(draft_content, to_email, files)\nif result['approved']:\n    send_email(draft_content, to_email)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI AI Email Assistant",
+      "description": "Deploy Vex guardrails today to protect your email operations from PII leaks and compliance risks."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "prompt-injection-prevention",
+    "framework": "mastra",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Prompt Injection Prevention for AI Agents in Mastra Agents",
+    "description": "How to detect and fix prompt injection prevention for ai agents in Mastra agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "prompt-injection-prevention-for-ai-agents",
+      "Mastra prompt-injection-prevention",
+      "Mastra reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Mastra agents, prompt injection manifests as attackers exploiting unvalidated workflow step outputs, tool call responses, memory retrievals, and sync integrations to hijack agent behavior. Without proper sanitization between workflow transitions, malicious payloads propagate through the agent's state and tools. This leads to unauthorized actions, data exfiltration, or complete workflow derailment specific to Mastra's pipeline architecture.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow step outputs not validated between transitions",
+        "symptom": "Agent suddenly executes unexpected tools or ignores workflow logic after processing user input through a prior step",
+        "impact": "Complete workflow hijacking - agent follows attacker's instructions instead of defined flow"
+      },
+      {
+        "scenario": "Agent tool calls returning malformed data",
+        "symptom": "Tool responses contain executable prompt fragments that override agent instructions in subsequent steps",
+        "impact": "Tools become injection vectors, allowing attackers to chain exploits across workflow steps"
+      },
+      {
+        "scenario": "Memory retrieval injecting stale context",
+        "symptom": "Agent retrieves conversation history containing cached injection payloads from previous sessions",
+        "impact": "Persistent injection attacks that survive across conversations and agent restarts"
+      },
+      {
+        "scenario": "Sync integration data causing agent confusion",
+        "symptom": "Third-party API responses contain unescaped prompt injection payloads that override agent goals",
+        "impact": "External integrations become trusted data sources for attackers to inject malicious instructions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Transition Payload Scanner",
+        "description": "Detects injection payloads in Mastra workflow step outputs before they propagate to next steps",
+        "code": "import { WorkflowContext, StepOutput } from 'mastra/workflows';\n\nimport { scanForInjection } from './injection-scanner';\n\nexport async function detectWorkflowInjection(ctx: WorkflowContext, output: StepOutput): Promise<boolean> {\n  // Scan all string outputs for common injection patterns\n  const payloads = ['ignore', 'forget', 'override', 'system', 'you are', 'act as'];\n  \n  for (const [key, value] of Object.entries(output.data)) {\n    if (typeof value === 'string') {\n      for (const payload of payloads) {\n        if (value.toLowerCase().includes(payload) && \n            (value.includes('previous') || value.includes('instructions'))) {\n          console.warn(`Injection detected in workflow step ${ctx.currentStep}: ${value.slice(0, 100)}...`);\n          return true;\n        }\n      }\n    }\n  }\n  return false;\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Response Validator",
+        "description": "Intercepts Mastra agent tool calls and validates responses for injection patterns",
+        "code": "import { AgentToolCall, ToolResponse } from 'mastra/agents';\n\nexport function validateToolResponse(call: AgentToolCall, response: ToolResponse): boolean {\n  const suspiciousPatterns = [\n    /\\b(ignore|forget|override|system|you are|act as)\\b/gi,\n    /previous instructions/i,\n    /do not tell|don't reveal/i,\n    /from now on/i\n  ];\n  \n  const content = response.content?.toString() || '';\n  \n  return !suspiciousPatterns.some(pattern => pattern.test(content));\n}\n\nexport function logSuspiciousToolResponse(call: AgentToolCall, response: ToolResponse) {\n  if (!validateToolResponse(call, response)) {\n    console.error('🚨 Tool injection detected:', {\n      tool: call.toolName,\n      input: call.input,\n      suspiciousContent: response.content\n    });\n  }\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Retrieval Auditor",
+        "description": "Scans Mastra memory retrievals for cached injection payloads before injecting into agent context",
+        "code": "import { MemoryRetrieval } from 'mastra/memory';\n\nexport function auditMemoryRetrieval(retrieval: MemoryRetrieval[]): boolean {\n  const injectionScore = (content: string): number => {\n    const indicators = ['system:', 'override', 'ignore previous', 'you are now'];\n    return indicators.filter(indicator => \n      content.toLowerCase().includes(indicator.toLowerCase())\n    ).length;\n  };\n  \n  for (const item of retrieval) {\n    if (injectionScore(item.content) >= 2) {\n      console.warn('Memory injection risk:', item.content.slice(0, 200));\n      return true;\n    }\n  }\n  return false;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Workflow Output Sanitizer Middleware",
+        "description": "Mastra workflow middleware that strips injection payloads before step transitions",
+        "code": "import { WorkflowMiddleware } from 'mastra/workflows';\n\nimport { sanitizePrompt } from './prompt-sanitizer';\n\nexport const injectionPreventionMiddleware: WorkflowMiddleware = async (ctx, next) => {\n  // Sanitize output before it becomes input for next step\n  if (ctx.output) {\n    ctx.output.data = {\n      ...ctx.output.data,\n      sanitizedContent: sanitizePrompt(JSON.stringify(ctx.output.data))\n    };\n  }\n  \n  await next();\n};\n\nexport function sanitizePrompt(input: string): string {\n  const dangerousPatterns = [\n    /ignore previous instructions/gi,\n    /you are now.*?\\b(?:helpful|malicious|evil)/gi,\n    /from now on.*?do/gi,\n    /system:.*?\\n\\n/gi\n  ];\n  \n  return dangerousPatterns.reduce((clean, pattern) => \n    clean.replace(pattern, '[SANITIZED]'), input\n  );\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Response Wrapper",
+        "description": "Wraps Mastra agent tools to validate and sanitize responses before returning to agent",
+        "code": "import { AgentTool, ToolResponse } from 'mastra/agents';\n\nexport function createSafeTool<T extends AgentTool>(tool: T): T {\n  const safeExecute = async (input: any): Promise<ToolResponse> => {\n    const rawResponse = await tool.execute(input);\n    \n    // Validate and sanitize\n    const safeContent = sanitizeToolOutput(rawResponse.content);\n    \n    return {\n      ...rawResponse,\n      content: safeContent\n    };\n  };\n  \n  return {\n    ...tool,\n    execute: safeExecute as any\n  };\n}\n\nfunction sanitizeToolOutput(content: any): string {\n  if (typeof content !== 'string') return String(content);\n  \n  // Remove executable prompt fragments\n  return content\n    .replace(/\\b(?:ignore|override|forget|system:)\\s*/gi, '[REMOVED]')\n    .replace(/you are now.*?\\./gi, '[ROLE SANITIZED]')\n    .replace(/from now on/gi, '[INSTRUCTION REMOVED]');\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Retrieval Filter",
+        "description": "Filters Mastra memory retrievals to block injection payloads from entering agent context",
+        "code": "import { MemoryFilter } from 'mastra/memory';\n\nexport const safeMemoryFilter: MemoryFilter = {\n  filter: (retrievals) => {\n    return retrievals.filter(item => {\n      const score = calculateInjectionRisk(item.content);\n      return score < 0.7; // Threshold for safe content\n    });\n  }\n};\n\nfunction calculateInjectionRisk(content: string): number {\n  const indicators = [\n    'ignore previous',\n    'you are now',\n    'system:',\n    'override',\n    'forget'\n  ];\n  \n  const matches = indicators.filter(ind => \n    content.toLowerCase().includes(ind)\n  );\n  \n  return matches.length / indicators.length;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Prompt Injection Prevention for AI Agents Detection with Vex",
+      "description": "Vex integrates directly into Mastra agent pipelines as middleware, automatically scanning every workflow transition, tool response, memory retrieval, and sync integration for injection payloads. Using behavioral pattern recognition trained on real Mastra deployments, Vex detects subtle injection attempts that bypass simple regex filters, including encoded payloads and context-aware attacks.\n\nVex provides real-time blocking, automatic remediation through content sanitization, and comprehensive attack reporting with payload origins traced back to specific workflow steps or integrations. The platform continuously learns from your Mastra agents' normal behavior to reduce false positives while catching novel injection techniques.\n\nDeployment takes minutes: install the Vex SDK, add one middleware line to your Mastra workflows, and get instant protection across all agents with full observability into injection attempts.",
+      "code": "import { Vex } from '@vex_dev/sdk';\nimport { Agent, Workflow } from 'mastra';\n\n// Initialize Vex for Mastra\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!,\n});\n\n// Protect Mastra agent pipeline\nexport class SecureMastraAgent extends Agent {\n  constructor() {\n    super();\n    \n    // Vex middleware - blocks injections automatically\n    this.use(vex.middleware({\n      framework: 'mastra',\n      blockOnRisk: 'high',\n      sanitize: true,\n      logPayloads: true\n    }));\n  }\n}\n\n// Protect workflows\nexport const secureWorkflow = new Workflow()\n  .use(vex.workflowMiddleware())\n  .addStep('userInput', userInputStep)\n  .addStep('process', processStep)\n  .addStep('respond', respondStep);",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one line of Vex middleware to protect all your Mastra agents from prompt injection - start your free trial now."
+    }
+  }
+}

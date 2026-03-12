@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build customer support with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents customer support",
+      "n8n AI Agents guardrails",
+      "customer support reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "n8n AI Agents enable powerful customer support workflows by combining RAG retrieval, CRM integrations, and tool-calling for ticket creation and order lookups. However, complex agent chains in n8n often lead to recursive loops, unvalidated outputs, credential leaks, and stale context injection. Vex provides essential guardrails to verify response accuracy, filter PII, ensure tone consistency, and enforce policy compliance before actions execute.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with n8n AI Agents",
+      "description": "Typical n8n customer support workflows start with a webhook trigger capturing customer inquiries. An AI Agent node with RAG retrieves relevant knowledge base articles and conversation history. The agent then uses tools for CRM lookups (order status, customer data) and ticket creation in systems like Zendesk or HubSpot. Memory window nodes maintain conversation context across interactions.\n\nThe workflow chains multiple AI Agent nodes for intent classification, response generation, and escalation decisions. Action nodes execute CRM API calls based on tool outputs. Without validation, unfiltered AI responses can expose PII, create incorrect tickets, or trigger inappropriate escalations.\n\nVex integrates as a webhook node immediately after each AI Agent node, verifying outputs before they reach action nodes or trigger recursive chains.",
+      "diagram": "Webhook Trigger → AI Agent (RAG + Tools) → [VEX WEBHOOK] → CRM Lookup → AI Agent (Response Gen) → [VEX WEBHOOK] → Ticket Action → Memory Window\n                    ↓\n              Escalation Check → Human Handoff"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI Agent nodes incorrectly parse customer responses as new triggers, creating infinite loops that exhaust API quotas and generate duplicate tickets.",
+        "severity": "critical",
+        "mitigation": "Vex recursion detector analyzes conversation patterns and blocks loops before action nodes execute."
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unverified tool calls pass hallucinated order IDs or customer data to CRM APIs, creating invalid tickets and support errors.",
+        "severity": "critical",
+        "mitigation": "Vex verifies tool parameters against knowledge base and CRM schemas before execution."
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI Agent tool calls embed API keys or session tokens in plain text parameters, exposing credentials in workflow logs.",
+        "severity": "high",
+        "mitigation": "Vex PII scanner redacts credentials and validates tool call security before forwarding."
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated memory windows inject irrelevant past conversations, causing agents to reference wrong orders or customer history.",
+        "severity": "high",
+        "mitigation": "Vex context validator ensures memory relevance and recency before agent processing."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Set up Vex Client in n8n Workflow",
+        "description": "Initialize Vex SDK with your API key as the first node after workflow trigger. This client verifies all subsequent AI outputs.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: $('VEX_API_KEY').value!,\n  projectId: 'cs-n8n-support',\n});\n\n// Store client in workflow context for reuse\n$workflow.staticData.vexClient = vex;\n\nreturn [{ json: { status: 'initialized', clientReady: true } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Verify AI Agent Response Before CRM Action",
+        "description": "After RAG AI Agent node, validate response accuracy, PII, and tone before CRM tool calls.",
+        "code": "const vex = $workflow.staticData.vexClient;\nconst aiOutput = $json.aiResponse;\n\nconst result = await vex.verify({\n  inputs: {\n    customerQuery: $('Customer Query').value,\n    agentResponse: aiOutput.response,\n    orderId: aiOutput.toolParams?.orderId,\n    conversationHistory: $json.memoryWindow\n  },\n  checks: ['response_accuracy', 'pii_filtering', 'tone_consistency'],\n  context: {\n    useCase: 'customer_support',\n    crmSystem: 'zendesk',\n    maxTokens: 2000\n  }\n});\n\nif (!result.valid) {\n  throw new Error(`Vex blocked: ${result.issues.join(', ')}`);\n}\n\nreturn [{ json: { verified: true, safeOutput: aiOutput } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Validate Tool Calls for Ticket Creation",
+        "description": "Before Zendesk ticket creation, verify tool parameters prevent invalid tickets and policy violations.",
+        "code": "const vex = $workflow.staticData.vexClient;\nconst toolCall = $json.toolCall;\n\nconst policyCheck = await vex.verify({\n  inputs: {\n    ticketSubject: toolCall.params.subject,\n    ticketDescription: toolCall.params.description,\n    customerEmail: toolCall.params.customerEmail,\n    escalationKeywords: toolCall.params.escalation\n  },\n  checks: ['policy_compliance', 'pii_filtering', 'escalation_triggers'],\n  context: {\n    supportTier: 'premium',\n    maxTicketLength: 5000,\n    allowedEscalations: ['billing', 'technical']\n  }\n});\n\nreturn policyCheck.valid ? \n  [{ json: { approved: true, params: toolCall.params } }] : \n  [{ json: { blocked: true, reason: policyCheck.issues } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Context Validation for Memory Window",
+        "description": "Ensure memory window provides relevant context before injecting into next AI Agent node.",
+        "code": "const vex = $workflow.staticData.vexClient;\nconst memoryContext = $json.memoryWindow;\n\nconst contextCheck = await vex.verify({\n  inputs: {\n    currentQuery: $('Customer Query').value,\n    memoryContext: memoryContext.slice(-5), // Last 5 exchanges\n    timestamp: new Date().toISOString()\n  },\n  checks: ['response_accuracy'],\n  context: {\n    stalenessThreshold: '2h',\n    relevanceScore: 0.7,\n    conversationId: $json.sessionId\n  }\n});\n\nreturn {\n  json: {\n    validContext: contextCheck.valid,\n    filteredMemory: contextCheck.valid ? memoryContext : [],\n    relevanceScore: contextCheck.metrics?.relevance\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Add Vex Webhook Node After Every AI Agent",
+        "description": "Insert Vex verification as HTTP Request node after each AI Agent node in your n8n workflow.",
+        "code": "// n8n HTTP Request Node Configuration\nconst webhookUrl = 'https://api.vex.dev/v1/verify/webhook';\n\nconst body = {\n  apiKey: $('VEX_API_KEY').value,\n  inputs: {\n    agentResponse: $('AI Agent').json.response,\n    customerQuery: $('Webhook Trigger').json.body.query,\n    toolCalls: $('AI Agent').json.tools\n  },\n  checks: ['response_accuracy', 'pii_filtering'],\n  projectId: 'n8n-customer-support'\n};\n\n// Set in HTTP Request node\nconst response = await $http.request({\n  method: 'POST',\n  url: webhookUrl,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(body),\n  timeout: 5000\n});\n\nif (!response.data.valid) {\n  return [{ json: { error: 'Vex verification failed', issues: response.data.issues } }];\n}\n\nreturn [{ json: { verified: true, output: $('AI Agent').json } }];",
+        "language": "typescript"
+      },
+      {
+        "title": "Configure Global Vex Policy for Support Workflows",
+        "description": "Set organization-wide policies that apply to all customer support workflows.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ apiKey: process.env.VEX_API_KEY! });\n\nawait vex.policies.create({\n  name: 'n8n-customer-support-policy',\n  projectId: 'cs-n8n-support',\n  rules: {\n    pii: {\n      detect: ['email', 'phone', 'order_id'],\n      action: 'redact'\n    },\n    tone: {\n      required: ['professional', 'empathetic'],\n      prohibited: ['aggressive', 'sarcastic']\n    },\n    escalation: {\n      keywords: ['urgent', 'billing emergency'],\n      action: 'flag_for_human'\n    }\n  },\n  defaultChecks: ['response_accuracy', 'policy_compliance']\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Monitor Vex Blocks in n8n Dashboard",
+        "description": "Track verification failures and common issues across all support workflows.",
+        "code": "const vex = new Vex({ apiKey: $('VEX_API_KEY').value! });\n\nconst metrics = await vex.metrics.list({\n  projectId: 'cs-n8n-support',\n  timeRange: '24h',\n  filters: {\n    workflow: 'customer-support',\n    checks: ['pii_filtering', 'policy_compliance']\n  }\n});\n\nreturn {\n  json: {\n    totalVerifications: metrics.total,\n    blockRate: metrics.block_rate,\n    topIssues: metrics.top_issues,\n    recentBlocks: metrics.recent.slice(0, 5)\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents Customer Support",
+      "description": "Add Vex verification to your workflows today to prevent costly support errors and ensure compliance."
+    }
+  }
+}

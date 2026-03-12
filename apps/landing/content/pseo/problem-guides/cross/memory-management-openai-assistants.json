@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in OpenAI Assistants API Agents",
+    "description": "How to detect and fix ai agent memory management in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "OpenAI Assistants API memory-management",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, AI Agent Memory Management problems arise from unbounded thread message accumulation, where conversation history grows indefinitely without truncation or summarization. This leads to silent context overflow as the model struggles with massive token counts, degrading performance and increasing costs. The API's thread-based persistence exacerbates this, lacking built-in memory pruning mechanisms.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support threads",
+        "symptom": "Assistant responses become incoherent or repetitive after 50+ exchanges",
+        "impact": "Token usage spikes 10x, responses timeout, customers abandon conversations"
+      },
+      {
+        "scenario": "Multi-turn code debugging sessions",
+        "symptom": "Code interpreter fails with 'context too long' errors after 20 iterations",
+        "impact": "Development workflow breaks, engineers lose hours of debugging progress"
+      },
+      {
+        "scenario": "File search over growing document sets",
+        "symptom": "Retrieval includes irrelevant old files from early thread messages",
+        "impact": "Assistant hallucinates based on outdated context, delivers wrong answers"
+      },
+      {
+        "scenario": "Function calling in persistent agents",
+        "symptom": "Function arguments reference message IDs from 100+ turns ago",
+        "impact": "API calls fail with invalid references, agent gets stuck in loops"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Token Bloat Monitor",
+        "description": "Calculates total token count across all thread messages and alerts on thresholds",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef check_thread_memory(thread_id, max_tokens=100000):\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    total_tokens = 0\n    for msg in messages.data:\n        total_tokens += len(msg.content[0].text.value) // 4  # Rough token estimate\n    return {\n        'thread_id': thread_id,\n        'total_tokens': total_tokens,\n        'over_limit': total_tokens > max_tokens,\n        'message_count': len(messages.data)\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Message Age Distribution Check",
+        "description": "Identifies threads with messages older than 7 days still contributing to context",
+        "code": "import datetime\nfrom openai import OpenAI\nclient = OpenAI()\n\ndef detect_stale_messages(thread_id):\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    cutoff = datetime.datetime.now() - datetime.timedelta(days=7)\n    stale_count = sum(1 for msg in messages.data \n                     if datetime.datetime.fromisoformat(msg.created_at.replace('Z', '+00:00')) < cutoff)\n    return {\n        'stale_messages': stale_count,\n        'total_messages': len(messages.data),\n        'stale_ratio': stale_count / len(messages.data)\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Context Overflow Simulator",
+        "description": "Simulates assistant run with current thread to detect context length failures",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef test_thread_overflow(thread_id):\n    try:\n        run = client.beta.threads.runs.create(\n            thread_id=thread_id,\n            assistant_id='your-assistant-id',\n            instructions='Respond with current date only.'\n        )\n        client.beta.threads.runs.wait(thread_id=thread_id, run_id=run.id, timeout=30)\n        return {'status': 'pass', 'run_id': run.id}\n    except Exception as e:\n        return {'status': 'fail', 'error': str(e), 'likely_overflow': 'context_length_exceeded' in str(e).lower()}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Smart Thread Rotation",
+        "description": "Creates new threads when memory limits hit, preserving summary from old thread",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef rotate_thread(old_thread_id, assistant_id):\n    # Get summary of old thread\n    messages = client.beta.threads.messages.list(thread_id=old_thread_id, limit=100)\n    summary_prompt = 'Summarize this conversation in 200 words: ' + '\\n'.join([\n        f\"{msg.role}: {msg.content[0].text.value[:100]}...\"\n        for msg in messages.data[:10]\n    ])\n    \n    # Create summary with assistant\n    new_thread = client.beta.threads.create()\n    run = client.beta.threads.runs.create(\n        thread_id=new_thread.id,\n        assistant_id=assistant_id,\n        instructions=summary_prompt\n    )\n    client.beta.threads.runs.wait(thread_id=new_thread.id, run_id=run.id)\n    return new_thread.id",
+        "language": "python"
+      },
+      {
+        "name": "Message Pruning Middleware",
+        "description": "Automatically deletes old messages while preserving critical context",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef prune_thread(thread_id, keep_last=20):\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    for msg in messages.data[keep_last:]:\n        client.beta.threads.messages.delete(thread_id=thread_id, message_id=msg.id)\n    print(f'Pruned thread to {keep_last} recent messages')\n\n# Usage: prune_thread('thread_abc123', keep_last=15)",
+        "language": "python"
+      },
+      {
+        "name": "External Memory Vector Store",
+        "description": "Offloads conversation history to vector DB, injects only relevant context",
+        "code": "from openai import OpenAI\nimport pinecone\nclient = OpenAI()\n\npinecone.init(api_key='your-key', environment='us-west1-gcp')\nindex = pinecone.Index('conversation-memory')\n\ndef store_memory(thread_id, message):\n    vector = client.embeddings.create(input=message.content[0].text.value, model='text-embedding-3-small').data[0].embedding\n    index.upsert([{'id': message.id, 'values': vector, 'metadata': {'thread_id': thread_id}}])\n\ndef retrieve_relevant_context(query, thread_id, top_k=5):\n    query_vector = client.embeddings.create(input=query, model='text-embedding-3-small').data[0].embedding\n    results = index.query(vector=query_vector, top_k=top_k, filter={'thread_id': thread_id})\n    return [match['id'] for match in results['matches']]\n\n# Usage before assistant run:\n# relevant_msgs = retrieve_relevant_context('current query', thread_id)\n# Inject relevant message content into new thread",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI run completion events, automatically monitoring thread token counts, message age distributions, and context overflow risks across all your assistants. When memory bloat is detected, Vex triggers intelligent remediation workflows like thread rotation or message pruning without human intervention. \n\nThe platform provides real-time dashboards showing memory usage trends per thread, assistant, and customer segment, with one-click remediation and automatic A/B testing of memory strategies. Vex's ML-powered anomaly detection identifies emerging memory patterns before they impact production SLAs. \n\nIntegration takes 5 minutes with the vex-sdk, and Vex handles retries, rate limits, and error recovery automatically while maintaining full audit trails for compliance.",
+      "code": "from vex import Vex\nfrom openai import OpenAI\n\nvex = Vex(api_key='your-vex-key')\nopenai_client = OpenAI()\n\n@vex.webhook('openai_run_complete')\ndef monitor_assistant_memory(event):\n    thread_id = event['data']['thread_id']\n    run = event['data']\n    \n    # Vex built-in memory checks\n    memory_status = vex.checks.run_thread_memory_check(\n        client=openai_client,\n        thread_id=thread_id,\n        max_tokens=80000\n    )\n    \n    if memory_status['over_limit']:\n        # Auto-remediate\n        new_thread = vex.remediations.rotate_thread(\n            client=openai_client,\n            old_thread_id=thread_id,\n            assistant_id=run['assistant_id']\n        )\n        vex.notify(\n            title='Thread Memory Overflow Fixed',\n            message=f'Rotated {thread_id} -> {new_thread}',\n            severity='warning'\n        )\n        return {'action': 'rotated', 'new_thread': new_thread}\n    \n    return {'status': 'healthy'}\n\n# Deploy: vex deploy --webhook openai_run_complete",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install in 5 minutes: pip install vex-sdk && vex quickstart openai"
+    }
+  }
+}

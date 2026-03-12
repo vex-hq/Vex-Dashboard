@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Azure AI Agent Service Agents",
+    "description": "How to detect and fix context window management for ai agents in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Azure AI Agent Service context-window-management",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, Context Window Management issues arise when agents exceed token limits during multi-turn conversations, tool calls, and grounding data retrieval from Azure AI Search or Bing. Agents fail gracefully only if middleware validates token counts before submission to Azure OpenAI models, but native threading often concatenates history without truncation. This leads to 429 errors, incomplete responses, and security violations when sensitive data spills across truncated contexts.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-turn agent threads with tool execution",
+        "symptom": "AzureOpenAIChatCompletions returns 429 'token limit exceeded' after 10+ turns",
+        "impact": "Agent halts mid-conversation, users experience dropped sessions"
+      },
+      {
+        "scenario": "Grounding with Azure AI Search file retrieval",
+        "symptom": "File content + metadata exceeds 128k token limit for gpt-4o",
+        "impact": "Truncated grounding data causes hallucinated responses"
+      },
+      {
+        "scenario": "Bing Search grounding in enterprise agents",
+        "symptom": "Search snippets + conversation history overflow context window",
+        "impact": "Outdated or irrelevant grounding due to forced truncation"
+      },
+      {
+        "scenario": "Agent memory persistence across sessions",
+        "symptom": "Thread token count grows exponentially without summarization",
+        "impact": "High Azure OpenAI costs and eventual hard failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Pre-Check Middleware",
+        "description": "Intercepts Azure AI Agent Service requests and calculates total tokens before API call",
+        "code": "from azure.ai.projects.client import ProjectsClient\nfrom tiktoken import get_encoding\n\nclient = ProjectsClient.from_credential()\nthread_id = 'your-thread-id'\n\n# Get thread messages\nmessages = client.agents.get_thread_messages(thread_id)\n\n# Calculate tokens\nencoding = get_encoding('cl100k_base')\ntotal_tokens = 0\nfor msg in messages:\n    total_tokens += len(encoding.encode(msg.content))\n\nmodel_limit = 128000  # gpt-4o\nif total_tokens > model_limit * 0.9:\n    print(f'⚠️ Token overflow detected: {total_tokens}/{model_limit}')\n",
+        "language": "python"
+      },
+      {
+        "name": "Azure Monitor Token Overflow Alerts",
+        "description": "Sets up Azure Monitor alerts for 429 errors with token limit patterns",
+        "code": "from azure.monitor.query import LogsQueryClient\n\nquery = \"\"\"\nAzureDiagnostics\n| where Category == 'AzureOpenAIChatCompletions'\n| where message_s contains 'token limit'\n| where resultType_s == 'RequestFailure'\n| summarize count() by bin(TimeGenerated, 5m)\n| where count_ > 5\n\"\"\"\n\nclient = LogsQueryClient.from_credential()\nresponse = client.query_workspace(\n    workspace_id='your-log-analytics-id',\n    query=query,\n    timespan='PT1H'\n)\n\nif response.tables:\n    print('🚨 Token limit alerts triggered:', response.tables[0].rows)\n",
+        "language": "python"
+      },
+      {
+        "name": "Thread Token Usage Dashboard",
+        "description": "TypeScript dashboard monitoring Azure AI Agent threads token consumption",
+        "code": "import { ProjectsClient } from '@azure/ai-projects-rest';\n\nconst client = new ProjectsClient(credential, subscriptionId);\n\nconst checkThreadTokens = async (threadId: string) => {\n  const messages = await client.agents.getThreadMessages(threadId);\n  \n  let totalTokens = 0;\n  messages.value.forEach(msg => {\n    totalTokens += estimateTokens(msg.content);\n  });\n  \n  const alertThreshold = 115200; // 90% of 128k\n  if (totalTokens > alertThreshold) {\n    console.warn(`Thread ${threadId} at ${totalTokens} tokens`);\n  }\n};\n\nfunction estimateTokens(text: string): number {\n  return Math.ceil(text.length / 4); // Rough GPT-4 token estimate\n}\n",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Summarization",
+        "description": "Summarizes conversation history when approaching token limits",
+        "code": "from openai import AzureOpenAI\nfrom tiktoken import get_encoding\n\nclient = AzureOpenAI(azure_endpoint='your-endpoint')\nencoding = get_encoding('cl100k_base')\n\ndef summarize_context(messages, max_tokens=8000):\n    context_tokens = sum(len(encoding.encode(msg['content'])) for msg in messages)\n    \n    if context_tokens > max_tokens:\n        summary_prompt = 'Summarize this conversation preserving key facts:'\n        summary_response = client.chat.completions.create(\n            model='gpt-4o-mini',\n            messages=[{'role': 'user', 'content': summary_prompt + str(messages)}]\n        )\n        return [{'role': 'system', 'content': 'Conversation summary: ' + summary_response.choices[0].message.content}]\n    return messages[-10:]  # Keep recent messages\n\n# Use in agent loop\nthread_messages = summarize_context(get_thread_messages())\n",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budgeted Tool Calls",
+        "description": "Limits tool response size before adding to context",
+        "code": "import json\n\ndef validate_tool_result(tool_result: dict, token_budget: int = 4000) -> str:\n    encoding = get_encoding('cl100k_base')\n    \n    content = json.dumps(tool_result)\n    tokens = len(encoding.encode(content))\n    \n    if tokens > token_budget:\n        # Truncate intelligently\n        return json.dumps({\n            'content': content[:token_budget*4],\n            'truncated': True,\n            'original_tokens': tokens\n        })\n    return content\n\n# In Azure Agent Service tool handler\nresult = validate_tool_result(tool_output)\nagent_memory.append({'role': 'tool', 'content': result})\n",
+        "language": "python"
+      },
+      {
+        "name": "Rolling Window Buffer TS",
+        "description": "TypeScript implementation of fixed-size message buffer",
+        "code": "class TokenWindowManager {\n  private maxTokens: number = 120000;\n  private encoding: any;\n  private messages: any[] = [];\n\n  constructor() {\n    // Load tiktoken-wasm or use approximation\n  }\n\n  addMessage(role: string, content: string): void {\n    const msg = { role, content };\n    this.messages.push(msg);\n\n    // Trim from start until under limit\n    while (this.getTotalTokens() > this.maxTokens) {\n      this.messages.shift();\n    }\n  }\n\n  getContext(): any[] {\n    return [...this.messages];\n  }\n\n  private getTotalTokens(): number {\n    return this.messages.reduce((sum, msg) => sum + this.estimateTokens(msg.content), 0);\n  }\n\n  private estimateTokens(text: string): number {\n    return Math.ceil(text.length / 4);\n  }\n}\n\nconst window = new TokenWindowManager();\nwindow.addMessage('user', userInput);\nconst context = window.getContext();\n",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically intercepting all agent threads and tool calls to monitor token consumption in real-time. Using the Vex SDK (pip install vex-sdk), it calculates context window usage across conversation history, grounding data, and tool outputs, flagging threads exceeding 90% of model limits. Vex provides automated remediation through dynamic summarization, rolling window truncation, and policy-based content filtering, ensuring enterprise compliance while maintaining agent performance.\n\nThe platform generates comprehensive dashboards showing token utilization trends per agent, thread, and model, with one-click remediation workflows. Vex's Azure-native integration leverages Azure Monitor and Application Insights for historical analysis, predicting token overflow before it causes 429 errors. Teams can enforce organization-wide context window policies with zero-code configuration.",
+      "code": "from vex_sdk import VexAgentMonitor\nfrom azure.ai.projects.client import ProjectsClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nvex_monitor = VexAgentMonitor(\n    azure_tenant_id='your-tenant',\n    subscription_id='your-sub',\n    resource_group='rg-agents'\n)\n\n@vex_monitor.context_window_guard(model='gpt-4o', threshold=0.9)\ndef process_agent_thread(thread_id: str):\n    client = ProjectsClient.from_credential()\n    messages = client.agents.get_thread_messages(thread_id)\n    \n    # Vex auto-summarizes if over threshold\n    optimized_context = vex_monitor.optimize_context(messages)\n    \n    response = client.agents.create_message(\n        thread_id=thread_id,\n        message={'role': 'user', 'content': 'continue'}\n    )\n    return response\n\n# Vex auto-instruments all threads\nvex_monitor.start_monitoring(project_name='enterprise-agents')\n\n# Detection + auto-fix reports\nprint(vex_monitor.get_token_violations_report())\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate context window failures in your Azure AI Agents with one line of code."
+    }
+  }
+}

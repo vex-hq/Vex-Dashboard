@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "context-window-management",
+    "framework": "google-adk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Context Window Management for AI Agents in Google ADK Agents",
+    "description": "How to detect and fix context window management for ai agents in Google ADK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "context-window-management-for-ai-agents",
+      "Google ADK context-window-management",
+      "Google ADK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Google ADK, Context Window Management issues for AI agents arise from multi-agent delegation exceeding Gemini's token limits, causing truncated histories and failed handoffs. Session state accumulation in long conversations corrupts agent memory, while tool response mismatches inflate context unnecessarily. These problems manifest uniquely through ADK's agent orchestration patterns and Gemini model constraints.",
+    "howItManifests": [
+      {
+        "scenario": "Multi-agent delegation loops",
+        "symptom": "Agent history exceeds 1M token limit during handoffs between DelegateAgent and WorkerAgent",
+        "impact": "Gemini returns 'context too long' errors, breaking conversation flow"
+      },
+      {
+        "scenario": "Gemini model switching (1.5 → 2.0 Flash)",
+        "symptom": "Context window size mismatch causes sudden truncation mid-conversation",
+        "impact": "Agents lose critical session state, producing incoherent responses"
+      },
+      {
+        "scenario": "Long conversation session state",
+        "symptom": "ADK's default SessionState accumulates every message indefinitely",
+        "impact": "Performance degradation → complete failure after 20-30 turns"
+      },
+      {
+        "scenario": "Tool response format mismatches",
+        "symptom": "Agents return verbose JSON instead of structured ToolResponse objects",
+        "impact": "Context balloons 5-10x, hitting limits in 5-7 interactions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Token Limit Monitor",
+        "description": "Tracks context window usage before each agent invocation using ADK's message history",
+        "code": "from google.adk.agents import Agent\nfrom vex_sdk import before_agent_callback\n\ndef monitor_context_window(agent: Agent, messages: list):\n    total_tokens = sum(len(msg.content) for msg in messages[-50:])\n    if total_tokens > 800_000:\n        print(f'⚠️  CONTEXT OVERFLOW: {total_tokens:,} tokens')\n        return {'alert': 'near_limit', 'tokens': total_tokens}\n    return {'status': 'safe'}\n\n# Integrate with Vex\napp = before_agent_callback(monitor_context_window)",
+        "language": "python"
+      },
+      {
+        "name": "Session State Bloat Detector",
+        "description": "Analyzes ADK SessionState growth rate across conversation turns",
+        "code": "from google.adk.sessions import SessionState\n\ndef detect_state_bloat(session: SessionState, turn_count: int):\n    state_size = len(str(session.__dict__))\n    growth_rate = state_size / max(turn_count, 1)\n    \n    if growth_rate > 500:  # >500 chars/turn\n        return {\n            'bloat_detected': True,\n            'growth_rate': growth_rate,\n            'recommendation': 'enable state_pruning=True'\n        }\n    return {'healthy': True}",
+        "language": "python"
+      },
+      {
+        "name": "Tool Response Size Analyzer",
+        "description": "Measures tool response verbosity across agent interactions",
+        "code": "from google.adk.tools import ToolResponse\n\ndef analyze_tool_bloat(responses: list[ToolResponse]):\n    verbose_tools = []\n    for resp in responses[-10:]:\n        if len(resp.content) > 2000:\n            verbose_tools.append({\n                'tool': resp.tool_name,\n                'tokens': len(resp.content),\n                'issue': 'excessively verbose'\n            })\n    return {'bloated_tools': verbose_tools}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Dynamic Context Pruning",
+        "description": "Automatically trims oldest messages before hitting Gemini limits",
+        "code": "from google.adk.agents import Agent\n\ndef prune_context(messages: list, max_tokens: int = 700_000) -> list:\n    trimmed = messages.copy()\n    while sum(len(m.content) for m in trimmed) > max_tokens and len(trimmed) > 5:\n        trimmed.pop(0)\n    return trimmed\n\nclass ContextAwareAgent(Agent):\n    def invoke(self, messages):\n        pruned_messages = prune_context(messages)\n        return super().invoke(pruned_messages)",
+        "language": "python"
+      },
+      {
+        "name": "State Compression Middleware",
+        "description": "Compresses SessionState using JSON delta encoding",
+        "code": "import json\nfrom google.adk.sessions import SessionState\n\ndef compress_session_state(session: SessionState):\n    # Only store delta changes\n    state_snapshot = {\n        k: getattr(session, k) \n        for k in session._changed_attrs\n        if not k.startswith('_')\n    }\n    return json.dumps(state_snapshot, separators=(',', ':'))\n\n# Usage in agent\nsession.state = compress_session_state(session)",
+        "language": "python"
+      },
+      {
+        "name": "Structured Tool Responses",
+        "description": "Enforces compact ToolResponse format across all agents",
+        "code": "from google.adk.tools import ToolResponse, tool\n\n@tool\ndef compact_search(query: str) -> str:\n    '''Returns ONLY JSON results, no explanations'''\n    results = search_engine(query)\n    return json.dumps({\n        'hits': [{'title': r.title, 'url': r.url} for r in results[:3]]\n    }, separators=(',', ':'))\n\n# Forces compact output\nclass StrictToolAgent(Agent):\n    def parse_tool_output(self, output: str) -> ToolResponse:\n        return ToolResponse(content=output[:1000])  # Hard truncate",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Context Window Management for AI Agents Detection with Vex",
+      "description": "Vex integrates as a before_agent_callback in Google ADK, automatically monitoring context window usage, session state growth, and tool response bloat across all agent interactions. It applies intelligent pruning and compression in real-time, preventing failures before they occur. Configuration is zero-code via Vex dashboard policies.\n\nVex's ADK-specific detectors track Gemini token limits per model variant (1.5 Pro/Flash, 2.0), correlate multi-agent delegation patterns, and enforce response formatting standards. Remediation happens automatically with fallback behaviors like context summarization and state eviction.\n\nThe platform provides observability dashboards showing context usage trends, failure patterns by agent, and ROI from prevented outages.",
+      "code": "from vex_sdk import before_agent_callback\nfrom google.adk.agents import Agent\n\n# Single line integration\napp = before_agent_callback(\n    detectors=['context_window', 'session_bloat', 'tool_response'],\n    remediation=['auto_prune', 'state_compress'],\n    alert_on='context_overflow'\n)\n\n# All ADK agents automatically protected\nplanner_agent = PlannerAgent()\nworker_agent = WorkerAgent()\n\n# Vex handles everything transparently\nresponse = planner_agent.invoke(messages)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with `pip install google-adk vex-sdk` and add one line to protect all your ADK agents from context window failures."
+    }
+  }
+}

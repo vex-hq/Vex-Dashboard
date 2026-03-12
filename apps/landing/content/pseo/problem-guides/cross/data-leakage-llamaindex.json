@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in LlamaIndex Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "LlamaIndex data-leakage",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex AI agents, sensitive data leakage occurs when retrieved documents or synthesized responses inadvertently expose PII, API keys, or confidential information from indexed data sources during RAG workflows. This manifests uniquely through issues like irrelevant context retrieval pulling in sensitive chunks, synthesizer hallucinations reconstructing private data, stale indexes retaining leaked credentials, and chunking errors fragmenting but not sanitizing sensitive spans. Without proper safeguards, LlamaIndex query engines become vectors for unintentional data exfiltration via agent responses.",
+    "howItManifests": [
+      {
+        "scenario": "Irrelevant context retrieval from unsecured enterprise documents",
+        "symptom": "Query engine returns chunks containing employee SSNs, API keys despite unrelated query",
+        "impact": "Compliance violations (GDPR, HIPAA), credential compromise"
+      },
+      {
+        "scenario": "Synthesizer reconstructs sensitive data from partial chunks",
+        "symptom": "Response hallucinates full email addresses from redacted document fragments",
+        "impact": "Privacy breach through intelligent reassembly of PII"
+      },
+      {
+        "scenario": "Stale index retains deleted sensitive documents",
+        "symptom": "Archived employee records with salary data surface in current queries",
+        "impact": "Data retention violations, outdated confidential info exposure"
+      },
+      {
+        "scenario": "Chunk boundary splits sensitive data across fragments",
+        "symptom": "API keys fragmented across chunks but reassembled in final response",
+        "impact": "Bypass of per-chunk sanitization, complete credential exposure"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex Pattern Scanning in Retrieved Nodes",
+        "description": "Scan LlamaIndex Retrieval objects for common PII/API key patterns before synthesis",
+        "code": "from llama_index.core import VectorStoreIndex\nfrom llama_index.core.retrievers import VectorIndexRetriever\n\nimport re\n\nPII_PATTERNS = [\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',  # Email\n    r'\\b(sk-\\w+|ak-\\w+|pk-\\w+)\\b'  # API keys\n]\n\ndef scan_retrieved_nodes(nodes):\n    leaks = []\n    for node in nodes:\n        text = node.text\n        for pattern in PII_PATTERNS:\n            matches = re.finditer(pattern, text)\n            for match in matches:\n                leaks.append({\n                    'node': node.node_id,\n                    'text': match.group(),\n                    'position': match.span()\n                })\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "Response Entropy Analysis",
+        "description": "Detect anomalously high information density indicating PII leakage in final responses",
+        "code": "import numpy as np\nfrom collections import Counter\n\ndef entropy_analysis(response_text: str, threshold: float = 3.5) -> bool:\n    # Calculate character-level Shannon entropy\n    counter = Counter(response_text)\n    length = len(response_text)\n    entropy = -sum((count/length) * np.log2(count/length) \n                   for count in counter.values())\n    \n    # High entropy often correlates with mixed alphanumeric PII\n    return entropy > threshold",
+        "language": "python"
+      },
+      {
+        "name": "Named Entity Recognition on Query Engine Output",
+        "description": "Use spaCy to extract PERSON, ORG, and custom entities from responses",
+        "code": "import spacy\n\nnlp = spacy.load('en_core_web_sm')\n\ndef detect_entities_in_response(response: str):\n    doc = nlp(response)\n    sensitive_entities = []\n    for ent in doc.ents:\n        if ent.label_ in ['PERSON', 'ORG', 'GPE']:\n            sensitive_entities.append({\n                'entity': ent.text,\n                'label': ent.label_,\n                'confidence': ent._.get('confidence', 1.0)\n            })\n    return sensitive_entities",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Pre-Retrieval PII Node Filtering",
+        "description": "Filter sensitive nodes from retriever results using metadata tags",
+        "code": "from llama_index.core import VectorStoreIndex, StorageContext\nfrom llama_index.core.node_parser import SentenceSplitter\n\nclass SensitiveDataNodeParser(SentenceSplitter):\n    PII_PATTERNS = [r'\\b\\d{3}-\\d{2}-\\d{4}\\b', r'api[_-]?key']\n    \n    def _contains_sensitive_data(self, text: str) -> bool:\n        return any(re.search(pattern, text) for pattern in self.PII_PATTERNS)\n    \n    def get_nodes_from_documents(self, documents):\n        nodes = super().get_nodes_from_documents(documents)\n        return [n for n in nodes if not self._contains_sensitive_data(n.text)]\n\n# Usage\nparser = SensitiveDataNodeParser(chunk_size=512)\nindex = VectorStoreIndex.from_documents(\n    docs, transformations=[parser]\n)",
+        "language": "python"
+      },
+      {
+        "name": "Safe Response Synthesizer Wrapper",
+        "description": "Custom synthesizer that redacts PII before final output",
+        "code": "from llama_index.core.response_synthesizers import get_response_synthesizer\nfrom llama_index.core.schema import NodeWithScore\n\nimport re\n\nclass SafeResponseSynthesizer:\n    def __init__(self):\n        self.synthesizer = get_response_synthesizer()\n    \n    def synthesize(self, query_str: str, nodes: list[NodeWithScore]) -> str:\n        raw_response = self.synthesizer.synthesize(query_str, nodes)\n        \n        # Redact common PII patterns\n        redacted = re.sub(r'\\b\\d{3}-\\d{2}-\\d{4}\\b', '[SSN]', raw_response)\n        redacted = re.sub(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL]', redacted)\n        \n        return redacted\n\n# Usage in query engine\nquery_engine = index.as_query_engine(response_synthesizer=SafeResponseSynthesizer())",
+        "language": "python"
+      },
+      {
+        "name": "Metadata-Based Access Control",
+        "description": "Tag and filter nodes by sensitivity level during indexing",
+        "code": "from llama_index.core import Document, VectorStoreIndex\n\ndef classify_document_sensitivity(doc_text: str) -> str:\n    if re.search(r'\\b(ssn|passport|credit_card)\\b', doc_text, re.IGNORECASE):\n        return 'HIGH'\n    elif re.search(r'\\b(api_key|secret|password)\\b', doc_text, re.IGNORECASE):\n        return 'MEDIUM'\n    return 'LOW'\n\n# Tag documents during indexing\ndocuments = []\nfor doc in raw_docs:\n    sensitivity = classify_document_sensitivity(doc.text)\n    doc.metadata['sensitivity'] = sensitivity\n    documents.append(doc)\n\n# Filter during retrieval\nindex = VectorStoreIndex.from_documents(documents)\nretriever = index.as_retriever(filters=MetadataFilters(\n    operator='!=', value='HIGH', key='sensitivity'\n))",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade monitoring for LlamaIndex agents by wrapping query_engine.query() calls with vex.verify(), automatically detecting PII leakage, compliance violations, and sensitive data exposure patterns. The platform runs regex scanning, NER detection, and entropy analysis across retrieved nodes and final responses, surfacing violations with exact node references and remediation suggestions.\n\nVex's LlamaIndex integration captures full query context including retrieved nodes, metadata filters, and synthesizer outputs, enabling root-cause analysis of leakage paths. Automated remediation workflows can enforce node filtering, response redaction, and index rebuilding based on violation patterns, reducing MTTR from hours to seconds.\n\nThe verification suite includes built-in detectors for 50+ PII patterns, enterprise credential formats, and compliance frameworks (GDPR, HIPAA, SOC2), with custom detector support for proprietary data formats.",
+      "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nfrom vex_sdk import verify\n\n# Load and index documents\ndocuments = SimpleDirectoryReader('data/').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine()\n\n# Vex-wrapped query engine\n@verify(\n    detectors=['pii_leakage', 'credential_exposure'],\n    remediation='block_response',\n    alert_severity='CRITICAL'\n)\ndef safe_query(question: str):\n    response = query_engine.query(question)\n    return str(response)\n\n# Production usage\nresult = safe_query('What are our Q4 sales figures?')\n# Vex automatically:\n# 1. Scans retrieved nodes for PII/API keys\n# 2. Analyzes response entropy\n# 3. Blocks/quarantines violating responses\n# 4. Alerts on-call team with node references",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your LlamaIndex query engines to eliminate sensitive data leakage instantly."
+    }
+  }
+}

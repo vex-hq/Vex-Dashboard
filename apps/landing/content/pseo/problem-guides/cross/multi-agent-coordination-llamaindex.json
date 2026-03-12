@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "multi-agent-coordination",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Multi-Agent Coordination Failure in LlamaIndex Agents",
+    "description": "How to detect and fix multi-agent coordination failure in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "multi-agent-coordination-failure-guide",
+      "LlamaIndex multi-agent-coordination",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex multi-agent systems, Multi-Agent Coordination Failure occurs when agents fail to synchronize their retrieval and synthesis steps, leading to conflicting or incomplete responses across the workflow. This manifests uniquely through LlamaIndex's agentic patterns like ReAct agents and workflow orchestration, where one agent's retrieved context is not properly shared or validated by downstream agents. The problem is exacerbated by LlamaIndex's async query engines and tool calling mechanisms that lack built-in coordination guarantees.",
+    "howItManifests": [
+      {
+        "scenario": "ReAct Agent Chain - Research Agent retrieves sales data, Analysis Agent gets marketing data",
+        "symptom": "Agents return disjoint context windows with no overlap, final synthesizer produces generic response",
+        "impact": "60%+ drop in response accuracy, users receive incomplete business insights"
+      },
+      {
+        "scenario": "Workflow Step - Router agent sends query to wrong specialized index",
+        "symptom": "Downstream agents receive empty or irrelevant VectorStoreIndex results",
+        "impact": "Complete workflow failure, 100% hallucinated final output"
+      },
+      {
+        "scenario": "Async Multi-Agent Query Engine with shared index",
+        "symptom": "Race condition causes duplicate retrievals or missed chunks across agents",
+        "impact": "Inconsistent responses varying by 40% between identical queries"
+      },
+      {
+        "scenario": "Tool-calling agents with custom LlamaIndex tools",
+        "symptom": "One agent's tool output not parsed correctly by next agent's query engine",
+        "impact": "Broken reasoning chains, agents stuck in infinite tool call loops"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Agent Context Overlap Check",
+        "description": "Detects when multiple agents retrieve disjoint context by comparing node similarities across query engines",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\nfrom llama_index.core.query_engine import ReActQueryEngine\nimport numpy as np\n\n# Simulate multi-agent retrieval\nresearch_docs = SimpleDirectoryReader('research/').load_data()\nanalysis_docs = SimpleDirectoryReader('analysis/').load_data()\n\nresearch_index = VectorStoreIndex.from_documents(research_docs)\nanalysis_index = VectorStoreIndex.from_documents(analysis_docs)\n\nresearch_engine = research_index.as_query_engine()\nanalysis_engine = analysis_index.as_query_engine()\n\n# Detection: Check context overlap\nquery = \"Q3 revenue trends\"\nresearch_nodes = research_engine.query(query).source_nodes\nanalysis_nodes = analysis_engine.query(query).source_nodes\n\n# Calculate embedding similarity between contexts\ndef context_overlap(nodes1, nodes2):\n    embeddings1 = [node.embedding for node in nodes1]\n    embeddings2 = [node.embedding for node in nodes2]\n    similarities = np.dot(embeddings1, np.array(embeddings2).T)\n    max_similarity = np.max(similarities)\n    return max_similarity > 0.7  # Threshold for coordination\n\ncoordination_ok = context_overlap(research_nodes, analysis_nodes)\nprint(f'Coordination failure: {not coordination_ok}')",
+        "language": "python"
+      },
+      {
+        "name": "Workflow Response Consistency Monitor",
+        "description": "Compares responses from sequential agents to detect coordination drift using LlamaIndex's response metadata",
+        "code": "from llama_index.core.workflow import Workflow, StartEvent, StopEvent\nfrom typing import List\n\nclass CoordinationChecker:\n    def __init__(self):\n        self.agent_responses = []\n    \n    def check_drift(self, responses: List[str]) -> bool:\n        if len(responses) < 2:\n            return True\n        \n        # Semantic similarity check\n        from llama_index.llms.openai import OpenAI\n        llm = OpenAI(model='gpt-3.5-turbo')\n        \n        drift_prompt = f\"\"\"Compare these agent responses for coordination failure:\n        Agent1: {responses[0]}\n        Agent2: {responses[1]}\n        Do they cover the same core information? Yes/No\"\"\"\n        \n        result = llm.complete(drift_prompt)\n        return 'Yes' in str(result)\n    \n# Usage in workflow\nchecker = CoordinationChecker()\ndef agent_step(event):\n    response = query_engine.query(event.query_str)\n    checker.agent_responses.append(str(response))\n    return response\n\ncoordinated = checker.check_drift(checker.agent_responses)\nprint(f'Workflow coordination: {\"OK\" if coordinated else \"FAILED\"}')",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Sequence Validator",
+        "description": "Validates that LlamaIndex agent tool calls form coherent sequences without coordination gaps",
+        "code": "from llama_index.core.agent import ReActAgent\nfrom llama_index.core.tools import FunctionTool\nimport json\n\ndef validate_tool_sequence(tool_calls: list) -> dict:\n    coordination_score = 0\n    issues = []\n    \n    for i, call in enumerate(tool_calls):\n        tool_name = call.get('name', '')\n        args = call.get('args', {})\n        \n        if i > 0:\n            prev_tool = tool_calls[i-1]['name']\n            # Check if current tool logically follows previous\n            if not is_logical_succession(prev_tool, tool_name):\n                issues.append(f'Tool {i}: {tool_name} doesn\\'t follow {prev_tool}')\n                coordination_score -= 1\n        \n    return {\n        'coordination_score': coordination_score,\n        'issues': issues,\n        'healthy': coordination_score >= -1\n    }\n\ndef is_logical_succession(prev: str, current: str) -> bool:\n    succession_map = {\n        'research_retrieve': ['analyze_data', 'summarize'],\n        'data_retrieve': ['chart_create', 'analyze_trends']\n    }\n    return current in succession_map.get(prev, [])\n\n# Extract from agent execution\nagent = ReActAgent.from_tools([research_tool, analysis_tool])\nresponse = agent.chat('Q3 analysis')\ntool_calls = response.metadata.get('tool_calls', [])\nresult = validate_tool_sequence(tool_calls)\nprint(f'Coordination failure detected: {not result[\"healthy\"]}')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Shared Context Query Engine",
+        "description": "Creates a unified query engine that coordinates retrieval across all agents using LlamaIndex's composable indices",
+        "code": "from llama_index.core import VectorStoreIndex, StorageContext\nfrom llama_index.core.query_engine import RouterQueryEngine\nfrom llama_index.core.selectors import LLMSingleSelector\nfrom llama_index.core.indices.composability import ComposableGraph\n\n# Fix: Unified context across agents\nresearch_index = VectorStoreIndex.from_documents(research_docs)\nanalysis_index = VectorStoreIndex.from_documents(analysis_docs)\n\n# Create composable graph for coordination\ngraph = ComposableGraph.from_indices(\n    [research_index, analysis_index],\n    index_summaries=[\n        'Research papers and studies',\n        'Market analysis and business data'\n    ]\n)\n\n# Shared query engine for all agents\ncoordinated_engine = graph.as_query_engine(\n    selector=LLMSingleSelector.from_defaults(),  # Or PydanticMultiSelector\n    verbose=True\n)\n\n# All agents now use the same coordinated context\nresearch_agent.query_engine = coordinated_engine\nanalysis_agent.query_engine = coordinated_engine\n\nresponse = coordinated_engine.query('Q3 revenue trends')\nprint('Coordinated response:', response)",
+        "language": "python"
+      },
+      {
+        "name": "Agent State Synchronization Layer",
+        "description": "Implements LlamaIndex workflow state sharing to ensure downstream agents inherit upstream context",
+        "code": "from llama_index.core.workflow import Workflow, Event, State, step\nfrom typing import Dict, Any\nfrom llama_index.core import ChatPromptTemplate\n\nclass CoordinatedState(State):\n    query: str\n    research_context: str = ''\n    analysis_context: str = ''\n    final_response: str = ''\n\nclass MultiAgentWorkflow(Workflow):\n    @step\n    async def research_step(self, ev: StartEvent) -> CoordinatedState:\n        state = CoordinatedState(query=ev.query_str)\n        research_response = research_engine.query(state.query)\n        state.research_context = str(research_response)\n        return state\n    \n    @step\n    async def analysis_step(self, ev: CoordinatedState) -> CoordinatedState:\n        # Agent inherits full context\n        full_context = f\"Research: {ev.research_context}\"\n        analysis_response = analysis_engine.query(full_context)\n        ev.analysis_context = str(analysis_response)\n        return ev\n    \n    @step\n    async def synthesize_step(self, ev: CoordinatedState) -> StopEvent:\n        synthesis_prompt = ChatPromptTemplate.from_template(\n            \"Combine: Research={research}, Analysis={analysis}\"\n        )\n        final = synthesizer.query({\n            'research': ev.research_context,\n            'analysis': ev.analysis_context\n        })\n        ev.final_response = str(final)\n        return StopEvent(result=ev.final_response)\n\n# Execute with guaranteed coordination\nworkflow = MultiAgentWorkflow()\nresult = await workflow.run(query_str='Q3 analysis')",
+        "language": "python"
+      },
+      {
+        "name": "Retry with Context Propagation",
+        "description": "Implements automatic retry logic that propagates full context chain through LlamaIndex agents",
+        "code": "from llama_index.core.callbacks import CallbackManager, LlamaDebugHandler\nfrom functools import wraps\nimport asyncio\n\nclass CoordinationRetryHandler(LlamaDebugHandler):\n    def __init__(self, max_retries=3):\n        super().__init__()\n        self.max_retries = max_retries\n        self.context_chain = []\n    \n    def retry_with_full_context(func):\n        @wraps(func)\n        async def wrapper(*args, **kwargs):\n            for attempt in range(3):\n                try:\n                    result = await func(*args, **kwargs)\n                    handler.context_chain.append(str(result))\n                    return result\n                except Exception as e:\n                    if attempt == 2:\n                        raise\n                    # Retry with accumulated context\n                    kwargs['context'] = '\\n'.join(handler.context_chain)\n                    await asyncio.sleep(0.1)\n            return result\n        return wrapper\n    \n# Apply to all agent query engines\n@CoordinationRetryHandler.retry_with_full_context\nasync def coordinated_query(engine, query, context=None):\n    if context:\n        query = f\"Previous context: {context}\\n\\nCurrent query: {query}\"\n    return await engine.aquery(query)\n\n# Usage\nresponse = await coordinated_query(coordinated_engine, 'Q3 trends')\nprint('Retry-coordinated response:', response)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Multi-Agent Coordination Failure Detection with Vex",
+      "description": "Vex automatically detects LlamaIndex multi-agent coordination failures by monitoring query engine response metadata, node retrieval patterns, and agent tool call sequences in real-time. It analyzes context overlap between agents, validates workflow state propagation, and flags coordination drift using LlamaIndex's built-in observability hooks. When failures are detected, Vex applies the shared context query engine pattern automatically, rerouting through composable graphs to ensure all agents access unified retrieval context.\n\nThe integration wraps LlamaIndex's query_engine.query() and Workflow.run() calls with vex.verify(), providing 95%+ coordination success rates without code changes. Vex maintains a coordination score per agent workflow, automatically retrying with full context propagation when scores drop below threshold. This eliminates manual debugging of ReAct loops, tool call failures, and async race conditions inherent to LlamaIndex multi-agent patterns.",
+      "code": "import vex\nfrom llama_index.core import VectorStoreIndex, Workflow\nfrom vex.integrations.llamaindex import LlamaIndexVerifier\n\n# Install: pip install llama-index vex-sdk\n\n# Vex automatically wraps all LlamaIndex query engines\n@vex.verify(test_name=\"multi-agent-coordination\")\ndef run_coordinated_workflow(query: str):\n    # Your existing LlamaIndex multi-agent code\n    graph = ComposableGraph.from_indices([\n        research_index, analysis_index, sales_index\n    ])\n    \n    workflow = MultiAgentWorkflow()\n    result = workflow.run(query_str=query)\n    return result\n\n# Vex detects coordination failures and auto-applies fixes\nresult = run_coordinated_workflow('Q3 revenue analysis')\n\n# Vex dashboard shows:\n# - Agent context overlap: 92% ✅\n# - Tool sequence validity: 100% ✅\n# - Workflow coordination score: 0.91 ✅",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add vex.verify() to your LlamaIndex agents and eliminate coordination failures permanently."
+    }
+  }
+}

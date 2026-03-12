@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "useCase": "code-generation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Code Generation with Flowise + Vex Guardrails",
+    "description": "Learn how to build code generation with Flowise + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Flowise code generation",
+      "Flowise guardrails",
+      "code generation reliability",
+      "Vex Flowise",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Flowise enables rapid development of code generation agents through its drag-and-drop interface, combining LLM chains, vector stores, and custom tools for iterative code refinement. However, unvalidated outputs, silent tool failures, and context loss in multi-agent flows can produce unsafe or incorrect code. Vex provides runtime verification to ensure code safety, syntax validity, and secure execution before deployment.",
+    "architectureOverview": {
+      "heading": "Code Generation Architecture with Flowise",
+      "description": "The typical Flowise code generation flow starts with a user prompt routed to an LLM agent node that generates initial code. This feeds into a sandbox execution tool node for runtime testing, followed by a validation agent that checks syntax, safety, and test results. If issues are detected, the flow loops back through a refinement agent using vector store retrieval of similar code examples. Custom tool nodes handle dependency installation and credential scanning, with chatflow callbacks capturing intermediate outputs for monitoring.\n\nVector stores provide RAG context from code repositories, while multi-agent handoffs coordinate between generation, execution, and review phases. The high-risk nature demands verification at each stage to prevent malicious code injection or dependency vulnerabilities.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Prompt   │───▶│  LLM Code Gen    │\n└─────────────────┘    │  Agent Node       │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼─────────┐\n                       │ Sandbox Execution  │◄────┐\n                       │   + Tests          │     │\n                       └──────────┬─────────┘     │\n                                  │               │\n                       ┌──────────▼─────────┐     │\n                       │ Validation Agent   │─────┘\n                       │ (Syntax/Safety)    │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼─────────┐\n                       │   Refine/Retry?    │──┐\n                       │ Multi-Agent Handoff│  │\n                       └──────────┘  │      │\n                                     ▼      │\n                              ┌──────────────┼──────┐\n                              │ Vector Store │      │\n                              │ RAG Context  │      │\n                              └──────────────┘      │\n                                            │      │\n                                    ┌───────▼──────┼──────┐\n                                    │ Final Code   │      │\n                                    │ Output       │──────┘\n                                    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated code injection",
+        "description": "LLM generates code with malicious payloads or credential leaks due to prompt contamination",
+        "severity": "critical",
+        "mitigation": "Vex code safety scanner blocks execution of dangerous patterns before sandbox"
+      },
+      {
+        "name": "Silent sandbox failures",
+        "description": "Custom tool nodes fail without error propagation, returning invalid code to user",
+        "severity": "high",
+        "mitigation": "Vex callback handler captures and validates all tool outputs with structured checks"
+      },
+      {
+        "name": "Context loss in refinement loops",
+        "description": "Multi-agent handoffs lose execution feedback, causing infinite invalid iterations",
+        "severity": "high",
+        "mitigation": "Vex session context preservation ensures full trace across agent boundaries"
+      },
+      {
+        "name": "Unsafe dependency installation",
+        "description": "Generated code installs malicious npm packages via dynamic import statements",
+        "severity": "critical",
+        "mitigation": "Vex dependency analyzer whitelists approved packages before execution"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Code Generation Chatflow",
+        "description": "Core Flowise chatflow with LLM agent and sandbox execution node",
+        "code": "import { ChatFlowise } from 'flowise';\nimport { AgentExecutor } from 'langchain/agents';\n\nconst codeGenFlow = new ChatFlowise({\n  nodes: {\n    code_agent: {\n      type: 'llm-agent',\n      model: 'gpt-4',\n      tools: ['sandbox_exec'],\n      prompt: `Generate Python code for: {{input}}\\nInclude tests and safety checks.`\n    },\n    sandbox_exec: {\n      type: 'custom-tool',\n      func: async (code: string) => {\n        // Sandbox execution logic\n        return { stdout: result, passed: true };\n      }\n    }\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Syntax Validation Agent",
+        "description": "Secondary agent validates generated code syntax and safety",
+        "code": "const validationAgent = new AgentExecutor({\n  llm: openai('gpt-4'),\n  tools: [syntaxChecker, safetyScanner],\n  prompt: `Review this code:\\n{{code}}\\nCheck: 1) Syntax 2) No secrets 3) Safe deps\\nRespond JSON: {valid: bool, issues: []}`\n});\n\nconst safetyScanner = {\n  name: 'safety_scan',\n  func: async (code: string) => {\n    const issues = scanForSecrets(code);\n    return issues.length ? `Found: ${issues.join(', ')}` : 'Clean';\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Vector Store RAG Integration",
+        "description": "Retrieve similar code examples for refinement context",
+        "code": "import { Chroma } from '@langchain/community/vectorstores/chroma';\n\nconst codeStore = await Chroma.fromDocuments(\n  codeExamples,\n  embeddings\n);\n\nconst refinementNode = {\n  type: 'rag-chain',\n  vectorStore: codeStore,\n  prompt: `Improve this code using examples:\\n{{context}}\\nOriginal: {{code}}`\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Iterative Refinement Loop",
+        "description": "Loop until tests pass with max iterations",
+        "code": "const MAX_ITERATIONS = 5;\nlet iteration = 0;\nlet finalCode = '';\n\nwhile (iteration < MAX_ITERATIONS) {\n  const genResult = await codeGenFlow.invoke({ input: prompt });\n  const testResult = await sandboxNode.invoke(genResult.code);\n  \n  if (testResult.passed) {\n    finalCode = genResult.code;\n    break;\n  }\n  \n  prompt = `Fix issues: ${testResult.errors}. Previous: ${genResult.code}`;\n  iteration++;\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install Vex Callback Handler",
+        "description": "Add Vex as global chatflow callback for output monitoring",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  project: 'flowise-code-gen',\n  riskProfile: 'high'\n});\n\nconst flowWithVex = codeGenFlow.withCallbacks([\n  {\n    type: 'onChainEnd',\n    callback: async (output) => {\n      await vex.verify({\n        sessionId: 'code-gen-' + Date.now(),\n        data: output,\n        checks: ['code_safety', 'syntax_valid', 'no_secrets']\n      });\n    }\n  }\n]);",
+        "language": "typescript"
+      },
+      {
+        "title": "Code Safety Pre-Execution Guard",
+        "description": "Block malicious code before sandbox with Vex scanner",
+        "code": "const safeSandboxTool = {\n  ...sandboxTool,\n  func: async (code: string) => {\n    const safetyCheck = await vex.verify({\n      data: code,\n      checks: [\n        'code_safety',\n        'no_eval_exec',\n        'no_network_calls',\n        'dependency_safety'\n      ],\n      riskProfile: 'high'\n    });\n    \n    if (!safetyCheck.pass) {\n      throw new Error(`Safety violation: ${safetyCheck.issues}`);\n    }\n    \n    return await originalSandbox(code);\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Session Context Preservation",
+        "description": "Maintain full trace across multi-agent handoffs",
+        "code": "const vexSession = await vex.createSession({\n  useCase: 'code_generation',\n  riskProfile: 'high',\n  metadata: { flowId: flow.id }\n});\n\nconst tracedFlow = codeGenFlow.withCallbacks([\n  {\n    type: 'onChainStart',\n    callback: () => vexSession.startTrace('code-gen-cycle')\n  },\n  {\n    type: 'onToolStart',\n    callback: (tool) => vexSession.logEvent('tool_call', { tool })\n  },\n  {\n    type: 'onChainEnd',\n    callback: async (output) => {\n      const result = await vexSession.verifyOutput(output);\n      if (!result.pass) {\n        throw new Error('Vex verification failed');\n      }\n    }\n  }\n]);",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Flowise Code Generation",
+      "description": "Add Vex protection to your Flowise flows today with one callback - npm install @vex_dev/sdk"
+    }
+  }
+}

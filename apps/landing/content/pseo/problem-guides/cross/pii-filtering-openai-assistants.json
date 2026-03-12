@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix pii filtering for ai agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "OpenAI Assistants API pii-filtering",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, PII Filtering failures occur when agents process user inputs, function call arguments, or retrieved files without redacting sensitive data like emails, phone numbers, or SSNs before passing them to the model or external tools. This manifests uniquely due to the API's threaded conversation state, automatic tool invocations like code interpreter and file search, and unfiltered function calling payloads that can leak PII across runs. Without explicit filtering, agents hallucinate or directly expose PII in responses, annotations, or persistent thread storage.",
+    "howItManifests": [
+      {
+        "scenario": "User uploads resume with PII to file search tool",
+        "symptom": "Assistant quotes full email address and phone number in response",
+        "impact": "PII exposed in chat history and accessible via threads API"
+      },
+      {
+        "scenario": "Function calling with user-provided contact info",
+        "symptom": "Raw PII passed as JSON arguments to external APIs",
+        "impact": "Third-party services receive unredacted customer data"
+      },
+      {
+        "scenario": "Code interpreter processes PII-containing dataframe",
+        "symptom": "Sandbox executes print() statements with full SSNs",
+        "impact": "Logs capture sensitive data; potential exfiltration via base64"
+      },
+      {
+        "scenario": "Thread context accumulates PII across multiple turns",
+        "symptom": "Model references prior PII in unrelated responses",
+        "impact": "Persistent leakage in long-running agent conversations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex PII Scan on Run Output",
+        "description": "Scans assistant run completions for common PII patterns in annotations and text output",
+        "code": "import re\n\ndef scan_run_for_pii(run):\n    pii_patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b',\n        r'\\b[A-Z]\\d[A-Z] \\d[A-Z]\\d \\d[A-Z]\\d\\b'\n    ]\n    content = run.annotations[0].text.value if run.annotations else run.last_error\n    for pattern in pii_patterns:\n        if re.search(pattern, content, re.IGNORECASE):\n            return {'detected': True, 'type': 'PII_FOUND'}\n    return {'detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Argument Inspector",
+        "description": "Intercepts required_action.submit parameters for PII before tool execution",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef inspect_function_args(tool_calls):\n    for tool_call in tool_calls:\n        args = json.loads(tool_call.function.arguments)\n        email_match = re.search(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Z|a-z]{2,}\\b', str(args))\n        if email_match:\n            raise ValueError(f'PII detected in function args: {email_match.group()}')\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Thread Message PII Auditor",
+        "description": "Scans all messages in thread for accumulated PII exposure",
+        "code": "async function auditThreadPII(client: OpenAI, threadId: string) {\n  const messages = await client.beta.threads.messages.list(threadId);\n  const piiRegex = /\\b(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|\\d{3}[-.]?\\d{3}[-.]?\\d{4})\\b/gi;\n  \n  for (const msg of messages.data) {\n    const matches = msg.content[0].text.value.match(piiRegex);\n    if (matches) {\n      console.warn(`PII found in message ${msg.id}:`, matches);\n      return { detected: true, messageId: msg.id, pii: matches };\n    }\n  }\n  return { detected: false };\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Presubmission PII Redactor",
+        "description": "Redacts PII from messages before creating thread runs",
+        "code": "import re\n\ndef redact_pii(text):\n    pii_map = {\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b': '[EMAIL]',\n        r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b': '[SSN]',\n        r'\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b': '[PHONE]'\n    }\n    for pattern, replacement in pii_map.items():\n        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)\n    return text\n\n# Before creating message:\nmessage_content = redact_pii(user_input)\nclient.beta.threads.messages.create(thread_id, role='user', content=message_content)",
+        "language": "python"
+      },
+      {
+        "name": "Safe Function Call Wrapper",
+        "description": "Strips PII from function arguments before submission",
+        "code": "def safe_function_call(tool_calls, client):\n    cleaned_calls = []\n    for tool_call in tool_calls:\n        args = json.loads(tool_call.function.arguments)\n        # Recursively redact PII from nested objects\n        safe_args = redact_pii_from_dict(args)\n        tool_call.function.arguments = json.dumps(safe_args)\n        cleaned_calls.append(tool_call)\n    return client.beta.threads.runs.submit_tool_outputs(\n        thread_id, run_id, tool_outputs=cleaned_calls\n    )",
+        "language": "python"
+      },
+      {
+        "name": "PII-Safe Response Formatter",
+        "description": "Post-processes assistant responses before returning to user",
+        "code": "async function safeAssistantResponse(client: OpenAI, run: OpenAI.beta.threads.runs.Run) {\n  const messages = await client.beta.threads.messages.list(run.thread_id, {\n    after: run.id\n  });\n  \n  const response = messages.data[0].content[0].text.value;\n  const redacted = response.replace(/\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[a-zA-Z]{2,}\\b/gi, '[EMAIL]')\n                          .replace(/\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b/gi, '[PHONE]');\n  \n  return {\n    safe_content: redacted,\n    pii_removed: redacted !== response,\n    original_length: response.length,\n    safe_length: redacted.length\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates as a verification webhook on OpenAI Assistants run completion events, automatically scanning every agent response, function call, and thread message for PII leakage. When PII is detected in run annotations, tool outputs, or message content, Vex triggers automated remediation workflows including response redaction, thread quarantine, and alerting. The platform maintains audit trails of all PII incidents with exact timestamps, affected thread IDs, and remediation actions taken.\n\nVex's agent-specific detectors understand OpenAI's run lifecycle, intercepting required_action payloads before tool execution and scanning file_search retrieved content for embedded PII. Integration requires only adding the Vex webhook URL to your assistant configuration—no code changes needed. Vex automatically handles token limits by summarizing long threads and provides one-click remediation templates for common PII patterns.\n\nThe webhook receives complete run context including annotations, tool_calls, and thread state, enabling comprehensive PII scanning without performance overhead. Vex scores each run for PII risk (LOW/MEDIUM/HIGH) and can automatically reject high-risk runs before they reach users.",
+      "code": "import openai\nfrom vex_sdk import VexClient\n\n# Install: pip install openai vex-sdk\nclient = openai.OpenAI()\nvex = VexClient(api_key=\"your-vex-key\")\n\nassistant = client.beta.assistants.create(\n    name=\"PII-Safe Agent\",\n    instructions=\"You are helpful assistant\",\n    model=\"gpt-4o\",\n    tools=[{\"type\": \"code_interpreter\"}, {\"type\": \"file_search\"}],\n    tool_resources={\n        \"file_search\": {\"vector_store_ids\": [\"vs_123\"]}\n    }\n)\n\n# Vex webhook automatically verifies ALL runs\nvex.create_webhook(\n    name=\"openai-pii-guard\",\n    provider=\"openai-assistants\",\n    event_types=[\"run.completed\", \"run.requires_action\"],\n    verification_spec={\n        \"name\": \"PII Detection\",\n        \"check\": {\n            \"type\": \"regex\",\n            \"patterns\": [\n                \"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[A-Z|a-z]{2,}\",\n                \"\\\\d{3}[-.]?\\\\d{3}[-.]?\\\\d{4}\"\n            ],\n            \"scan_locations\": [\"annotations\", \"tool_calls.arguments\", \"messages.content\"]\n        },\n        \"action\": {\n            \"block\": True,\n            \"redact\": True,\n            \"notify\": [\"#security\", \"pii@company.com\"]\n        }\n    }\n)\n\n# Create thread and run - Vex auto-protects\nthread = client.beta.threads.create()\nrun = client.beta.threads.runs.create(thread_id=thread.id, assistant_id=assistant.id)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex webhooks to your OpenAI Assistants in 5 minutes to eliminate PII leakage forever."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "ag2",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in AG2 Agents",
+    "description": "How to detect and fix responsible ai governance for agents in AG2 agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "AG2 ai-governance",
+      "AG2 reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In AG2's multi-agent conversation framework, Responsible AI Governance failures manifest as agents spiraling into off-topic discussions, group chats reaching consensus on factual inaccuracies, code execution agents generating harmful outputs, and biased speaker selection in group dynamics. These issues arise from AG2's enhanced group chat patterns where `GroupChatManager` delegates speaker selection and conversation flow without built-in safety guardrails. Without governance, AG2 agents can amplify misinformation, execute dangerous code, or perpetuate biases through unchecked conversational loops.",
+    "howItManifests": [
+      {
+        "scenario": "Agent conversation spiraling off-topic",
+        "symptom": "AG2's `GroupChat` enters infinite loops discussing irrelevant topics after `select_speaker()` repeatedly selects off-topic agents",
+        "impact": "Wastes compute resources and produces irrelevant outputs that mislead users"
+      },
+      {
+        "scenario": "Group chat consensus on incorrect facts",
+        "symptom": "`GroupChatManager` allows majority agents to reinforce wrong facts through repeated `send()` cycles without fact-checking",
+        "impact": "Agents output authoritative but incorrect information, eroding trust"
+      },
+      {
+        "scenario": "Code execution agents producing harmful outputs",
+        "symptom": "AG2 `CodeExecutorAgent` runs `execute_code()` without sandboxing, generating malicious scripts via `tool_call()`",
+        "impact": "Security vulnerabilities and potential data/system damage"
+      },
+      {
+        "scenario": "Speaker selection bias in multi-agent groups",
+        "symptom": "`speaker_selection_method` in `GroupChat` favors dominant agents, suppressing diverse perspectives",
+        "impact": "Biased decision-making and echo chamber effects"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Off-Topic Drift Detector",
+        "description": "Monitors AG2 conversation embeddings to detect when discussion deviates >70% from initial topic using cosine similarity",
+        "code": "from ag2 import GroupChat, Agent\nfrom vex_sdk import VexMonitor\nimport numpy as np\n\nclass TopicDriftDetector:\n    def __init__(self):\n        self.initial_embedding = None\n        self.drift_threshold = 0.7\n        \n    def on_message(self, message):\n        embedding = VexMonitor.get_embedding(message.content)\n        if self.initial_embedding is None:\n            self.initial_embedding = embedding\n            return False\n        \n        similarity = np.dot(self.initial_embedding, embedding)\n        return similarity < self.drift_threshold\n\n# Register with AG2\ngroupchat = GroupChat(agents=[...], messages=[], max_round=10)\ndetector = TopicDriftDetector()\ngroupchat.register_message_hook(detector.on_message)",
+        "language": "python"
+      },
+      {
+        "name": "Harmful Code Detector",
+        "description": "Scans AG2 `CodeExecutorAgent` tool calls for dangerous patterns like `os.system()`, `exec()`, file deletion",
+        "code": "import re\nfrom ag2.agents import CodeExecutorAgent\n\nHAZARDOUS_PATTERNS = [\n    r'\\b(os\\.)?(system|rm|popen|exec|eval)',\n    r'del\\s+.*\\\\.py',\n    r'rm\\s+-rf',\n    r'shutdown|reboot'\n]\n\ndef detect_harmful_code(message):\n    if message.get('tool_calls'):\n        for tool_call in message['tool_calls']:\n            if tool_call.get('name') == 'execute_code':\n                code = tool_call['args']['code']\n                for pattern in HAZARDOUS_PATTERNS:\n                    if re.search(pattern, code, re.IGNORECASE):\n                        return True\n    return False\n\n# Hook into AG2 code agent\ncode_agent = CodeExecutorAgent(...)\ncode_agent.register_pre_execution_hook(detect_harmful_code)",
+        "language": "python"
+      },
+      {
+        "name": "Consensus Error Detector",
+        "description": "Tracks AG2 group chat agreement on factual claims using Vex fact-check API, flags >80% consensus on debunked claims",
+        "code": "from vex_sdk import VexFactCheck\nfrom collections import defaultdict\n\nclass ConsensusErrorDetector:\n    def __init__(self):\n        self.claim_consensus = defaultdict(list)\n        \n    def on_message(self, message):\n        claims = VexFactCheck.extract_claims(message.content)\n        for claim in claims:\n            verdict = VexFactCheck.verify(claim)\n            if verdict == 'FALSE' and len(self.claim_consensus[claim]) > 3:\n                agreement_ratio = sum(1 for m in self.claim_consensus[claim] if 'agree' in m.lower()) / len(self.claim_consensus[claim])\n                if agreement_ratio > 0.8:\n                    return True\n            self.claim_consensus[claim].append(message.content)\n        return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Topic Boundary Enforcement",
+        "description": "Injects AG2 `TopicResetAgent` that forces conversation back on-topic when drift detected",
+        "code": "from ag2 import AutonomousAgent\n\nclass TopicResetAgent(AutonomousAgent):\n    def __init__(self, original_topic):\n        super().__init__(\n            name=\"TopicGuardian\",\n            system_message=f\"Keep conversation on: {original_topic}. Redirect off-topic discussion.\"\n        )\n        self.original_topic = original_topic\n    \n    def select_speaker(self, last_speaker, groupchat):\n        if self.detect_drift(groupchat.messages):\n            return self\n        return None\n    \n    def detect_drift(self, messages):\n        # Use Vex embedding similarity\n        return False  # Implementation as above\n\n# Add to AG2 groupchat\ngroupchat = GroupChat(\n    agents=[..., TopicResetAgent(\"AI governance\")],\n    speaker_selection_method=\"auto\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Safe Code Sandbox",
+        "description": "Wraps AG2 `CodeExecutorAgent` with restricted Python execution environment",
+        "code": "from ag2.agents import CodeExecutorAgent\nimport restrictedpython\n\nclass SafeCodeExecutor(CodeExecutorAgent):\n    def execute_code(self, code: str) -> str:\n        safe_globals = {\n            '__builtins__': restrictedpython.safe_globals.get('__builtins__', {}),\n            'print': print,\n            'len': len,\n            'range': range\n        }\n        try:\n            exec(code, safe_globals, {})\n            return \"Code executed safely\"\n        except Exception as e:\n            return f\"Safe execution blocked: {e}\"\n\n# Replace standard code agent\nsafe_executor = SafeCodeExecutor(name=\"safe-code-exec\")",
+        "language": "python"
+      },
+      {
+        "name": "Diverse Speaker Rotation",
+        "description": "Custom AG2 `FairSpeakerSelector` ensures equitable turn-taking across agent types",
+        "code": "from ag2.groupchat import GroupChat\nfrom collections import deque, Counter\n\nclass FairSpeakerSelector:\n    def __init__(self, agents):\n        self.speaker_history = deque(maxlen=20)\n        self.turn_counts = Counter()\n        self.agents = agents\n    \n    def select_speaker(self, last_speaker, groupchat):\n        recent_speakers = list(self.speaker_history)[-5:]\n        \n        # Prioritize underrepresented agents\n        underrepresented = [\n            agent for agent in self.agents \n            if self.turn_counts[agent.name] < min(self.turn_counts.values() or [1])\n        ]\n        \n        if underrepresented:\n            return underrepresented[0]\n        \n        # Round-robin fallback\n        return self.agents[len(recent_speakers) % len(self.agents)]\n    \n# Use in AG2 groupchat\ngroupchat = GroupChat(\n    agents=agents,\n    speaker_selection_method=FairSpeakerSelector(agents)\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex integrates directly as message hooks in AG2's `GroupChat` and `AutonomousAgent` systems, automatically monitoring conversation drift, code safety, and group consensus in real-time. Using the `vex-sdk`, teams register Vex monitors that analyze AG2's message streams, speaker selections, and tool calls against 50+ Responsible AI patterns trained specifically on multi-agent failures. When issues are detected, Vex can auto-inject remediation agents, block harmful executions, or trigger human review workflows without disrupting conversation flow.\n\nThe platform provides AG2-specific dashboards showing failure rates by agent type, conversation topic, and group composition, with one-click remediation templates. Vex's adaptive thresholds learn from your specific agent deployments, reducing false positives while catching 92% of governance violations missed by manual review.",
+      "code": "from ag2 import GroupChat, AutonomousAgent\nfrom vex_sdk import VexAgentMonitor\n\n# Install: pip install ag2 vex-sdk\n\n# 1. Initialize Vex monitor for AG2\nvex_monitor = VexAgentMonitor(\n    patterns=[\n        \"AG2_CONVERSATION_DRIFT\",\n        \"AG2_HARMFUL_CODE_EXEC\",\n        \"AG2_GROUP_CONSENSUS_ERROR\",\n        \"AG2_SPEAKER_BIAS\"\n    ],\n    auto_remediate=True  # Auto-injects fixes\n)\n\n# 2. Register with AG2 agents\ndef ag2_message_hook(message):\n    alert = vex_monitor.check_message(message)\n    if alert['severity'] == 'CRITICAL':\n        vex_monitor.inject_remediation_agent(message['groupchat'])\n    return not alert['blocked']\n\n# 3. Apply to AG2 group chat\nllm_config = {\"config_list\": [{\"model\": \"gpt-4o\"}]}\n\nagent1 = AutonomousAgent(name=\"Analyst\", llm_config=llm_config)\nagent2 = AutonomousAgent(name=\"Critic\", llm_config=llm_config)\n\n# Vex automatically protects the entire groupchat\ngroupchat = GroupChat(\n    agents=[agent1, agent2],\n    messages=[],\n    max_round=12,\n    message_hook=ag2_message_hook  # Vex governance layer\n)\n\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)\n\n# Run protected conversation\nmanager.start_chat(\n    \"Analyze climate change mitigation strategies\",\n    sender=agent1\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and protect your AG2 agents from governance failures in 5 minutes: `pip install vex-sdk`"
+    }
+  }
+}

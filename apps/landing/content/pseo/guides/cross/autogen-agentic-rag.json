@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "autogen",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with AutoGen + Vex Guardrails",
+    "description": "Learn how to build agentic rag with AutoGen + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "AutoGen agentic rag",
+      "AutoGen guardrails",
+      "agentic rag reliability",
+      "Vex AutoGen",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Agentic RAG with AutoGen enables multi-agent systems that autonomously plan retrieval queries, fetch from diverse sources, and synthesize attributed responses, powering advanced knowledge-intensive applications. However, these systems face risks like infinite loops, hallucinations, and unverified citations that can lead to unreliable outputs. Vex integration provides runtime verification to ensure source faithfulness, query accuracy, and safety in high-stakes deployments.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with AutoGen",
+      "description": "The Agentic RAG system typically features a Planner Agent that decomposes user queries into sub-queries and retrieval strategies. Retriever Agents execute parallel searches across vector stores, web APIs, and knowledge bases, routing results to a Synthesizer Agent. The Synthesizer critiques cross-source consistency, generates attributed responses, and invokes a Critic Agent for final verification before human proxy approval.\n\nAgents communicate via AutoGen's group chat manager, with tools for retrieval (e.g., FAISS, Pinecone), code execution for ranking, and LLM calls for planning. Human-in-the-loop occurs via termination conditions or veto rights. This creates robust but complex flows prone to cascading errors.\n\nVex intercepts agent replies as a filter, verifying planning logic, retrieval faithfulness, and synthesis before message propagation.",
+      "diagram": "User Query\n    |\n[Planner Agent] --> sub-queries\n    |                    |\n[Retriever A]   [Retriever B]  [Retriever C]\n    |                    |             |\n    +--------------------+-------------+\n                         |\n                  [Synthesizer Agent]\n                         |\n                    [Critic Agent]\n                         |\n                    Final Response\n\nVex Filter: o--> Verify each agent reply"
+    },
+    "risks": [
+      {
+        "name": "Infinite conversation loops between agents",
+        "description": "Planner and Critic agents debate query refinement endlessly without convergence criteria",
+        "severity": "critical",
+        "mitigation": "Vex detects repetitive message patterns and enforces max-turn limits"
+      },
+      {
+        "name": "Hallucination in synthesis despite retrieval",
+        "description": "Synthesizer agent fabricates details or ignores contradictory sources",
+        "severity": "high",
+        "mitigation": "Vex verifies source faithfulness and citation grounding"
+      },
+      {
+        "name": "Incorrect query planning",
+        "description": "Planner generates irrelevant sub-queries missing key aspects of complex questions",
+        "severity": "high",
+        "mitigation": "Vex checks query coverage against original intent"
+      },
+      {
+        "name": "Cross-source inconsistency",
+        "description": "Agents reconcile conflicting information from different retrievers incorrectly",
+        "severity": "medium",
+        "mitigation": "Vex validates consistency scoring and evidence reconciliation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Planner Agent with Query Decomposition",
+        "description": "Configures the Planner agent to break down complex queries into parallel retrieval tasks",
+        "code": "from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager\n\nplanner = AssistantAgent(\n    name=\"Planner\",\n    llm_config={\"config_list\": [{\"model\": \"gpt-4\", \"api_key\": os.getenv(\"OPENAI_API_KEY\")}]},\n    system_message=\"\"\"You are a query planner for Agentic RAG. Decompose complex questions into 3-5 specific sub-queries for parallel retrieval. Output JSON: {'sub_queries': [...], 'retrieval_strategy': 'parallel'}\"\"\"\n)\n\nplanner.register_reply(\n    UserProxyAgent(name=\"User\", human_input_mode=\"NEVER\"),\n    lambda msg: vex_client.verify_reply(msg, checks=[\"query_planning_accuracy\"])\n)",
+        "language": "python"
+      },
+      {
+        "title": "Retriever Agent with Multi-Source Tools",
+        "description": "Retriever agents execute parallel searches across vector DB, web, and enterprise sources",
+        "code": "retriever_a = AssistantAgent(\n    name=\"VectorRetriever\",\n    llm_config=llm_config,\n    system_message=\"Retrieve relevant chunks from FAISS vector store. Return top-5 with scores and metadata.\"\n)\n\n# Register retrieval tool\ndef retrieve_vector(query):\n    results = vector_store.similarity_search(query, k=5)\n    return [{\"content\": r.page_content, \"metadata\": r.metadata, \"score\": r.score} for r in results]\n\nretriever_a.register_for_llm(name=\"vector_retrieve\", description=\"Search vector store\")(retrieve_vector)\nretriever_a.register_reply(planner, vex_filter)",
+        "language": "python"
+      },
+      {
+        "title": "Synthesizer with Source Attribution",
+        "description": "Combines multi-source results with proper citation tracking and faithfulness checks",
+        "code": "synthesizer = AssistantAgent(\n    name=\"Synthesizer\",\n    system_message=\"\"\"Synthesize response from multiple sources. Format:\n1. Summary\n2. Key findings with citations [SourceA:score]\n3. Confidence score (0-1)\n4. Gaps/uncertainties\nVerify all claims against provided evidence.\"\"\"\n)\n\ndef format_sources(contexts):\n    return \"\\n\".join([f\"[Source{i}]: {c['content']} (score: {c['score']})\" for i, c in enumerate(contexts)])\n\nsynthesizer.register_reply(group_chat, vex_filter)",
+        "language": "python"
+      },
+      {
+        "title": "GroupChat with Vex Reply Filtering",
+        "description": "Orchestrates multi-agent conversation with Vex verification on every reply",
+        "code": "groupchat = GroupChat(agents=[planner, retriever_a, retriever_b, synthesizer, critic], messages=[])\nmanager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)\n\n# Vex reply filter\nasync def vex_filter_function(recipient, messages, sender, config):\n    last_msg = messages[-1]\n    verification = await vex_client.verify_agent_reply(\n        last_msg[\"content\"],\n        context=last_msg.get(\"context\", {}),\n        checks=[\"source_faithfulness\", \"hallucination_detection\", \"cross_source_consistency\"]\n    )\n    if verification[\"approved\"]:\n        return True\n    return False\n\nmanager.register_reply(None, vex_filter_function)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Reply Filter",
+        "description": "Intercepts all agent replies for Agentic RAG verification checks before propagation",
+        "code": "import vex\nvex_client = vex.Client(api_key=os.getenv(\"VEX_API_KEY\"))\n\ndef vex_rag_filter(sender, recipient, content, context):\n    checks = {\n        \"source_faithfulness\": context.get(\"sources\", []),\n        \"hallucination_detection\": True,\n        \"query_planning_accuracy\": \"planner\" in sender.name,\n        \"cross_source_consistency\": len(context.get(\"sources\", [])) > 1\n    }\n    \n    result = vex_client.verify({\n        \"content\": content,\n        \"agent_role\": sender.name,\n        \"checks\": checks,\n        \"risk_profile\": \"high\"\n    })\n    \n    if not result[\"pass\"]:\n        return f\"[VEX BLOCKED] {result['reason']}: {content}\"\n    return content\n\n# Register globally\nfor agent in [planner, synthesizer, critic]:\n    agent.register_reply(None, vex_rag_filter)",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Ensures synthesizer citations match retrieved evidence with semantic similarity scoring",
+        "code": "async def verify_source_faithfulness(content, sources):\n    verification = await vex_client.verify({\n        \"type\": \"source_faithfulness\",\n        \"claims\": extract_claims(content),\n        \"sources\": sources,\n        \"threshold\": 0.85  # cosine similarity\n    })\n    \n    failed_citations = []\n    for claim, evidence in verification[\"matches\"]:\n        if evidence[\"similarity\"] < 0.85:\n            failed_citations.append(f\"Claim '{claim}' not grounded\")\n    \n    if failed_citations:\n        raise ValueError(\"\\n\".join(failed_citations))\n    return True\n\n# In synthesizer reply handler\nsynthesizer.register_reply(critic, lambda msg: verify_source_faithfulness(msg[\"content\"], msg[\"context\"][\"sources\"]))",
+        "language": "python"
+      },
+      {
+        "title": "Loop Detection and Termination",
+        "description": "Prevents infinite planner-critic debates with semantic repetition detection",
+        "code": "class LoopDetector:\n    def __init__(self, max_iterations=10):\n        self.conversation_history = []\n        self.max_iterations = max_iterations\n    \n    async def check_loop(self, sender, content):\n        self.conversation_history.append(content)\n        if len(self.conversation_history) > self.max_iterations:\n            # Semantic similarity check\n            recent_msgs = self.conversation_history[-5:]\n            similarity = await vex_client.compute_semantic_similarity(recent_msgs)\n            \n            if similarity > 0.9:  # High repetition\n                return False, \"Infinite loop detected - terminating conversation\"\n        return True, \"OK\"\n    \nloop_detector = LoopDetector()\n\nasync def loop_protect_filter(sender, content):\n    approved, reason = await loop_detector.check_loop(sender, content)\n    if not approved:\n        return reason\n    return vex_client.verify(content, checks=[\"hallucination_detection\"])[\"content\"]\n\nmanager.register_reply(None, loop_protect_filter)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your AutoGen Agentic RAG",
+      "description": "Install Vex today with `pip install vex-sdk` and register your first reply filter to eliminate Agentic RAG risks."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-observability",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Observability in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent observability in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-observability-guide",
+      "Azure AI Agent Service agent-observability",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, AI Agent Observability challenges arise from opaque tool integrations, grounding data pipelines, and thread management that lack built-in validation against enterprise policies. Agents often fail silently when Bing Search returns outdated information, file search tools expose Azure metadata instead of content, or token limits are exceeded without graceful degradation. Vex provides middleware observability to surface these issues before they impact enterprise workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Tool execution results not validated against enterprise policies",
+        "symptom": "Agent returns PII-containing responses from unfiltered tools",
+        "impact": "Data leakage violations trigger compliance alerts"
+      },
+      {
+        "scenario": "Grounding data from Bing Search containing outdated information",
+        "symptom": "Agent cites 2023 pricing data in 2025 responses",
+        "impact": "Customer decisions based on stale enterprise information"
+      },
+      {
+        "scenario": "File search returning Azure-specific metadata instead of content",
+        "symptom": "Responses contain blob URLs and SAS tokens instead of document text",
+        "impact": "Users receive unusable links requiring additional permissions"
+      },
+      {
+        "scenario": "Agent thread token limits exceeded without graceful degradation",
+        "symptom": "Thread creation fails with 429 errors mid-conversation",
+        "impact": "Lost conversation context forces users to restart interactions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "PII Detection in Tool Outputs",
+        "description": "Scans Azure AI Agent tool responses for PII patterns before returning to user",
+        "code": "import re\nfrom azure.ai.projects.client import ProjectsClient\n\nPII_PATTERNS = [\n    r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n    r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'\n]\n\ndef detect_pii_in_tool_output(tool_output: str) -> bool:\n    for pattern in PII_PATTERNS:\n        if re.search(pattern, tool_output):\n            return True\n    return False\n\n# Azure AI Agent Service integration\nclient = ProjectsClient.from_azure_cli()\nagent_thread = client.agents.get_thread(thread_id)\n\nfor event in agent_thread.events():\n    if event.type == 'tool_call' and event.output:\n        if detect_pii_in_tool_output(event.output):\n            print(f'🚨 PII detected in tool output: {event.output[:100]}...')\n",
+        "language": "python"
+      },
+      {
+        "name": "Bing Grounding Staleness Check",
+        "description": "Validates Bing search results against publication dates and freshness thresholds",
+        "code": "from datetime import datetime, timedelta\nimport xml.etree.ElementTree as ET\n\ndef check_bing_freshness(bing_xml: str, max_age_days: int = 90) -> bool:\n    try:\n        root = ET.fromstring(bing_xml)\n        for result in root.findall('.//{http://schemas.microsoft.com/search/local/ws/rest/v1}NewsResult'):\n            pub_date = result.find('{http://schemas.microsoft.com/search/local/ws/rest/v1}Date')\n            if pub_date is not None:\n                pub_dt = datetime.fromisoformat(pub_date.text.replace('Z', '+00:00'))\n                if datetime.now(pub_dt.tzinfo) - pub_dt > timedelta(days=max_age_days):\n                    return False\n        return True\n    except:\n        return False\n\n# Check Azure Agent grounding data\nagent_response = client.agents.get_last_exchange(thread_id)\nif not check_bing_freshness(agent_response.grounding_data):\n    print('🚨 Stale Bing grounding data detected')\n",
+        "language": "python"
+      },
+      {
+        "name": "Token Limit Monitoring",
+        "description": "Tracks Azure AI Agent thread token usage against limits with alerts",
+        "code": "from azure.ai.projects.types import ThreadMetrics\n\ndef check_thread_token_limits(thread_metrics: ThreadMetrics, warning_threshold: float = 0.9) -> str:\n    total_tokens = thread_metrics.input_tokens + thread_metrics.output_tokens\n    max_tokens = 128000  # Azure AI Agent Service GPT-4o limit\n    \n    usage_pct = total_tokens / max_tokens\n    if usage_pct > 1.0:\n        return '🚨 EXCEEDED'\n    elif usage_pct > warning_threshold:\n        return f'⚠️  {usage_pct:.1%} - Approaching limit'\n    return f'✅ {usage_pct:.1%}'\n\n# Monitor active threads\nfor thread in client.agents.list_threads(project_name, agent_id):\n    metrics = client.agents.get_thread_metrics(thread.id)\n    status = check_thread_token_limits(metrics)\n    print(f'Thread {thread.id}: {status} ({metrics.input_tokens + metrics.output_tokens}/128k)')\n",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Policy-Gated Tool Response Filter",
+        "description": "Intercepts and sanitizes tool outputs before agent processing",
+        "code": "from vex_sdk import VexMiddleware\nfrom azure.ai.projects import AgentExtension\n\nclass PolicyFilterMiddleware(VexMiddleware):\n    def __init__(self):\n        self.blocked_patterns = [\n            r'\\b(?:SSN|credit\\s*card)\\b',\n            r'\\b\\d{3}-\\d{2}-\\d{4}\\b'\n        ]\n\n    def process_tool_output(self, tool_call, output: str) -> str:\n        for pattern in self.blocked_patterns:\n            if re.search(pattern, output, re.IGNORECASE):\n                self.log_violation(tool_call, 'PII_DETECTED')\n                return 'Output blocked by enterprise policy'\n        return output\n\n# Register with Azure AI Agent Service\nmiddleware = PolicyFilterMiddleware()\nagent_extension = AgentExtension(\n    middleware=middleware,\n    trigger_on=['tool_call']\n)\nclient.agents.create_extension(agent_id, agent_extension)\n",
+        "language": "python"
+      },
+      {
+        "name": "Freshness-Aware Grounding Router",
+        "description": "Routes stale Bing results to internal knowledge bases",
+        "code": "class GroundingRouter(VexMiddleware):\n    def route_grounding_data(self, grounding_sources: list) -> list:\n        fresh_sources = []\n        for source in grounding_sources:\n            if source.provider == 'bing' and not self.is_fresh(source):\n                self.log('Routing stale Bing to enterprise KB')\n                fresh_sources.append(self.query_enterprise_kb(source.query))\n            else:\n                fresh_sources.append(source)\n        return fresh_sources\n\n    def is_fresh(self, source) -> bool:\n        if 'publish_date' in source.metadata:\n            return (datetime.now() - source.metadata['publish_date']).days < 30\n        return True\n\n# Install router in Azure pipeline\nrouter = GroundingRouter()\nclient.agents.update_pipeline(\n    agent_id,\n    middleware=[router],\n    stage='grounding'\n)\n",
+        "language": "python"
+      },
+      {
+        "name": "Graceful Token Limit Handler",
+        "description": "Implements thread summarization before token exhaustion",
+        "code": "class TokenManager(VexMiddleware):\n    def __init__(self):\n        self.summarization_threshold = 0.95\n\n    async def before_thread_step(self, thread):\n        metrics = thread.metrics\n        if self._needs_summarization(metrics):\n            summary = await self.summarize_thread(thread)\n            await self.create_summary_thread(summary, thread.id)\n            await self.log('Created summary thread to prevent token exhaustion')\n\n    def _needs_summarization(self, metrics):\n        total = metrics.input_tokens + metrics.output_tokens\n        return total / 128000 > self.summarization_threshold\n\n# Deploy to Azure AI Agent Service\ntoken_mgr = TokenManager()\nclient.agents.assign_middleware(agent_id, token_mgr, 'pre_step')\n",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Observability Detection with Vex",
+      "description": "Vex integrates as middleware directly into Azure AI Agent Service processing pipelines, automatically detecting all four common observability failure modes in real-time. The Vex SDK hooks into agent thread events, tool calls, and grounding pipelines to validate outputs against enterprise policies, freshness requirements, and token limits before issues reach users.\n\nVex provides automated remediation through configurable rulesets - blocking PII, routing stale data, and creating summary threads - all without code changes to existing agents. Dashboards show failure rates, compliance violations, and token usage trends across all Azure AI Agents.\n\nDeployment takes minutes: `pip install azure-ai-projects vex-sdk`, then register Vex middleware with a single API call. Vex handles the observability complexity while preserving Azure's enterprise security controls.",
+      "code": "from vex_sdk import VexAgentObserver\nfrom azure.ai.projects.client import ProjectsClient\n\n# Install: pip install azure-ai-projects vex-sdk\n\nclient = ProjectsClient.from_azure_cli()\n\n# Auto-configure Vex for all observability failure modes\nobserver = VexAgentObserver(\n    azure_client=client,\n    rules={\n        'pii_policy': {'enabled': True, 'block': True},\n        'bing_freshness': {'max_age_days': 30},\n        'file_content': {'strip_metadata': True},\n        'token_limits': {'summarize_at': 0.95}\n    }\n)\n\n# Single command deployment\nobserver.deploy_to_project(\n    project_name='my-enterprise-agents',\n    agent_ids=['agent-123', 'agent-456']\n)\n\n# Real-time monitoring dashboard\nobserver.start_dashboard(port=8080)\nprint('🚀 Vex Observability active - Dashboard: http://localhost:8080')\n\n# Automated alerts\n@observer.on_violation\ndef handle_policy_violation(violation):\n    print(f'🚨 {violation.type}: {violation.details}')\n    # Send to Azure Monitor / Teams\n",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Deploy Vex middleware to your Azure AI Agents in 5 minutes and eliminate observability failures: `pip install vex-sdk`"
+    }
+  }
+}

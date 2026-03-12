@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "beeai",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with BeeAI + Vex Guardrails",
+    "description": "Learn how to build data extraction with BeeAI + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "BeeAI data extraction",
+      "BeeAI guardrails",
+      "data extraction reliability",
+      "Vex BeeAI",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "BeeAI enables robust data extraction from unstructured documents using schema-guided LLM calls, powering production AI agents with memory and tools. Vex integration provides essential guardrails to address common failure modes like unbounded memory growth and tool injection risks. This guide ensures reliable, verifiable extractions critical for medium-risk production workflows.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with BeeAI",
+      "description": "BeeAI agents process unstructured documents through a schema-guided extraction pipeline. The agent loads documents, invokes Granite models with Pydantic schemas for structured output, and persists state across sessions using BeeAI's memory layer. Tools validate extracted fields against business rules before storage or downstream processing.\n\nKey components include the BeeAI Agent with memory for session continuity, schema-defined extraction tools, and event hooks for observability. Long-running extractions risk memory bloat from accumulating document states, while schema inconsistencies from Granite's variable formatting can lead to incomplete or invalid outputs.\n\nVex listens to BeeAI events to enforce schema compliance, field accuracy, and completeness, preventing propagation of extraction errors.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│ Unstructured    │───▶│ BeeAI Agent      │\n│ Documents       │    │ + Memory         │\n└─────────────────�┘    │ + Granite LLM    │\n                       │ + Extraction Tool │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼─────────┐\n                       │ Vex Event Listener │\n                       │ - Schema Check     │\n                       │ - Completeness     │\n                       │ - Field Accuracy   │\n                       └──────────┬─────────┘\n                                  │\n                       ┌──────────▼─────────┐\n                       │ Verified JSON      │\n                       │ Output             │\n                       └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unbounded Agent Memory Growth",
+        "description": "Long extraction sessions accumulate document states in BeeAI memory, causing OOM errors",
+        "severity": "high",
+        "mitigation": "Vex monitors memory usage per session and triggers truncation at thresholds"
+      },
+      {
+        "name": "Tool Injection via Malformed Documents",
+        "description": "Adversarial PDFs trigger unsafe tool calls through validation gaps",
+        "severity": "critical",
+        "mitigation": "Vex input sanitization and tool call whitelisting before execution"
+      },
+      {
+        "name": "Granite Output Format Drift",
+        "description": "Model variations break Pydantic schema parsing during extraction",
+        "severity": "medium",
+        "mitigation": "Vex schema compliance checks with fallback parsing strategies"
+      },
+      {
+        "name": "Incomplete Field Extraction",
+        "description": "LLM misses required fields despite schema guidance",
+        "severity": "high",
+        "mitigation": "Vex completeness validation with field population rate monitoring"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Schema-Defined Extraction Agent",
+        "description": "Define Pydantic schema and BeeAI agent for document extraction",
+        "code": "from beeai import Agent\nfrom pydantic import BaseModel, Field\nfrom typing import Optional\n\nclass InvoiceData(BaseModel):\n    invoice_number: str = Field(..., description=\"Unique invoice ID\")\n    date: str = Field(..., description=\"Invoice date\")\n    total_amount: float = Field(..., description=\"Total amount\")\n    vendor: Optional[str] = Field(None)\n\nclass ExtractionAgent(Agent):\n    def __init__(self):\n        super().__init__(\n            model=\"granite-3.0\",\n            tools=[self.extract_invoice],\n            memory_size_limit=1000\n        )\n    \n    def extract_invoice(self, document_text: str) -> InvoiceData:\n        prompt = f\"\"\"Extract invoice data from: {document_text}\"\"\"\n        return self._call_llm_with_schema(prompt, InvoiceData)",
+        "language": "python"
+      },
+      {
+        "title": "Document Processing Pipeline",
+        "description": "Load and preprocess documents for extraction",
+        "code": "import PyPDF2\n\ndef load_documents(pdf_path: str) -> list[str]:\n    texts = []\n    with open(pdf_path, 'rb') as file:\n        reader = PyPDF2.PdfReader(file)\n        for page in reader.pages:\n            texts.append(page.extract_text())\n    return texts\n\nagent = ExtractionAgent()\ndocuments = load_documents('invoices.pdf')\nresults = []\nfor doc in documents:\n    result = agent.extract_invoice(doc)\n    results.append(result.model_dump())",
+        "language": "python"
+      },
+      {
+        "title": "Basic Validation Wrapper",
+        "description": "Validate extraction completeness before processing",
+        "code": "def validate_extraction(data: InvoiceData) -> bool:\n    required_fields = ['invoice_number', 'date', 'total_amount']\n    missing = [f for f in required_fields if not getattr(data, f)]\n    if missing:\n        print(f'Missing fields: {missing}')\n        return False\n    if data.total_amount <= 0:\n        print('Invalid total amount')\n        return False\n    return True\n\n# Usage\nfor result in results:\n    validated = validate_extraction(InvoiceData(**result))\n    if validated:\n        print('✓ Valid extraction')",
+        "language": "python"
+      },
+      {
+        "title": "Batch Processing with Error Handling",
+        "description": "Handle extraction failures gracefully in production",
+        "code": "from typing import List, Dict\n\nclass ExtractionProcessor:\n    def __init__(self, agent: ExtractionAgent):\n        self.agent = agent\n        self.success_count = 0\n        self.error_count = 0\n    \n    def process_batch(self, documents: List[str]) -> List[Dict]:\n        results = []\n        for i, doc in enumerate(documents):\n            try:\n                extraction = self.agent.extract_invoice(doc)\n                if validate_extraction(extraction):\n                    results.append({\n                        'status': 'success',\n                        'data': extraction.model_dump(),\n                        'doc_index': i\n                    })\n                    self.success_count += 1\n                else:\n                    results.append({'status': 'validation_failed', 'doc_index': i})\n            except Exception as e:\n                results.append({'status': 'error', 'error': str(e), 'doc_index': i})\n                self.error_count += 1\n        return results",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Register Vex Event Listener",
+        "description": "Hook Vex into BeeAI agent events for real-time monitoring",
+        "code": "from vex_sdk import VexClient\nfrom beeai import AgentEvent\n\nvex = VexClient(api_key=\"your-vex-key\")\n\n@vex.on_agent_event(\"beeai\")\ndef handle_beeai_event(event: AgentEvent):\n    if event.type == \"tool_call\":\n        vex.validate_tool_call(\n            tool_name=event.tool_name,\n            params=event.params,\n            risk_profile=\"medium\"\n        )\n    elif event.type == \"memory_update\":\n        vex.enforce_memory_limit(event.session_id, max_tokens=50000)\n\n# Register with BeeAI agent\nagent.add_event_listener(vex_event_handler)",
+        "language": "python"
+      },
+      {
+        "title": "Schema Compliance Guardrail",
+        "description": "Verify Pydantic schema adherence and field completeness",
+        "code": "@vex.guardrail(\"schema-compliance\")\ndef validate_extraction_schema(data: dict, schema: type[BaseModel]):\n    try:\n        # Parse and validate\n        parsed = schema(**data)\n        \n        # Completeness check\n        required_fields = {f.name for f in schema.__fields__.values() \n                         if f.required}\n        missing = required_fields - set(k for k, v in data.items() if v)\n        \n        if missing:\n            vex.alert(f'Missing required fields: {missing}')\n            return False\n        \n        # Type consistency\n        for field, value in data.items():\n            field_type = schema.__fields__[field].type_\n            if not isinstance(value, field_type):\n                vex.alert(f'Type mismatch: {field} expected {field_type}')\n                return False\n        \n        return True\n    except Exception as e:\n        vex.alert(f'Schema validation failed: {e}')\n        return False\n\n# Usage in pipeline\nif validate_extraction_schema(result, InvoiceData):\n    print('Schema compliant')",
+        "language": "python"
+      },
+      {
+        "title": "Field Accuracy & Memory Guardrails",
+        "description": "Monitor extraction quality and prevent memory bloat",
+        "code": "@vex.guardrail(\"extraction-quality\")\ndef validate_field_accuracy(data: InvoiceData, context: str):\n    # Amount reasonableness check\n    if data.total_amount > 1000000:\n        vex.flag('suspicious_amount', data.total_amount)\n        return False\n    \n    # Date format validation\n    from datetime import datetime\n    try:\n        datetime.strptime(data.date, '%Y-%m-%d')\n    except:\n        vex.flag('invalid_date_format', data.date)\n        return False\n    \n    return True\n\n@vex.guardrail(\"memory-protection\")\ndef check_memory_usage(session):\n    memory_usage = session.get_memory_usage()\n    if memory_usage > 45000:\n        session.truncate_memory(keep_last_n=50)\n        vex.log('memory_truncated', {'tokens_saved': memory_usage - 40000})\n\n# Integrate into agent lifecycle\nagent.on_before_tool_call(validate_extraction_schema)\nagent.on_memory_update(check_memory_usage)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your BeeAI Data Extraction",
+      "description": "Add Vex guardrails today to achieve 99.9% extraction reliability with production-grade observability."
+    }
+  }
+}

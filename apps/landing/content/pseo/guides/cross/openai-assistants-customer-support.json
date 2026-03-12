@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-assistants",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with OpenAI Assistants API + Vex Guardrails",
+    "description": "Learn how to build customer support with OpenAI Assistants API + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Assistants API customer support",
+      "OpenAI Assistants API guardrails",
+      "customer support reliability",
+      "Vex OpenAI Assistants API",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with OpenAI Assistants API enables powerful RAG-based conversations with CRM integration, knowledge base retrieval, and automated ticket creation. However, the built-in code interpreter, file search, and function calling introduce significant risks like unsafe executions, irrelevant retrievals, and hallucinated tool calls. Vex provides essential verification guardrails to ensure response accuracy, PII safety, tone consistency, and policy compliance in high-risk customer interactions.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with OpenAI Assistants API",
+      "description": "The typical architecture starts with a customer query routed to an OpenAI Assistant configured with a custom GPT model fine-tuned for support tone. The assistant accesses a knowledge base via file search for product docs and FAQs, integrates with CRM via function calling for order lookup and ticket creation, and uses code interpreter for data analysis like refund calculations. Threads maintain conversation context across interactions, with webhooks triggering on run completion to verify outputs before delivery to customers.\n\nKey components include: Assistant configuration with tools (file_search, code_interpreter, function calling), persistent threads for context, vector stores for RAG, and CRM APIs (e.g., Zendesk, Salesforce) for actions. Run completion webhooks enable Vex verification of response accuracy, PII filtering, and escalation logic before final customer response.\n\nThis setup scales to thousands of concurrent support threads but requires guardrails to prevent context bloat, unsafe code execution, and compliance violations.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Customer      │───▶│ OpenAI Assistants │\n│   Query         │    │ + Thread Mgmt    │\n└─────────────────┘    │                   │\n                       │ ┌──────────────┐ │\n                       │ │ File Search  │ │◀── Knowledge Base\n                       │ │ Code Interp  │ │\n                       │ │ Functions    │ │◀── CRM (Zendesk/SF)\n                       │ └──────────────┘ │\n                       └──────────────────┘\n                                     │\n                       ┌──────────────────┘\n                       │ Vex Verification\n                       │ Webhook on Run\n                       └───────────────────▶ Verified Response\n"
+    },
+    "risks": [
+      {
+        "name": "Code interpreter executing unsafe operations in sandbox",
+        "description": "Assistant may generate file system operations or network calls that violate sandbox policies during refund calculations or data processing",
+        "severity": "critical",
+        "mitigation": "Vex scans code execution traces and blocks operations accessing unauthorized paths or external endpoints"
+      },
+      {
+        "name": "File search retrieving irrelevant or outdated documents",
+        "description": "RAG retrieval pulls expired pricing docs or wrong product manuals, leading to incorrect support advice",
+        "severity": "high",
+        "mitigation": "Vex validates retrieval relevance against query semantic similarity and document metadata freshness"
+      },
+      {
+        "name": "Thread context growing beyond model limits silently",
+        "description": "Long support conversations exceed 128k token context, causing incoherent responses without warning",
+        "severity": "high",
+        "mitigation": "Vex monitors thread token usage and triggers summarization or escalation when approaching limits"
+      },
+      {
+        "name": "Function call arguments hallucinated outside valid schema",
+        "description": "Assistant fabricates invalid Zendesk ticket parameters (wrong customer IDs, invalid priorities), causing API failures",
+        "severity": "critical",
+        "mitigation": "Vex schema validates all function call JSON against CRM API specifications before execution"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Create Assistant with Customer Support Tools",
+        "description": "Configure Assistant with file search, code interpreter, and CRM function calling for order lookup and ticketing",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\nassistant = client.beta.assistants.create(\n    name=\"Customer Support Agent\",\n    instructions=\"You are a helpful customer support agent. Use tools to lookup orders, search knowledge base, and create tickets. Always maintain professional tone.\",\n    model=\"gpt-4-turbo-preview\",\n    tools=[\n        {\n            \"type\": \"file_search\"\n        },\n        {\n            \"type\": \"code_interpreter\"\n        },\n        {\n            \"type\": \"function\",\n            \"function\": {\n                \"name\": \"create_support_ticket\",\n                \"description\": \"Create Zendesk ticket\",\n                \"parameters\": {\n                    \"type\": \"object\",\n                    \"properties\": {\n                        \"customer_email\": {\"type\": \"string\"},\n                        \"subject\": {\"type\": \"string\"},\n                        \"priority\": {\"type\": \"string\", \"enum\": [\"low\", \"medium\", \"high\", \"urgent\"]}\n                    },\n                    \"required\": [\"customer_email\", \"subject\"]\n                }\n            }\n        }\n    ],\n    tool_resources={\n        \"file_search\": {\n            \"vector_store_ids\": [VECTOR_STORE_ID]\n        }\n    }\n)",
+        "language": "python"
+      },
+      {
+        "title": "Handle Customer Thread with Run Completion Webhook",
+        "description": "Process customer messages in persistent threads and register webhook for Vex verification on run completion",
+        "code": "app.post('/webhook/assistant-run-completed', async (req, res) => {\n  const { thread_id, run_id, assistant_id } = req.body.data.object;\n  \n  // Fetch final assistant response\n  const run = await openai.beta.threads.runs.retrieve(thread_id, run_id);\n  const messages = await openai.beta.threads.messages.list(thread_id);\n  const assistantMessage = messages.data[0];\n  \n  // Send to Vex for verification\n  const vexResult = await vexClient.verify({\n    input: customerQuery,\n    output: assistantMessage.content[0].text.value,\n    context: { thread_id, run_id },\n    checks: ['response_accuracy', 'pii_filtering', 'tone_consistency', 'policy_compliance']\n  });\n  \n  if (vexResult.passed) {\n    // Deliver verified response to customer\n    await sendCustomerResponse(assistantMessage.content[0].text.value);\n  } else {\n    // Escalate based on Vex failure reasons\n    await escalateToHuman(thread_id, vexResult.failures);\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "CRM Function Calling for Ticket Creation",
+        "description": "Implement required functions for Zendesk ticket creation and order lookup with proper schema validation",
+        "code": "def create_support_ticket(client, tool_call):\n    args = json.loads(tool_call.function.arguments)\n    \n    # Vex pre-execution validation\n    vex_result = vex_client.verify({\n        'type': 'function_args',\n        'function_name': 'create_support_ticket',\n        'arguments': args,\n        'checks': ['pii_filtering', 'policy_compliance']\n    })\n    \n    if not vex_result.passed:\n        return {'error': 'Validation failed', 'details': vex_result.failures}\n    \n    # Safe CRM integration\n    ticket = zendesk_client.tickets.create(\n        requester=args['customer_email'],\n        subject=args['subject'],\n        priority=args['priority'],\n        type='question'\n    )\n    return {'ticket_id': ticket.id}",
+        "language": "python"
+      },
+      {
+        "title": "Monitor Thread Context and Trigger Escalation",
+        "description": "Track token usage and escalate long conversations to human agents before context limits cause failures",
+        "code": "async function monitorThreadContext(threadId: string, messages: any[]) {\n  const tokenCount = await calculateThreadTokens(messages);\n  \n  if (tokenCount > 100000) { // 80% of 128k limit\n    const vexResult = await vexClient.verify({\n      input: 'Thread context analysis',\n      output: 'LONG_CONTEXT_WARNING',\n      context: { thread_id: threadId, token_count: tokenCount },\n      checks: ['escalation_triggers']\n    });\n    \n    if (vexResult.escalate) {\n      await escalateThread(threadId, 'Context limit approaching');\n      return { action: 'escalated' };\n    }\n  }\n  \n  return { action: 'continue' };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install and Initialize Vex SDK",
+        "description": "Install vex-sdk and configure with your verification project for OpenAI webhook integration",
+        "code": "pip install openai vex-sdk\n\nfrom vex import VexClient\n\nvex_client = VexClient(\n    api_key=\"vex_YOUR_API_KEY\",\n    project_id=\"cs-openai-assistants\",\n    base_url=\"https://api.vex.dev\"\n)\n\n# Configure verification checks for customer support\nchecks = [\n    \"response_accuracy\",\n    \"pii_filtering\",\n    \"tone_consistency=professional\",\n    \"policy_compliance=support\",\n    \"escalation_triggers\"\n]",
+        "language": "python"
+      },
+      {
+        "title": "Webhook Verification on Run Completion",
+        "description": "Verify assistant output in webhook handler before customer delivery with all required checks",
+        "code": "app.post('/vex-webhook', async (req, res) => {\n  const { thread_id, output } = req.body;\n  \n  const result = await vexClient.verify({\n    session_id: thread_id,\n    input: req.body.customer_query,\n    output: output,\n    model: 'gpt-4-turbo-preview',\n    checks: [\n      'response_accuracy',\n      {\n        name: 'pii_filtering',\n        config: { block: ['ssn', 'credit_card', 'phone'] }\n      },\n      {\n        name: 'tone_consistency',\n        config: { target: 'professional,empathetic' }\n      },\n      'policy_compliance',\n      'escalation_triggers'\n    ]\n  });\n  \n  res.json({ passed: result.passed, score: result.score });\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Dynamic Escalation Based on Vex Results",
+        "description": "Handle verification failures with appropriate escalation workflows for compliance violations",
+        "code": "def handle_vex_result(vex_result, thread_id, customer_email):\n    if not vex_result.passed:\n        failures = vex_result.failures\n        \n        if 'pii_filtering' in failures:\n            log_security_incident(customer_email, 'PII detected')\n            return {'action': 'block', 'reason': 'PII violation'}\n        \n        if 'policy_compliance' in failures:\n            create_internal_ticket(\n                subject=f\"Policy violation in thread {thread_id}\",\n                details=vex_result.failures\n            )\n            return {'action': 'escalate_internal'}\n        \n        if vex_result.escalation_score > 0.8:\n            assign_to_senior_agent(thread_id)\n            return {'action': 'escalate_human'}\n    \n    return {'action': 'approve'}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Assistants API Customer Support",
+      "description": "Deploy Vex verification in minutes to protect your customer support agents from compliance risks and ensure reliable, safe interactions."
+    }
+  }
+}

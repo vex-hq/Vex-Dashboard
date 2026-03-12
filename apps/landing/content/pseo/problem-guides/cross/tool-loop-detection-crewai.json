@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "crewai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in CrewAI Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in CrewAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "CrewAI tool-loop-detection",
+      "CrewAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In CrewAI, Tool Loop Detection issues arise when agents enter infinite delegation cycles between crew members, repeatedly calling tools or passing hallucinated outputs without progressing toward task completion. This manifests uniquely due to CrewAI's hierarchical agent delegation and task handoff patterns, where agents misinterpret shared context or hallucinate tool responses, leading to stalled workflows. Common triggers include vague task descriptions and lack of loop-breaking logic in agent execution.",
+    "howItManifests": [
+      {
+        "scenario": "Agent delegation loops between crew members",
+        "symptom": "Researcher agent delegates to Writer, who delegates back to Researcher indefinitely",
+        "impact": "Task never completes, consuming excessive tokens and API calls"
+      },
+      {
+        "scenario": "Hallucinated tool outputs passed between agents",
+        "symptom": "Agent fabricates tool response like 'API returned: success' without actual call",
+        "impact": "Downstream agents act on false data, producing garbage outputs"
+      },
+      {
+        "scenario": "Task drift when agents reinterpret objectives",
+        "symptom": "Initial 'research market trends' becomes 'analyze competitor pricing' after 3 handoffs",
+        "impact": "Final output irrelevant to original goal"
+      },
+      {
+        "scenario": "Inconsistent output quality across crew roles",
+        "symptom": "Junior researcher produces shallow analysis, senior analyst rejects and loops back",
+        "impact": "Quality oscillation prevents convergence on acceptable output"
+      }
+    ],
+    "detection": [
+      {
+        "name": "CrewAI Task Handoff Cycle Detector",
+        "description": "Monitors agent task delegation graph to detect cycles longer than 5 handoffs",
+        "code": "from collections import defaultdict, deque\n\ndef detect_delegation_cycles(task_history):\n    graph = defaultdict(list)\n    for i, task in enumerate(task_history):\n        if task.get('delegated_to'):\n            graph[task['agent_id']].append(task['delegated_to'])\n    \n    visited = set()\n    rec_stack = set()\n    \n    def has_cycle(node):\n        visited.add(node)\n        rec_stack.add(node)\n        for neighbor in graph[node]:\n            if neighbor not in visited:\n                if has_cycle(neighbor):\n                    return True\n            elif neighbor in rec_stack:\n                return True\n        rec_stack.remove(node)\n        return False\n    \n    for node in graph:\n        if node not in visited:\n            if has_cycle(node):\n                return True\n    return False",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Repetition Monitor",
+        "description": "Tracks identical tool calls across agents within execution window",
+        "code": "from collections import Counter\n\ndef detect_tool_loops(tool_calls, window=10):\n    recent_calls = deque(tool_calls[-window:], maxlen=window)\n    call_signatures = [f\"{call['tool_name']}:{call['args']}\" for call in recent_calls]\n    counter = Counter(call_signatures)\n    return any(count >= 3 for count in counter.values())",
+        "language": "python"
+      },
+      {
+        "name": "Task Objective Drift Detector",
+        "description": "Measures semantic similarity between original and current task descriptions",
+        "code": "from sklearn.metrics.pairwise import cosine_similarity\nimport numpy as np\n\ndef detect_task_drift(original_task, current_tasks, threshold=0.7):\n    # Mock embedding function (replace with actual embeddings)\n    def embed(text): \n        return np.random.rand(384)  # Use sentence-transformers in production\n    \n    orig_emb = embed(original_task['description'])\n    drifts = []\n    for task in current_tasks:\n        task_emb = embed(task['description'])\n        sim = cosine_similarity([orig_emb], [task_emb])[0][0]\n        if sim < threshold:\n            drifts.append((task['agent_id'], sim))\n    return len(drifts) > 2",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Delegation Depth Limit",
+        "description": "Enforce maximum handoffs per task in CrewAI agent configuration",
+        "code": "from crewai import Agent, Task, Crew\n\nresearcher = Agent(\n    role='Researcher',\n    goal='Research market trends',\n    max_delegations=3,  # CrewAI-specific limit\n    verbose=True\n)\n\ntask = Task(\n    description='Analyze market',\n    agent=researcher,\n    max_iterations=5,  # Prevent tool call loops\n    context=[other_tasks]\n)\n\ncrew = Crew(agents=[researcher, writer], tasks=[task])",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Validation Middleware",
+        "description": "Validate tool outputs before agent handoff with checksums",
+        "code": "from crewai import Agent\n\nclass ValidatedAgent(Agent):\n    def _execute_tool(self, tool_call):\n        result = super()._execute_tool(tool_call)\n        # Validate tool output structure\n        if not hasattr(result, 'content') or len(result.content) == 0:\n            return \"TOOL_ERROR: Empty response - retrying with fallback\"\n        # Add checksum for hallucination detection\n        checksum = hash(result.content) % 1000\n        result.metadata = {'checksum': checksum}\n        return result\n\nvalidated_researcher = ValidatedAgent(\n    role='Validated Researcher',\n    goal='Research with validation',\n    tools=[search_tool]\n)",
+        "language": "python"
+      },
+      {
+        "name": "Objective Lock in Task Context",
+        "description": "Pin original objective to prevent task drift across agents",
+        "code": "from crewai import Task\n\ndef create_locked_task(description, original_objective):\n    locked_desc = f\"\"\"ORIGINAL_OBJECTIVE: {original_objective}\n\nCurrent Task: {description}\n\nIMPORTANT: Do not change the ORIGINAL_OBJECTIVE. Only execute the Current Task.\"\"\"\n    \n    return Task(\n        description=locked_desc,\n        expected_output='Output matching ORIGINAL_OBJECTIVE',\n        validate_output=True,\n        output_format='json'  # Structured output prevents drift\n    )",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a callback in CrewAI's task execution pipeline, automatically monitoring delegation graphs, tool call patterns, and semantic drift in real-time. When loops are detected, Vex injects remediation actions like task termination, fallback execution, or agent reassignment without manual intervention. The platform maintains execution traces across crew runs, enabling pattern-based prevention for future deployments.\n\nInstallation is straightforward with `pip install crewai vex-sdk`, and Vex callbacks attach to each agent's task execution. The SDK provides pre-built detectors for CrewAI-specific failure modes, surfacing issues in the Vex dashboard with one-click remediation templates. This shifts teams from reactive debugging to proactive reliability engineering.\n\nVex's CrewAI integration captures full execution context including agent memory states, tool call traces, and delegation metadata, providing comprehensive loop forensics beyond basic logging.",
+      "code": "import vex\n\nfrom crewai import Agent, Task, Crew\n\n# Initialize Vex client\nvex_client = vex.Client(api_key=\"your-vex-api-key\")\n\n# Define loop detection monitors\n@vex_client.monitor(\"crewai-tool-loop\")\ndef detect_loops(task_history):\n    if len(set(t.agent_id for t in task_history[-5:])) < 3:\n        return \"DELEGATION_LOOP\", \"High reuse of same agents\"\n    return None\n\n# Attach Vex to CrewAI agents\nresearcher = Agent(\n    role='Researcher',\n    goal='Research market',\n    callbacks=[\n        vex_client.trace_task,  # Auto-tracing\n        vex_client.monitor_task(detect_loops)  # Loop detection\n    ]\n)\n\ncrew = Crew(\n    agents=[researcher, writer],\n    tasks=[research_task],\n    verbose=True\n)\n\n# Vex auto-remediates on loop detection\nresult = crew.kickoff()",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops in your CrewAI agents with zero-config monitoring."
+    }
+  }
+}

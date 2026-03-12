@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "drift-monitoring",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Drift Monitoring in n8n AI Agents Agents",
+    "description": "How to detect and fix ai agent drift monitoring in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-drift-monitoring-guide",
+      "n8n AI Agents drift-monitoring",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Drift in n8n manifests as agents deviating from expected behavior due to unvalidated AI outputs triggering recursive workflows, stale memory context poisoning conversations, and credential leaks through unsecured tool calls. n8n's node-based architecture amplifies these issues since AI Agent nodes pass raw LLM outputs directly to action nodes without validation, creating silent failure chains. Vex integration via webhook nodes provides real-time drift monitoring across these complex agentic workflows.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node outputs trigger webhook nodes that loop back to the same agent",
+        "impact": "Infinite execution loops consuming credits and hitting rate limits"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Unstructured LLM responses passed to HTTP Request or Database nodes",
+        "impact": "Failed API calls, SQL injection risks, and corrupted data pipelines"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "AI Agent tool schemas expose API keys in structured output",
+        "impact": "Security breaches when logs capture sensitive parameters"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context into conversations",
+        "symptom": "Chat Memory nodes return outdated conversation history",
+        "impact": "Agents hallucinate based on irrelevant or expired context"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Recursive Loop Detector",
+        "description": "Detects workflow node IDs repeating in execution traces indicating loops",
+        "code": "const detectRecursion = (items: n8n.WorkflowExecuteAdditionalData[]) => {\n  const nodeIds = new Set<string>();\n  const loops: string[] = [];\n  \n  for (const item of items) {\n    const workflowData = item.workflow.data.resultData.runData;\n    for (const [nodeName, executions] of Object.entries(workflowData)) {\n      if (nodeIds.has(nodeName)) {\n        loops.push(`Recursive loop detected at node: ${nodeName}`);\n      } else {\n        nodeIds.add(nodeName);\n      }\n    }\n  }\n  \n  return {\n    hasRecursion: loops.length > 0,\n    loopCount: loops.length,\n    details: loops\n  };\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Credential Exposure Scanner",
+        "description": "Scans AI Agent tool call outputs for API keys and secrets",
+        "code": "const scanCredentials = (jsonData: any): string[] => {\n  const secrets: string[] = [];\n  const patterns = [\n    /(?i)(api[_-]?key|token|secret|password)[\\s:=]+['\"]?[a-zA-Z0-9]{20,}/g,\n    /(?:ak|sk)[a-z0-9]{64}/gi,\n    /xoxb-[0-9]{12}-[a-zA-Z0-9-_]{32}/gi\n  ];\n  \n  const scanObject = (obj: any) => {\n    if (typeof obj === 'string') {\n      patterns.forEach(pattern => {\n        const matches = obj.match(pattern);\n        if (matches) secrets.push(...matches);\n      });\n    } else if (obj && typeof obj === 'object') {\n      Object.values(obj).forEach(scanObject);\n    }\n  };\n  \n  scanObject(jsonData);\n  return [...new Set(secrets)];\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Staleness Checker",
+        "description": "Validates chat memory timestamps against workflow execution time",
+        "code": "const checkMemoryStaleness = (memoryItems: n8n.INodeExecutionData[][]) => {\n  const now = Date.now();\n  const staleItems: any[] = [];\n  const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours\n  \n  for (const item of memoryItems.flat()) {\n    const timestamp = item.json.timestamp || item.json.createdAt;\n    if (timestamp && (now - new Date(timestamp).getTime()) > MAX_AGE_MS) {\n      staleItems.push({\n        messageId: item.json.messageId,\n        age: Math.floor((now - new Date(timestamp).getTime()) / (1000 * 60 * 60)),\n        content: item.json.content?.substring(0, 100)\n      });\n    }\n  }\n  \n  return {\n    isStale: staleItems.length > 0,\n    staleCount: staleItems.length,\n    oldestHours: Math.max(...staleItems.map(i => i.age))\n  };\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Recursion Guard Node",
+        "description": "Webhook node that prevents recursive execution using workflow context",
+        "code": "// Add as HTTP Request node before AI Agent\nconst addRecursionGuard = ($input: any[], $workflow: n8n.Workflow) => {\n  const executionContext = $workflow.context.get('execution');\n  const callCount = executionContext?.callCount || 0;\n  \n  if (callCount > 5) {\n    throw new Error('Max recursion depth exceeded');\n  }\n  \n  executionContext.callCount = callCount + 1;\n  \n  return $input.map(item => ({\n    json: {\n      ...item.json,\n      recursionGuard: {\n        callCount,\n        maxDepth: 5,\n        safeToProceed: callCount <= 5\n      }\n    }\n  }));\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Output Schema Validator",
+        "description": "Validates AI Agent JSON outputs before action nodes",
+        "code": "// Code node after AI Agent\nconst validateAgentOutput = (items: n8n.INodeExecutionData[]) => {\n  const expectedSchema = {\n    action: 'string',\n    parameters: {\n      url?: 'string',\n      method?: 'string',\n      headers: { type: 'object' }\n    }\n  };\n  \n  return items.map(item => {\n    try {\n      const data = item.json;\n      // Validate required fields\n      if (!data.action || typeof data.action !== 'string') {\n        throw new Error('Missing or invalid action field');\n      }\n      \n      // Sanitize parameters\n      const safeParams = {\n        ...data.parameters,\n        headers: data.parameters?.headers || {}\n      };\n      \n      return {\n        json: {\n          validated: true,\n          action: data.action,\n          parameters: safeParams,\n          original: data\n        }\n      };\n    } catch (error) {\n      return {\n        json: {\n          validated: false,\n          error: error.message,\n          original: item.json\n        }\n      };\n    }\n  });\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Filter",
+        "description": "Filters stale memory entries before AI Agent input",
+        "code": "// Code node before AI Agent\nconst filterFreshMemory = (memoryItems: any[]) => {\n  const now = Date.now();\n  const MAX_AGE_HOURS = 24;\n  const FRESH_THRESHOLD = MAX_AGE_HOURS * 60 * 60 * 1000;\n  \n  const freshMemory = memoryItems.filter(item => {\n    const timestamp = new Date(item.timestamp || item.createdAt).getTime();\n    return (now - timestamp) < FRESH_THRESHOLD;\n  }).slice(-10); // Keep last 10 fresh messages\n  \n  return [{\n    json: {\n      context: freshMemory,\n      filteredCount: memoryItems.length - freshMemory.length,\n      totalFresh: freshMemory.length,\n      cutoffAgeHours: MAX_AGE_HOURS\n    }\n  }];\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Drift Monitoring Detection with Vex",
+      "description": "Vex integrates seamlessly as a webhook node after every AI Agent node in n8n workflows, automatically capturing execution traces, validating outputs against expected schemas, and detecting drift patterns like recursion and credential leaks. The Vex SDK provides TypeScript-native observability that traces agent decisions through n8n's node execution graph, alerting on anomalies in real-time.\n\nVex's drift detection engine analyzes the full execution lineage, correlating AI outputs with downstream failures and automatically suggesting remediation workflows. For n8n specifically, Vex monitors the critical handoff between AI Agent nodes and action nodes, catching issues before they cascade through complex workflow chains.\n\nDeployment takes seconds: npm install @vex_dev/sdk, add a single Vex Webhook node, and get comprehensive agent observability across all your n8n workflows.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY!\n});\n\n// n8n Code Node after AI Agent\nexport default defineN8nCodeNode({\n  async process(inputData, workflow) {\n    const aiOutput = inputData[0].json;\n    \n    // Capture agent execution for drift monitoring\n    const trace = await vex.agent.trace({\n      workflowId: workflow.id!,\n      nodeName: workflow.node?.name,\n      input: aiOutput,\n      metadata: {\n        n8nNodeType: workflow.node?.type,\n        executionId: workflow.execution?.id\n      }\n    });\n    \n    // Auto-detect common drift patterns\n    const issues = await vex.agent.detectDrift({\n      traceId: trace.id,\n      patterns: ['recursion', 'credential_leak', 'stale_context'],\n      framework: 'n8n'\n    });\n    \n    if (issues.length > 0) {\n      await vex.agent.alert({\n        traceId: trace.id,\n        issues,\n        severity: 'high',\n        remediation: vex.suggestedFixes(issues)\n      });\n    }\n    \n    return {\n      json: {\n        ...aiOutput,\n        vexTraceId: trace.id,\n        driftScore: trace.driftScore,\n        safeToProceed: issues.length === 0\n      }\n    };\n  }\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node to your n8n workflows and eliminate AI Agent drift forever - start your free trial now."
+    }
+  }
+}

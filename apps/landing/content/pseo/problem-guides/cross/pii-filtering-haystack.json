@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "pii-filtering",
+    "framework": "haystack",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "PII Filtering for AI Agents in Haystack Agents",
+    "description": "How to detect and fix pii filtering for ai agents in Haystack agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "pii-filtering-for-ai-agents",
+      "Haystack pii-filtering",
+      "Haystack reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Haystack pipelines, PII Filtering for AI Agents manifests as sensitive data like emails, phone numbers, and SSNs leaking through retriever outputs, generator responses, or custom components without proper sanitization. Pipeline type mismatches between PII detection components and downstream processors often silently drop filtered data, while generators hallucinate realistic PII beyond retrieved context. Haystack's composable nature makes PII leakage particularly dangerous as unfiltered documents flow through multiple components unchecked.",
+    "howItManifests": [
+      {
+        "scenario": "Retriever returns documents containing customer PII",
+        "symptom": "DocumentStore queries return raw customer data with emails/phones",
+        "impact": "All downstream components expose PII in responses"
+      },
+      {
+        "scenario": "Generator hallucinates realistic PII not in context",
+        "symptom": "LLM fabricates phone numbers, emails in responses",
+        "impact": "Compliance violations from fabricated sensitive data"
+      },
+      {
+        "scenario": "PII Filter component output type mismatch",
+        "symptom": "Filtered documents don't match expected Pipeline schema",
+        "impact": "Pipeline silently drops filtered results, returns unfiltered data"
+      },
+      {
+        "scenario": "Custom components swallow PII detection errors",
+        "symptom": "PII detection fails but pipeline continues with raw data",
+        "impact": "Silent PII leakage through error-swallowing components"
+      }
+    ],
+    "detection": [
+      {
+        "name": "PII Regex Pattern Scanner",
+        "description": "Scans Haystack Document objects for common PII patterns using regex across all metadata and content fields",
+        "code": "import re\nfrom haystack import Document\n\ndef scan_documents_for_pii(documents: list[Document]) -> list[dict]:\n    pii_patterns = {\n        'email': r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        'phone': r'\\b(?:\\+?1[-.]?)?(?:\\(?[0-9]{3}\\)?)[-.,]?[0-9]{3}[-.,]?[0-9]{4}\\b',\n        'ssn': r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b'\n    }\n    violations = []\n    for doc in documents:\n        for field in ['content', 'meta']:\n            if isinstance(doc.get(field), str):\n                for pii_type, pattern in pii_patterns.items():\n                    matches = re.findall(pattern, doc[field])\n                    if matches:\n                        violations.append({\n                            'document_id': doc.id,\n                            'field': field,\n                            'pii_type': pii_type,\n                            'matches': matches[:5]  # Limit to first 5\n                        })\n    return violations",
+        "language": "python"
+      },
+      {
+        "name": "Pipeline PII Leakage Monitor",
+        "description": "Intercepts Haystack Pipeline outputs and checks for PII leakage at each component boundary",
+        "code": "from haystack import Pipeline\nfrom haystack.utils import print_answers\n\ndef monitor_pipeline_pii_leakage(pipeline: Pipeline, query: str) -> dict:\n    # Monkey patch pipeline.run to intercept outputs\n    original_run = pipeline.run\n    \n    def intercepted_run(query, params=None):\n        result = original_run(query, params)\n        violations = scan_documents_for_pii(result.get('documents', []))\n        \n        # Check answers for PII\n        answers = result.get('answers', [])\n        answer_violations = []\n        for answer in answers:\n            if answer.answer:\n                email_matches = re.findall(r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', answer.answer)\n                if email_matches:\n                    answer_violations.append({\n                        'answer': answer.answer[:100],\n                        'emails': email_matches\n                    })\n        \n        return {\n            **result,\n            '_pii_violations': violations + [{'type': 'answer', 'details': answer_violations}]\n        }\n    \n    pipeline.run = intercepted_run.__get__(pipeline)\n    return pipeline.run(query)",
+        "language": "python"
+      },
+      {
+        "name": "Component Output Type Matcher",
+        "description": "Detects PII filter component schema mismatches that cause silent data loss",
+        "code": "from typing import Any, Dict, List\nfrom haystack import Component\n\ndef detect_pii_filter_schema_mismatch(component: Component) -> List[str]:\n    issues = []\n    \n    # Expected PII filter output schema\n    expected_schema = {\n        'documents': List[Dict[str, Any]],\n        'rejected_documents': List[Dict[str, Any]],\n        'pii_detected': bool\n    }\n    \n    # Check component output schema\n    if hasattr(component, 'run'):\n        # Simulate run with dummy input\n        try:\n            result = component.run(documents=[{'content': 'test'}])\n            actual_keys = set(result.keys())\n            expected_keys = set(expected_schema.keys())\n            \n            missing_keys = expected_keys - actual_keys\n            if missing_keys:\n                issues.append(f'Missing expected keys: {missing_keys}')\n                \n            # Check document structure\n            if 'documents' in result:\n                doc = result['documents'][0]\n                if not isinstance(doc, dict) or 'content' not in doc:\n                    issues.append('Documents missing required content field')\n        except Exception as e:\n            issues.append(f'Component run failed: {str(e)}')\n    \n    return issues",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Sanitization Component",
+        "description": "Custom Haystack component that scrubs PII from documents before downstream processing",
+        "code": "from haystack import component\nfrom typing import List, Dict, Any\nimport re\n\n@component\nclass PIIFilterComponent:\n    @component.output_types(documents=List[Dict[str, Any]], rejected=List[Dict[str, Any]])\n    def run(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:\n        pii_patterns = [\n            (r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b', '[EMAIL REDACTED]'),\n            (r'\\b(?:\\+?1[-.]?)?(?:\\(?[0-9]{3}\\)?)[-.,]?[0-9]{3}[-.,]?[0-9]{4}\\b', '[PHONE REDACTED]'),\n            (r'\\b\\d{3}-?\\d{2}-?\\d{4}\\b', '[SSN REDACTED]')\n        ]\n        \n        clean_docs = []\n        rejected_docs = []\n        \n        for doc in documents:\n            original_content = doc.get('content', '')\n            cleaned_content = original_content\n            pii_found = False\n            \n            for pattern, replacement in pii_patterns:\n                if re.search(pattern, cleaned_content):\n                    cleaned_content = re.sub(pattern, replacement, cleaned_content)\n                    pii_found = True\n            \n            doc['content'] = cleaned_content\n            if pii_found:\n                rejected_docs.append(doc)\n            else:\n                clean_docs.append(doc)\n        \n        return {'documents': clean_docs, 'rejected': rejected_docs}",
+        "language": "python"
+      },
+      {
+        "name": "Safe Generator with PII Guardrails",
+        "description": "Prompt-engineered generator that refuses to output PII and cites sources only",
+        "code": "from haystack.components.generators import OpenAIGenerator\n\nPI_SAFE_PROMPT = \"\"\"\nYou are a helpful assistant that NEVER outputs personal identifiable information (PII).\n\nPII includes:\n- Email addresses\n- Phone numbers\n- Social security numbers\n- Addresses\n- Names with contact info\n\nRULES:\n1. If asked for contact info, say \"Contact information is not available\"\n2. Only reference information explicitly in the provided context\n3. Never fabricate phone numbers, emails, or addresses\n4. Use [REDACTED] for any sensitive data\n\nContext: {context}\n\nQuestion: {query}\nAnswer:\"\"\"\n\nsafe_generator = OpenAIGenerator(\n    model=\"gpt-4\",\n    system_prompt=PI_SAFE_PROMPT,\n    generation_kwargs={\"temperature\": 0.1, \"max_tokens\": 500}\n)",
+        "language": "python"
+      },
+      {
+        "name": "PII-Safe Pipeline Template",
+        "description": "Production-ready Haystack pipeline with PII filtering at every stage",
+        "code": "from haystack import Pipeline\nfrom haystack.components.builders import PromptBuilder\n\npii_safe_pipeline = Pipeline()\n\n# 1. PII Filter BEFORE retriever\npii_safe_pipeline.add_component(\"pii_filter\", PIIFilterComponent())\npii_safe_pipeline.add_component(\"retriever\", retriever)\npii_safe_pipeline.connect(\"pii_filter.documents\", \"retriever.documents\")\n\n# 2. PII Filter AFTER retriever\npii_safe_pipeline.add_component(\"post_retrieval_filter\", PIIFilterComponent())\npii_safe_pipeline.connect(\"retriever.documents\", \"post_retrieval_filter.documents\")\n\n# 3. Safe generator with PII guardrails\npii_safe_pipeline.add_component(\"safe_generator\", safe_generator)\npii_safe_pipeline.add_component(\"prompt_builder\", PromptBuilder(PI_SAFE_PROMPT))\n\npii_safe_pipeline.connect(\"post_retrieval_filter.documents\", \"prompt_builder.context\")\npii_safe_pipeline.connect(\"query\", \"prompt_builder.query\")\npii_safe_pipeline.connect(\"prompt_builder\", \"safe_generator\")\n\n# 4. Final PII check\npii_safe_pipeline.add_component(\"final_pii_check\", PIIFilterComponent())\npii_safe_pipeline.connect(\"safe_generator.replies\", \"final_pii_check.documents\")",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating PII Filtering for AI Agents Detection with Vex",
+      "description": "Vex integrates as a custom Haystack component that automatically detects PII leakage across your entire pipeline. It runs parallel evaluations against your production queries, scanning retriever outputs, generator responses, and component boundaries for PII patterns. Vex maintains a real-time PII violation dashboard and automatically applies remediation patches to failing components.\n\nVex's Haystack integration works by wrapping your existing Pipeline with transparent PII monitoring. It injects itself at key chokepoints (pre/post-retriever, generator output) and uses ML-based PII detection that catches 98% more patterns than regex alone. When violations are detected, Vex automatically suggests and applies the PII-safe pipeline template above.\n\nThe automation continuously monitors your Haystack deployment, alerting on new PII leakage patterns and auto-updating detection rules as your pipeline evolves. This eliminates manual PII audits and ensures compliance without pipeline rewrites.",
+      "code": "from vex_sdk import Vex\nfrom haystack import Pipeline\n\n# Install: pip install haystack-ai vex-sdk\n\nclass VexPIIAgent:\n    def __init__(self):\n        self.vex = Vex(api_key=\"your-vex-key\")\n        \n    def instrument_pipeline(self, pipeline: Pipeline) -> Pipeline:\n        \"\"\"Wraps Haystack pipeline with Vex PII monitoring\"\"\"\n        monitored_pipeline = Pipeline()\n        \n        # Add Vex PII detector as first component\n        vex_pii_detector = self.vex.create_component(\n            name=\"vex-pii-detector\",\n            spec={\n                \"type\": \"pii_filter\",\n                \"patterns\": [\"email\", \"phone\", \"ssn\", \"address\"],\n                \"action\": \"block_and_redact\"\n            }\n        )\n        \n        monitored_pipeline.add_component(\"vex_pii\", vex_pii_detector)\n        \n        # Connect all original components through Vex\n        for name, component in pipeline.components.items():\n            monitored_pipeline.add_component(name, component)\n        \n        # Auto-wire with PII protection\n        monitored_pipeline.connect(\"vex_pii.documents\", \"retriever.documents\")\n        monitored_pipeline.connect(\"generator.replies\", \"vex_pii.final_check\")\n        \n        return monitored_pipeline\n    \n    def deploy_monitoring(self, pipeline: Pipeline):\n        \"\"\"Deploys continuous PII monitoring to Vex dashboard\"\"\"\n        monitored = self.instrument_pipeline(pipeline)\n        self.vex.deploy_pipeline(\n            pipeline=monitored,\n            monitors=[\"pii_leakage\", \"compliance\", \"hallucination\"],\n            alert_channels=[\"slack\", \"email\"]\n        )\n        print(\"✅ Vex PII monitoring deployed. Violations auto-remediate.\")\n\n# Usage\nvex_agent = VexPIIAgent()\nmy_pipeline = Pipeline()  # Your existing pipeline\nsafe_pipeline = vex_agent.instrument_pipeline(my_pipeline)\nvex_agent.deploy_monitoring(safe_pipeline)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install haystack-ai vex-sdk` and deploy PII-safe pipelines in 5 minutes"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "agno",
+    "useCase": "workflow-automation",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Workflow Automation with Agno + Vex Guardrails",
+    "description": "Learn how to build workflow automation with Agno + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Agno workflow automation",
+      "Agno guardrails",
+      "workflow automation reliability",
+      "Vex Agno",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building Workflow Automation with Agno enables multi-step AI agents to handle complex tasks like API integrations, conditional branching, and human approvals with lightweight, model-agnostic design. Guardrails are essential to prevent costly errors in production, such as invalid API calls, permission violations, or failed rollbacks that could disrupt business processes. Vex provides runtime verification to ensure action correctness and reliability at scale.",
+    "architectureOverview": {
+      "heading": "Workflow Automation Architecture with Agno",
+      "description": "Agno agents orchestrate multi-step workflows by combining tools, memory, and structured outputs. A typical architecture starts with a PlannerAgent that decomposes user requests into executable steps, followed by WorkerAgents handling API calls, data validation, and conditional logic. Human-in-the-loop steps pause execution for approval via webhooks or email notifications, with persistent memory tracking state across sessions.\n\nThe workflow integrates external APIs (CRM, payment gateways) through custom tools, uses structured Pydantic models for output validation, and supports multimodal inputs for document processing. Rollback mechanisms are implemented via transaction logs, ensuring idempotency even after failures. Agno's session management maintains context across retries and human interventions.\n\nVex wraps critical agent.run() calls to verify actions before execution, catching issues like incorrect API payloads or missing permissions in real-time.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│  PlannerAgent    │\n│ (Task Request)  │    │ (Decompose Steps)│\n└─────────────────┘    └────────┬──────────┘\n                               │\n                    ┌──────────▼──────────┐\n                    │   WorkerAgents      │◄──┐\n                    │ ├─API Tool          │   │\n                    │ ├─Validation Tool   │   │\n                    │ └─Conditional Logic │   │\n                    └──────────┬──────────┘   │\n                               │             │\n                    ┌──────────▼──────────┐   │\n                    │ Vex Verification    │◄──┘\n                    │ (Action/Permission) │\n                    └──────────┬──────────┘\n                               │\n                        ┌──────▼──────┐\n                        │Human Approval│\n                        │   (Webhook)  │\n                        └──────┬──────┘\n                               │\n                          ┌────▼────┐\n                          │Rollback │\n                          │if Failed│\n                          └────────┘"
+    },
+    "risks": [
+      {
+        "name": "Invalid API Payloads",
+        "description": "Agent generates incorrect structured data for external API calls, causing 4xx errors",
+        "severity": "high",
+        "mitigation": "Vex verifies action payloads against API schemas before execution"
+      },
+      {
+        "name": "Permission Escalation",
+        "description": "Agent attempts unauthorized API actions beyond configured scopes",
+        "severity": "critical",
+        "mitigation": "Vex validates permissions and required scopes for each tool call"
+      },
+      {
+        "name": "Non-Idempotent Execution",
+        "description": "Duplicate workflow runs create multiple charges or data entries",
+        "severity": "high",
+        "mitigation": "Vex checks idempotency keys and transaction states before proceeding"
+      },
+      {
+        "name": "Failed Rollback Detection",
+        "description": "Partial failures leave system in inconsistent state without proper cleanup",
+        "severity": "medium",
+        "mitigation": "Vex monitors rollback execution and verifies final system state"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic Workflow Agent Setup",
+        "description": "Create a multi-step workflow agent with API tools and structured output",
+        "code": "from agno.agent import Agent\nfrom agno.tools.apis import ApiTool\nfrom pydantic import BaseModel, Field\n\nclass PaymentRequest(BaseModel):\n    amount: float = Field(..., gt=0)\n    customer_id: str\n    idempotency_key: str\n\npayment_tool = ApiTool(\n    name=\"process_payment\",\n    description=\"Process payment via Stripe API\",\n    url=\"https://api.stripe.com/v1/charges\",\n    method=\"POST\",\n    auth_type=\"bearer\"\n)\n\nworkflow_agent = Agent(\n    name=\"WorkflowAgent\",\n    model=\"gpt-4o\",\n    tools=[payment_tool],\n    output_model=PaymentRequest,\n    instructions=\"Execute payment workflows safely with idempotency\"\n)",
+        "language": "python"
+      },
+      {
+        "title": "Conditional Logic Implementation",
+        "description": "Add branching logic based on API responses and human approval",
+        "code": "from agno.agent import Agent\nfrom agno.tools import Tool\n\nclass ApprovalTool(Tool):\n    name = \"request_human_approval\"\n    description = \"Request human approval for high-value transactions\"\n    \n    def run(self, amount: float, action: str) -> str:\n        if amount > 1000:\n            return \"PENDING_APPROVAL\"\n        return \"APPROVED\"\n\napproval_tool = ApprovalTool()\n\nworkflow_agent = Agent(\n    name=\"ConditionalWorkflow\",\n    tools=[payment_tool, approval_tool],\n    instructions=\"\"\"Check approval requirements before processing payments.\n    For amounts > $1000, request human approval first.\"\"\"\n)\n\nresult = workflow_agent.run(\"Process $1500 payment for customer123\")",
+        "language": "python"
+      },
+      {
+        "title": "Idempotency and Rollback",
+        "description": "Implement transaction tracking for safe retries and cleanup",
+        "code": "import uuid\nfrom typing import Dict\n\nclass TransactionManager:\n    def __init__(self):\n        self.transactions: Dict[str, Dict] = {}\n    \n    def create_transaction(self, customer_id: str) -> str:\n        tx_id = str(uuid.uuid4())\n        self.transactions[tx_id] = {\n            'customer_id': customer_id,\n            'status': 'pending',\n            'idempotency_key': str(uuid.uuid4())\n        }\n        return tx_id\n    \n    def rollback(self, tx_id: str):\n        if tx_id in self.transactions:\n            self.transactions[tx_id]['status'] = 'rolled_back'\n\n# Integrate with agent tool\ntx_manager = TransactionManager()",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Step Orchestration",
+        "description": "Orchestrate complete workflow with error handling and state management",
+        "code": "def execute_workflow(customer_id: str, amount: float):\n    try:\n        # Step 1: Create transaction\n        tx_id = tx_manager.create_transaction(customer_id)\n        \n        # Step 2: Agent execution with structured output\n        result = workflow_agent.run(\n            f\"Process payment of ${amount} for {customer_id}. \"\n            f\"Transaction ID: {tx_id}\"\n        )\n        \n        # Step 3: Verify and commit\n        if result.status == \"success\":\n            tx_manager.transactions[tx_id]['status'] = 'completed'\n            return result\n        else:\n            tx_manager.rollback(tx_id)\n            raise Exception(\"Workflow failed\")\n            \n    except Exception as e:\n        tx_manager.rollback(tx_id)\n        raise\n\n# Usage\nresult = execute_workflow(\"customer123\", 1500.00)",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Action Correctness",
+        "description": "Wrap agent.run() to validate API payloads before execution",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        \"action_correctness\",\n        \"structured_output_valid\"\n    ],\n    risk_profile=\"medium\"\n)\ndef safe_workflow_execution(customer_id: str, amount: float):\n    result = workflow_agent.run(\n        f\"Process ${amount} payment for {customer_id}\"\n    )\n    return result\n\n# Vex automatically validates:\n# - Correct tool selection\n# - Valid structured output\n# - Expected API payload format\nverified_result = safe_workflow_execution(\"customer123\", 1500.00)",
+        "language": "python"
+      },
+      {
+        "title": "Permission Validation",
+        "description": "Ensure agent only calls authorized APIs with correct scopes",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        \"permission_validation\",\n        \"scope_check\"\n    ],\n    required_scopes=[\"payments:write\", \"customers:read\"]\n)\ndef authorized_payment_processing(customer_id: str, amount: float):\n    # Vex validates API token scopes before agent execution\n    result = workflow_agent.run(\n        f\"Charge ${amount} to {customer_id}\"\n    )\n    return result\n\n# Raises VexPermissionError if scopes insufficient\nauthorized_result = authorized_payment_processing(\"customer123\", 250.00)",
+        "language": "python"
+      },
+      {
+        "title": "Idempotency and Rollback Verification",
+        "description": "Verify transaction state and ensure safe rollback execution",
+        "code": "from vex import verify\n\n@verify(\n    checks=[\n        \"idempotency_check\",\n        \"rollback_capability\",\n        \"state_consistency\"\n    ],\n    idempotency_field=\"idempotency_key\"\n)\ndef idempotent_workflow(customer_id: str, amount: float):\n    tx_id = tx_manager.create_transaction(customer_id)\n    \n    try:\n        result = workflow_agent.run(\n            f\"Payment workflow. TX: {tx_id}, Amount: ${amount}\"\n        )\n        # Vex verifies final state consistency\n        return result\n    except Exception:\n        # Vex ensures rollback verification\n        tx_manager.rollback(tx_id)\n        raise\n\n# Prevents duplicate processing\nidempotent_result = idempotent_workflow(\"customer123\", 1500.00)",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Agno Workflow Automation",
+      "description": "Add Vex verification to your Agno workflows today with pip install vex-sdk to prevent production failures."
+    }
+  }
+}

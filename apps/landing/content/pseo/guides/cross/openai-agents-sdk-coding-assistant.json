@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "openai-agents-sdk",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with OpenAI Agents SDK + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with OpenAI Agents SDK + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "OpenAI Agents SDK ai coding assistant",
+      "OpenAI Agents SDK guardrails",
+      "ai coding assistant reliability",
+      "Vex OpenAI Agents SDK",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with OpenAI Agents SDK enables multi-agent workflows for repository analysis, code generation, sandbox execution, and iterative debugging. Guardrails are essential to prevent handoff loops, prompt injections, unvalidated tool outputs, and tracing gaps that can lead to insecure code generation or security vulnerabilities. Vex integration ensures reliable agent behavior across the coding pipeline.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with OpenAI Agents SDK",
+      "description": "The architecture features a Router Agent that delegates tasks to specialized agents: RepoAnalyzer for repository context extraction, CodeGenerator for writing code, SandboxExecutor for safe execution, and TestValidator for validation and debugging. Agents handoff via OpenAI's structured handoff protocol with built-in tracing. Each step includes tool calls for git operations, code execution, and security scanning, creating a complete iterative development loop.\n\nVex guardrails wrap each agent's output to validate code correctness, scan for vulnerabilities, prevent credential leaks, and ensure dependency safety before handoffs. This prevents common failures like infinite agent loops or unvalidated malicious code execution.\n\nThe workflow supports iterative refinement where TestValidator feeds errors back to CodeGenerator, with Vex ensuring each iteration maintains security and compliance.",
+      "diagram": "┌─────────────────┐    ┌──────────────┐\n│   User Query    │───▶│ Router Agent  │\n└─────────────────┘    │   (Vex)       │\n                       └──────┬───────┘\n                              │ handoff\n                ┌──────────────▼───────┐    ┌──────────────┐\n                │ RepoAnalyzer Agent   │───▶│CodeGenerator │\n                │   (git clone, parse) │    │   (Vex)      │\n                └──────────────┬───────┘    └──────┬───────┘\n                             │                    │\n                       ┌─────▼──────┐    ┌────────▼────────┐\n                       │SandboxExec │◀──▶│ TestValidator   │\n                       │   (Vex)    │    │   (pytest) (Vex)│\n                       └────────────┘    └─────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Agent handoff loops between specialized agents",
+        "description": "CodeGenerator and TestValidator can enter infinite refinement loops when validation fails repeatedly without convergence criteria",
+        "severity": "high",
+        "mitigation": "Vex max_iterations guardrail with convergence scoring on test coverage improvement"
+      },
+      {
+        "name": "Guardrail bypasses via prompt injection",
+        "description": "Malicious user prompts can inject instructions to bypass sandbox or leak repo credentials through code generation",
+        "severity": "critical",
+        "mitigation": "Vex prompt injection detector and output sanitizer before agent consumption"
+      },
+      {
+        "name": "Tool output not validated before agent consumption",
+        "description": "SandboxExecutor outputs containing malicious code passed unvalidated to CodeGenerator for 'fixing'",
+        "severity": "high",
+        "mitigation": "Vex code correctness and security scanning on all tool outputs"
+      },
+      {
+        "name": "Tracing gaps in multi-agent handoff chains",
+        "description": "Incomplete traces make debugging handoff failures impossible, especially in iterative debugging loops",
+        "severity": "medium",
+        "mitigation": "Vex structured tracing wrapper capturing all handoffs and tool calls"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Router Agent with Task Delegation",
+        "description": "Central router that classifies coding tasks and delegates to specialized agents using OpenAI Agents SDK handoff protocol",
+        "code": "from agents import Agent, Runner\nfrom vex import Guardrail\n\nrouter_agent = Agent(\n    name=\"Router\",\n    instructions=\"Classify coding task and handoff to: RepoAnalyzer, CodeGenerator, SandboxExecutor, or TestValidator\",\n    model=\"gpt-4o\",\n    handoff_to=[\"repo_analyzer\", \"code_generator\", \"sandbox_exec\", \"test_validator\"]\n)\n\nguardrail = Guardrail(name=\"router_handoff\", rules=[{\"max_handoffs\": 3}])\n\nrunner = Runner(agents=[router_agent, repo_analyzer, code_generator, sandbox_exec, test_validator])\nresult = runner.run('Fix the login bug in auth.py', guardrails=[guardrail])",
+        "language": "python"
+      },
+      {
+        "title": "RepoAnalyzer with Git Context Extraction",
+        "description": "Agent that clones repos, extracts relevant files, and provides structured context for code generation",
+        "code": "repo_analyzer = Agent(\n    name=\"RepoAnalyzer\",\n    instructions=\"\"\"1. Clone git repo safely\n2. Identify relevant files for the task\n3. Extract context (imports, functions, tests)\n4. Return structured RepoContext\"\"\",\n    tools=[\n        git_clone_tool,\n        file_reader_tool,\n        ast_analyzer_tool\n    ],\n    model=\"gpt-4o\"\n)\n\n@tool\ndef git_clone(repo_url: str) -> str:\n    '''Safely clone repository to sandbox'''\n    subprocess.run(['git', 'clone', repo_url, '/sandbox/repo'])\n    return 'Repo cloned to /sandbox/repo'",
+        "language": "python"
+      },
+      {
+        "title": "SandboxExecutor with Isolated Code Execution",
+        "description": "Executes generated code in Docker sandbox and captures stdout/stderr/test results",
+        "code": "sandbox_exec = Agent(\n    name=\"SandboxExecutor\",\n    instructions=\"Execute code in isolated Docker container. Capture stdout/stderr/exit code. Run pytest if tests exist.\",\n    tools=[docker_exec_tool, pytest_runner_tool],\n    model=\"gpt-4o\"\n)\n\n@tool\ndef docker_exec(code: str, filename: str) -> dict:\n    '''Execute code in isolated Docker container'''\n    with DockerClient() as client:\n        container = client.containers.run(\n            'python:3.11-slim',\n            f'python /app/{filename}',\n            volumes={'/sandbox': {'bind': '/app', 'mode': 'ro'}}\n        )\n    return {\n        'stdout': container.logs(stdout=True).decode(),\n        'stderr': container.logs(stderr=True).decode(),\n        'exit_code': container.wait()['StatusCode']\n    }",
+        "language": "python"
+      },
+      {
+        "title": "TestValidator with Iterative Feedback",
+        "description": "Validates test coverage, identifies failures, and provides structured feedback for code refinement",
+        "code": "test_validator = Agent(\n    name=\"TestValidator\",\n    instructions=\"\"\"Analyze test results:\n1. Parse pytest output\n2. Calculate coverage\n3. Identify failure patterns\n4. Generate specific fix instructions\n5. Handoff back to CodeGenerator if fixes needed\"\"\",\n    tools=[pytest_parser_tool, coverage_analyzer_tool],\n    handoff_to=[\"code_generator\"],\n    model=\"gpt-4o\"\n)\n\n@tool\ndef parse_pytest_output(pytest_output: str) -> dict:\n    '''Parse pytest JSON output and extract failures'''\n    import json\n    pytest_json = json.loads(pytest_output)\n    failures = [t for t in pytest_json['tests'] if t['outcome'] == 'failed']\n    return {\n        'num_failures': len(failures),\n        'failure_details': [f['nodeid'] for f in failures],\n        'coverage_pct': pytest_json.get('coverage', 0)\n    }",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Output Guardrail on CodeGenerator",
+        "description": "Validates generated code for security vulnerabilities, credential leaks, and dependency safety before handoff",
+        "code": "from vex import Guardrail, Policy\n\ncode_gen_guardrail = Guardrail(\n    name=\"code_generator_output\",\n    policies=[\n        Policy.SECURITY_VULNERABILITIES,\n        Policy.NO_CREDENTIAL_LEAKS, \n        Policy.DEPENDENCY_SAFETY,\n        Policy.CODE_CORRECTNESS\n    ],\n    max_iterations=5,\n    convergence_metric=\"test_coverage_improvement\"\n)\n\n# Wrap agent output\n@code_gen_guardrail\nasync def validate_code_output(agent_output: str) -> bool:\n    # Vex automatically runs:\n    # - bandit security scanning\n    # - secret scanning (tokens, API keys)\n    # - pip-audit dependency check\n    # - syntax/type checking\n    return True\n\ncode_generator = Agent(\n    name=\"CodeGenerator\",\n    output_guardrail=code_gen_guardrail\n)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Handoff Loop Prevention",
+        "description": "Prevents infinite agent handoffs with iteration limits and convergence detection",
+        "code": "from vex import Guardrail\n\nhandoff_guardrail = Guardrail(\n    name=\"handoff_loop_prevention\",\n    policies=[\n        Policy.MAX_HANDOFFS_PER_CYCLE(3),\n        Policy.CONVERGENCE_REQUIRED([\n            \"test_coverage_increasing\",\n            \"failure_count_decreasing\"\n        ]),\n        Policy.TRACING_ENABLED()\n    ]\n)\n\n# Apply to runner\nrunner = Runner(\n    agents=[router_agent, repo_analyzer, code_generator, sandbox_exec, test_validator],\n    global_guardrails=[handoff_guardrail]\n)\n\n# Traces all handoffs automatically\nresult = runner.run_sync(\"Implement user auth\", trace=True)",
+        "language": "python"
+      },
+      {
+        "title": "Vex Tool Output Validation",
+        "description": "Validates all tool outputs (sandbox, git, pytest) before agent consumption",
+        "code": "from vex import Guardrail\n\ntool_output_guardrail = Guardrail(\n    name=\"tool_output_validation\",\n    policies=[\n        Policy.NO_MALICIOUS_CODE,\n        Policy.VALID_JSON_SCHEMA,\n        Policy.NO_SYSTEM_CALL_ESCALATION,\n        Policy.SIZE_LIMIT(100_000)  # bytes\n    ]\n)\n\n# Wrap all tools\n@tool_output_guardrail\ndef safe_sandbox_exec(code: str) -> dict:\n    result = docker_exec(code)\n    # Vex validates result before returning to agent\n    return result\n\n@tool_output_guardrail\ndef safe_git_clone(url: str) -> str:\n    # Vex scans for malicious git content\n    result = git_clone(url)\n    return result\n\n# Agents automatically get validated tool outputs\nsandbox_exec = Agent(tools=[safe_sandbox_exec, safe_git_clone])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your OpenAI Agents SDK AI Coding Assistant",
+      "description": "Install Vex today with `pip install vex-sdk` and protect your coding agents from security risks and reliability failures."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "memory-management",
+    "framework": "azure-ai-agents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Memory Management in Azure AI Agent Service Agents",
+    "description": "How to detect and fix ai agent memory management in Azure AI Agent Service agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-memory-management-guide",
+      "Azure AI Agent Service memory-management",
+      "Azure AI Agent Service reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Azure AI Agent Service, AI Agent Memory Management problems manifest as thread token limits being exceeded due to unbounded conversation histories and unpruned grounding data from Bing Search and file retrievals. Agents fail gracefully only when memory overflows, leading to hallucinated responses or complete thread termination without warning. This is exacerbated by Azure-specific metadata bloating memory and lack of enterprise policy validation on stored tool results.",
+    "howItManifests": [
+      {
+        "scenario": "Long-running customer support threads",
+        "symptom": "Agent returns 'Thread token limit exceeded' error after 20+ turns",
+        "impact": "Customer conversations dropped mid-resolution, requiring manual restart"
+      },
+      {
+        "scenario": "Bing Search grounding in research agents",
+        "symptom": "Search results accumulate without relevance filtering, consuming 80% of context window",
+        "impact": "Fresh queries answered with 2-week-old cached search snippets"
+      },
+      {
+        "scenario": "Enterprise file search retrievals",
+        "symptom": "Azure metadata (permissions, timestamps) dominates retrieved content",
+        "impact": "Actual document content truncated, agent hallucinates missing information"
+      },
+      {
+        "scenario": "Tool execution result storage",
+        "symptom": "Unvalidated API responses stored indefinitely in thread memory",
+        "impact": "PII leakage and compliance violations from retained sensitive data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Token Usage Monitor",
+        "description": "Monitors Azure AI Agent Service thread token consumption before each agent turn",
+        "code": "from azure.ai.projects import AgentClient\nfrom azure.core.credentials import AzureKeyCredential\n\nclient = AgentClient(\n    endpoint=\"https://your-project.openai.azure.com/\",\n    credential=AzureKeyCredential(\"your-key\")\n)\n\nthread = client.beta.threads.create()\n\ndef check_token_usage(thread_id):\n    metrics = client.beta.threads.get(thread_id).usage\n    current_tokens = metrics.total_tokens\n    max_tokens = 128000  # gpt-4o limit\n    \n    if current_tokens > max_tokens * 0.8:\n        print(f\"⚠️  Memory Alert: {current_tokens}/{max_tokens} tokens used\")\n        return False\n    return True\n\n# Usage\nif not check_token_usage(thread.id):\n    print(\"Thread memory critical - prune required\")",
+        "language": "python"
+      },
+      {
+        "name": "Grounding Data Bloat Detector",
+        "description": "Analyzes stored messages for excessive metadata vs content ratio",
+        "code": "def analyze_memory_bloat(thread_id):\n    thread = client.beta.threads.get(thread_id)\n    messages = client.beta.threads.messages.list(thread_id)\n    \n    metadata_ratio = 0\n    for msg in messages.data:\n        if msg.role == \"assistant\":\n            content_len = len(msg.content[0].text.value)\n            metadata_indicators = len([w for w in msg.content[0].text.value.split() \n                                    if any(x in w.lower() for x in ['azure', 'permission', 'timestamp', 'etag'])])\n            if content_len > 0:\n                metadata_ratio += metadata_indicators / content_len\n    \n    if metadata_ratio > 0.3:\n        print(f\"🚨 High metadata bloat detected: {metadata_ratio:.2%}\")\n        return False\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Memory Leak Pattern Scanner",
+        "description": "TypeScript detector for TypeScript-based Azure AI agents",
+        "code": "import { AgentRuntime, Thread } from \"@azure/ai-projects\";\n\nconst runtime = new AgentRuntime({\n  endpoint: process.env.AZURE_OPENAI_ENDPOINT!,\n  apiKey: process.env.AZURE_OPENAI_KEY!\n});\n\nasync function detectMemoryLeaks(threadId: string): Promise<boolean> {\n  const thread = await runtime.getThread(threadId) as Thread;\n  const usage = thread.usage;\n  \n  // Check for unbounded growth\n  const growthRate = usage.totalTokens / (usage.promptTokens + usage.completionTokens);\n  \n  if (growthRate > 1.5 || usage.totalTokens > 100000) {\n    console.warn(`Memory leak detected: ${usage.totalTokens} tokens, growth: ${growthRate.toFixed(2)}`);\n    return false;\n  }\n  \n  // Flag excessive grounding data\n  const groundingMsgs = thread.messages.filter(msg => msg.content.includes('bing://') || msg.content.includes('azuresearch://'));\n  if (groundingMsgs.length > 10) {\n    console.warn(`Excessive grounding data: ${groundingMsgs.length} messages`);\n    return false;\n  }\n  \n  return true;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Smart Memory Pruner",
+        "description": "Automatically prunes low-relevance messages while preserving thread coherence",
+        "code": "from openai import OpenAI\n\nclient = OpenAI(azure_endpoint=\"your-endpoint\", api_key=\"your-key\")\n\ndef prune_thread_memory(thread_id, max_tokens=80000):\n    thread = client.beta.threads.retrieve(thread_id)\n    messages = client.beta.threads.messages.list(thread_id, limit=100)\n    \n    # Score messages by relevance (simplified)\n    scored_messages = []\n    for msg in messages.data:\n        score = len(msg.content[0].text.value) * (1 if 'user' in msg.role else 0.7)\n        scored_messages.append((msg.id, score))\n    \n    # Keep highest scoring messages until token limit\n    scored_messages.sort(key=lambda x: x[1], reverse=True)\n    keep_count = 0\n    total_tokens = 0\n    \n    for msg_id, score in scored_messages:\n        msg_tokens = estimate_tokens(client.beta.threads.messages.retrieve(thread_id, msg_id))\n        if total_tokens + msg_tokens < max_tokens:\n            keep_count += 1\n            total_tokens += msg_tokens\n        else:\n            # Delete low-priority messages\n            client.beta.threads.messages.delete(msg_id)\n    \n    print(f\"Pruned to {keep_count} messages, {total_tokens} tokens\")",
+        "language": "python"
+      },
+      {
+        "name": "Policy-Compliant Tool Result Filter",
+        "description": "Filters tool results against enterprise PII/compliance policies before storage",
+        "code": "import re\n\ndef filter_tool_results(tool_output: str) -> str:\n    # Enterprise PII patterns\n    pii_patterns = [\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',  # SSN\n        r'\\b[A-Z]\\d{2}\\d{7}\\b',     # Drivers license\n        r'\\b\\d{16}\\b',             # Credit card\n    ]\n    \n    filtered = tool_output\n    for pattern in pii_patterns:\n        filtered = re.sub(pattern, '[REDACTED]', filtered)\n    \n    # Remove Azure metadata noise\n    filtered = re.sub(r'\"etag\":\\s*\"[^\"]*\"', '', filtered)\n    filtered = re.sub(r'\"permissions\":\\s*\\[[^\\]]*\\]', '', filtered)\n    \n    # Truncate if still too long\n    if len(filtered) > 4000:\n        filtered = filtered[:4000] + \"... [truncated]\"\n    \n    return filtered\n\n# Usage in agent\nresult = some_tool_call()\nvalidated_result = filter_tool_results(result)\nagent_memory.append(validated_result)",
+        "language": "python"
+      },
+      {
+        "name": "Token-Budgeted Retrieval",
+        "description": "TypeScript implementation limits retrieval tokens proactively",
+        "code": "import { AzureSearchAgentExtension } from \"@azure/ai-projects\";\n\nconst searchExtension = new AzureSearchAgentExtension({\n  endpoint: process.env.SEARCH_ENDPOINT!,\n  key: process.env.SEARCH_KEY!\n});\n\nasync function budgetedRetrieval(query: string, maxTokens: number = 4000): Promise<string> {\n  const results = await searchExtension.search(query, {\n    top: 3,\n    queryType: \"semantic\",\n    semanticConfiguration: \"default\"\n  });\n  \n  let content = \"\";\n  for (const result of results.results) {\n    const docContent = result.document.content || result.document.chunk;\n    const docTokens = estimateTokens(docContent);\n    \n    if (content.length + docTokens < maxTokens) {\n      content += `\\n--- Source: ${result.document.metadata.filename} ---\\n${docContent}`;\n    } else {\n      break;\n    }\n  }\n  \n  return content;\n}\n\n// Integrate with agent\nagent.addExtension(searchExtension);\nagent.instructions = `Always use budgetedRetrieval for grounding data.`;",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Memory Management Detection with Vex",
+      "description": "Vex integrates as middleware in the Azure AI Agent Service processing pipeline, automatically intercepting thread operations to monitor token usage and detect memory leaks in real-time. When thresholds are exceeded, Vex triggers intelligent pruning while preserving conversation context, and validates all tool outputs against enterprise policies before committing to memory.\n\nThe Vex SDK provides declarative policies for Azure-specific failure modes like metadata bloat and grounding data staleness. Deploy once via `pip install vex-sdk`, and Vex handles continuous monitoring, automated remediation, and compliance reporting across all your agent threads.\n\nVex's agent memory controller maintains sliding window summaries and relevance-ranked message histories, ensuring threads scale indefinitely without token limit failures while maintaining full auditability.",
+      "code": "from vex_sdk import VexClient\nfrom azure.ai.projects import AgentClient\n\n# Install: pip install azure-ai-projects vex-sdk\nvex = VexClient(api_key=\"your-vex-key\")\nazure_client = AgentClient(endpoint=\"your-azure-endpoint\", credential=...)\n\n# Add Vex middleware to ALL agent threads\n@vex.policy(\n    name=\"azure-agent-memory-management\",\n    severity=\"critical\",\n    conditions={\n        \"thread_tokens\": \">80%\",\n        \"metadata_bloat\": \">30%\",\n        \"grounding_staleness\": \">7d\"\n    }\n)\ndef azure_memory_guard(thread_id: str):\n    # Auto-prune and validate\n    vex.prune_thread(azure_client, thread_id, max_tokens=80000)\n    vex.validate_tool_outputs(thread_id, enterprise_policy=\"pci-dss\")\n    return vex.approve_thread(thread_id)\n\n# Protect all threads\nfor thread in azure_client.beta.threads.list():\n    azure_memory_guard(thread.id)\n\n# Vex auto-instruments new threads\nvex.watch_azure_project(azure_client)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate Azure AI Agent memory failures across your entire fleet: `pip install vex-sdk`"
+    }
+  }
+}

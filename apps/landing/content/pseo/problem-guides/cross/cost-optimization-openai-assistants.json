@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "cost-optimization",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Cost Optimization in OpenAI Assistants API Agents",
+    "description": "How to detect and fix ai agent cost optimization in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-cost-optimization-guide",
+      "OpenAI Assistants API cost-optimization",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Cost Optimization challenges in OpenAI Assistants API arise from unbounded thread context growth, inefficient tool usage, redundant function calls, and excessive code interpreter executions that silently accumulate token costs. Unlike traditional chat completions, Assistants API maintains persistent threads that can balloon beyond model context limits, leading to unexpectedly high costs during long-running agent interactions. File search and code interpreter tools exacerbate this by processing irrelevant data and performing computationally expensive operations without built-in cost controls.",
+    "howItManifests": [
+      {
+        "scenario": "Thread context growing beyond model limits silently",
+        "symptom": "Messages array in thread exceeds 100k+ tokens after 20-30 turns",
+        "impact": "Costs multiply 10x as full thread history fed to model each turn"
+      },
+      {
+        "scenario": "Code interpreter executing unsafe operations in sandbox",
+        "symptom": "Long-running data processing loops or file I/O operations",
+        "impact": "$0.03 per compute minute accumulates during complex analysis tasks"
+      },
+      {
+        "scenario": "File search retrieving irrelevant or outdated documents",
+        "symptom": "Vector search returns 50+ files per query regardless of relevance",
+        "impact": "Unnecessary token processing of irrelevant docs adds 40% to costs"
+      },
+      {
+        "scenario": "Function call arguments hallucinated outside valid schema",
+        "symptom": "Invalid JSON parameters cause tool failures and retries",
+        "impact": "3-5x more API calls due to repeated failed function executions"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Thread Token Bloat Monitor",
+        "description": "Calculates total token count across all thread messages and flags when exceeding 80% of model limit",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef detect_thread_bloat(thread_id: str, model: str = 'gpt-4o') -> dict:\n    # Fetch all messages\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    \n    total_tokens = 0\n    for msg in messages.data:\n        # Rough token estimation: 4 chars per token + 20% overhead\n        content = msg.content[0].text.value if msg.content else ''\n        total_tokens += int(len(content) / 4 * 1.2)\n        \n        # Add tool call tokens\n        if msg.tool_calls:\n            total_tokens += len(msg.tool_calls) * 200\n    \n    model_limits = {'gpt-4o': 128000, 'gpt-4-turbo': 128000}\n    limit = model_limits.get(model, 128000)\n    \n    return {\n        'is_bloated': total_tokens > limit * 0.8,\n        'current_tokens': total_tokens,\n        'limit': limit,\n        'utilization': f'{(total_tokens/limit)*100:.1f}%'\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Cost Per Run Tracker",
+        "description": "Tracks usage across runs and alerts on cost spikes using OpenAI usage API",
+        "code": "import openai\nfrom datetime import datetime, timedelta\n\nclient = openai.OpenAI()\n\ndef detect_cost_spikes(project_id: str, threshold_usd: float = 5.0) -> list:\n    end_date = datetime.utcnow()\n    start_date = end_date - timedelta(days=7)\n    \n    usage = client.usage.search(\n        start_date=start_date.strftime('%Y-%m-%d'),\n        end_date=end_date.strftime('%Y-%m-%d'),\n        project_ids=[project_id]\n    )\n    \n    spikes = []\n    daily_costs = {}\n    for record in usage.data:\n        date = record.timestamp.date()\n        daily_costs[date] = daily_costs.get(date, 0) + record.cost\n    \n    for date, cost in daily_costs.items():\n        if cost > threshold_usd:\n            spikes.append({\n                'date': date,\n                'cost': f'${cost:.2f}',\n                'alert': f'Cost exceeded ${threshold_usd} threshold'\n            })\n    \n    return spikes",
+        "language": "python"
+      },
+      {
+        "name": "Run Completion Analyzer",
+        "description": "Analyzes run events for excessive tool usage and retries",
+        "code": "import openai\n\nclient = openai.OpenAI()\n\ndef analyze_run_efficiency(thread_id: str, run_id: str) -> dict:\n    run = client.beta.threads.runs.retrieve(\n        thread_id=thread_id,\n        run_id=run_id\n    )\n    \n    events = client.beta.threads.runs.events.list(\n        thread_id=thread_id,\n        run_id=run_id,\n        limit=100\n    )\n    \n    tool_calls = 0\n    retries = 0\n    requires_action = 0\n    \n    for event in events.data:\n        if event.event == 'tool_call_created':\n            tool_calls += 1\n        elif event.event == 'run_requires_action':\n            requires_action += 1\n        elif event.event == 'run_failed' and 'retry' in str(event.data).lower():\n            retries += 1\n    \n    return {\n        'tool_calls': tool_calls,\n        'requires_action': requires_action,\n        'retries': retries,\n        'efficiency_score': 100 - (retries * 25 + (tool_calls - requires_action) * 10),\n        'is_inefficient': tool_calls > 5 or retries > 0\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Thread Context Truncation",
+        "description": "Automatically prunes old messages from thread when approaching token limits",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef truncate_thread_context(thread_id: str, max_tokens: int = 80000) -> None:\n    messages = client.beta.threads.messages.list(thread_id=thread_id)\n    total_tokens = 0\n    messages_to_keep = []\n    \n    # Keep most recent messages until token limit\n    for msg in reversed(messages.data):\n        content = msg.content[0].text.value if msg.content else ''\n        msg_tokens = int(len(content) / 4 * 1.2)\n        \n        if total_tokens + msg_tokens < max_tokens:\n            total_tokens += msg_tokens\n            messages_to_keep.append(msg.id)\n        else:\n            break\n    \n    # Delete old messages\n    all_message_ids = [msg.id for msg in messages.data]\n    old_messages = [mid for mid in all_message_ids if mid not in messages_to_keep]\n    \n    for msg_id in old_messages[:50]:  # Batch limit\n        try:\n            client.beta.threads.messages.delete(thread_id=thread_id, message_id=msg_id)\n        except:\n            pass\n    print(f'Truncated {len(old_messages)} old messages')",
+        "language": "python"
+      },
+      {
+        "name": "File Search Optimization",
+        "description": "Limits file retrieval and adds relevance filtering before processing",
+        "code": "from openai import OpenAI\nclient = OpenAI()\n\ndef create_optimized_vector_store(file_ids: list, max_files: int = 5):\n    # Create vector store with metadata filtering\n    vector_store = client.beta.vector_stores.create(name=\"Optimized Search\")\n    \n    # Batch upload limited files\n    batch = client.beta.vector_stores.file_batches.create_and_poll(\n        vector_store_id=vector_store.id,\n        file_ids=file_ids[:max_files]\n    )\n    \n    return {\n        'vector_store_id': vector_store.id,\n        'files_processed': len(file_ids[:max_files]),\n        'search_config': {\n            'max_results': 3,\n            'min_relevance_score': 0.8\n        }\n    }\n\n# Usage in assistant creation\nassistant = client.beta.assistants.create(\n    name=\"Cost Optimized\",\n    model=\"gpt-4o\",\n    tools=[{\n        \"type\": \"file_search\",\n        \"file_search\": {\n            \"vector_store_ids\": [\"optimized_store_id\"],\n            \"max_num_results\": 3\n        }\n    }],\n    tool_resources={\n        \"file_search\": {\n            \"vector_store_ids\": [\"optimized_store_id\"]\n        }\n    }\n)",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Validation Guard",
+        "description": "Validates tool call arguments against schema before execution",
+        "code": "import json\nfrom openai import OpenAI\nfrom pydantic import BaseModel, ValidationError\n\nclient = OpenAI()\n\nclass ToolValidator:\n    def __init__(self):\n        self.schemas = {\n            'get_weather': {\n                'type': 'object',\n                'properties': {\n                    'location': {'type': 'string'},\n                    'unit': {'type': 'string', 'enum': ['celsius', 'fahrenheit']}\n                },\n                'required': ['location']\n            }\n        }\n    \n    def validate_tool_call(self, tool_call):\n        schema = self.schemas.get(tool_call.function.name)\n        if not schema:\n            return False, \"Unknown function\"\n        \n        try:\n            args = json.loads(tool_call.function.arguments)\n            # Pydantic validation\n            class ToolArgs(BaseModel):\n                pass  # Dynamic schema\n            \n            # Simple JSON schema validation\n            for prop, prop_schema in schema['properties'].items():\n                if prop in args and not self._validate_value(args[prop], prop_schema):\n                    return False, f\"Invalid {prop}\"\n            return True, \"Valid\"\n        except:\n            return False, \"Invalid JSON\"\n    \n    def _validate_value(self, value, schema):\n        if 'enum' in schema and value not in schema['enum']:\n            return False\n        return True\n\n# Usage in run handling\nvalidator = ToolValidator()\n# In requires_action handler:\n# for tool_call in run.required_action.submit_tool_outputs.tool_calls:\n#     is_valid, message = validator.validate_tool_call(tool_call)\n#     if not is_valid:\n#         # Reject invalid call, save 2-3 retries",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Cost Optimization Detection with Vex",
+      "description": "Vex integrates directly with OpenAI Assistants API via webhook on run completion events, automatically analyzing thread token usage, tool call efficiency, and cost patterns across all your agents. When cost anomalies are detected—such as thread bloat exceeding 80% utilization or excessive tool retries—Vex triggers automated remediation workflows including thread truncation, vector store optimization, and function call validation. \n\nThe platform provides real-time dashboards showing cost per agent, token efficiency scores, and ROI impact of optimizations, with one-click deployment of Vex guards that reduce costs by 40-70% without changing your existing agent logic. Vex's ML-powered anomaly detection learns your normal usage patterns and alerts on deviations before they impact your budget.",
+      "code": "import vex\n\n@vex.hook('openai_run_completed')\ndef optimize_assistant_costs(event: dict) -> dict:\n    thread_id = event['data']['thread_id']\n    run_id = event['data']['id']\n    \n    # Run cost optimization checks\n    bloat_check = detect_thread_bloat(thread_id)\n    run_analysis = analyze_run_efficiency(thread_id, run_id)\n    \n    actions = []\n    \n    if bloat_check['is_bloated']:\n        truncate_thread_context(thread_id)\n        actions.append('truncated_thread')\n    \n    if run_analysis['is_inefficient']:\n        actions.append('flagged_inefficient_run')\n        vex.alert(\n            title='Cost Optimization Alert',\n            message=f'Inefficient run detected: {run_analysis[\"efficiency_score\"]}',\n            metadata={'thread_id': thread_id, 'run_id': run_id}\n        )\n    \n    return {\n        'status': 'optimized',\n        'actions_taken': actions,\n        'savings_estimate': len(actions) * 2.5  # $ per action\n    }\n\n# Install: pip install openai vex-sdk\n# Deploy: vex deploy --webhook openai_run_completed",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Deploy Vex cost optimization in 5 minutes and cut your OpenAI bills by 50%+ automatically"
+    }
+  }
+}

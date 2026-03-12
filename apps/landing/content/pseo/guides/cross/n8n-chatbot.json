@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents ai chatbot",
+      "n8n AI Agents guardrails",
+      "ai chatbot reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI Chatbots with n8n AI Agents enables powerful conversational workflows combining retrieval-augmented generation, intent classification, and multi-turn memory in an open-source automation platform. However, complex agent chains and unvalidated AI outputs introduce risks like recursive loops, hallucinations, and PII leaks that can degrade user experience and expose vulnerabilities. Vex provides essential guardrails to verify response accuracy, ensure conversation coherence, and protect against safety issues before responses reach users.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with n8n AI Agents",
+      "description": "A typical n8n AI Chatbot workflow starts with a Webhook trigger capturing user messages, followed by an AI Agent node for intent classification using a language model like GPT-4. This feeds into parallel branches: one for retrieval-augmented generation (RAG) via vector store lookup and LLM synthesis, another for memory management using n8n's Memory Window node to maintain conversation context. Outputs converge at a final AI Agent node that generates the response, which is then sent back via the webhook response node.\n\nThe architecture leverages n8n's native AI nodes for tool calling, but lacks built-in validation between agent steps, creating failure points where stale memory, unfiltered retrievals, or hallucinated responses propagate unchecked. Multi-turn conversations amplify risks as context windows grow, increasing token costs and coherence drift.",
+      "diagram": "Webhook Trigger\n       ↓\n  Intent Classifier\n       ↓\n   ├─ RAG Pipeline ──┐\n   │  (Vector Store  │\n   │   + LLM Synth)  │\n   └─ Memory Window ─┼─ Final AI Agent ── Vex Webhook ── Response\n                     │\n                Context Merge"
+    },
+    "risks": [
+      {
+        "name": "Workflow trigger chains causing recursive agent execution",
+        "description": "AI Agent nodes calling webhooks or other triggers create infinite loops when validation fails",
+        "severity": "critical",
+        "mitigation": "Insert Vex webhook after every AI Agent node to validate outputs before trigger execution"
+      },
+      {
+        "name": "AI node outputs not validated before passing to action nodes",
+        "description": "Unfiltered LLM responses containing PII or unsafe content passed to database/email nodes",
+        "severity": "critical",
+        "mitigation": "Vex safety filtering and PII detection between AI Agent and Action nodes"
+      },
+      {
+        "name": "Credential exposure through agent tool call parameters",
+        "description": "AI Agents expose API keys/secrets in tool call parameters visible in workflow logs",
+        "severity": "high",
+        "mitigation": "Vex parameter scanning and credential redaction before tool execution"
+      },
+      {
+        "name": "Memory window nodes injecting stale context into conversations",
+        "description": "Outdated conversation history causes context drift and incoherent responses",
+        "severity": "high",
+        "mitigation": "Vex conversation coherence verification against memory state"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n Webhook Trigger Setup",
+        "description": "Configure the entry point for chatbot conversations with conversation ID persistence",
+        "code": "import { createClient } from '@vex_dev/sdk';\n\nconst vex = createClient({\n  projectId: process.env.VEX_PROJECT_ID!,\n  secret: process.env.VEX_SECRET!,\n});\n\nexport default defineN8nWebhook({\n  path: '/chatbot',\n  method: 'POST',\n  async handler(req, res) {\n    const { message, conversationId } = req.body;\n    \n    // Store raw input for Vex verification later\n    const inputSpan = await vex.span('chatbot.input', {\n      input: { message, conversationId },\n      conversationId\n    });\n    \n    return res.json({\n      workflowData: [{ json: { message, conversationId, vexSpanId: inputSpan.id } }]\n    });\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "AI Agent Intent Classification",
+        "description": "Classify user intent before routing to RAG or other handlers",
+        "code": "// n8n AI Agent Node configuration\nconst agentConfig = {\n  model: 'gpt-4o-mini',\n  systemPrompt: `You are an intent classifier for a customer support chatbot.\nClassify the user message into one of: GREETING, QUERY, COMPLAINT, ESCALATION.\nRespond ONLY with JSON: {\"intent\": \"QUERY\", \"confidence\": 0.95}`\n};\n\n// Pass to next node\nconst intentOutput = $input.all()[0].json;\n\n// Vex verification checkpoint\nconst verification = await $http.request({\n  method: 'POST',\n  url: 'https://api.vex.dev/v1/verify',\n  headers: {\n    'Authorization': `Bearer ${$env.VEX_SECRET}`,\n    'Content-Type': 'application/json'\n  },\n  body: {\n    spanId: intentOutput.vexSpanId,\n    checks: ['json_schema'],\n    schema: {\n      type: 'object',\n      properties: {\n        intent: { type: 'string', enum: ['GREETING', 'QUERY', 'COMPLAINT', 'ESCALATION'] },\n        confidence: { type: 'number', minimum: 0, maximum: 1 }\n      }\n    }\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG Pipeline with Vector Store",
+        "description": "Retrieve relevant documents and synthesize response using LLM",
+        "code": "const ragAgentConfig = {\n  model: 'gpt-4o',\n  systemPrompt: `You are a helpful support agent. Use ONLY the provided context.\nContext: {{ $json.retrievedDocs }}\nUser: {{ $json.message }}\nRespond conversationally but factually.`,\n  tools: [\n    {\n      type: 'retrieval',\n      name: 'knowledge_base',\n      description: 'Search support documentation'\n    }\n  ]\n};\n\n// After RAG execution\nconst ragOutput = $input.all()[0].json.response;\n\n// Vex hallucination + accuracy check\nreturn {\n  ragResponse: ragOutput,\n  vexPayload: {\n    spanId: $json.vexSpanId,\n    checks: ['hallucination_detection', 'response_accuracy'],\n    context: $json.retrievedDocs,\n    response: ragOutput,\n    conversationId: $json.conversationId\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Window Context Management",
+        "description": "Maintain conversation history with Vex coherence verification",
+        "code": "// Memory Window Node + Vex Coherence Check\nconst memoryConfig = {\n  windowSize: 10,\n  memoryKey: 'chat_history',\n  conversationId: $json.conversationId\n};\n\nconst fullContext = {\n  history: $json.chatHistory,\n  currentMessage: $json.message,\n  ragContext: $json.retrievedDocs\n};\n\n// Verify context coherence before final response\nconst coherenceCheck = await $http.request({\n  url: 'https://api.vex.dev/v1/verify',\n  method: 'POST',\n  body: {\n    spanId: $json.vexSpanId,\n    checks: ['conversation_coherence'],\n    context: {\n      history: fullContext.history.slice(-5),\n      current: fullContext.currentMessage\n    },\n    maxTokens: 4000\n  }\n});\n\nreturn {\n  verifiedContext: coherenceCheck.data.pass ? fullContext : null,\n  conversationId: $json.conversationId\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Webhook Node After AI Agents",
+        "description": "Add this HTTP Request node after every AI Agent to catch failures early",
+        "code": "// Vex Webhook Node Configuration\nconst vexWebhookNode = {\n  resource: 'httpRequest',\n  operation: 'post',\n  url: 'https://api.vex.dev/v1/verify',\n  headers: {\n    Authorization: `Bearer {{$secrets.VEX_SECRET}}`,\n    'Content-Type': 'application/json'\n  },\n  body: {\n    spanId: '={{$json.vexSpanId}}',\n    checks: [\n      'response_accuracy',\n      'conversation_coherence',\n      'safety_filtering',\n      'pii_protection',\n      'hallucination_detection'\n    ],\n    input: '={{$json.message}}',\n    output: '={{$json.aiResponse}}',\n    conversationId: '={{$json.conversationId}}',\n    riskProfile: 'high'\n  },\n  options: {\n    timeout: 5000,\n    responseFormat: 'json'\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Conditional Routing Based on Vex Results",
+        "description": "Route to fallback or human handoff when Vex detects issues",
+        "code": "// IF Node after Vex Webhook\nconst routingConditions = [\n  {\n    conditions: {\n      options: { caseSensitive: true, leftValue: '', typeValidation: 'strict' },\n      conditions: [\n        {\n          id: 'v1',\n          leftValue: '={{$json.pass}}',\n          rightValue: false,\n          operator: { type: 'boolean', operation: 'equals' }\n        }\n      ],\n      combinators: []\n    },\n    name: 'Vex Failed - Route to Fallback'\n  },\n  {\n    name: 'Vex Passed - Continue to Response'\n  }\n];\n\n// Fallback branch\nconst fallbackResponse = {\n  respondToWebhook: {\n    respondWith: 'text',\n    responseBody: 'I apologize, let me get a human to help you. One moment...',\n    options: {}\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Conversation Finalization with Vex Span Close",
+        "description": "Close the Vex span and log metrics before webhook response",
+        "code": "// Final Vex span close before webhook response\nconst finalizeSpan = await $http.request({\n  method: 'POST',\n  url: `https://api.vex.dev/v1/spans/{{$json.vexSpanId}}/close`,\n  headers: {\n    'Authorization': `Bearer {{$secrets.VEX_SECRET}}`,\n    'Content-Type': 'application/json'\n  },\n  body: {\n    metrics: {\n      responseTime: Date.now() - $json.conversationStart,\n      tokenUsage: $json.totalTokens,\n      vexScore: $json.vexResult.score\n    },\n    finalOutput: $json.finalResponse,\n    status: 'success'\n  }\n});\n\n// Safe webhook response\nreturn {\n  respondToWebhook: true,\n  responseData: {\n    response: $json.finalResponse,\n    conversationId: $json.conversationId,\n    vexPassed: $json.vexResult.pass\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Agents AI Chatbot",
+      "description": "Add Vex guardrails to your n8n workflows today with our free tier - prevent failures before they reach users."
+    }
+  }
+}

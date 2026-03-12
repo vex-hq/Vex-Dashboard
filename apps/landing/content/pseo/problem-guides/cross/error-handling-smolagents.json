@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "error-handling",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Error Handling Patterns in Smolagents Agents",
+    "description": "How to detect and fix ai agent error handling patterns in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-error-handling-patterns",
+      "Smolagents error-handling",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, AI Agent Error Handling Patterns manifest as agents generating code with minimal or absent error handling, leading to uncaught exceptions during tool execution or reasoning steps. The framework's emphasis on simplicity and code-based reasoning exacerbates issues like unsafe Python execution and multi-step reasoning errors that compound silently. Without explicit error boundaries, agent failures cascade through the lightweight execution pipeline, making debugging challenging.",
+    "howItManifests": [
+      {
+        "scenario": "Code agent generating unsafe Python execution",
+        "symptom": "Agent writes code accessing files/network without try-catch, crashes on permission errors",
+        "impact": "Entire agent session terminates, no recovery or fallback reasoning"
+      },
+      {
+        "scenario": "Tool agent misinterpreting tool descriptions",
+        "symptom": "Agent calls tools with invalid parameters, raises ValueError/TypeError",
+        "impact": "Tool execution fails silently, agent continues with corrupted state"
+      },
+      {
+        "scenario": "Multi-step reasoning errors compounding",
+        "symptom": "Early reasoning step fails but exception swallowed, propagates bad assumptions",
+        "impact": "Final output completely wrong, no traceability to root cause"
+      },
+      {
+        "scenario": "Minimal error handling in generated code",
+        "symptom": "Agent-generated code lacks validation, fails on edge cases (empty inputs, None values)",
+        "impact": "Production deployments crash unpredictably on real user data"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Trace Agent Exceptions",
+        "description": "Capture and log all exceptions during agent.run() execution to identify unhandled errors",
+        "code": "from smolagents import CodeAgent\nimport traceback\n\ndef detect_agent_exceptions():\n    agent = CodeAgent('gpt-4o-mini')\n    try:\n        result = agent.run('Write code to read /etc/passwd and print first 10 lines')\n    except Exception as e:\n        print(f'UNHANDLED EXCEPTION: {type(e).__name__}')\n        print(traceback.format_exc())\n        return False\n    return True",
+        "language": "python"
+      },
+      {
+        "name": "Validate Generated Code Safety",
+        "description": "Static analysis of agent-generated code for dangerous patterns and missing error handling",
+        "code": "import ast\nimport re\n\ndef analyze_generated_code(code: str) -> dict:\n    tree = ast.parse(code)\n    issues = []\n    \n    # Detect dangerous operations without try/except\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            if getattr(node.func, 'id', '') in ['open', 'exec', 'eval', 'subprocess.run']:\n                parent = ast.ParentMap(ast.parse(code))[node]\n                if not any(isinstance(p, ast.Try) for p in ast.walk(parent)):\n                    issues.append(f'Dangerous {node.func.id} without try/except')\n    \n    # Detect missing input validation\n    if re.search(r'\\b(input|sys.argv|request.args)\\b', code) and 'if' not in code:\n        issues.append('Missing input validation')\n    \n    return {'safe': len(issues) == 0, 'issues': issues}",
+        "language": "python"
+      },
+      {
+        "name": "Monitor Multi-Step Failure Cascade",
+        "description": "Track error accumulation across reasoning steps in multi-turn conversations",
+        "code": "from smolagents import Conversation\n\ndef detect_cascading_errors():\n    convo = Conversation()\n    errors = []\n    \n    steps = [\n        'Calculate 100 / (age - age)',  # Division by zero\n        'Use previous result to compute square root',\n        'Format final answer'\n    ]\n    \n    for i, step in enumerate(steps):\n        try:\n            result = convo.run(step)\n        except Exception as e:\n            errors.append({'step': i+1, 'error': str(e)})\n            print(f'Step {i+1} failed: {e}')\n    \n    cascade_detected = len(errors) > 1\n    print(f'Cascading errors: {cascade_detected}, Count: {len(errors)}')\n    return cascade_detected",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Safe Code Agent Wrapper",
+        "description": "Wrap agent execution with comprehensive error handling and fallback reasoning",
+        "code": "from smolagents import CodeAgent\nimport traceback\n\ndef safe_agent_run(agent, prompt: str, max_retries: int = 3):\n    for attempt in range(max_retries):\n        try:\n            # Pre-validate prompt\n            if any(danger in prompt.lower() for danger in ['exec', 'eval', '__import__', 'os.system']):\n                return {'error': 'Blocked dangerous prompt', 'safe_output': 'Use safe alternative approach'}\n            \n            result = agent.run(prompt)\n            return {'success': True, 'result': result}\n        \n        except Exception as e:\n            error_msg = f'Attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}'\n            print(error_msg)\n            \n            if attempt == max_retries - 1:\n                return {\n                    'success': False, \n                    'error': error_msg,\n                    'fallback': 'Task failed safely - no execution performed',\n                    'traceback': traceback.format_exc()\n                }",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Validation Middleware",
+        "description": "Validate tool parameters before execution with schema checking",
+        "code": "from smolagents import ToolAgent, Tool\nfrom pydantic import BaseModel, ValidationError\n\nclass SafeFileReader(Tool):\n    name = 'safe_file_reader'\n    description = 'Read file safely with size limits'\n    \n    class Input(BaseModel):\n        path: str\n        max_bytes: int = 1024\n    \n    def call(self, path: str, max_bytes: int = 1024) -> str:\n        try:\n            # Schema validation\n            input_data = self.Input(path=path, max_bytes=max_bytes)\n            \n            # Security checks\n            if not path.startswith('/tmp/'):\n                raise ValueError('Only /tmp/ files allowed')\n                \n            with open(path, 'r') as f:\n                content = f.read(max_bytes)\n                return f'Read {len(content)} bytes successfully'\n        except (FileNotFoundError, PermissionError) as e:\n            return f'File access failed safely: {str(e)}'\n        except ValidationError as e:\n            return f'Invalid parameters: {e.errors()}'",
+        "language": "python"
+      },
+      {
+        "name": "Resilient Multi-Step Conversation",
+        "description": "Implement checkpointing and error recovery for multi-step reasoning",
+        "code": "from smolagents import Conversation\nfrom typing import Dict, Any\n\nclass ResilientConversation(Conversation):\n    def __init__(self):\n        super().__init__()\n        self.checkpoints: Dict[str, Any] = {}\n    \n    def run_with_recovery(self, step: str, checkpoint_key: str = None) -> dict:\n        try:\n            result = self.run(step)\n            \n            # Auto-checkpoint successful steps\n            if checkpoint_key:\n                self.checkpoints[checkpoint_key] = result\n            \n            return {'success': True, 'result': result}\n        \n        except Exception as e:\n            # Recovery: restore from last checkpoint\n            if checkpoint_key and checkpoint_key in self.checkpoints:\n                recovery_prompt = f'Previous step failed: {str(e)}. Continuing from: {self.checkpoints[checkpoint_key]}. Current task: {step}'\n                recovery_result = self.run(recovery_prompt)\n                return {'success': True, 'recovered': True, 'result': recovery_result}\n            \n            return {'success': False, 'error': str(e), 'recovered': False}",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Error Handling Patterns Detection with Vex",
+      "description": "Vex provides automated detection of Smolagents error handling issues by wrapping agent.run() calls with comprehensive safety verification. It detects unsafe code generation, unhandled exceptions, cascading failures, and missing validation patterns in real-time. Vex generates remediation reports with specific fixes and can automatically inject safe wrappers around vulnerable agent patterns.\n\nThe integration requires only pip install smolagents vex-sdk and wrapping your agent.run() calls with vex.verify(). Vex analyzes both the generated code and execution behavior, catching issues that static analysis misses. Remediation is automatic with one-click fixes that maintain agent functionality while adding robust error boundaries.\n\nVex's agent-specific detectors understand Smolagents' code-generation patterns, identifying when agents produce unsafe exec/eval patterns or lack try/except blocks around file I/O and API calls common in agent workflows.",
+      "code": "from smolagents import CodeAgent, Conversation\nimport vex\n\n# Vex automatically detects error handling issues\n@vex.verify(\n    suite='ai-agent-safety',\n    detectors=['unsafe-code-generation', 'missing-error-handling', 'cascading-failures'],\n    auto_fix=True\n)\ndef safe_agent_pipeline(prompt: str):\n    # Regular Smolagents code - Vex wraps automatically\n    agent = CodeAgent('gpt-4o-mini')\n    result = agent.run(prompt)\n    return result\n\n# Multi-step conversation protection\n@vex.verify(suite='agent-conversation-safety')\ndef safe_conversation(steps: list):\n    convo = Conversation()\n    results = []\n    for step in steps:\n        result = convo.run(step)\n        results.append(result)\n    return results\n\n# Usage\nif __name__ == '__main__':\n    result = safe_agent_pipeline('Write code to read system files')\n    print('✅ Vex verified result:', result)\n    \n    convo_result = safe_conversation([\n        'Calculate risky math',\n        'Process previous result'\n    ])",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install with pip install smolagents vex-sdk and wrap agent.run() with vex.verify() for instant error handling protection."
+    }
+  }
+}

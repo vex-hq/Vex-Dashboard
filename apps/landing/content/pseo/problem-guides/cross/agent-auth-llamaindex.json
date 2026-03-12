@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "agent-auth",
+    "framework": "llamaindex",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Authentication and Authorization in LlamaIndex Agents",
+    "description": "How to detect and fix ai agent authentication and authorization in LlamaIndex agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-authentication-and-authorization-guide",
+      "LlamaIndex agent-auth",
+      "LlamaIndex reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In LlamaIndex agents, AI Agent Authentication and Authorization problems manifest when agents attempt to access protected external data sources or tools without proper credentials, leading to failed retrievals or unauthorized actions. This often appears as silent failures in query engines where indexed data from authenticated sources becomes inaccessible, or when agents invoke tools like APIs without valid tokens. These issues disrupt the RAG pipeline, causing irrelevant responses or complete breakdowns in agent reasoning.",
+    "howItManifests": [
+      {
+        "scenario": "Query engine accessing stale or expired API tokens in indexed enterprise data",
+        "symptom": "Retrieval returns empty nodes or 401 Unauthorized errors in node metadata",
+        "impact": "Agent hallucinates answers due to missing context from protected sources"
+      },
+      {
+        "scenario": "Agent tool calling external APIs without auth headers during reasoning",
+        "symptom": "Tool execution fails with authentication errors, breaking agent loop",
+        "impact": "Agent gets stuck in infinite reasoning loops or returns permission denied"
+      },
+      {
+        "scenario": "Multi-tenant index serving unauthorized user data access",
+        "symptom": "Wrong tenant's documents appear in retrieved context",
+        "impact": "Data leakage exposing sensitive information across organizations"
+      },
+      {
+        "scenario": "Dynamic tool registration without auth context propagation",
+        "symptom": "Newly added tools fail authentication despite valid user session",
+        "impact": "Agent capabilities degrade as tools become unusable mid-conversation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Monitor Query Engine Auth Failures",
+        "description": "Detect 401/403 errors and empty retrievals from authenticated sources",
+        "code": "from llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\nfrom llama_index.core.query_engine import CitationQueryEngine\n\n# Wrap your query engine\ndef detect_auth_failures(query_engine):\n    try:\n        response = query_engine.query(\"Check enterprise sales data\")\n        nodes = response.source_nodes\n        auth_errors = [n.metadata.get('error') for n in nodes \n                      if n.metadata.get('status_code') in [401, 403]]\n        if auth_errors or len(nodes) == 0:\n            print(f\"AUTH ISSUE: {len(auth_errors)} failures detected\")\n            return True\n        return False\n    except Exception as e:\n        if '401' in str(e) or '403' in str(e):\n            print(\"AUTH ERROR:\", str(e))\n            return True\n        raise",
+        "language": "python"
+      },
+      {
+        "name": "Tool Call Auth Validation",
+        "description": "Intercept tool calls to check for missing auth headers/tokens",
+        "code": "from llama_index.core.tools import FunctionTool\n\ndef validate_tool_auth(tool_call):\n    \"\"\"Detect missing auth in tool parameters\"\"\"\n    required_auth = ['api_key', 'bearer_token', 'authorization']\n    params = tool_call.get('parameters', {})\n    missing_auth = [p for p in required_auth if not params.get(p)]\n    \n    if missing_auth:\n        print(f\"TOOL AUTH MISSING: {missing_auth}\")\n        return {'error': 'Missing authentication parameters'}\n    return {'status': 'valid'}",
+        "language": "python"
+      },
+      {
+        "name": "Tenant Isolation Check",
+        "description": "Verify retrieved nodes match expected tenant boundaries",
+        "code": "def check_tenant_leakage(retrieved_nodes, expected_tenant):\n    \"\"\"Detect cross-tenant data access\"\"\"\n    tenant_ids = [n.metadata.get('tenant_id') for n in retrieved_nodes]\n    unauthorized = [t for t in tenant_ids if t != expected_tenant]\n    \n    if unauthorized:\n        print(f\"TENANT LEAKAGE: Found {len(set(unauthorized))} unauthorized tenants\")\n        return True\n    return False",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Token Refresh Middleware",
+        "description": "Automatically refresh expired tokens before queries",
+        "code": "from llama_index.core.indices import VectorStoreIndex\n\nfrom functools import wraps\nimport requests\n\ndef auth_middleware(query_engine):\n    @wraps(query_engine.query)\n    def wrapped_query(*args, **kwargs):\n        # Refresh token if expired\n        if not validate_token():\n            refresh_access_token()\n        return query_engine.query(*args, **kwargs)\n    query_engine.query = wrapped_query\n    return query_engine\n\ndef validate_token():\n    response = requests.get('https://api.example.com/validate', \n                           headers={'Authorization': f'Bearer {get_token()}'},\n                           timeout=5)\n    return response.status_code == 200\n\ndef refresh_access_token():\n    # Implementation depends on your auth provider\n    token = requests.post('https://auth.example.com/token', \n                         json={'refresh_token': get_refresh_token()}).json()\n    save_token(token['access_token'])",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Auth Wrapper",
+        "description": "Inject user context into all tool calls automatically",
+        "code": "from llama_index.core.tools import ToolMetadata\n\nfrom llama_index.core.base.llms.types import ChatMessage\n\ndef secure_tool_wrapper(func):\n    @wraps(func)\n    def wrapper(**kwargs):\n        # Inject auth from current user context\n        user_context = get_current_user_context()\n        kwargs['headers'] = {\n            'Authorization': f'Bearer {user_context[\"token\"]}',\n            'X-Tenant-ID': user_context['tenant_id']\n        }\n        kwargs['timeout'] = 30\n        return func(**kwargs)\n    return wrapper\n\n# Usage\n@secure_tool_wrapper\ndef sales_api_tool(start_date, end_date):\n    response = requests.get(f'/api/sales?start={start_date}&end={end_date}')\n    return response.json()",
+        "language": "python"
+      },
+      {
+        "name": "Tenant-Aware Retriever",
+        "description": "Filter index retrieval by tenant context",
+        "code": "from llama_index.core.vector_stores.types import VectorStoreInfo\n\nfrom llama_index.core.query_engine import CustomQueryEngine\n\ndef tenant_retriever(query_bundle, tenant_id):\n    \"\"\"Custom retriever with tenant filtering\"\"\"\n    base_retriever = index.as_retriever()\n    nodes = base_retriever.retrieve(query_bundle)\n    \n    # Filter by tenant\n    tenant_nodes = [n for n in nodes \n                   if n.metadata.get('tenant_id') == tenant_id]\n    \n    return tenant_nodes\n\n# Create tenant-aware query engine\nquery_engine = CustomQueryEngine.from_defaults(\n    retriever=partial(tenant_retriever, tenant_id='tenant-123'),\n    node_postprocessors=[]\n)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Authentication and Authorization Detection with Vex",
+      "description": "Vex provides production-grade observability for LlamaIndex agents by wrapping query engines and tool calls with automatic verification. It detects authentication failures, token expiration patterns, and tenant isolation violations in real-time, surfacing them through dashboards and alerts. Vex's verification engine analyzes response metadata, HTTP status codes, and retrieval patterns to pinpoint exactly where auth flows break.\n\nThe integration automatically captures auth-related signals including 401/403 rates, empty retrievals from protected sources, and cross-tenant data access. Vex generates remediation blueprints with exact code snippets for token refresh logic, secure tool wrappers, and tenant-aware retrievers. Teams can set up automated alerting when auth failure rates exceed 2% of queries.\n\nVex also provides auth drift detection, alerting when token lifetimes change or API endpoints introduce new auth requirements, preventing widespread agent failures before they impact users.",
+      "code": "from vex_sdk import verify\nfrom llama_index.core import VectorStoreIndex, SimpleDirectoryReader\n\n# Install: pip install llama-index vex-sdk\n\n# Load your index\ndocuments = SimpleDirectoryReader('data').load_data()\nindex = VectorStoreIndex.from_documents(documents)\nquery_engine = index.as_query_engine()\n\n# Vex auto-detects auth failures\n@verify(guards=[\n    'auth-failures',\n    'token-expiration',\n    'tenant-leakage',\n    'tool-auth-errors'\n])\ndef secure_agent_query(question: str):\n    \"\"\"Vex monitors auth at every layer\"\"\"\n    response = query_engine.query(question)\n    return str(response)\n\n# Vex auto-generates these fixes:\n# 1. Token refresh middleware\n# 2. Tenant filtering retriever\n# 3. Secure tool wrappers\n# 4. Auth failure alerts",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 minutes to automatically catch auth failures across all your LlamaIndex agents: pip install vex-sdk"
+    }
+  }
+}

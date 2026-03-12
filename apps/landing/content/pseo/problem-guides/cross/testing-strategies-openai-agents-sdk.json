@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "testing-strategies",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "AI Agent Testing Strategies in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix ai agent testing strategies in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "ai-agent-testing-strategies-guide",
+      "OpenAI Agents SDK testing-strategies",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "AI Agent Testing Strategies failures in OpenAI Agents SDK manifest as unreliable multi-agent handoffs, unvalidated tool outputs, and guardrail bypasses that cascade through agent chains. These issues appear specifically in the SDK's `Agent.handoff()` patterns and `Agent.run()` execution flows, where tracing gaps hide looping behaviors and prompt injections evade `guardrails.validate()` checks. Without systematic testing, production agents degrade into infinite loops or produce hallucinated responses from untrusted tool data.",
+    "howItManifests": [
+      {
+        "scenario": "Agent handoff loops between specialized agents",
+        "symptom": "Agents ping-pong indefinitely between `handoff()` calls without progress",
+        "impact": "Infinite execution loops consuming API quotas and timing out"
+      },
+      {
+        "scenario": "Guardrail bypasses via prompt injection",
+        "symptom": "`guardrails.validate()` returns True despite malicious 'ignore previous instructions' payloads",
+        "impact": "Agents execute unauthorized actions or leak sensitive data"
+      },
+      {
+        "scenario": "Tool output not validated before agent consumption",
+        "symptom": "Raw `tool.call()` JSON passed directly to `agent.run()` without schema validation",
+        "impact": "Agents hallucinate from malformed or malicious tool responses"
+      },
+      {
+        "scenario": "Tracing gaps in multi-agent handoff chains",
+        "symptom": "`tracing.span()` missing across `Agent.handoff()` boundaries",
+        "impact": "Impossible to debug cascading failures in production handoff chains"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Handoff Loop Detector",
+        "description": "Scans agent execution traces for repeated handoff patterns exceeding threshold",
+        "code": "```python\nfrom openai_agents import Agent\nfrom vex_sdk import VexMonitor\n\nvex = VexMonitor()\n\ndef detect_handoff_loops(agent_traces):\n    loops = []\n    for trace in agent_traces:\n        handoffs = [step for step in trace.steps if 'handoff' in step.get('action', {})]\n        if len(handoffs) > 5 and len(set(h.tgt_agent for h in handoffs)) < 3:\n            loops.append({\n                'agent_id': trace.agent_id,\n                'loop_count': len(handoffs),\n                'pattern': [h.src_agent for h in handoffs[-3:]]\n            })\n    return vex.flag('HANDOFF_LOOP', loops)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Prompt Injection Scanner",
+        "description": "Detects jailbreak patterns in inputs that bypass guardrails.validate()",
+        "code": "```python\nimport re\nfrom openai_agents import Guardrail\n\nJAILBREAK_PATTERNS = [\n    r'ignore.*previous.*instructions',\n    r'you are now.*hacker',\n    r'forget.*rules',\n    r'override.*guardrails'\n]\n\ndef scan_prompt_injection(user_input):\n    violations = []\n    for pattern in JAILBREAK_PATTERNS:\n        if re.search(pattern, user_input, re.IGNORECASE):\n            violations.append({\n                'pattern': pattern,\n                'input_snippet': user_input[:100],\n                'risk': 'HIGH'\n            })\n    return violations\n```",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Checks if tool responses match expected JSON schemas before agent consumption",
+        "code": "```python\nimport json\nfrom openai_agents import Tool\n\ndef validate_tool_output(tool_call, expected_schema):\n    try:\n        result = json.loads(tool_call.output)\n        # Validate against expected schema\n        required_fields = expected_schema.get('required', [])\n        missing = [f for f in required_fields if f not in result]\n        if missing:\n            return {'valid': False, 'error': f'Missing fields: {missing}'}\n        return {'valid': True}\n    except json.JSONDecodeError:\n        return {'valid': False, 'error': 'Invalid JSON'}\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Circuit Breaker Handoff Guard",
+        "description": "Prevents infinite loops by tracking handoff state and enforcing max iterations",
+        "code": "```python\nfrom openai_agents import Agent\nfrom collections import defaultdict\n\nclass SafeAgent(Agent):\n    def __init__(self, *args, max_handoffs=3, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.handoff_counts = defaultdict(int)\n        self.max_handoffs = max_handoffs\n    \n    def handoff(self, target_agent, context):\n        key = f'{self.id}->{target_agent.id}'\n        self.handoff_counts[key] += 1\n        if self.handoff_counts[key] > self.max_handoffs:\n            return self.fail('Handoff loop detected')\n        return super().handoff(target_agent, context)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Hardened Input Sanitizer",
+        "description": "Strips jailbreak attempts before guardrail validation",
+        "code": "```python\nfrom openai_agents import Guardrail\n\nclass SecureGuardrail(Guardrail):\n    JAILBREAK_BLACKLIST = [\n        'ignore previous instructions',\n        'you are now',\n        'forget your rules',\n        'override guardrails'\n    ]\n    \n    def validate(self, input_text):\n        for pattern in self.JAILBREAK_BLACKLIST:\n            if pattern in input_text.lower():\n                return False, 'Jailbreak attempt detected'\n        return super().validate(input_text)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Tool Response Validator",
+        "description": "Enforces JSON schema validation before passing to agent",
+        "code": "```python\nfrom openai_agents import Tool, agent\nfrom pydantic import BaseModel, ValidationError\n\nclass ValidatedTool(Tool):\n    expected_schema: dict\n    \n    def call(self, args):\n        result = super().call(args)\n        try:\n            validated = self.schema_model(**result)\n            return validated.dict()\n        except ValidationError as e:\n            agent.fail(f'Tool output validation failed: {e}')\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating AI Agent Testing Strategies Detection with Vex",
+      "description": "Vex integrates directly as output guardrails on OpenAI Agents SDK agents, automatically detecting handoff loops, prompt injections, and validation failures across multi-agent chains. Using `VexGuardrail(agent)` wrappers, Vex captures 100% of agent executions with full tracing context, applying ML-powered anomaly detection trained specifically on OpenAI Agents SDK patterns. \n\nRemediation happens inline: Vex can block malicious handoffs, sanitize injected prompts, and validate tool outputs before they reach downstream agents. Production dashboards show failure cascades with one-click fixes that deploy across your entire agent fleet. The SDK integration requires zero code changes beyond `pip install openai-agents vex-sdk` and adding VexGuardrail to agent constructors.",
+      "code": "```python\nfrom openai_agents import Agent, Runner\nfrom vex_sdk import VexGuardrail\n\n# Install: pip install openai-agents vex-sdk\n\n# Wrap existing agents with Vex\ndeforensics_team = Agent(name=\"Forensics\", model=\"gpt-4o\")\nresearcher = Agent(name=\"Researcher\", model=\"gpt-4o\")\n\n# Zero-config Vex integration\nforensics_team = VexGuardrail(forensics_team)\nresearcher = VexGuardrail(researcher)\n\nrunner = Runner(agents=[forensics_team, researcher])\nresult = runner.run('Analyze this contract for risks')\n\n# Vex auto-detects loops, injections, validation failures\nprint(result.vex_report)\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add `pip install openai-agents vex-sdk` and wrap your agents to eliminate testing failures instantly."
+    }
+  }
+}

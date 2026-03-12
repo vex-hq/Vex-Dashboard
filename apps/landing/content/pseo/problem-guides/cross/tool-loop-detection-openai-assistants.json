@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in OpenAI Assistants API Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "OpenAI Assistants API tool-loop-detection",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, Tool Loop Detection identifies when agents enter infinite cycles of redundant tool calls, such as repeatedly invoking the same function or code interpreter without progressing toward task completion. This manifests as excessive run steps, ballooning thread context, and stalled assistant responses due to the API's stateful run loop continuing until max iterations or timeouts. Common triggers include ambiguous function schemas leading to repetitive calls and code interpreter loops generating infinite outputs.",
+    "howItManifests": [
+      {
+        "scenario": "Code interpreter repeatedly executes the same analysis",
+        "symptom": "Run status shows 20+ 'requires_action' steps with identical code interpreter tool calls",
+        "impact": "Hits OpenAI run limit (100 steps), thread context exceeds 128k tokens, $10+ per failed run"
+      },
+      {
+        "scenario": "File search tool called in tight loop on same directory",
+        "symptom": "Sequential 'file_search' tool calls with overlapping vector store queries",
+        "impact": "Irrelevant document retrieval cascades, degrading response relevance by 80%"
+      },
+      {
+        "scenario": "Custom function ping-pongs between two interdependent calls",
+        "symptom": "Alternating 'function_call' between 'get_user_data' and 'validate_user' tools",
+        "impact": "Assistant stuck in loop, user experiences 5+ minute hangs"
+      },
+      {
+        "scenario": "Thread context accumulation from unterminated tool chains",
+        "symptom": "Run metadata shows step count >50 with repeating tool_ids",
+        "impact": "Silent failure as context hits model limits, incomplete responses"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Run Steps Loop Analysis",
+        "description": "Parse run events to detect >10 identical tool calls within 20 steps",
+        "code": "from openai import OpenAI\nclient = OpenAI()\ndef detect_tool_loop(thread_id):\n    events = client.beta.threads.runs.list(\n        thread_id=thread_id,\n        event_types=['thread.run.step.created']\n    ).data\n    tool_calls = []\n    for event in events[:20]:\n        if 'step' in event.data:\n            step = event.data['step']\n            if step['step_details']['type'] == 'tool_calls':\n                for tool in step['step_details']['tool_calls']:\n                    tool_calls.append(tool['type'])\n    if len(tool_calls) > 10 and len(set(tool_calls[-10:])) <= 2:\n        return {'loop_detected': True, 'repeating_tools': tool_calls[-10:]}\n    return {'loop_detected': False}",
+        "language": "python"
+      },
+      {
+        "name": "Function Call Cycle Detection",
+        "description": "Track function call graph to identify cycles using networkx",
+        "code": "import networkx as nx\nfrom openai import OpenAI\nclient = OpenAI()\ndef detect_function_cycles(thread_id):\n    run = client.beta.threads.runs.retrieve(thread_id=thread_id)\n    G = nx.DiGraph()\n    events = client.beta.threads.runs.list(thread_id, limit=50).data\n    for event in events:\n        if 'step' in event.data and event.data['step']['type'] == 'tool_calls':\n            for tool in event.data['step']['step_details']['tool_calls']:\n                func_name = tool['function']['name']\n                G.add_node(func_name)\n                G.add_edge('assistant', func_name)\n    cycles = list(nx.simple_cycles(G))\n    return {'cycles_found': len(cycles) > 0, 'cycles': cycles}",
+        "language": "python"
+      },
+      {
+        "name": "Realtime Run Monitoring",
+        "description": "TypeScript webhook handler for run.step events detecting loops",
+        "code": "import OpenAI from 'openai';\nconst openai = new OpenAI();\n\nexport async function detectLoopInRun(run: OpenAI.Beta.Threads.Runs.Run) {\n  const events = await openai.beta.threads.runs.events.list(run.thread_id!, {\n    run_id: run.id!,\n  });\n  const toolCalls = events.data\n    .filter((e) => e.data?.step?.step_details?.type === 'tool_calls')\n    .slice(0, 20)\n    .map((e) => e.data.step.step_details.tool_calls[0]?.type || '');\n  const recentUnique = new Set(toolCalls.slice(-10));\n  const isLoop = toolCalls.length > 10 && recentUnique.size <= 2;\n  return {\n    loopDetected: isLoop,\n    repeatingTools: Array.from(recentUnique),\n    stepCount: toolCalls.length,\n  };\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Max Tool Calls Per Run",
+        "description": "Configure assistant with tool call limits to prevent runaway loops",
+        "code": "from openai import OpenAI\nclient = OpenAI()\nassistant = client.beta.assistants.create(\n    name=\"Safe Agent\",\n    instructions=\"Complete tasks efficiently. Max 3 tool calls per response.\",\n    model=\"gpt-4o\",\n    tools=[\n        {\n            \"type\": \"code_interpreter\"\n        },\n        {\n            \"type\": \"file_search\"\n        }\n    ],\n    tool_resources={\n        \"code_interpreter\": {\n            \"max_turns\": 3  # Prevents interpreter loops\n        }\n    }\n)",
+        "language": "python"
+      },
+      {
+        "name": "Loop-Breaking System Instructions",
+        "description": "Instruct assistant to detect and break loops explicitly",
+        "code": "assistant = client.beta.assistants.update(\n    assistant_id,\n    instructions=\"\"\"CRITICAL: Detect tool loops and STOP.\n    If you've called the same tool 3+ times without progress:\n    1. Summarize findings\n    2. Respond directly to user\n    3. Do NOT call tools again\n    Track your tool calls:\"\"\"\n)",
+        "language": "python"
+      },
+      {
+        "name": "Run Termination Guardrails",
+        "description": "TypeScript interceptor to cancel looping runs",
+        "code": "import OpenAI from 'openai';\nconst openai = new OpenAI();\n\nexport async function guardRun(threadId: string, runId: string) {\n  const run = await openai.beta.threads.runs.retrieve(threadId, runId);\n  if (run.required_action?.type === 'submit_tool_outputs' &&\n      run.completed_at === null &&\n      (Date.now() - new Date(run.created_at).getTime()) > 300000) {  // 5min\n    await openai.beta.threads.runs.cancel(threadId, runId);\n    return { action: 'cancelled_looping_run' };\n  }\n  return { action: 'continue' };\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI run completion events, automatically analyzing run steps for tool call patterns and detecting loops before they exhaust quotas. Using Vex's pattern recognition, it identifies repeating tool_ids, function call cycles, and context bloat in real-time across all your assistants. When loops are detected, Vex can auto-remediate by canceling runs, updating assistant instructions, or triggering fallback human review.\n\nThe Vex SDK provides pre-built detectors for OpenAI-specific failure modes including tool loops, with one-line integration into your existing run polling loops. Vex maintains historical baselines per assistant, alerting only on statistically significant loop behaviors while ignoring legitimate iterative tool use. Remediation workflows auto-generate loop-breaking instructions and deploy updated assistant configs.\n\nVex dashboards provide loop heatmaps by tool type, assistant, and thread, enabling proactive schema improvements before loops impact users.",
+      "code": "from vex_sdk import Vex\nfrom openai import OpenAI\n\nvex = Vex(api_key=\"your-vex-key\")\nclient = OpenAI()\n\n@vex.on('openai_run_complete')\ndef detect_tool_loops(event):\n    thread_id = event['data']['thread_id']\n    run = client.beta.threads.runs.retrieve(thread_id, event['data']['run_id'])\n    \n    if run.status == 'requires_action':\n        step_count = len(client.beta.threads.runs.events.list(thread_id).data)\n        if step_count > 15:\n            vex.trigger_remediation(\n                'tool_loop_detected',\n                {\n                    'assistant_id': run.assistant_id,\n                    'step_count': step_count,\n                    'action': 'cancel_and_restart'\n                }\n            )\n            return {'status': 'loop_detected', 'action': 'cancelled'}\n    \n@vex.start_webhook(port=8080)\n# Auto-deploys to catch all your OpenAI runs",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK now and eliminate tool loops across all your OpenAI assistants in 5 minutes"
+    }
+  }
+}

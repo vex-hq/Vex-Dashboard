@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "framework": "flowise",
+    "industry": "recruitment",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Flowise Guardrails for Recruitment/HR",
+    "description": "Compliance guide for Flowise agents in recruitment/hr. Meet EEOC guidelines, NYC Local Law 144 requirements with Vex guardrails.",
+    "keywords": [
+      "Flowise recruitment/hr",
+      "recruitment/hr AI compliance",
+      "Flowise guardrails",
+      "recruitment/hr AI agents",
+      "AI compliance guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Recruitment/HR teams using Flowise for AI-driven resume screening and candidate evaluation face heightened compliance risks due to strict regulations like EEOC guidelines and the EU AI Act, which classify hiring AI as high-risk. Without proper guardrails, chatflows and RAG pipelines can inadvertently produce biased outputs or discriminate based on protected characteristics. Vex provides essential observability and validation to ensure fair, auditable, and legally compliant AI hiring processes.",
+    "complianceRequirements": [
+      {
+        "regulation": "EEOC Guidelines",
+        "description": "AI screening tools must not discriminate based on protected characteristics like race, gender, age, or disability; annual bias audits required.",
+        "howVexHelps": "Monitors chatflow outputs for biased language and flags intermediate reasoning steps that reference protected attributes, enabling audit trails."
+      },
+      {
+        "regulation": "NYC Local Law 144",
+        "description": "Employers must notify candidates when AI is used in hiring decisions and conduct annual bias audits on automated employment decision tools.",
+        "howVexHelps": "Captures all AI interactions with metadata for disclosure logs and validates tool outputs against bias thresholds before candidate notifications."
+      },
+      {
+        "regulation": "EU AI Act (High-Risk)",
+        "description": "High-risk AI systems in employment must ensure transparency, human oversight, and risk mitigation for discriminatory outcomes.",
+        "howVexHelps": "Provides real-time validation of vector retrieval relevance and agent handoffs, blocking low-confidence or biased recommendations."
+      },
+      {
+        "regulation": "ADA & State Hiring Bias Laws",
+        "description": "Resume screening must accommodate disabilities and avoid disparate impact on protected groups.",
+        "howVexHelps": "Detects and redacts disability-related inferences in RAG documents and enforces fairness constraints in multi-agent flows."
+      }
+    ],
+    "industryRisks": [
+      {
+        "name": "Unvalidated Chatflow Outputs",
+        "description": "Intermediate agent reasoning produces biased candidate rankings without validation, leading to discriminatory shortlisting.",
+        "severity": "critical",
+        "example": "Chatflow chain scores female candidates lower due to unvalidated 'cultural fit' proxies correlated with gender."
+      },
+      {
+        "name": "Low-Relevance Vector Retrieval",
+        "description": "RAG retrieves resumes with irrelevant protected characteristics, poisoning hiring recommendations.",
+        "severity": "high",
+        "example": "Vector store pulls documents mentioning 'veteran status' for unrelated military experience queries."
+      },
+      {
+        "name": "Silent Custom Tool Failures",
+        "description": "Custom nodes for skills extraction fail without error propagation, defaulting to biased defaults.",
+        "severity": "high",
+        "example": "Tool silently returns zero skills for non-traditional career paths, disproportionately affecting older candidates."
+      },
+      {
+        "name": "Context Loss in Agent Handoffs",
+        "description": "Multi-agent flows lose fairness constraints between screening and interview scheduling agents.",
+        "severity": "medium",
+        "example": "Initial screener flags diverse candidates appropriately, but interview agent drops them due to missing context."
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Add Vex Callback to Flowise Chatflow Config",
+        "description": "Integrate Vex as a callback handler in Flowise to monitor all chatflow executions and validate outputs against HR compliance rules.",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your-project-id',\n  apiKey: process.env.VEX_API_KEY\n});\n\n// In Flowise chatflow configuration\nconst chatflowConfig = {\n  // ... other config\n  callbacks: {\n    onChatFlowExecution: async (data) => {\n      const span = await vex.span('hr-screening-flow', {\n        input: { resume: data.input, jobReq: data.jobDescription },\n        tags: { regulation: 'EEOC', useCase: 'resume-screening' }\n      });\n      \n      // Validate output for bias\n      if (data.output.includes('cultural fit') || data.output.match(/age|gender/i)) {\n        span.fail('potential bias detected');\n        throw new Error('Compliance violation');\n      }\n      \n      await span.success({ score: data.candidateScore });\n    }\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Validate Vector Store Retrieval for Relevance",
+        "description": "Ensure RAG retrieves only relevant, non-discriminatory documents by validating cosine similarity and content filters.",
+        "code": "vex.span('vector-retrieval', async (span) => {\n  const query = 'software engineer with Python experience';\n  const docs = await vectorStore.similaritySearch(query, 5);\n  \n  for (const doc of docs) {\n    span.event('doc-retrieved', {\n      content: doc.pageContent.slice(0, 200),\n      score: doc.metadata.similarityScore,\n      protectedTerms: doc.pageContent.match(/(disability|age|veteran|gender)/gi) || []\n    });\n    \n    if (doc.metadata.similarityScore < 0.7) {\n      span.fail('low relevance retrieval');\n      return []; // Block low-relevance docs\n    }\n    \n    if (doc.pageContent.match(/(disability|age|veteran)/i)) {\n      span.fail('protected characteristic in retrieval');\n    }\n  }\n  \n  return docs;\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Monitor Multi-Agent Context Preservation",
+        "description": "Track context handoffs between screening agents to prevent loss of fairness constraints and bias drift.",
+        "code": "// Sequential agent handoff monitoring\nconst agents = ['screener', 'skills-extractor', 'interviewer'];\n\nfor (let i = 0; i < agents.length; i++) {\n  const span = await vex.span(`hr-agent-${agents[i]}`, {\n    input: agentInputs[i],\n    prevContext: i > 0 ? agentOutputs[i-1] : null,\n    tags: { handoffIndex: i, regulation: 'NYC-LL144' }\n  });\n  \n  const output = await agents[i].execute(agentInputs[i]);\n  \n  // Validate context preservation\n  if (i > 0 && !output.context.includes('fairness-checked')) {\n    span.fail('context loss between agents');\n    throw new Error('Fairness context missing');\n  }\n  \n  // Check for bias drift\n  const biasScore = analyzeBias(output);\n  if (biasScore > 0.3) {\n    span.fail(`bias drift detected: ${biasScore}`);\n  }\n  \n  agentOutputs[i] = output;\n  await span.success({ biasScore });\n}",
+        "language": "typescript"
+      }
+    ],
+    "caseStudyScenario": {
+      "heading": "Flowise in Recruitment/HR: A Scenario",
+      "scenario": "A mid-sized tech company deploys a Flowise chatflow for high-volume software engineering hiring. The pipeline includes a RAG vector store of 50K resumes, custom tool nodes for skills extraction, and multi-agent handoffs from initial screening to interview scheduling. The system processes 1,000 applications weekly, ranking candidates by 'fit score' using LLM chains that combine job requirements with resume analysis.\n\nWithout observability, the vector store occasionally retrieves irrelevant documents mentioning protected characteristics (veteran status, age indicators), and custom tools silently fail on non-standard resumes from career changers. Agent handoffs lose fairness context, causing the final interviewer agent to deprioritize diverse candidates flagged appropriately in screening. EEOC notices candidate complaints about systematic exclusion of older applicants and women from senior roles.",
+      "outcome": "After integrating Vex callbacks, the company identifies 23% of chatflows producing biased intermediate outputs and blocks 15% of vector retrievals for low relevance or protected terms. Custom tool failures surface with full traces, revealing default biases in skills extraction. Multi-agent monitoring catches context loss in 8% of handoffs, enforcing fairness propagation. Annual bias audits now complete in hours instead of weeks, with comprehensive traces proving compliance. The pipeline diversity improves 42%, avoiding a potential $2.3M EEOC settlement while maintaining 95% screening accuracy."
+    },
+    "cta": {
+      "heading": "Comply with Recruitment/HR Regulations Using Vex",
+      "description": "Add Vex to your Flowise HR chatflows today and eliminate discriminatory hiring risks with enterprise-grade compliance monitoring."
+    }
+  }
+}

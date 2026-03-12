@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "llama-stack",
+    "useCase": "coding-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Coding Assistant with Llama Stack + Vex Guardrails",
+    "description": "Learn how to build ai coding assistant with Llama Stack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Llama Stack ai coding assistant",
+      "Llama Stack guardrails",
+      "ai coding assistant reliability",
+      "Vex Llama Stack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Coding Assistant with Llama Stack enables powerful code-aware agents that leverage repository context, sandbox execution, and iterative debugging for developer productivity. However, the agentic nature introduces risks like security vulnerabilities, credential leaks, and unsafe dependencies that can compromise code integrity. Vex provides essential guardrails through post-processing verification to ensure reliable, secure outputs.",
+    "architectureOverview": {
+      "heading": "AI Coding Assistant Architecture with Llama Stack",
+      "description": "The AI Coding Assistant uses Llama Stack's standardized SDK to orchestrate a code-aware LLM agent. It begins with repository context ingestion via the memory bank, feeding relevant files into the agent's context window. The agent then generates code suggestions, executes them in a sandboxed environment, runs tests, and iterates based on validation feedback.\n\nSafety shields filter outputs, tools handle execution and testing, and memory persists debugging history across sessions. The loop continues until tests pass or turn limits are reached, with Vex verification wrapped around each agent response to check code correctness and security.\n\nThis architecture balances autonomy with safety, but requires robust verification to catch false positives from safety filters and schema mismatches from tool responses.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   Repository    │───▶│  Llama Stack     │\n│     Context     │    │  Memory Bank     │\n└─────────────────┘    │  + Safety Shield  │\n                       │  + Tool Executor  │\n                       └──────┬─────────────┘\n                              │\n                       ┌──────▼─────────────┐\n                       │  Agent Loop        │◀──┐\n                       │  (Code Gen +       │   │\n                       │   Test + Debug)    │   │\n                       └──────┬─────────────┘   │\n                              │                 │\n                       ┌──────▼─────────────┐   │\n                       │   Vex Verify       │───┘\n                       │ (Security/Code)    │\n                       └────────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Malicious code injection",
+        "description": "Agent generates code with security vulnerabilities or backdoors due to poisoned repository context",
+        "severity": "critical",
+        "mitigation": "Vex scans for known vulnerability patterns and executes in isolated sandbox"
+      },
+      {
+        "name": "Credential leakage",
+        "description": "Debugging outputs expose API keys, tokens, or secrets from repository files",
+        "severity": "high",
+        "mitigation": "Vex regex patterns detect and redact credentials before final output"
+      },
+      {
+        "name": "Unsafe dependency injection",
+        "description": "Agent suggests pip installs of malicious packages during dependency resolution",
+        "severity": "high",
+        "mitigation": "Vex validates package names against known safe registries and PyPI safety scores"
+      },
+      {
+        "name": "License violations",
+        "description": "Generated code mixes incompatible licenses or proprietary snippets",
+        "severity": "medium",
+        "mitigation": "Vex checks imported modules and code patterns against license databases"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Initialize Llama Stack Client",
+        "description": "Set up the Llama Stack client with memory, safety, and sandbox tool configurations for the coding assistant.",
+        "code": "from llama_stack_client import LlamaStack\nfrom vex import verify\n\nclient = LlamaStack(\n    model=\"llama-3.2-11b-vision\",\n    safety_config={\"enabled\": True, \"categories\": [\"harmful_content\", \"pii\"]},\n    memory_bank=\"repo_context\",\n    tools=[\n        {\"name\": \"sandbox_exec\", \"description\": \"Execute Python in sandbox\"},\n        {\"name\": \"pytest_run\", \"description\": \"Run test suite\"}\n    ]\n)\n\nrepo_context = client.memory_bank.load(\"github://user/repo/main\")",
+        "language": "python"
+      },
+      {
+        "title": "Agent Loop with Repository Context",
+        "description": "Main agent loop that processes user requests with repo context, generates code, tests, and debugs iteratively.",
+        "code": "def coding_assistant_loop(client, user_request, repo_context, max_turns=5):\n    conversation = [{\"role\": \"system\", \"content\": \"You are a code debugging assistant.\"},\n                   {\"role\": \"user\", \"content\": user_request}]\n    \n    for turn in range(max_turns):\n        response = client.chat.completions.create(\n            messages=conversation + repo_context,\n            tools=client.tools\n        )\n        \n        # Tool execution\n        if response.tool_calls:\n            tool_results = execute_tools(response.tool_calls)\n            conversation.append({\"role\": \"assistant\", \"content\": response.content})\n            conversation.append({\"role\": \"tool\", \"content\": tool_results})\n        else:\n            break\n    \n    return response.content",
+        "language": "python"
+      },
+      {
+        "title": "Sandbox Tool Implementation",
+        "description": "Custom sandbox execution tool that runs generated code safely and returns test results.",
+        "code": "import subprocess\nimport docker\n\ndef sandbox_exec(code: str, test_file: str = None) -> str:\n    client = docker.from_env()\n    \n    container = client.containers.run(\n        \"python:3.11-slim\",\n        command=f\"python -c '{code}'\",\n        detach=True,\n        remove=True,\n        mem_limit='256m',\n        network_disabled=True\n    )\n    \n    result = container.wait()\n    logs = container.logs().decode()\n    \n    if test_file:\n        test_result = subprocess.run(['pytest', test_file], capture_output=True)\n        logs += f\"\\nTest result: {test_result.stdout.decode()}\"\n    \n    return f\"Exit code: {result['StatusCode']}\\nOutput: {logs}\"",
+        "language": "python"
+      },
+      {
+        "title": "Memory Bank Context Retrieval",
+        "description": "Retrieve relevant files from repository context using semantic search for agent context.",
+        "code": "def get_repo_context(client, query: str, top_k: int = 5) -> list:\n    relevant_files = client.memory_bank.search(\n        query=query,\n        namespace=\"repo_files\",\n        limit=top_k,\n        filter={\"extension\": [\"py\", \"js\", \"ts\"]}\n    )\n    \n    context_docs = []\n    for doc in relevant_files:\n        content = client.memory_bank.retrieve(doc['id'])\n        context_docs.append({\n            \"role\": \"context\",\n            \"content\": f\"File: {doc['metadata']['path']}\\n{content}\",\n            \"metadata\": doc['metadata']\n        })\n    \n    return context_docs",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Agent Response with Vex Verify",
+        "description": "Post-process every agent response with comprehensive Vex verification for code safety and correctness.",
+        "code": "from vex import verify, Guardrail\n\n@pip install vex-sdk\n\ndef safe_agent_response(client_response):\n    guards = [\n        Guardrail(\"code_correctness\", checks=[\"syntax\", \"imports_valid\", \"test_passing\"]),\n        Guardrail(\"security_vuln\", patterns=[\"eval(\", \"exec(\", \"__import__(\"]),\n        Guardrail(\"credential_leak\", regex=[r'api[_-]?key[:=]\\s*[\"\\'][a-zA-Z0-9]{32,}[\"\\']']),\n        Guardrail(\"dependency_safety\", pypi_check=True),\n        Guardrail(\"license_compliance\", allowed=[\"MIT\", \"Apache-2.0\", \"BSD-3\"])\n    ]\n    \n    verified = verify(client_response.content, guards=guards)\n    if verified.passed:\n        return verified.output\n    else:\n        return f\"Blocked: {verified.issues}\"",
+        "language": "python"
+      },
+      {
+        "title": "Verify Sandbox Execution Output",
+        "description": "Validate sandbox tool results to ensure no runtime security violations occurred.",
+        "code": "def verify_sandbox_output(sandbox_result: str):\n    from vex import verify\n    \n    sandbox_checks = [\n        Guardrail(\"runtime_safety\", checks=[\"no_shell_escape\", \"no_file_write\", \"no_network\"]),\n        Guardrail(\"test_coverage\", threshold=0.8),\n        Guardrail(\"perf_safety\", checks=[\"execution_time_under_30s\", \"memory_under_256mb\"])\n    ]\n    \n    result = verify(sandbox_result, guards=sandbox_checks)\n    return {\n        'safe': result.passed,\n        'issues': result.issues,\n        'coverage': result.metrics.get('test_coverage', 0),\n        'output': result.output if result.passed else None\n    }",
+        "language": "python"
+      },
+      {
+        "title": "Full Integration in Agent Loop",
+        "description": "Complete agent loop with Vex verification at every critical decision point.",
+        "code": "def secure_coding_loop(client, request, repo_context):\n    response = coding_assistant_loop(client, request, repo_context)\n    \n    # Vex verification\n    verified_code = safe_agent_response(response)\n    if not verified_code.startswith(\"Blocked:\"):\n        sandbox_result = sandbox_exec(verified_code)\n        sandbox_verified = verify_sandbox_output(sandbox_result)\n        \n        if sandbox_verified['safe']:\n            return {\n                'status': 'success',\n                'code': verified_code,\n                'tests': sandbox_verified['coverage'],\n                'output': sandbox_verified['output']\n            }\n    \n    return {'status': 'failed_verification', 'issues': verified_code}",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Llama Stack AI Coding Assistant",
+      "description": "Install Vex SDK today and wrap your agent responses to eliminate code security risks: pip install vex-sdk"
+    }
+  }
+}

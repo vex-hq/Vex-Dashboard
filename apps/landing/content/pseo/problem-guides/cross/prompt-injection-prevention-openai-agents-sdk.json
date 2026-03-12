@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "prompt-injection-prevention",
+    "framework": "openai-agents-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Prompt Injection Prevention for AI Agents in OpenAI Agents SDK Agents",
+    "description": "How to detect and fix prompt injection prevention for ai agents in OpenAI Agents SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "prompt-injection-prevention-for-ai-agents",
+      "OpenAI Agents SDK prompt-injection-prevention",
+      "OpenAI Agents SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Agents SDK, prompt injection manifests as malicious inputs exploiting agent handoffs, where injected instructions override agent directives during tool calls or inter-agent communication. This is particularly dangerous in multi-agent workflows, as unvalidated tool outputs or handoff messages can propagate injections across specialized agents, leading to unauthorized actions or data leaks. The SDK's flexible routing and tracing make it powerful but expose gaps in input sanitization at critical junctions.",
+    "howItManifests": [
+      {
+        "scenario": "Direct injection via user input to primary agent",
+        "symptom": "Agent ignores system instructions and executes hidden commands in user message",
+        "impact": "Unauthorized tool calls or sensitive data exfiltration"
+      },
+      {
+        "scenario": "Tool output injection during handoff to specialist agent",
+        "symptom": "Specialist agent receives malicious payload in tool response and follows injected instructions",
+        "impact": "Agent handoff loops or execution of unintended workflows"
+      },
+      {
+        "scenario": "Guardrail bypass via encoded injection in multi-hop conversations",
+        "symptom": "Injected instructions hidden in base64 or concatenated tool outputs bypass initial validation",
+        "impact": "Complete workflow compromise across agent chain"
+      },
+      {
+        "scenario": "Tracing gap exploitation in handoff chains",
+        "symptom": "Injected content appears clean in traces but triggers malicious behavior downstream",
+        "impact": "Silent propagation of injections through observability blind spots"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Runtime Input Scanner",
+        "description": "Intercepts all agent inputs and tool outputs to detect injection patterns before processing",
+        "code": "```python\nfrom openai_agents import Agent, agent\nfrom vex_sdk import VexGuardrail\n\n# Install: pip install openai-agents vex-sdk\n\ninjection_guardrail = VexGuardrail(\n    name='prompt-injection-scanner',\n    rules=[\n        'ignore previous instructions',\n        'you are now',\n        'forget|override',\n        r'base64_decode|eval\\(',\n        r'exec\\(|__import__'\n    ]\n)\n\n@agent\ndef research_agent():\n    \"\"\"Primary research agent with injection detection\"\"\"\n    return Agent(\n        model='gpt-4o',\n        guardrails=[injection_guardrail],\n        tools=[...]\n    )\n```",
+        "language": "python"
+      },
+      {
+        "name": "Handoff Payload Validator",
+        "description": "Validates messages passed between agents for injection artifacts using regex + LLM classification",
+        "code": "```python\nimport re\nfrom openai_agents import Handoff\nfrom vex_sdk import classify_with_vex\n\ndef validate_handoff_payload(message: str) -> bool:\n    # Pattern-based detection\n    injection_patterns = [\n        r'(?i)(ignore|forget|override).*instructions',\n        r'(?i)(you are|act as).*?(admin|root|developer)',\n        r'base64\\.decode|eval\\(.*?\\)|exec\\(',\n        r'\\$\\$?\\{.*?\\}\\$\\$?'\n    ]\n    \n    for pattern in injection_patterns:\n        if re.search(pattern, message):\n            return False\n    \n    # LLM classification backup\n    verdict = classify_with_vex(\n        prompt=message,\n        categories=['prompt_injection', 'safe']\n    )\n    return verdict != 'prompt_injection'\n\nclass SafeHandoff(Handoff):\n    def __init__(self, *args, **kwargs):\n        super().__init__(*args, **kwargs)\n        self.payload_validator = validate_handoff_payload\n```",
+        "language": "python"
+      },
+      {
+        "name": "Tool Output Sanitizer",
+        "description": "Scans all tool responses before agent consumption for executable code patterns",
+        "code": "```python\nfrom openai_agents import tool\nfrom vex_sdk import VexOutputGuardrail\n\n@tool\ndef web_search(query: str) -> str:\n    \"\"\"Safe web search with output sanitization\"\"\"\n    results = perform_search(query)\n    \n    output_guardrail = VexOutputGuardrail(\n        rules=[\n            'no javascript',\n            'no python code',\n            'no system commands',\n            'no base64 payloads'\n        ]\n    )\n    \n    sanitized = output_guardrail.sanitize(results)\n    return sanitized\n```",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Per-Agent Vex Guardrails",
+        "description": "Wrap each agent with dedicated Vex guardrails tuned to its role and tools",
+        "code": "```python\nfrom openai_agents import Agent, Workflow\nfrom vex_sdk import VexGuardrail\n\n# Role-specific guardrails\nresearch_guardrail = VexGuardrail(\n    name='research-injection-prevention',\n    deny_patterns=[\n        'delete data',\n        'access credentials',\n        'exec code',\n        'system override'\n    ]\n)\n\nanalyst_guardrail = VexGuardrail(\n    name='analyst-math-only',\n    allow_patterns=[\n        'calculate',\n        'analyze data',\n        'generate report'\n    ],\n    deny_patterns=['external calls', 'file access']\n)\n\n# Protected workflow\nworkflow = Workflow([\n    Agent('research', guardrails=[research_guardrail]),\n    Agent('analyst', guardrails=[analyst_guardrail])\n])\n```",
+        "language": "python"
+      },
+      {
+        "name": "Structured Message Validation",
+        "description": "Enforce JSON schema validation on all agent communications to strip free-form injections",
+        "code": "```python\nimport json\nfrom pydantic import BaseModel, validator\nfrom openai_agents import Message\n\nclass SafeAgentMessage(BaseModel):\n    role: str\n    content: str\n    tool_calls: list = []\n    \n    @validator('content')\n    def sanitize_content(cls, v):\n        # Strip common injection prefixes\n        injections = [\n            'Ignore all previous',\n            'You are now',\n            'Forget instructions',\n            '```python', '```js'\n        ]\n        for injection in injections:\n            if injection.lower() in v.lower():\n                raise ValueError(f'Injection detected: {injection}')\n        return v\n    \n    @classmethod\n    def from_raw(cls, raw_message: Message):\n        return cls(**raw_message.dict())\n\n# Usage in agent handoff\nsafe_message = SafeAgentMessage.from_raw(incoming_message)\n```",
+        "language": "python"
+      },
+      {
+        "name": "Execution Context Isolation",
+        "description": "Sandbox agent execution with strict capability boundaries",
+        "code": "```python\nfrom openai_agents import Agent\nfrom vex_sdk import CapabilitySandbox\n\ncapability_sandbox = CapabilitySandbox(\n    allowed_tools=['web_search', 'calculator'],\n    blocked_tools=['file_write', 'exec_code'],\n    max_iterations=5,\n    timeout=30\n)\n\n@agent\ndef secure_analyst():\n    return Agent(\n        model='gpt-4o',\n        sandbox=capability_sandbox,\n        instructions=\"\"\"You are a secure analyst. \n        ONLY use approved tools. Never execute code or access files.\"\"\"\n    )\n```",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Prompt Injection Prevention for AI Agents Detection with Vex",
+      "description": "Vex provides production-grade automation for OpenAI Agents SDK by wrapping every agent, tool, and handoff with adaptive guardrails that learn from your specific attack surface. Unlike static rules, Vex combines regex pattern matching, LLM classification, and behavioral analysis to detect both known injection techniques and novel jailbreaks in real-time. \n\nThe platform automatically instruments your multi-agent workflows, providing complete lineage tracing through handoffs while blocking malicious payloads before they propagate. Vex's remediation engine can even rewrite injected prompts to preserve legitimate intent while neutralizing attacks, ensuring zero downtime during incident response. \n\nFor OpenAI Agents SDK specifically, Vex integrates as drop-in guardrails that validate every message boundary - user inputs, tool outputs, agent handoffs, and tracing payloads - creating defense-in-depth without refactoring existing agent logic.",
+      "code": "```python\nfrom openai_agents import Workflow, Agent\nfrom vex_sdk import VexRuntime\n\n# Zero-config Vex integration\nvex = VexRuntime(\n    project_id='your-project',\n    ruleset='openai-agents-prompt-injection'\n)\n\n# Auto-instrument entire workflow\n@Workflow\n@vex.protect(guard='prompt-injection')\ndef production_research_pipeline():\n    researcher = Agent('gpt-4o', tools=[web_search])\n    analyst = Agent('gpt-4o', tools=[data_analyzer])\n    reporter = Agent('gpt-4o')\n    \n    researcher >> analyst >> reporter\n    return researcher\n\n# Vex auto-generates:\n# 1. Input validation on researcher\n# 2. Tool output sanitization\n# 3. Handoff payload inspection\n# 4. Full trace monitoring\n\nif __name__ == '__main__:\n    result = production_research_pipeline.run('Analyze Q3 earnings')\n    print(result)\n```",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex with `pip install openai-agents vex-sdk` and protect your agents in 5 minutes."
+    }
+  }
+}

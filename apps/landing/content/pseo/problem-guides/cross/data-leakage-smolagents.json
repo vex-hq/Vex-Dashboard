@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "smolagents",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Smolagents Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Smolagents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Smolagents data-leakage",
+      "Smolagents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Smolagents, sensitive data leakage often occurs when code agents generate Python scripts that inadvertently log, print, or transmit PII like API keys or user data during tool execution. The framework's emphasis on lightweight, code-based reasoning exacerbates this as agents lack built-in data sanitization, leading to leaks in multi-step reasoning chains. Tool misinterpretation compounds the issue when agents expose credentials in debug outputs or file operations.",
+    "howItManifests": [
+      {
+        "scenario": "Code agent generating file I/O with hardcoded credentials",
+        "symptom": "Agent writes API keys to temporary files or logs them in debug output",
+        "impact": "Credentials exposed in /tmp files or console output accessible to other processes"
+      },
+      {
+        "scenario": "Tool agent printing environment variables during reasoning",
+        "symptom": "debug=True reveals sensitive env vars like OPENAI_API_KEY in tool descriptions",
+        "impact": "All conversation history contains leaked credentials visible to developers"
+      },
+      {
+        "scenario": "Multi-step reasoning chaining database connections",
+        "symptom": "Each reasoning step logs connection strings with passwords",
+        "impact": "Compounding leakage across entire agent execution trace"
+      },
+      {
+        "scenario": "Minimal error handling exposes stack traces with secrets",
+        "symptom": "Uncaught exceptions print full stack with embedded secrets",
+        "impact": "Production logs contain complete credential exposure"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Regex Pattern Scanning in Agent Output",
+        "description": "Scans agent responses and generated code for common secret patterns (API keys, passwords)",
+        "code": "import re\n\ndef detect_secrets_in_output(agent_output: str) -> list:\n    patterns = [\n        r'api[_-]?key\\s*[=:]\\s*[\"\\']?([a-zA-Z0-9]{20,})',\n        r'password\\s*[=:]\\s*[\"\\']?([^\\s\"\\']{8,})',\n        r'([a-zA-Z0-9]{32,})\\s*=\\s*[\"\\']?password',\n        r'Bearer\\s+([a-zA-Z0-9._-]{20,})'\n    ]\n    secrets = []\n    for pattern in patterns:\n        matches = re.finditer(pattern, agent_output, re.IGNORECASE)\n        for match in matches:\n            secrets.append({\n                'pattern': pattern,\n                'secret': match.group(1),\n                'location': match.span()\n            })\n    return secrets",
+        "language": "python"
+      },
+      {
+        "name": "Environment Variable Leak Detector",
+        "description": "Monitors agent output for exposure of environment variables containing sensitive data",
+        "code": "import os\nimport re\n\ndef detect_env_leaks(agent_output: str) -> list:\n    sensitive_vars = ['API_KEY', 'PASSWORD', 'SECRET', 'TOKEN', 'KEY']\n    leaks = []\n    for var in sensitive_vars:\n        pattern = rf'{var}[\\s:=]*([a-zA-Z0-9_\\-]{10,})'\n        matches = re.finditer(pattern, agent_output, re.IGNORECASE)\n        for match in matches:\n            if var in os.environ:\n                leaks.append({\n                    'variable': var,\n                    'exposed_value': match.group(1),\n                    'real_value_exists': bool(os.environ.get(var))\n                })\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "Smolagents Code Agent Output Auditor",
+        "description": "Specifically audits Smolagents code agent generated Python for dangerous patterns",
+        "code": "import ast\nimport re\n\ndef audit_smolagents_code(code: str) -> dict:\n    tree = ast.parse(code)\n    issues = []\n    \n    # Check for print/debug statements with variables\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            if isinstance(node.func, ast.Name) and node.func.id in ['print', 'log', 'debug']:\n                issues.append(f'Dangerous {node.func.id} call at line {node.lineno}')\n    \n    # Check for file writes\n    file_writes = re.findall(r'\\.write\\(|open\\([^,]+,[\\'\"][wa]\\)', code)\n    if file_writes:\n        issues.append(f'File write operations detected: {file_writes}')\n    \n    return {'issues': issues, 'severity': 'HIGH' if issues else 'CLEAR'}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Secure Code Agent Wrapper",
+        "description": "Wraps smolagents code agent execution with output sanitization and safe execution",
+        "code": "from smolagents import CodeAgent\nimport tempfile\nimport os\n\ndef secure_code_agent():\n    agent = CodeAgent(\n        model='gpt-4o-mini',\n        debug=False,  # Disable debug output\n        sandbox=True\n    )\n    \n    def safe_execute(code):\n        # Redirect stdout/stderr to capture output\n        old_stdout, old_stderr = sys.stdout, sys.stderr\n        sys.stdout = open(os.devnull, 'w')\n        sys.stderr = open(os.devnull, 'w')\n        \n        try:\n            # Execute in isolated temp dir\n            with tempfile.TemporaryDirectory() as tmpdir:\n                os.chdir(tmpdir)\n                exec(code, {'__builtins__': {}}, {})\n        finally:\n            sys.stdout, sys.stderr = old_stdout, old_stderr\n    \n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Secret Masking Middleware",
+        "description": "Intercepts and masks secrets in all agent communications",
+        "code": "import re\nfrom typing import Callable\n\ndef secret_masking_middleware(agent):\n    def wrapped_run(*args, **kwargs):\n        result = agent.run(*args, **kwargs)\n        \n        # Mask common secret patterns\n        patterns = [\n            r'api[_-]?key[\\s:=]*[a-zA-Z0-9]{20,}',\n            r'password[\\s:=]*[^\\s]{8,}',\n            r'[a-zA-Z0-9]{32,}',\n        ]\n        \n        masked_result = result\n        for pattern in patterns:\n            masked_result = re.sub(pattern, '[REDACTED]', masked_result, flags=re.IGNORECASE)\n        \n        return masked_result\n    \n    agent.run = wrapped_run\n    return agent",
+        "language": "python"
+      },
+      {
+        "name": "Environment-Safe Tool Definitions",
+        "description": "Defines tools that never receive raw environment variables",
+        "code": "from smolagents import Agent, tool\n\n@tool\ndef safe_database_query(query: str) -> str:\n    \"\"\"Execute database query without exposing credentials.\"\"\"\n    # Credentials managed internally, never passed as parameters\n    from config import get_db_connection\n    conn = get_db_connection()  # Internal credential management\n    try:\n        result = conn.execute(query)\n        return str(result)\n    finally:\n        conn.close()\n\nagent = Agent(tools=[safe_database_query])\n# Tool description never contains credentials",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides continuous verification of Smolagents executions by wrapping agent.run() calls with vex.verify(), automatically detecting secret leakage patterns in both agent reasoning and generated code. The platform employs ML-powered regex detection combined with semantic analysis to identify PII exposure across multi-step reasoning chains, providing actionable remediation suggestions. Integration takes <5 minutes and catches 95% of leakage issues before production deployment.\n\nVex's Smolagents-specific detectors understand code agent patterns, tool description vulnerabilities, and the compounding effects of multi-step reasoning. When leakage is detected, Vex automatically suggests secure wrappers and provides one-click remediation with patched agent configurations. The platform maintains zero false positives through whitelisting common safe patterns while flagging novel leakage vectors.",
+      "code": "from smolagents import CodeAgent\nimport vex\n\n# Initialize Smolagents agent\nagent = CodeAgent(model='gpt-4o-mini')\n\n# Vex verification wrapper - detects secret leakage automatically\n@vex.verify(\n    checks=[\n        'secret_leakage',\n        'pii_exposure',\n        'credential_logging',\n        'env_var_exposure'\n    ],\n    remediation='auto_suggest'\n)\ndef verified_agent_run(prompt: str):\n    \"\"\"Verified agent execution with automatic leakage prevention\"\"\"\n    result = agent.run(prompt)\n    return result\n\n# Usage - Vex automatically detects and blocks leakage\nresponse = verified_agent_run('Write Python code to connect to my database')\n\n# Vex will flag and remediate:\n# - API keys in generated code\n# - print(os.environ) statements\n# - File writes containing secrets\n# - Debug logging of credentials",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex in 2 minutes and automatically prevent 95% of Smolagents data leakage issues: pip install vex-sdk"
+    }
+  }
+}

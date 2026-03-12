@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "data-extraction",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Data Extraction with Haystack + Vex Guardrails",
+    "description": "Learn how to build data extraction with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack data extraction",
+      "Haystack guardrails",
+      "data extraction reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building data extraction pipelines with Haystack enables structured output from unstructured documents using schema-guided LLMs, powering RAG and automation workflows. Guardrails are essential to catch schema violations, hallucinations, and retrieval failures that undermine reliability in production. Vex integrates seamlessly as a custom component to verify outputs against your extraction schema.",
+    "architectureOverview": {
+      "heading": "Data Extraction Architecture with Haystack",
+      "description": "A typical Haystack data extraction pipeline starts with a DocumentStore (e.g., InMemoryDocumentStore) loaded with unstructured PDFs or texts. An EmbeddingsRetriever fetches relevant documents using semantic search, followed by a PromptBuilder that formats the retrieval context with a Pydantic schema for structured extraction. The core LLM component (e.g., OpenAIChatGenerator) generates JSON output guided by the schema, which a custom OutputParser validates for completeness.\n\nFor production, pipelines are serialized and deployed via Haystack's Pipeline API. Vex slots in as a verification node post-LLM to check schema compliance, field accuracy, and type consistency before forwarding to downstream consumers like databases or APIs.\n\nThis modular design allows easy iteration on retrievers, prompts, and models while maintaining strict output guarantees critical for enterprise data pipelines.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐\n│   DocumentStore  │───▶│   Embeddings     │───▶│   PromptBuilder   │\n│   (PDFs/Texts)   │    │   Retriever      │    │   (Schema+RAG)    │\n└─────────────────┘    └──────────────────┘    └──────────────────┘\n                                                        │\n                                               ┌────────▼────────┐\n                                               │   LLM Generator  │\n                                               │   (Structured)   │\n                                               └────────┬────────┘\n                                                        │\n┌─────────────────┐                           ┌────────▼────────┐\n│      Vex        │◀─────────────────────────▶│   OutputParser  │\n│   Verifier      │                           │   (Validated)   │\n└─────────────────┘                           └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Retriever outputs non-Document types or LLM returns malformed JSON, breaking downstream parsing",
+        "severity": "high",
+        "mitigation": "Vex schema validation catches type errors before parser failures"
+      },
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "Semantic search misses key context, causing empty or inaccurate extractions",
+        "severity": "critical",
+        "mitigation": "Vex verifies extraction completeness against expected field population"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM fabricates data not grounded in retrieved documents",
+        "severity": "high",
+        "mitigation": "Vex cross-checks extracted values against document context spans"
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "Vex or parser exceptions get dropped, masking production failures",
+        "severity": "medium",
+        "mitigation": "Vex error reporting with structured traces and fallback routing"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Define Pydantic Schema for Extraction",
+        "description": "Create a structured model for invoice data extraction with validation.",
+        "code": "from pydantic import BaseModel, Field\nfrom typing import Optional, List\n\nclass InvoiceItem(BaseModel):\n    description: str = Field(..., min_length=1)\n    quantity: int = Field(..., ge=1)\n    unit_price: float = Field(..., ge=0)\n\nclass Invoice(BaseModel):\n    invoice_number: str = Field(..., pattern=r'^INV-\\d{6}')\n    date: str = Field(..., pattern=r'^\\d{4}-\\d{2}-\\d{2}')\n    total_amount: float = Field(..., ge=0)\n    items: List[InvoiceItem] = Field(..., min_items=1)",
+        "language": "python"
+      },
+      {
+        "title": "Build Basic Extraction Pipeline",
+        "description": "Core pipeline with retriever, prompt template, and LLM generator.",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIChatGenerator\nfrom haystack.components.builders import PromptBuilder\n\nretrieval = InMemoryEmbeddingRetriever(document_store=doc_store)\ngenerator = OpenAIChatGenerator(model=\"gpt-4o\")\nprompt_builder = PromptBuilder(template=\"\"\"Extract invoice data as JSON:\\n{{context}}\\nSchema: {{schema_json}}\"\"\")\n\npipeline = Pipeline()\npipeline.add_components([retrieval, prompt_builder, generator])\npipeline.connect('retrieval', 'prompt_builder')\npipeline.connect('prompt_builder', 'generator')",
+        "language": "python"
+      },
+      {
+        "title": "Custom Output Parser Component",
+        "description": "Parse and validate LLM JSON output against Pydantic schema.",
+        "code": "from haystack import component\nfrom pydantic import ValidationError\n\n@component\nclass InvoiceParser:\n    @component.output_types(extracted_invoice=dict, is_valid=bool)\n    def run(self, llm_output: str) -> dict:\n        try:\n            invoice_data = json.loads(llm_output)\n            validated = Invoice.model_validate(invoice_data)\n            return {'extracted_invoice': validated.model_dump(), 'is_valid': True}\n        except (json.JSONDecodeError, ValidationError):\n            return {'extracted_invoice': {}, 'is_valid': False}",
+        "language": "python"
+      },
+      {
+        "title": "Run Pipeline with Documents",
+        "description": "Load documents and execute extraction with query.",
+        "code": "documents = doc_store.filter(filters={}).to_dicts()\nresult = pipeline.run({\n    'retrieval': {'query_embedding': query_embedding, 'top_k': 3},\n    'prompt_builder': {'schema_json': Invoice.model_json_schema()}\n})\n\nextracted = result['extracted_invoice']\nis_valid = result['is_valid']\nprint(f\"Valid extraction: {is_valid}, Data: {extracted}\")",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Install Vex and Define Verifier Schema",
+        "description": "Setup Vex SDK and create verifier matching extraction schema.",
+        "code": "pip install haystack-ai vex-sdk\n\nfrom vex import Verifier, Guard\nfrom pydantic import BaseModel\n\nclass InvoiceGuard(Guard):\n    schema = Invoice.model_json_schema()\n    checks = [\n        'schema_compliance',\n        'field_accuracy>80%',\n        'completeness>95%',\n        'type_consistency'\n    ]\n\nverifier = Verifier(guards=[InvoiceGuard()])",
+        "language": "python"
+      },
+      {
+        "title": "Vex as Custom Haystack Component",
+        "description": "Create VexVerifier component that integrates into pipeline.",
+        "code": "from vex import VerificationResult\nfrom haystack import component\n\n@component\nclass VexVerifier:\n    def __init__(self, verifier: Verifier):\n        self.verifier = verifier\n\n    @component.input_types(raw_extraction=dict, documents=list)\n    @component.output_types(\n        verified_extraction=dict,\n        score=float,\n        passed=bool,\n        issues=list\n    )\n    def run(self, raw_extraction: dict, documents: list) -> dict:\n        result = self.verifier.verify(\n            data=raw_extraction,\n            context=[doc.content for doc in documents]\n        )\n        return {\n            'verified_extraction': result.data,\n            'score': result.score,\n            'passed': result.passed,\n            'issues': result.issues\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Complete Pipeline with Vex Guardrails",
+        "description": "Insert VexVerifier between generator and final output.",
+        "code": "vex_verifier = VexVerifier(verifier=verifier)\n\npipeline.add_component('vex_verifier', vex_verifier)\npipeline.connect('generator.documents', 'vex_verifier.documents')\npipeline.connect('parser.extracted_invoice', 'vex_verifier.raw_extraction')\n\nresult = pipeline.run({\n    'retrieval': {'query': 'invoice INV-123456'},\n    'prompt_builder': {'schema_json': Invoice.model_json_schema()}\n})\n\nif result['vex_verifier']['passed']:\n    final_invoice = result['vex_verifier']['verified_extraction']\n    print('✅ Verified extraction:', final_invoice)\nelse:\n    print('❌ Issues:', result['vex_verifier']['issues'])",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack Data Extraction",
+      "description": "Add Vex guardrails to your pipeline today and achieve 99.9% extraction reliability."
+    }
+  }
+}

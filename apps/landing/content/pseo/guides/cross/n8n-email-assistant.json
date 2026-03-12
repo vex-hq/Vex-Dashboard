@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "n8n",
+    "useCase": "email-assistant",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Email Assistant with n8n AI Agents + Vex Guardrails",
+    "description": "Learn how to build ai email assistant with n8n AI Agents + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "n8n AI Agents ai email assistant",
+      "n8n AI Agents guardrails",
+      "ai email assistant reliability",
+      "Vex n8n AI Agents",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Build powerful AI Email Assistants using n8n AI Agents to automate intent detection, draft generation, attachment handling, and approval workflows. These agentic workflows process incoming emails with complex chains of AI nodes, but introduce risks like unvalidated outputs leading to inappropriate sends or PII leaks. Vex guardrails ensure reliability by validating AI outputs before critical actions like emailing.",
+    "architectureOverview": {
+      "heading": "AI Email Assistant Architecture with n8n AI Agents",
+      "description": "The typical n8n AI Email Assistant starts with an Email Trigger node (IMAP/Gmail) that captures incoming messages. An AI Agent node with intent detection tools classifies the email (e.g., 'urgent_reply', 'schedule_meeting', 'forward_internal') and extracts key entities like recipient, priority, and attachments.\n\nSubsequent AI Agent nodes handle specialized tasks: one generates draft responses with tone adaptation, another processes attachments via tools, and a memory window node maintains conversation context. Action nodes (Send Email, Calendar API) execute only after approval workflows, but lack validation exposes risks like sending confidential data to wrong recipients.\n\nVex integrates as a Webhook node after each AI Agent, verifying outputs against PII filters, tone rules, recipient validation, and confidentiality policies before passing to action nodes.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐    ┌──────────────┐\n│  Email Trigger  │───▶│ AI Agent: Intent │───▶│   Vex Guard  │\n│     (IMAP)      │    │   Detection      │    │   (Webhook)   │\n└─────────────────┘    └──────────────────┘    └──────────────┘\n                                    │                    │\n                                    ▼                    ▼\n                          ┌──────────────────┐    ┌──────────────┐\n                          │ AI Agent: Draft  │◀──▶│ Action Nodes │\n                          │   Generation     │    │ (Send Email)  │\n                          └──────────────────┘    └──────────────┘\n                                    │\n                                    ▼\n                          ┌──────────────────┐\n                          │ Memory Window    │\n                          │   Context        │\n                          └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Unvalidated AI Outputs to Email Nodes",
+        "description": "AI Agent generates drafts with inappropriate tone or wrong recipients without validation before Send Email node",
+        "severity": "critical",
+        "mitigation": "Insert Vex Webhook node after AI Agent to validate tone, recipient domains, and content accuracy"
+      },
+      {
+        "name": "PII Exposure in Agent Tool Calls",
+        "description": "Intent detection tools receive raw email content containing customer PII, risking credential exposure",
+        "severity": "critical",
+        "mitigation": "Pre-filter emails through Vex PII detection before AI Agent processing"
+      },
+      {
+        "name": "Recursive Workflow Triggers",
+        "description": "Sent email replies trigger the same workflow, causing infinite agent execution loops",
+        "severity": "high",
+        "mitigation": "Vex validates sender domain and conversation ID to prevent self-triggering"
+      },
+      {
+        "name": "Stale Memory Context Injection",
+        "description": "Memory window nodes inject outdated conversation history, causing contextually wrong responses",
+        "severity": "high",
+        "mitigation": "Vex timestamps and relevance-scores memory context before AI Agent consumption"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "n8n AI Agent Intent Detection Node",
+        "description": "Core AI Agent node for classifying email intent and extracting action parameters",
+        "code": "const intentAgent = await $createAgent({\n  name: 'Email Intent Detector',\n  model: 'gpt-4o-mini',\n  tools: [\n    {\n      name: 'classify_intent',\n      description: 'Classify email intent and extract parameters',\n      parameters: {\n        type: 'object',\n        properties: {\n          intent: { type: 'string', enum: ['reply', 'forward', 'schedule', 'delegate'] },\n          priority: { type: 'string' },\n          recipient_domain: { type: 'string' }\n        }\n      }\n    }\n  ]\n});\n\nconst result = await intentAgent.process([\n  {\n    role: 'user',\n    content: `Email: ${$input.email.body}\nClassify intent and extract: priority, recipient domain`\n  }\n]);\n\nreturn { intent: result.intent, priority: result.priority };",
+        "language": "typescript"
+      },
+      {
+        "title": "Draft Generation AI Agent",
+        "description": "Generates context-aware email drafts based on intent classification",
+        "code": "const draftAgent = await $createAgent({\n  name: 'Draft Generator',\n  model: 'gpt-4o',\n  systemMessage: `You are a professional email assistant. Generate appropriate responses:\n- Match original email tone\n- Never include confidential info\n- Use correct recipient addressing`\n});\n\nconst draft = await draftAgent.process([\n  {\n    role: 'user',\n    content: `Original: ${$input.email.body}\nIntent: ${$input.intent}\nPriority: ${$input.priority}\nGenerate professional response:`\n  }\n]);\n\nreturn {\n  subject: `Re: ${$input.email.subject}`,\n  body: draft.content,\n  to: $input.intent.recipient\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Email Send Action Node",
+        "description": "Final action node that sends validated email drafts",
+        "code": "const emailData = $input.draft;\n\n// This executes WITHOUT validation in base workflow\nawait $sendEmail({\n  to: emailData.to,\n  subject: emailData.subject,\n  html: emailData.body,\n  attachments: $input.attachments || []\n});\n\nreturn { status: 'sent', messageId: $response.messageId };",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Node",
+        "description": "Maintains conversation history for context-aware responses",
+        "code": "const memoryKey = `conversation_${$input.email.threadId}`;\nconst conversationHistory = await $getMemory(memoryKey, { limit: 5 });\n\nreturn {\n  context: conversationHistory,\n  currentEmail: $input.email,\n  threadId: $input.email.threadId\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex PII Filter Webhook After Email Trigger",
+        "description": "Scans incoming emails for PII before AI Agent processing",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: 'your_project_id',\n  secret: process.env.VEX_SECRET\n});\n\nconst result = await vex.verify({\n  input: {\n    email_body: $input.email.body,\n    sender: $input.email.from,\n    subject: $input.email.subject\n  },\n  rules: [\n    {\n      name: 'pii_filter',\n      type: 'pii_detection',\n      threshold: 'high',\n      action: 'block',\n      config: { fields: ['email_body'] }\n    }\n  ]\n});\n\nif (result.valid) {\n  return {\n    ...$input,\n    vex_score: result.score,\n    redacted_body: result.output?.redacted_email_body\n  };\n} else {\n  throw new Error(`PII detected: ${result.issues}`);\n}",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Tone & Recipient Validation After Draft Agent",
+        "description": "Validates generated drafts for tone appropriateness and recipient validation",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ projectId: 'your_project_id', secret: process.env.VEX_SECRET });\n\nconst result = await vex.verify({\n  input: {\n    draft_body: $input.draft.body,\n    recipient: $input.draft.to,\n    original_email: $input.original.body,\n    intent: $input.intent\n  },\n  rules: [\n    {\n      name: 'tone_check',\n      type: 'sentiment_analysis',\n      threshold: 'medium',\n      action: 'flag',\n      config: { min_positivity: 0.3, max_categories: ['hate_speech'] }\n    },\n    {\n      name: 'recipient_validation',\n      type: 'domain_allowlist',\n      action: 'block',\n      config: { allowed_domains: ['company.com', 'partner.org'] }\n    }\n  ]\n});\n\nreturn result.valid ? $input : { error: 'Draft validation failed', issues: result.issues };",
+        "language": "typescript"
+      },
+      {
+        "title": "Vex Final Send Approval Gate",
+        "description": "Final confidentiality and accuracy check before email send",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({ projectId: 'your_project_id', secret: process.env.VEX_SECRET });\n\nconst finalCheck = await vex.verify({\n  input: {\n    final_draft: $input.draft,\n    conversation_context: $input.context,\n    attachments: $input.attachments,\n    metadata: { priority: $input.priority, intent: $input.intent }\n  },\n  rules: [\n    {\n      name: 'confidentiality',\n      type: 'content_classification',\n      threshold: 'high',\n      action: 'block',\n      config: { prohibited: ['confidential', 'proprietary', 'internal_only'] }\n    },\n    {\n      name: 'accuracy_check',\n      type: 'factual_consistency',\n      action: 'require_human'\n    }\n  ]\n});\n\nif (finalCheck.valid) {\n  return { ...$input, approved: true, vex_final_score: finalCheck.score };\n} else {\n  return { ...$input, approved: false, requires_review: finalCheck.issues };\n}",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your n8n AI Email Assistant",
+      "description": "Add Vex guardrails to your n8n workflows today and prevent costly email mistakes - start with our free tier."
+    }
+  }
+}

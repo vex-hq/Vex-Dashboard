@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Mastra + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra ai chatbot",
+      "Mastra guardrails",
+      "ai chatbot reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with Mastra enables sophisticated conversational agents using workflows, knowledge retrieval, and seamless integrations. However, complex multi-turn conversations introduce risks like hallucination, PII leaks, and incoherent responses that can erode user trust. Vex provides essential guardrails as middleware to verify response accuracy, ensure safety, and maintain conversation coherence.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Mastra",
+      "description": "Mastra chatbots typically feature an intent classification step that routes user input through workflow nodes for RAG retrieval, memory lookup, and LLM generation. Each node processes structured data with tools for external API calls and knowledge base queries. The pipeline maintains conversation state via Mastra's memory management, enabling context-aware multi-turn interactions.\n\nKey components include the AgentExecutor that orchestrates workflow steps, VectorStore for semantic search, and ChatMemory for session persistence. Transitions between nodes must validate outputs to prevent malformed data propagation. Safety checks occur at response generation to filter harmful content before user delivery.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Input    │───▶│ Intent Classifier │\n└─────────────────┘    └────────┬──────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │     Workflow Router       │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │   RAG + Memory Lookup     │\n                │     (VectorStore)         │\n                └─────────────┬─────────────┘\n                              │\n                ┌─────────────▼─────────────┐\n                │     LLM Generation        │───▶┌──────────────┐\n                │   (w/ Vex Guardrails)     │    │  User Output │\n                └────────────────────────────┘    └──────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Mastra workflow nodes can pass malformed or incomplete data to downstream steps, causing agent confusion or infinite loops",
+        "severity": "critical",
+        "mitigation": "Vex middleware validates JSON schemas and data completeness at each workflow transition"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "External API tools return inconsistent formats that break LLM parsing and response generation",
+        "severity": "high",
+        "mitigation": "Vex normalizes tool outputs to expected Pydantic schemas before agent processing"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "ChatMemory returns outdated session data, causing context drift in multi-turn conversations",
+        "severity": "high",
+        "mitigation": "Vex timestamps and relevance-scores memory chunks before LLM context injection"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Real-time API data conflicts with knowledge base, creating contradictory context for LLM",
+        "severity": "medium",
+        "mitigation": "Vex prioritizes and merges sync data with recency/confidence metadata"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Agent with RAG Pipeline",
+        "description": "Basic Mastra agent setup with vector store retrieval and workflow routing for chatbot",
+        "code": "import { Agent, Workflow, VectorStore, ChatMemory } from 'mastra';\nimport { OpenAI } from 'mastra/llms';\n\nconst vectorStore = new VectorStore({\n  embeddingModel: 'text-embedding-ada-002',\n  collection: 'chatbot-knowledge'\n});\n\nconst memory = new ChatMemory({ sessionTtl: '1h' });\n\nconst llm = new OpenAI({ model: 'gpt-4-turbo' });\n\nconst ragWorkflow = new Workflow({\n  nodes: {\n    classify: {\n      llm,\n      prompt: 'Classify intent: {{input}}',\n      outputSchema: z.object({ intent: z.string(), confidence: z.number() })\n    },\n    retrieve: {\n      vectorStore,\n      topK: 5,\n      filter: ({ intent }) => ({ metadata: { intent } })\n    },\n    generate: {\n      llm,\n      prompt: `Context: {{retrieved}}\nHistory: {{memory}}\nUser: {{input}}\nRespond helpfully:`\n    }\n  }\n});\n\nexport const chatbot = new Agent({\n  workflow: ragWorkflow,\n  memory,\n  llm\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Intent Classification Node",
+        "description": "Classifies user intent and routes to appropriate workflow branches",
+        "code": "import { z } from 'zod';\n\nconst intentSchema = z.object({\n  intent: z.enum(['greeting', 'query', 'support', 'booking']),\n  confidence: z.number().min(0.7),\n  entities: z.array(z.object({ type: z.string(), value: z.string() }))\n});\n\nconst classifyNode = {\n  name: 'classify',\n  type: 'llm',\n  llm,\n  prompt: `Classify this message and extract entities:\n{{input}}\n\nRespond as JSON with intent, confidence (0-1), and entities array.`,\n  outputParser: intentSchema,\n  onError: (error, ctx) => {\n    console.error('Classification failed:', error);\n    return { intent: 'unknown', confidence: 0.1 };\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "RAG Retrieval with Memory",
+        "description": "Combines vector search with conversation history for grounded responses",
+        "code": "const retrievalNode = {\n  name: 'retrieve',\n  type: 'retrieval',\n  vectorStore,\n  inputKey: 'query',\n  topK: 3,\n  metadataFilter: ({ intent }) => ({\n    intent,\n    recency: { $gte: Date.now() - 24*60*60*1000 }\n  }),\n  augment: async (docs, { memory }) => {\n    const context = [\n      ...docs.map(d => d.pageContent),\n      `Recent conversation: ${memory.slice(-3).map(m => m.content).join('\\n')}`\n    ];\n    return { retrieved: context.join('\\n---\\n'), sources: docs.map(d => d.metadata) };\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Safety Filtered Response Generation",
+        "description": "Final LLM generation with basic content filtering before user delivery",
+        "code": "const generateNode = {\n  name: 'generate',\n  type: 'llm',\n  llm,\n  prompt: `CONTEXT: {{retrieved}}\n\nCONVERSATION HISTORY: {{memory}}\n\nUSER: {{input}}\n\n{{#if safety_check.passed}}\nGenerate a helpful, accurate response. Cite sources using [1], [2] etc.\n{{else}}\nRespond: \"Sorry, I can't assist with that request.\"\n{{/if}}`,\n  outputSchema: z.object({\n    response: z.string().max(2000),\n    citations: z.array(z.number()).optional(),\n    safety_score: z.number().min(0).max(1)\n  }),\n  preprocess: async ({ safety_check }) => {\n    const isSafe = await safetyFilter({ input: input, context: retrieved });\n    return { ...input, safety_check: { passed: isSafe } };\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware in Mastra Pipeline",
+        "description": "Wrap Mastra agent executor with Vex verification at workflow transitions",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY!,\n  project: 'mastra-chatbot',\n  riskProfile: 'high'\n});\n\nexport const guardedChatbot = {\n  async invoke(input: string, sessionId: string) {\n    // Pre-execution input validation\n    const cleanInput = await vex.verify({\n      data: input,\n      checks: ['pii_detection', 'safety_filter'],\n      context: { sessionId, type: 'user_input' }\n    });\n\n    const result = await chatbot.invoke(cleanInput);\n\n    // Post-execution response validation\n    const verified = await vex.verify({\n      data: result,\n      checks: [\n        'response_accuracy',\n        'hallucination_detection',\n        'conversation_coherence',\n        'json_schema'\n      ],\n      context: {\n        sessionId,\n        workflowOutputs: result.workflowTrace,\n        expectedSchema: generateSchema\n      }\n    });\n\n    return verified;\n  }\n};",
+        "language": "typescript"
+      },
+      {
+        "title": "Workflow Node Output Validation",
+        "description": "Vex validates structured outputs from each Mastra workflow node",
+        "code": "import { z } from 'zod';\n\nconst nodeSchemas = {\n  classify: z.object({\n    intent: z.enum(['greeting', 'query', 'support']),\n    confidence: z.number().gte(0.6)\n  }),\n  retrieve: z.object({\n    retrieved: z.string().min(10),\n    sources: z.array(z.object({ url: z.string().url() }))\n  })\n};\n\nconst validatedWorkflow = ragWorkflow.mapNodes((node) => ({\n  ...node,\n  postprocess: async (output) => {\n    const schema = nodeSchemas[node.name];\n    const validation = schema.safeParse(output);\n    \n    if (!validation.success) {\n      const fixed = await vex.verify({\n        data: output,\n        checks: ['json_schema_validation'],\n        context: { expectedSchema: schema, node: node.name }\n      });\n      return fixed;\n    }\n    return output;\n  }\n}));",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory Context Verification",
+        "description": "Vex ensures retrieved memory chunks are relevant and fresh before LLM injection",
+        "code": "const verifiedMemory = {\n  async retrieve(sessionId: string, query: string) {\n    const chunks = await memory.retrieve(sessionId, { limit: 5 });\n    \n    const verifiedChunks = await vex.verify({\n      data: chunks,\n      checks: [\n        'semantic_relevance',\n        'temporal_freshness',\n        'pii_redaction',\n        'conversation_coherence'\n      ],\n      context: {\n        query,\n        sessionId,\n        maxAge: 24 * 60 * 60 * 1000, // 24h\n        relevanceThreshold: 0.75\n      }\n    });\n\n    return verifiedChunks.filter(c => c.passed).slice(0, 3);\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra AI Chatbot",
+      "description": "Add Vex guardrails today to protect your users and ensure production reliability."
+    }
+  }
+}

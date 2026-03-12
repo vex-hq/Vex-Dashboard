@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "beeai",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in BeeAI Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in BeeAI agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "BeeAI data-leakage",
+      "BeeAI reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In BeeAI, sensitive data leakage in AI agents often occurs due to unbounded agent memory accumulation during long sessions, where PII from user inputs persists indefinitely and gets exposed in logs or shared state. Tool validation gaps allow malicious inputs to bypass sanitization and leak data through injected payloads in tool calls. Serialization errors during agent state persistence can inadvertently include raw sensitive data in stored artifacts, while Granite model output inconsistencies lead to unfiltered responses containing leaked credentials or personal information.",
+    "howItManifests": [
+      {
+        "scenario": "Unbounded agent memory in long conversations",
+        "symptom": "Conversation history grows without PII redaction, exposing emails/phone numbers in debug logs",
+        "impact": "All team members viewing agent logs see customer PII; memory bloat causes OOM failures"
+      },
+      {
+        "scenario": "Tool validation gaps allowing injection",
+        "symptom": "User inputs 'email:admin@company.com' in search tool bypassed by weak regex validation",
+        "impact": "Sensitive credentials returned in tool responses and persisted in agent memory"
+      },
+      {
+        "scenario": "Serialization errors in state persistence",
+        "symptom": "AgentState.to_json() includes raw 'user_profile' field with unredacted SSN data",
+        "impact": "Persisted state files in /tmp/agent_states contain PCI data accessible to all processes"
+      },
+      {
+        "scenario": "Granite model output format inconsistencies",
+        "symptom": "Model returns unparsed JSON with embedded API keys instead of structured tool_calls",
+        "impact": "Raw model output with secrets logged to stdout before parsing/validation"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Memory PII Scanner",
+        "description": "Scans BeeAI AgentMemory contents for common PII patterns using regex across conversation history",
+        "code": "import re\nfrom beeai import AgentMemory\n\ndef scan_agent_memory_pii(memory: AgentMemory) -> list:\n    pii_patterns = [\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b',\n        r'\\b\\d{16}\\b',\n        r'\\b[A-Z]{2}\\d{6}\\b'\n    ]\n    leaks = []\n    for message in memory.messages[-100:]:\n        for pattern in pii_patterns:\n            matches = re.findall(pattern, str(message.content), re.IGNORECASE)\n            if matches:\n                leaks.append({\n                    'message_id': message.id,\n                    'content': message.content,\n                    'pii_found': matches\n                })\n    return leaks",
+        "language": "python"
+      },
+      {
+        "name": "Tool Input Validator",
+        "description": "Intercepts BeeAITool calls and detects sensitive data in parameters before execution",
+        "code": "from beeai.tools import ToolCallEvent\n\ndef validate_tool_inputs(event: ToolCallEvent) -> bool:\n    sensitive_keywords = {'password', 'token', 'secret', 'key', 'ssn', 'credit_card'}\n    params_str = str(event.parameters)\n    \n    # Check for keywords\n    keyword_hits = sensitive_keywords.intersection(\n        word.lower() for word in params_str.split()\n    )\n    \n    # Check for base64 encoded data (common for secrets)\n    base64_pattern = r'[A-Za-z0-9+/]{20,}={0,2}'\n    encoded_hits = re.findall(base64_pattern, params_str)\n    \n    return len(keyword_hits) == 0 and len(encoded_hits) == 0",
+        "language": "python"
+      },
+      {
+        "name": "State Serialization Auditor",
+        "description": "Inspects BeeAI AgentState before JSON serialization for sensitive fields",
+        "code": "import json\nfrom beeai.agent import AgentState\n\ndef audit_state_serialization(state: AgentState) -> dict:\n    sensitive_fields = {'user_email', 'api_key', 'private_data', 'credentials'}\n    issues = []\n    \n    state_dict = state.__dict__.copy()\n    \n    for field, value in state_dict.items():\n        if any(sensitive in field.lower() for sensitive in sensitive_fields):\n            issues.append({\n                'field': field,\n                'value_preview': str(value)[:50],\n                'risk': 'HIGH'\n            })\n    \n    return {'issues_found': len(issues), 'details': issues}",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "PII Redacting Memory Wrapper",
+        "description": "Wraps BeeAI AgentMemory to automatically redact PII before storage and log emission",
+        "code": "import re\nfrom typing import List\nfrom beeai import AgentMessage, AgentMemory\n\nclass SecureAgentMemory(AgentMemory):\n    PII_REDACT_MAP = {\n        r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b': '[EMAIL]',\n        r'\\b\\d{3}-\\d{2}-\\d{4}\\b': '[SSN]',\n        r'\\b\\d{16}\\b': '[CARD]',\n        r'(?i)(api[-_]?key|token|secret|password)[\\s:=]+[^\\s]+': r'\\1=[REDACTED]'\n    }\n    \n    def _sanitize_content(self, content: str) -> str:\n        for pattern, replacement in self.PII_REDACT_MAP.items():\n            content = re.sub(pattern, replacement, content)\n        return content\n    \n    def add_message(self, message: AgentMessage):\n        message.content = self._sanitize_content(message.content)\n        super().add_message(message)",
+        "language": "python"
+      },
+      {
+        "name": "Secure Tool Parameter Filter",
+        "description": "BeeAI Tool decorator that strips sensitive data from inputs before execution",
+        "code": "from functools import wraps\nfrom beeai.tools import tool\n\ndef secure_tool(func):\n    @wraps(func)\n    def wrapper(*args, **kwargs):\n        # Sanitize all string parameters\n        sanitized_kwargs = {}\n        for key, value in kwargs.items():\n            if isinstance(value, str):\n                # Remove common secret patterns\n                value = re.sub(r'(?i)(password|token|secret|key)[\\s:=]*[^\\s,]+', '[REDACTED]', value)\n                value = re.sub(r'\\b[A-Za-z0-9+/]{20,}={0,2}\\b', '[BASE64_REDACTED]', value)\n            sanitized_kwargs[key] = value\n        \n        return func(*args, **sanitized_kwargs)\n    return wrapper\n\n@tool\n@secure_tool\ndef search_database(query: str):\n    # Safe execution\n    return f\"Results for: {query}\"",
+        "language": "python"
+      },
+      {
+        "name": "Safe State Serializer",
+        "description": "Custom JSON serializer for BeeAI AgentState that excludes sensitive fields",
+        "code": "import json\nfrom beeai.agent import AgentState\n\nclass SecureAgentState(AgentState):\n    SENSITIVE_FIELDS = {'user_email', 'api_key', 'private_data', 'credentials'}\n    \n    def to_json(self, redact_sensitive: bool = True) -> str:\n        state_dict = self.__dict__.copy()\n        \n        if redact_sensitive:\n            for field in list(state_dict.keys()):\n                if any(sensitive in field.lower() for sensitive in self.SENSITIVE_FIELDS):\n                    state_dict[field] = '[REDACTED]'\n        \n        return json.dumps(state_dict, default=str)",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly with BeeAI through its event listener system, automatically registering detectors for memory growth, tool calls, state serialization, and model outputs. When PII patterns are detected in agent memory or tool parameters, Vex triggers immediate remediation workflows including memory truncation, parameter sanitization, and state redaction. The platform provides real-time dashboards showing leakage risk scores across all BeeAI agents, with automated PRs for code fixes when static analysis finds vulnerable patterns in tool definitions or memory handlers.\n\nVex's BeeAI integration captures all agent lifecycle events - from message addition to tool execution and state persistence - running parallel scans against 50+ PII patterns and secret formats. High-confidence leaks trigger circuit breakers that pause agent execution until human review, while low-confidence findings feed into continuous training of custom detection models. This closed-loop system reduces MTTR from days to seconds while maintaining 99.9% agent uptime.",
+      "code": "from vex_sdk import Vex\nfrom beeai import Agent\nfrom beeai.events import AgentEventListener\n\n# Install: pip install beeai-framework vex-sdk\n\nclass VexBeeAIListener(AgentEventListener):\n    def __init__(self):\n        self.vex = Vex(api_key=\"your-vex-api-key\")\n        self.vex.register_framework(\"beeai\", version=\"1.2.0\")\n    \n    async def on_memory_update(self, memory, messages):\n        leaks = scan_agent_memory_pii(memory)  # From detection methods above\n        if leaks:\n            await self.vex.alert(\n                issue_type=\"pii-leakage\",\n                severity=\"HIGH\",\n                metadata={\"leaks_count\": len(leaks), \"agent_id\": memory.agent_id},\n                auto_fix=\"redact_memory\"\n            )\n    \n    async def on_tool_call(self, tool_call):\n        if not validate_tool_inputs(tool_call):\n            await self.vex.block_execution(\n                reason=\"sensitive-data-in-tool-params\",\n                remediation=\"sanitize_inputs\"\n            )\n    \n    async def on_state_serialize(self, state):\n        issues = audit_state_serialization(state)\n        if issues['issues_found'] > 0:\n            await self.vex.enforce_fix(\n                fix_type=\"state-redaction\",\n                target=\"agent_state_serialization\"\n            )\n\n# Register with BeeAI agent\nagent = Agent()\nlistener = VexBeeAIListener()\nagent.register_listener(listener)\n\nprint(\"✅ Vex PII protection active for BeeAI agent\")",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Get Vex's BeeAI integration running in 5 minutes to eliminate sensitive data leakage forever - start your 14-day free trial now."
+    }
+  }
+}

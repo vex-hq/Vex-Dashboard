@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "dspy",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with DSPy + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with DSPy + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "DSPy ai chatbot",
+      "DSPy guardrails",
+      "ai chatbot reliability",
+      "Vex DSPy",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building AI chatbots with DSPy enables programmatic optimization of LLM pipelines for intent classification, RAG, and multi-turn conversations, moving beyond brittle prompting. However, DSPy's optimized modules can overfit to training data, produce hallucinated reasoning, or fail safety checks in dynamic conversations. Vex provides runtime verification to catch these failures, ensuring response accuracy, coherence, and safety before user exposure.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with DSPy",
+      "description": "A DSPy-powered AI chatbot typically starts with an IntentClassifier module to route user queries, followed by a Retrieval module using vector search over a knowledge base. The core response generation uses a RAGChain combining retrieved context with ChainOfThought for reasoning. Multi-turn memory is managed via a ConversationBufferMemory module that maintains context across interactions, with safety checks at each forward pass.\n\nDSPy signatures define input/output behavior for each module (e.g., intent -> category, context -> response), optimized via teleprompters like BootstrapFewShot. The pipeline composes these modules into a forward() method that processes user input through intent → retrieve → generate → verify stages.\n\nVerification is critical since optimization can create brittle chains where small input variations cause assertion failures or incoherent outputs.",
+      "diagram": "User Input\n    ↓\n[IntentClassifier] → category\n    ↓\n[Retriever] → context chunks\n    ↓\n[CoT+RAG Generator] → response\n    ↓\n[Memory Manager] → conversation history\n    ↓\n[Safety Filter] → final output\n\nDSPy Modules: signatures → optimized → forward()\nVex: verify() wraps each forward()"
+    },
+    "risks": [
+      {
+        "name": "Overfitted Intent Classification",
+        "description": "DSPy optimization creates classifiers that fail on OOD user intents, misrouting medical queries to sales responses",
+        "severity": "critical",
+        "mitigation": "Vex verifies intent predictions against ground-truth categories with semantic similarity checks"
+      },
+      {
+        "name": "Hallucinated RAG Responses",
+        "description": "Chain-of-thought produces plausible but factually wrong answers despite retrieved context",
+        "severity": "high",
+        "mitigation": "Vex cross-validates generated responses against retrieved documents using entailment checks"
+      },
+      {
+        "name": "Conversation Incoherence",
+        "description": "Memory module loses context across turns, causing repetitive or contradictory responses",
+        "severity": "high",
+        "mitigation": "Vex checks response coherence against conversation history using continuity assertions"
+      },
+      {
+        "name": "Safety/PII Violations",
+        "description": "Uncaught toxic language or PII leakage in multi-turn conversations",
+        "severity": "critical",
+        "mitigation": "Vex applies safety classifiers and PII entity extraction before response delivery"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "DSPy Intent Classifier Module",
+        "description": "Basic intent classification signature optimized for chatbot routing",
+        "code": "import dspy\n\nclass IntentClassifier(dspy.Signature):\n    '''Classify user intent for routing.'''\n    user_query = dspy.InputField()\n    intent_category = dspy.OutputField(desc='one of: sales, support, medical, billing')\n\nclass IntentModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.classify = dspy.ChainOfThought(IntentClassifier)\n    \n    def forward(self, user_query: str) -> dict:\n        return self.classify(user_query=user_query)",
+        "language": "python"
+      },
+      {
+        "title": "RAG Response Generator",
+        "description": "Combines retrieved context with CoT reasoning for accurate responses",
+        "code": "class RAGGenerator(dspy.Signature):\n    '''Answer using provided context.'''\n    context = dspy.InputField(desc='relevant docs')\n    question = dspy.InputField()\n    answer = dspy.OutputField(desc='concise, accurate response')\n\nclass RAGModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.generate = dspy.ChainOfThought(RAGGenerator)\n    \n    def forward(self, context: str, question: str) -> dict:\n        return self.generate(context=context, question=question)",
+        "language": "python"
+      },
+      {
+        "title": "Conversation Memory Manager",
+        "description": "Maintains multi-turn context for coherent conversations",
+        "code": "class ConversationManager(dspy.Module):\n    def __init__(self, max_turns=5):\n        super().__init__()\n        self.max_turns = max_turns\n        self.history = []\n    \n    def forward(self, user_input: str, bot_response: str) -> str:\n        self.history.append({'user': user_input, 'bot': bot_response})\n        context = '\\n'.join([f'U: {t[\"user\"]}\\nA: {t[\"bot\"]}' \n                            for t in self.history[-self.max_turns:]])\n        return context\n    \n    def get_context(self) -> str:\n        return self.history[-3:] if self.history else ''",
+        "language": "python"
+      },
+      {
+        "title": "Complete Chatbot Pipeline",
+        "description": "Composes all modules into single forward pass",
+        "code": "class AIChatbot(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.intent = IntentModule()\n        self.rag = RAGModule()\n        self.memory = ConversationManager()\n    \n    def forward(self, user_query: str, retrieved_docs: str = '') -> dict:\n        # Classify intent\n        intent = self.intent(user_query)\n        \n        # Generate with context\n        context = retrieved_docs or self.memory.get_context()\n        response = self.rag(context=context, question=user_query)\n        \n        # Update memory\n        self.memory(user_query, response['answer'])\n        \n        return {'intent': intent['intent_category'], \n                'response': response['answer']}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Verify Intent Classification",
+        "description": "Wrap intent classifier to catch overfitting failures",
+        "code": "import vex\n\nclass VerifiedIntentModule(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.classify = dspy.ChainOfThought(IntentClassifier)\n    \n    def forward(self, user_query: str) -> dict:\n        raw_output = self.classify(user_query=user_query)\n        \n        # Vex verification\n        verified = vex.verify(\n            model_output=raw_output,\n            assertions=[\n                vex.Assertion(\n                    name='valid_intent',\n                    metric=vex.Metric.CATEGORICAL,\n                    reference=['sales', 'support', 'medical', 'billing'],\n                    field='intent_category',\n                    threshold=1.0\n                )\n            ],\n            risk_profile='high'\n        )\n        return verified.output if verified.passed else {'error': 'Invalid intent'}",
+        "language": "python"
+      },
+      {
+        "title": "RAG Hallucination Detection",
+        "description": "Verify responses are grounded in retrieved context",
+        "code": "def verified_rag_forward(self, context: str, question: str) -> dict:\n    raw_response = self.generate(context=context, question=question)\n    \n    verified = vex.verify(\n        model_output=raw_response,\n        assertions=[\n            vex.Assertion(\n                name='grounded_response',\n                metric=vex.Metric.ENTAILMENT,\n                reference=context,\n                field='answer',\n                threshold=0.8\n            ),\n            vex.Assertion(\n                name='no_hallucination',\n                metric=vex.Metric.SIMILARITY,\n                reference=question + context,\n                field='answer',\n                threshold=0.7\n            )\n        ]\n    )\n    return verified.output if verified.passed else {'answer': 'Unable to verify response'}",
+        "language": "python"
+      },
+      {
+        "title": "Safety + PII Full Pipeline",
+        "description": "Complete chatbot with all verifications",
+        "code": "class VerifiedAIChatbot(dspy.Module):\n    def __init__(self):\n        super().__init__()\n        self.vex_client = vex.Client()\n    \n    def forward(self, user_query: str, docs: str = '') -> dict:\n        # All Vex-wrapped modules\n        intent_result = self.verified_intent(user_query)\n        rag_result = self.verified_rag(docs, user_query)\n        \n        # Final safety check\n        final_result = vex.verify(\n            model_output=rag_result,\n            assertions=[\n                vex.Assertion(name='no_pii', metric=vex.Metric.NER, \n                            field='answer', threshold=0.0),\n                vex.Assertion(name='safety', metric=vex.Metric.TOXICITY, \n                            field='answer', threshold=0.1),\n                vex.Assertion(name='coherence', metric=vex.Metric.CONTINUITY,\n                            reference=self.memory.get_context(), field='answer')\n            ],\n            risk_profile='high'\n        )\n        \n        return final_result.output",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your DSPy AI Chatbot",
+      "description": "Install Vex with `pip install vex-sdk` and wrap your DSPy modules today to eliminate production failures."
+    }
+  }
+}

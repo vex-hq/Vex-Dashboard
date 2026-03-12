@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "data-leakage",
+    "framework": "vercel-ai-sdk",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Sensitive Data Leakage Prevention in AI Agents in Vercel AI SDK Agents",
+    "description": "How to detect and fix sensitive data leakage prevention in ai agents in Vercel AI SDK agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "sensitive-data-leakage-prevention-in-ai-agents",
+      "Vercel AI SDK data-leakage",
+      "Vercel AI SDK reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In Vercel AI SDK, sensitive data leakage in AI agents often occurs when streaming responses from providers like OpenAI inadvertently include API keys, user PII, or internal secrets due to hallucinations or unfiltered tool outputs. This is exacerbated by the framework's `streamText` and `generateText` APIs, which prioritize low-latency streaming over built-in sanitization, allowing partial responses to expose data before validation. Agents using tools in `experimental_streamObject` or `streamUI` patterns are particularly vulnerable as unvalidated tool results flow directly into the UI.",
+    "howItManifests": [
+      {
+        "scenario": "Streaming agent responses with hallucinated secrets",
+        "symptom": "Partial `streamText` chunks contain API keys or tokens before completion",
+        "impact": "Real-time UI displays secrets to users during streaming"
+      },
+      {
+        "scenario": "Tool call results not sanitized before streaming",
+        "symptom": "`experimental_streamObject` includes raw database query results with PII",
+        "impact": "Structured outputs leak customer data in agent responses"
+      },
+      {
+        "scenario": "Error handling exposes internal config in agent failures",
+        "symptom": "Uncaught errors in `generateText` log secrets to client-side console",
+        "impact": "Browser dev tools capture leaked environment variables"
+      },
+      {
+        "scenario": "Multi-provider agent switches leak provider-specific secrets",
+        "symptom": "Inconsistent `streamText` payloads mix API keys across providers",
+        "impact": "Cross-provider hallucination exposes multiple credential types"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Stream Chunk Regex Scanner",
+        "description": "Intercepts `streamText` chunks and scans for common secret patterns before rendering",
+        "code": "import { streamText } from 'ai';\nimport { createStreamableValue } from 'ai/rsc';\nimport regex from 'sensitive-regex';\n\nconst detectLeaksInStream = async (model: any, prompt: string) => {\n  const result = await streamText({\n    model,\n    prompt,\n    onChunk: (chunk) => {\n      // Scan each streaming chunk for secrets\n      const secrets = regex(chunk.delta);\n      if (secrets.length > 0) {\n        console.error('🚨 SENSITIVE DATA DETECTED:', secrets);\n        throw new Error('Sensitive data leakage detected');\n      }\n    }\n  });\n  return result;\n};",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Output Validator",
+        "description": "Middleware for `experimental_streamObject` that redacts PII from tool results",
+        "code": "import { tool } from 'ai/rsc';\nimport { z } from 'zod';\n\nconst safeToolCall = tool({\n  description: 'Safe database query',\n  parameters: z.object({ query: z.string() }),\n  execute: async ({ query }) => {\n    const result = await db.query(query);\n    // Redact PII before returning\n    const sanitized = result.map(row => ({\n      id: row.id,\n      // Filter sensitive fields\n      ...Object.fromEntries(\n        Object.entries(row).filter(([key]) => !['email', 'ssn', 'api_key'].includes(key))\n      )\n    }));\n    return sanitized;\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Error Boundary Logger",
+        "description": "Captures and sanitizes agent errors that might leak config data",
+        "code": "import { generateText } from 'ai';\n\nconst safeGenerateText = async (model: any, prompt: string) => {\n  try {\n    return await generateText({ model, prompt });\n  } catch (error) {\n    // Sanitize error before logging\n    const safeError = error.message.replace(/api_[a-z0-9]{32}/gi, '[REDACTED]');\n    console.error('Agent error (sanitized):', safeError);\n    throw new Error('Agent execution failed safely');\n  }\n};",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Vex Middleware for All Streams",
+        "description": "Wraps `streamText`/`generateText` with automatic PII detection and redaction",
+        "code": "import { createMiddleware } from '@vex_dev/sdk';\nimport { streamText, generateText } from 'ai';\n\nconst vexMiddleware = createMiddleware({\n  detectors: ['pii', 'api-keys', 'secrets'],\n  actions: ['redact', 'block-stream']\n});\n\nexport const safeStreamText = (params: any) =>\n  vexMiddleware(streamText(params));\n\nexport const safeGenerateText = (params: any) =>\n  vexMiddleware(generateText(params));",
+        "language": "typescript"
+      },
+      {
+        "name": "Sanitized Tool Schema",
+        "description": "Zod schemas that automatically strip sensitive fields from tool outputs",
+        "code": "import { tool } from 'ai/rsc';\nimport { z } from 'zod';\n\nconst SafeUserSchema = z.object({\n  id: z.string(),\n  name: z.string().transform((val) => val.replace(/\\w+@\\w+\\.\\w+/g, '[EMAIL_REDACTED]')),\n  // Explicitly exclude sensitive fields\n}).partial();\n\nconst safeUserLookup = tool({\n  description: 'Lookup sanitized user data',\n  parameters: z.object({ userId: z.string() }),\n  execute: async ({ userId }) => {\n    const user = await db.user.find(userId);\n    return SafeUserSchema.parse(user);\n  }\n});",
+        "language": "typescript"
+      },
+      {
+        "name": "Response Transformer",
+        "description": "Post-processes all agent outputs with regex-based redaction",
+        "code": "import { createStreamableValue } from 'ai/rsc';\n\nconst redactSensitiveData = (text: string) => {\n  const patterns = [\n    /sk-[a-zA-Z0-9]{48}/g,\n    /\\b[A-Za-z0-9]{20}\\b/g,\n    /xoxb-[0-9a-f]{32}/g\n  ];\n  return patterns.reduce((clean, pattern) => \n    clean.replace(pattern, '[REDACTED]'), text\n  );\n};\n\nexport const safeStreamUI = async (model: any, prompt: string) => {\n  const ui = createStreamableValue();\n  (async () => {\n    const result = await streamText({ model, prompt });\n    for await (const chunk of result.textStream) {\n      ui.update(redactSensitiveData(chunk));\n    }\n    ui.done();\n  })();\n  return ui.value;\n};",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Sensitive Data Leakage Prevention in AI Agents Detection with Vex",
+      "description": "Vex provides production-grade middleware that automatically wraps Vercel AI SDK's `streamText`, `generateText`, and `experimental_streamObject` calls with real-time PII and secret detection. Using pattern-matched detectors trained on millions of agent traces, Vex identifies leaks in streaming chunks, tool outputs, and error messages before they reach users. The SDK integrates in <5 lines of code and provides remediation actions like auto-redaction, stream blocking, and audit logging.\n\nVex's agent-specific detectors understand Vercel AI SDK patterns including partial hallucinations during streaming, unvalidated tool results, and provider inconsistencies. It automatically classifies leaks by severity (critical: API keys, high: PII, medium: internal config) and enforces your org's data retention policies. Integration happens at the framework level, protecting all agents without code changes.\n\nRemediation is proactive: Vex can block leaky streams, inject redacted fallbacks, or trigger incident workflows. Coverage spans all providers (OpenAI, Anthropic, custom) and deployment targets (Vercel Edge, Next.js). Metrics dashboard shows leakage rates, common patterns, and fix effectiveness across your agent fleet.",
+      "code": "import { createVexMiddleware } from '@vex_dev/sdk';\nimport { streamText, generateText, experimental_streamObject } from 'ai';\n\n// One-line integration protects ALL AI SDK calls\n\nconst withVex = createVexMiddleware({\n  projectId: process.env.VEX_PROJECT_ID!,\n  detectors: ['pii', 'api-keys', 'secrets'],\n  autoRemediate: true,\n  blockOnCritical: true\n});\n\n// Protected endpoints\nexport const POST = withVex(async (req) => {\n  const { messages } = await req.json();\n  const result = await streamText({\n    model: openai('gpt-4o'),\n    messages,\n    tools: { safeDbQuery }\n  });\n  return result.toAIStreamResponse();\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add Vex middleware to catch 100% of sensitive data leaks in your Vercel AI SDK agents in under 5 minutes"
+    }
+  }
+}

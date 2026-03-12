@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "tool-loop-detection",
+    "framework": "n8n",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Tool Loop Detection in AI Agents in n8n AI Agents Agents",
+    "description": "How to detect and fix tool loop detection in ai agents in n8n AI Agents agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "tool-loop-detection-in-ai-agents",
+      "n8n AI Agents tool-loop-detection",
+      "n8n AI Agents reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In n8n AI Agents, tool loops manifest as infinite recursion between AI Agent nodes and Tool nodes due to unvalidated outputs triggering repeated executions in workflow chains. This occurs frequently in agentic workflows where AI nodes generate tool calls that reference other workflow triggers, creating self-reinforcing cycles. The open-source nature of n8n exacerbates this as users chain multiple AI agents without built-in loop safeguards.",
+    "howItManifests": [
+      {
+        "scenario": "Workflow trigger chains causing recursive agent execution",
+        "symptom": "AI Agent node outputs contain workflow trigger URLs that get re-executed by subsequent Tool nodes",
+        "impact": "Infinite HTTP requests exhausting n8n server resources and hitting rate limits"
+      },
+      {
+        "scenario": "AI node outputs not validated before passing to action nodes",
+        "symptom": "Unstructured AI responses passed directly to HTTP Request tools calling the same workflow",
+        "impact": "Recursive tool calls creating exponential execution growth"
+      },
+      {
+        "scenario": "Memory window nodes injecting stale context",
+        "symptom": "Previous conversation memory contains tool call patterns that AI reuses in loops",
+        "impact": "Stale context perpetuates loop patterns across sessions"
+      },
+      {
+        "scenario": "Credential exposure through agent tool call parameters",
+        "symptom": "AI generates tool calls with embedded API keys that trigger credentialed workflows recursively",
+        "impact": "Security breach + resource exhaustion from authenticated loop"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Workflow Trigger Loop Detection",
+        "description": "Scans AI Agent outputs for n8n webhook URLs that match current workflow execution context",
+        "code": "interface N8nExecutionData { node: { name: string; type: string }; json: any; }\n\nfunction detectTriggerLoop(data: N8nExecutionData[]): boolean {\n  const aiNodes = data.filter(n => n.node.type.includes('ai') || n.node.name.includes('Agent'));\n  const currentWorkflowId = process.env.WORKFLOW_ID || '';\n  \n  return aiNodes.some(node => {\n    const output = node.json.output || node.json;\n    const webhookPatterns = [\n      `webhook/${currentWorkflowId}`,\n      new RegExp(`n8n\\.workflow\\.webhook.*${currentWorkflowId}`, 'i'),\n      /https?:\\/\\/[^\\s]+n8n\\.[^\\s]+\\/webhook\\/[^\\s]+/i\n    ];\n    \n    return webhookPatterns.some(pattern => \n      typeof output === 'string' ? pattern.test(output) : \n      JSON.stringify(output).match(pattern)\n    );\n  });\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Tool Call Recursion Counter",
+        "description": "Tracks tool call depth across workflow executions using n8n's execution metadata",
+        "code": "function detectToolRecursion(items: any[]): { isLoop: boolean; depth: number } {\n  let toolDepth = 0;\n  let parentIds: string[] = [];\n  \n  for (const item of items) {\n    const executionData = item.json.$execution || {};\n    if (executionData.parentExecutionId) {\n      toolDepth++;\n      parentIds.push(executionData.parentExecutionId);\n      \n      // Detect self-reference\n      if (parentIds.includes(executionData.id)) {\n        return { isLoop: true, depth: toolDepth };\n      }\n    }\n  }\n  \n  return { isLoop: toolDepth > 5, depth: toolDepth };\n}",
+        "language": "typescript"
+      },
+      {
+        "name": "Memory Context Loop Scanner",
+        "description": "Analyzes Chat Memory node outputs for repeated tool call patterns",
+        "code": "function detectMemoryLoops(memoryItems: any[]): boolean {\n  const toolCallRegex = /tool_call|function_call|action:\\s*\\w+/gi;\n  const messages = memoryItems.flatMap(item => item.json.messages || []);\n  \n  const toolSequences: string[] = [];\n  let currentSeq = '';\n  \n  for (const msg of messages.slice(-10)) { // Last 10 messages\n    const toolMatches = (msg.content || '').match(toolCallRegex);\n    if (toolMatches) {\n      currentSeq += toolMatches.join(' ');\n      if (currentSeq.length > 100) {\n        toolSequences.push(currentSeq);\n        currentSeq = '';\n      }\n    }\n  }\n  \n  // Check for repeating sequences\n  const seqSet = new Set(toolSequences);\n  return toolSequences.length > 2 && seqSet.size < toolSequences.length / 2;\n}",
+        "language": "typescript"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Loop-Breaking Output Validator",
+        "description": "n8n Code node that validates AI outputs before passing to tools",
+        "code": "// Add as Code node after AI Agent\nconst items = $input.all();\nconst fixedItems = items.map(item => {\n  const output = item.json.output || item.json;\n  \n  // Block webhook triggers\n  if (typeof output === 'string' && /webhook\\//i.test(output)) {\n    return {\n      json: {\n        ...item.json,\n        output: 'LOOP_DETECTED: Webhook recursion blocked',\n        safe_to_proceed: false,\n        loop_type: 'trigger_recursion'\n      }\n    };\n  }\n  \n  // Limit tool call depth\n  const execData = $execution;\n  if (execData.parentExecutions?.length > 3) {\n    return {\n      json: {\n        ...item.json,\n        output: 'LOOP_DETECTED: Max recursion depth exceeded',\n        safe_to_proceed: false,\n        loop_type: 'depth_exceeded'\n      }\n    };\n  }\n  \n  return { json: { ...item.json, safe_to_proceed: true } };\n});\n\nreturn fixedItems.filter(item => item.json.safe_to_proceed);",
+        "language": "typescript"
+      },
+      {
+        "name": "Stateful Loop Tracker Node",
+        "description": "Persistent workflow state tracking with automatic loop termination",
+        "code": "// Code node with n8n workflow static data\nasync function trackLoopState() {\n  const workflowStaticData = await $workflow.staticData();\n  const executionId = $execution.id;\n  const toolCalls = workflowStaticData.toolCalls || [];\n  \n  toolCalls.push({\n    executionId,\n    timestamp: Date.now(),\n    nodeName: $node.name\n  });\n  \n  // Prune old calls\n  workflowStaticData.toolCalls = toolCalls.filter(\n    call => Date.now() - call.timestamp < 60000 // 1 min window\n  );\n  \n  // Detect loops\n  const recentCalls = workflowStaticData.toolCalls.slice(-5);\n  const isLoop = recentCalls.length > 3 && \n    recentCalls.some((call, i) => \n      i > 0 && call.nodeName === recentCalls[0].nodeName\n    );\n  \n  await $workflow.staticData('toolCalls', workflowStaticData.toolCalls);\n  \n  if (isLoop) {\n    throw new Error('LOOP_DETECTED: Terminating recursive execution');\n  }\n  \n  return $input.all();\n}\n\nreturn await trackLoopState();",
+        "language": "typescript"
+      },
+      {
+        "name": "Safe Tool Call Filter",
+        "description": "Filters dangerous tool parameters before execution",
+        "code": "const items = $input.all();\nconst safeItems = items.map(item => {\n  const toolCall = item.json.tool_calls?.[0] || item.json;\n  if (!toolCall) return item;\n  \n  const params = toolCall.function?.arguments || toolCall.parameters || {};\n  \n  // Block self-referential URLs\n  const urls = Object.values(params).filter(v => typeof v === 'string');\n  const selfWebhook = urls.some(url => \n    url.includes('n8n') && (url.includes('webhook') || url.includes($workflow.id))\n  );\n  \n  // Block credential patterns\n  const creds = urls.some(url => /api_key|token|secret/i.test(url));\n  \n  if (selfWebhook || creds) {\n    return {\n      json: {\n        ...item.json,\n        blocked: true,\n        reason: selfWebhook ? 'self_webhook' : 'credential_exposure',\n        safe_params: { ...params, dangerous_urls: urls }\n      }\n    };\n  }\n  \n  return item;\n});\n\nreturn safeItems.filter(item => !item.json.blocked);",
+        "language": "typescript"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Tool Loop Detection in AI Agents Detection with Vex",
+      "description": "Vex integrates seamlessly as a webhook node immediately after n8n AI Agent nodes, automatically analyzing execution traces for loop patterns without modifying core workflow logic. It monitors tool call sequences, execution depth, and memory context in real-time, providing instant loop detection with zero false positives through n8n-specific pattern recognition. When loops are detected, Vex can automatically inject remediation payloads or terminate executions while logging patterns for workflow optimization.\n\nThe Vex SDK hooks directly into n8n's execution data structure, parsing $input.all() payloads and workflow metadata to build comprehensive agent traces. This enables proactive loop prevention across all AI Agent nodes simultaneously, with configurable thresholds for different workflow patterns. Remediation happens inline - Vex can rewrite dangerous tool calls or inject loop-breaking responses before they reach action nodes.\n\nDeployment takes seconds: npm install @vex_dev/sdk, add Vex webhook node, done. Vex handles the complex trace analysis while preserving n8n's native execution model.",
+      "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  projectId: process.env.VEX_PROJECT_ID!,\n  webhookToken: process.env.VEX_WEBHOOK_TOKEN!\n});\n\n// n8n Code node - Vex integration after AI Agent\nexport default defineN8nCodeNode({\n  async run({ items, $execution }) {\n    // Send execution trace to Vex\n    const trace = {\n      workflowId: $execution.workflowData.id,\n      nodeName: $node.name,\n      inputData: items.map(i => i.json),\n      executionId: $execution.id,\n      parentId: $execution.parentExecution?.id\n    };\n    \n    const { verdict, remediation } = await vex.check({\n      type: 'n8n_ai_loop',\n      trace,\n      patterns: ['webhook_recursion', 'tool_depth_exceeded', 'memory_loop'],\n      maxDepth: 5\n    });\n    \n    if (verdict === 'LOOP_DETECTED') {\n      // Apply Vex remediation\n      return [{\n        json: {\n          ...remediation,\n          vex_verdict: verdict,\n          loop_type: remediation.loop_type,\n          fixed: true\n        }\n      }];\n    }\n    \n    // Forward safe execution\n    return items.map(item => ({ json: { ...item.json, vex_clear: true } }));\n  }\n});",
+      "language": "typescript"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Add one Vex webhook node to eliminate AI agent loops across all your n8n workflows forever."
+    }
+  }
+}

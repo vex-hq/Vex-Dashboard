@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "haystack",
+    "useCase": "chatbot",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building AI Chatbot with Haystack + Vex Guardrails",
+    "description": "Learn how to build ai chatbot with Haystack + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Haystack ai chatbot",
+      "Haystack guardrails",
+      "ai chatbot reliability",
+      "Vex Haystack",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building an AI Chatbot with Haystack enables scalable retrieval-augmented generation (RAG) pipelines for conversational agents. Guardrails are essential to prevent failures like hallucinations, irrelevant retrievals, and incoherent multi-turn conversations that erode user trust. Vex integration provides runtime verification for response accuracy, safety, and coherence in production deployments.",
+    "architectureOverview": {
+      "heading": "AI Chatbot Architecture with Haystack",
+      "description": "The typical Haystack AI Chatbot uses a Pipeline with an Embedder for query encoding, a Retriever (e.g., BM25 or Dense) to fetch relevant documents from a DocumentStore like InMemory or Weaviate, and a PromptBuilder to construct RAG prompts. A Generator (e.g., OpenAIChat) produces responses, while an IntentClassifier handles routing for multi-turn memory via a ConversationMemory component. Custom components manage safety filtering and PII redaction before final output.\n\nMulti-turn context is preserved using session-based memory stores, with intent classification triggering actions like fallback responses or tool calls. The pipeline processes user input sequentially: classify intent → retrieve context → generate → verify → respond, ensuring coherent and grounded conversations.\n\nThis modular design allows easy insertion of Vex as a verification component post-generation to check hallucinations, PII leaks, and coherence against retrieved context.",
+      "diagram": "User Input\n    ↓\nIntentClassifier → MemoryLoader\n    ↓\nPromptBuilder ← Retriever ← DocumentStore\n    ↓\nGenerator\n    ↓\n[Vex Verifier]\n    ↓\nSafetyFilter → Response\n    ↓\nUser"
+    },
+    "risks": [
+      {
+        "name": "Retriever returning irrelevant documents",
+        "description": "BM25 or embedding retriever fetches off-topic docs, leading to hallucinated or inaccurate responses",
+        "severity": "critical",
+        "mitigation": "Vex semantic similarity checks between query, retrieved docs, and generated output"
+      },
+      {
+        "name": "Generator hallucinating beyond retrieved context",
+        "description": "LLM invents facts not grounded in retrieved documents, breaking RAG fidelity",
+        "severity": "critical",
+        "mitigation": "Vex hallucination detection via context faithfulness scoring"
+      },
+      {
+        "name": "Pipeline component output type mismatches",
+        "description": "Type errors between components (e.g., wrong Document format) cause silent failures",
+        "severity": "high",
+        "mitigation": "Vex schema validation on all component outputs"
+      },
+      {
+        "name": "Custom component errors silently swallowed",
+        "description": "Safety filter or memory component crashes without traceback in production",
+        "severity": "high",
+        "mitigation": "Vex error capture and alerting with full stack traces"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Basic RAG Chatbot Pipeline",
+        "description": "Core pipeline with retriever, prompt builder, and generator for single-turn Q&A",
+        "code": "from haystack import Pipeline\nfrom haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever\nfrom haystack.components.generators import OpenAIChatGenerator\nfrom haystack.components.builders import PromptBuilder\n\nretrieval = Pipeline()\nretrieval.add_component(\"retriever\", InMemoryEmbeddingRetriever(document_store))\nretrieval.add_component(\"prompt_builder\", PromptBuilder(template=\"Answer using context: {{documents}} Question: {{query}}\"))\nretrieval.add_component(\"generator\", OpenAIChatGenerator(api_key=\"your-key\"))\nretrieval.connect(\"retriever.documents\", \"prompt_builder.documents\")\nretrieval.connect(\"retriever.query\", \"prompt_builder.query\")\nretrieval.connect(\"prompt_builder\", \"generator\")",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Turn Memory Integration",
+        "description": "Add conversation memory for context-aware responses across turns",
+        "code": "from haystack.components.memory.conversation import ConversationMemory\nfrom haystack.components.builders import ChatPromptBuilder\n\nchat_pipeline = Pipeline()\nchat_pipeline.add_component(\"memory\", ConversationMemory(session_id=\"chat-1\"))\nchat_pipeline.add_component(\"prompt\", ChatPromptBuilder(template=\"Socratic tutor: {{history}} Current: {{query}}\"))\nchat_pipeline.add_component(\"generator\", OpenAIChatGenerator())\nchat_pipeline.connect(\"memory.output\", \"prompt.history\")\nchat_pipeline.connect(\"prompt\", \"generator\")\nchat_pipeline.connect(\"generator.replies\", \"memory.input\")",
+        "language": "python"
+      },
+      {
+        "title": "Intent Classification Router",
+        "description": "Classify user intent to route between RAG, fallback, or tool calls",
+        "code": "from haystack.components.classifiers import OpenAIDocumentEmbedder\nfrom haystack.utils import ComponentDevice\n\nintent_pipe = Pipeline()\nintent_pipe.add_component(\"embedder\", OpenAIDocumentEmbedder(api_key=\"your-key\"))\nintents = [\"rag_query\", \"greeting\", \"fallback\"]\n# Simplified intent classification\nresult = intent_pipe.run({\"embedder\": {\"text\": user_query}})\nif result[\"embedder\"][\"embedding\"].similarity(intents[0]) > 0.8:\n    result = rag_pipeline.run(query=user_query)\nelse:\n    result = fallback_pipeline.run(query=user_query)",
+        "language": "python"
+      },
+      {
+        "title": "Safety and PII Filtering",
+        "description": "Custom component to redact PII and filter unsafe content before response",
+        "code": "from haystack import component\n\n@component\nclass SafetyFilter:\n    @component.output_types(response=str, safe=bool)\n    def run(self, text: str) -> dict:\n        import re\n        pii_pattern = r'\\b(?:\\d{3}-?\\d{2}-?\\d{4}|\\w+@\\w+\\.\\w+)\\b'\n        safe_text = re.sub(pii_pattern, '[REDACTED]', text)\n        is_safe = 'harmful' not in safe_text.lower()\n        return {\"response\": safe_text, \"safe\": is_safe}",
+        "language": "python"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Verifier Custom Component",
+        "description": "Add Vex as pipeline component to verify response accuracy and hallucination",
+        "code": "from vex_sdk import Vex\nfrom haystack import component\n\n@component\nclass VexVerifier:\n    def __init__(self):\n        self.vex = Vex(api_key=\"vex-api-key\")\n\n    @component.output_types(verified_response=str, score=float, passed=bool)\n    def run(self, query: str, documents: list, response: str) -> dict:\n        result = self.vex.verify(\n            task='rag_verification',\n            inputs={'query': query, 'context': documents, 'response': response},\n            checks=['hallucination', 'relevance', 'safety']\n        )\n        return {\n            'verified_response': response if result.passed else 'Blocked',\n            'score': result.score,\n            'passed': result.passed\n        }",
+        "language": "python"
+      },
+      {
+        "title": "Insert Vex into RAG Pipeline",
+        "description": "Connect VexVerifier after generator for end-to-end verification",
+        "code": "rag_pipeline = Pipeline()\nrag_pipeline.add_component(\"retriever\", InMemoryEmbeddingRetriever(store))\nrag_pipeline.add_component(\"generator\", OpenAIChatGenerator())\nrag_pipeline.add_component(\"vex\", VexVerifier())\n\nrag_pipeline.connect(\"retriever\", \"generator\")\nrag_pipeline.connect(\"generator.response\", \"vex.response\")\nrag_pipeline.connect(\"retriever.query\", \"vex.query\")\nrag_pipeline.connect(\"retriever.documents\", \"vex.documents\")\n\nresult = rag_pipeline.run({\n    \"retriever\": {\"query\": \"What is Haystack?\"},\n    \"generator\": {\"prompt\": \"Answer using context:\"}\n})\nprint(result['vex']['verified_response'])",
+        "language": "python"
+      },
+      {
+        "title": "Multi-Turn Vex with Memory",
+        "description": "Verify conversation coherence across turns with session context",
+        "code": "chat_pipeline.add_component(\"vex_coherence\", VexVerifier())\nchat_pipeline.connect(\"memory.output\", \"vex_coherence.context\")\nchat_pipeline.connect(\"generator.replies\", \"vex_coherence.response\")\nchat_pipeline.connect(\"memory.current_query\", \"vex_coherence.query\")\n\n# Run with session tracking\nsession_id = \"user-123\"\nresult = chat_pipeline.run({\n    \"memory\": {\"session_id\": session_id, \"query\": user_message},\n    \"generator\": {\"model\": \"gpt-4\"}\n})\n\nif not result['vex_coherence']['passed']:\n    result['vex_coherence']['verified_response'] = \"Sorry, I can't respond to that.\"",
+        "language": "python"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Haystack AI Chatbot",
+      "description": "Add Vex verification to your Haystack pipelines today with `pip install vex-sdk` and start your 14-day free trial."
+    }
+  }
+}

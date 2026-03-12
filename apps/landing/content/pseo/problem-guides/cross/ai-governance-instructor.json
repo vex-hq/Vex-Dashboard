@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "ai-governance",
+    "framework": "instructor",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Responsible AI Governance for Agents in Instructor Agents",
+    "description": "How to detect and fix responsible ai governance for agents in Instructor agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "responsible-ai-governance-for-agents",
+      "Instructor ai-governance",
+      "Instructor reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Responsible AI Governance for Agents in Instructor manifests as failures in structured output validation, where agents produce invalid Pydantic models despite schema enforcement. Common issues include exhausted retries from malformed responses, missing required fields in partial extractions, hallucinated enum values, and inconsistent nested object structures. These failures undermine agent reliability and require governance mechanisms to detect, validate, and remediate outputs before deployment.",
+    "howItManifests": [
+      {
+        "scenario": "Structured output validation retries exhausted",
+        "symptom": "Instructor's from_openai() wrapper retries 3x but still raises ValidationError after max_attempts exceeded",
+        "impact": "Agent halts execution, blocking downstream workflows and requiring manual intervention"
+      },
+      {
+        "scenario": "Partial extraction missing required fields",
+        "symptom": "Pydantic model returns None for required fields despite clear input data present",
+        "impact": "Incomplete agent responses lead to cascading errors in multi-step agent workflows"
+      },
+      {
+        "scenario": "Model hallucinating enum values outside schema",
+        "symptom": "Instructor extracts enum values like 'INVALID_CHOICE' when schema defines ['approved', 'rejected', 'pending']",
+        "impact": "Agents make decisions based on invalid categories, violating business logic"
+      },
+      {
+        "scenario": "Nested object extraction producing inconsistent depth",
+        "symptom": "Nested Pydantic models sometimes return partial trees (e.g., user.address missing street)",
+        "impact": "Data pipelines fail validation, causing governance compliance violations"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retry Exhaustion Monitor",
+        "description": "Detects when Instructor's validation retries are exhausted by catching ValidationError with retry metadata",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel\n\nclass User(BaseModel):\n    name: str\n    age: int\n\nclient = from_openai(OpenAI())\n\ntry:\n    user = client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=User,\n        messages=[{'role': 'user', 'content': 'Extract user: John 35'}]\n    )\nexcept instructor.exceptions.WrongNumberOfRetriesError as e:\n    print(f'Retry exhaustion detected: {e.validation_error}')\n    raise",
+        "language": "python"
+      },
+      {
+        "name": "Enum Hallucination Detector",
+        "description": "Validates extracted enum values against schema to catch hallucinations",
+        "code": "from enum import Enum\nfrom pydantic import BaseModel, validator\n\nclass Status(str, Enum):\n    APPROVED = 'approved'\n    REJECTED = 'rejected'\n    PENDING = 'pending'\n\nclass Document(BaseModel):\n    status: Status\n\n    @validator('status')\n    def validate_status(cls, v):\n        if v not in Status.__members__:\n            raise ValueError(f'Hallucinated enum: {v}')\n        return v\n\n# Usage with Instructor\nresponse = client.chat.completions.create(\n    response_model=Document,\n    messages=[{'role': 'user', 'content': 'Document status: APPROVED'}]\n)",
+        "language": "python"
+      },
+      {
+        "name": "Nested Completeness Check",
+        "description": "Verifies all required nested fields are populated in Instructor extractions",
+        "code": "from typing import Optional\nfrom pydantic import BaseModel\n\nclass Address(BaseModel):\n    street: str\n    city: str\n\nclass User(BaseModel):\n    name: str\n    address: Optional[Address] = None\n\n    def is_complete(self) -> bool:\n        return (self.address is not None and \n                all([self.address.street, self.address.city]))\n\n# Post-Instructor validation\nuser = client.chat.completions.create(\n    response_model=User,\n    messages=[{'role': 'user', 'content': 'User: John, 123 Main St, NYC'}]\n)\n\nif not user.is_complete():\n    raise ValueError('Nested extraction incomplete')",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Fallback Partial Mode",
+        "description": "Enable Instructor's partial mode to extract available fields when full validation fails",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\n\nclass User(BaseModel):\n    name: str\n    age: int = Field(default=None)\n\nclient = from_openai(\n    OpenAI(),\n    mode=instructor.Mode.PARTIAL  # Fallback to partial extraction\n)\n\nuser = client.chat.completions.create(\n    model='gpt-4o-mini',\n    response_model=User,\n    messages=[{'role': 'user', 'content': 'Just John'}],\n    max_retries=1\n)\nprint(f'Partial success: {user.dict(exclude_unset=True)}')",
+        "language": "python"
+      },
+      {
+        "name": "Strict Enum Coercion",
+        "description": "Configure Instructor to coerce hallucinated enums to closest valid value",
+        "code": "from instructor import from_openai\nfrom pydantic import BaseModel, Field\nfrom enum import Enum\n\nclass Status(str, Enum):\n    APPROVED = 'approved'\n    REJECTED = 'rejected'\n\nclient = from_openai(OpenAI())\n\nclass Document(BaseModel):\n    status: Status = Field(safer_underscore_names=True)\n\n# Instructor auto-coerces invalid enums\ndoc = client.chat.completions.create(\n    response_model=Document,\n    messages=[{'role': 'user', 'content': 'status: APPROVE'}],\n    temperature=0.1  # Reduce hallucination\n)",
+        "language": "python"
+      },
+      {
+        "name": "Nested Validation Retry",
+        "description": "Implement custom retry logic for nested objects with specific prompts",
+        "code": "from instructor import from_openai\nimport time\n\nclass NestedUser(BaseModel):\n    name: str\n    address: dict\n\nclient = from_openai(OpenAI())\n\ndef safe_nested_extract(prompt: str, max_tries=3):\n    for attempt in range(max_tries):\n        try:\n            return client.chat.completions.create(\n                model='gpt-4o-mini',\n                response_model=NestedUser,\n                messages=[\n                    {'role': 'system', 'content': 'ALWAYS include complete address: street + city.'},\n                    {'role': 'user', 'content': prompt}\n                ]\n            )\n        except Exception:\n            if attempt == max_tries - 1:\n                raise\n            time.sleep(0.5)\n\nuser = safe_nested_extract('John at 123 Main NYC')",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating Responsible AI Governance for Agents Detection with Vex",
+      "description": "Vex automates Instructor governance by wrapping client.chat.completions.create() calls with vex.verify(), providing real-time monitoring of validation failures, retry exhaustion, and schema violations. It captures detailed traces of Pydantic ValidationErrors, hallucinated enum values, and incomplete nested extractions, surfacing patterns across agent deployments. Vex's remediation engine suggests optimal temperature settings, retry configurations, and fallback modes based on historical failure patterns.\n\nThe platform generates governance dashboards showing MTTR for Instructor failures and compliance rates across agent fleets. Automated alerts trigger when validation success rates drop below 95%, with one-click fixes deploying updated Instructor configurations. Vex maintains audit trails for all agent outputs, ensuring Responsible AI compliance for production deployments.",
+      "code": "from vex_sdk import verify\nfrom instructor import from_openai\nfrom openai import OpenAI\nfrom pydantic import BaseModel\n\n# Install: pip install instructor vex-sdk\nclass AgentResponse(BaseModel):\n    action: str\n    confidence: float\n    details: dict\n\n# Wrap Instructor client with Vex\n@verify()\ndef governed_agent(prompt: str) -> AgentResponse:\n    client = from_openai(OpenAI())\n    \n    return client.chat.completions.create(\n        model='gpt-4o-mini',\n        response_model=AgentResponse,\n        messages=[\n            {'role': 'system', 'content': 'Respond with valid schema ONLY.'},\n            {'role': 'user', 'content': prompt}\n        ],\n        max_retries=2\n    )\n\n# Vex auto-detects: retry exhaustion, missing fields, enum hallucinations\nresponse = governed_agent('Classify this transaction')\n\n# Vex captures traces, suggests fixes, enforces governance",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Install Vex SDK and wrap your Instructor calls to eliminate governance failures in 5 minutes."
+    }
+  }
+}

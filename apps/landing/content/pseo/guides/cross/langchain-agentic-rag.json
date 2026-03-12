@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "langchain",
+    "useCase": "agentic-rag",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Agentic RAG with LangChain + Vex Guardrails",
+    "description": "Learn how to build agentic rag with LangChain + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "LangChain agentic rag",
+      "LangChain guardrails",
+      "agentic rag reliability",
+      "Vex LangChain",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Agentic RAG with LangChain enables autonomous agents to plan queries, retrieve from multiple sources, and synthesize attributed responses, powering advanced search and Q&A systems. However, complex multi-step reasoning introduces risks like hallucinations, infinite tool loops, and inconsistent citations that can erode trust. Vex provides runtime verification to ensure source faithfulness, accurate planning, and reliable outputs in production.",
+    "architectureOverview": {
+      "heading": "Agentic RAG Architecture with LangChain",
+      "description": "Agentic RAG extends traditional RAG by using an LLM agent to dynamically plan retrieval queries across multiple vector stores and tools. The agent receives a user query, decomposes it into sub-queries using a reasoning model, executes parallel retrievals from sources like Pinecone, Weaviate, or web search tools, then synthesizes results with proper attribution. This creates a feedback loop where the agent can re-query or refine based on initial retrieval quality.\n\nThe core components include a ReAct-style agent executor with custom tools for vector search, query decomposition, and citation tracking. LangChain's RouterChain or multi-retriever setup handles source selection, while output parsers enforce structured responses with source links. Long conversations are managed via memory buffers with context summarization to prevent token overflow.\n\nThis architecture shines for complex questions requiring multi-hop reasoning but amplifies risks around retrieval faithfulness and agent stability.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│  Agent Planner   │\n│                 │    │ (ReAct/GPT-4o)   │\n└─────────────────┘    │                  │\n                       └────────┬─────────┘\n                                │\n                       ┌────────▼─────────┐\n                       │   Tool Calls     │\n                       │ • VectorStore1   │◄────┐\n                       │ • VectorStore2   │◄────┼─── Multiple Sources\n                       │ • Web Search     │◄────┘\n                       └────────┬─────────┘\n                                │\n                       ┌────────▼─────────┐\n                       │  Synthesis LLM   │\n                       │ + Citation Paser │\n                       └────────┬─────────┘\n                                │\n                       ┌────────▼─────────┐\n                       │  Verified       │\n                       │  Response       │\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Hallucination in RAG retrieval chains",
+        "description": "Agent fabricates information when retrieved context is insufficient or irrelevant",
+        "severity": "critical",
+        "mitigation": "Vex source faithfulness checks against retrieved chunks"
+      },
+      {
+        "name": "Tool call loops in agent executors",
+        "description": "Agent enters infinite retrieval/refinement cycles without converging",
+        "severity": "critical",
+        "mitigation": "Vex loop detection and max iteration enforcement"
+      },
+      {
+        "name": "Context window overflow in long conversations",
+        "description": "Accumulated context + retrievals exceed model token limits",
+        "severity": "high",
+        "mitigation": "Vex token counting and context summarization triggers"
+      },
+      {
+        "name": "Inconsistent output formatting across chain steps",
+        "description": "Citation formats vary between planning, retrieval, and synthesis steps",
+        "severity": "medium",
+        "mitigation": "Vex structured output schema validation"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Multi-Retriever Setup",
+        "description": "Configure ensemble retriever across multiple vector stores for comprehensive coverage",
+        "code": "from langchain.retrievers import EnsembleRetriever\nfrom langchain_community.vectorstores import Pinecone, Weaviate\n\npinecone = Pinecone.from_existing_index(index_name=\"docs\", embedding=embeddings)\nweaviate = Weaviate(client=weaviate_client, index_name=\"knowledge\")\n\nretriever1 = pinecone.as_retriever(search_kwargs={\"k\": 4})\nretriever2 = weaviate.as_retriever(search_kwargs={\"k\": 4})\n\nensemble_retriever = EnsembleRetriever(\n    retrievers=[retriever1, retriever2], \n    weights=[0.6, 0.4]\n)",
+        "language": "python"
+      },
+      {
+        "title": "Query Decomposition Agent",
+        "description": "Agent breaks complex queries into parallel sub-queries for multi-hop retrieval",
+        "code": "from langchain.agents import create_react_agent, AgentExecutor\nfrom langchain.tools.retriever import create_retriever_tool\n\nsearch_docs = create_retriever_tool(\n    ensemble_retriever,\n    \"search_documents\",\n    \"Searches across company documents\"\n)\n\ntools = [search_docs]\n\nagent = create_react_agent(\n    llm=ChatOpenAI(model=\"gpt-4o\"),\n    tools=tools,\n    prompt=hub.pull(\"hwchase17/react\")\n)\nagent_executor = AgentExecutor(agent=agent, tools=tools, max_iterations=5)",
+        "language": "python"
+      },
+      {
+        "title": "Citation Tracking Output Parser",
+        "description": "Enforces source attribution in final responses with structured citations",
+        "code": "from langchain.schema import BaseOutputParser\nfrom typing import List, Dict, Any\n\nclass CitationParser(BaseOutputParser):\n    def parse(self, text: str) -> Dict[str, Any]:\n        # Extract citations from [1], [2] format\n        import re\n        citations = re.findall(r'\\[[0-9]+\\]', text)\n        \n        return {\n            \"answer\": text,\n            \"citations\": citations,\n            \"sources\": self.retrieve_sources(citations)\n        }",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Agent Tool Definition",
+        "description": "Define retriever tools with TypeScript for LangChain.js agentic RAG",
+        "code": "import { Tool } from \"langchain/tools\";\nimport { PineconeStore } from \"langchain/vectorstores/pinecone\";\n\ntype Document = { pageContent: string; metadata: { source: string } };\n\nclass MultiRetrieverTool extends Tool {\n  name = \"multi_retriever\";\n  description = \"Search multiple document sources\";\n\n  protected _call(input: string): Promise<string> {\n    const retrievers = [\n      await PineconeStore.fromExistingIndex(/* config */),\n      // other retrievers\n    ];\n    \n    return Promise.all(retrievers.map(r => r.getRelevantDocuments(input)))\n      .then(results => JSON.stringify(results.flat()));\n  }\n}",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Wrap Agent Executor with Vex Verify",
+        "description": "Protect the full agent execution pipeline with comprehensive verification",
+        "code": "import vex\n\n@vex.verify(\n    guards=[\n        \"source_faithfulness\",\n        \"no_hallucinations\",\n        \"structured_output:citation_schema\",\n        \"max_iterations:5\"\n    ],\n    risk_profile=\"high\"\n)\ndef agentic_rag(query: str, chat_history: list) -> str:\n    result = agent_executor.invoke({\n        \"input\": query,\n        \"chat_history\": chat_history\n    })\n    return result[\"output\"]\n\n# Usage\nresponse = agentic_rag(\"What is our Q3 revenue strategy?\")",
+        "language": "python"
+      },
+      {
+        "title": "Source Faithfulness Verification",
+        "description": "Ensure agent responses are grounded in retrieved documents",
+        "code": "import vex\n\n@vex.verify(\n    guards=[\n        {\n            \"type\": \"source_faithfulness\",\n            \"retrieved_docs\": lambda ctx: ctx.get(\"docs\", []),\n            \"threshold\": 0.85\n        },\n        \"query_planning_accuracy\"\n    ]\n)\ndef verified_retrieval(query: str):\n    docs = ensemble_retriever.get_relevant_documents(query)\n    result = llm.invoke({\n        \"context\": docs,\n        \"question\": query\n    })\n    return {\"answer\": result.content, \"docs\": docs}\n\nresponse = verified_retrieval(user_query)",
+        "language": "python"
+      },
+      {
+        "title": "TypeScript Vex Integration",
+        "description": "Protect LangChain.js agents with Vex runtime verification",
+        "code": "import { verify } from \"vex-sdk\";\n\nimport { agentExecutor } from \"./langchain-agent\";\n\nconst secureAgent = verify({\n  guards: [\n    \"sourceFaithfulness\",\n    \"noHallucinations\", \n    \"crossSourceConsistency\",\n    \"citationVerification\"\n  ],\n  riskProfile: \"high\",\n  maxTokens: 128000\n})(async (query: string, history: string[]) => {\n  const result = await agentExecutor.call({\n    input: query,\n    chatHistory: history\n  });\n  return result.output;\n});\n\nconst response = await secureAgent(\"Complex multi-hop query\");",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your LangChain Agentic RAG",
+      "description": "Add Vex verification to your production agents in 5 lines of code - start your 14-day free trial today."
+    }
+  }
+}

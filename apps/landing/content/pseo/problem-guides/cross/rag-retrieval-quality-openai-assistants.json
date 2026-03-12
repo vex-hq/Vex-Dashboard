@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "problem": "rag-retrieval-quality",
+    "framework": "openai-assistants",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "RAG Retrieval Quality Optimization in OpenAI Assistants API Agents",
+    "description": "How to detect and fix rag retrieval quality optimization in OpenAI Assistants API agents. Framework-specific detection, fixes, and Vex automation.",
+    "keywords": [
+      "rag-retrieval-quality-optimization-guide",
+      "OpenAI Assistants API rag-retrieval-quality",
+      "OpenAI Assistants API reliability",
+      "AI agent monitoring",
+      "Vex guardrails"
+    ]
+  },
+  "content": {
+    "intro": "In OpenAI Assistants API, RAG Retrieval Quality issues manifest when the built-in file search tool retrieves irrelevant, outdated, or incomplete documents, leading agents to generate inaccurate responses. This is exacerbated by the API's opaque retrieval logic and lack of built-in relevance scoring, causing agents to confidently cite wrong files. Thread context bloat from poor retrievals compounds the problem, silently degrading performance as irrelevant chunks accumulate.",
+    "howItManifests": [
+      {
+        "scenario": "File search retrieves semantically similar but factually outdated documents",
+        "symptom": "Agent cites 2022 pricing data for 2024 product queries",
+        "impact": "Customer-facing misinformation and trust erosion"
+      },
+      {
+        "scenario": "Broad queries match high-volume irrelevant files",
+        "symptom": "20KB thread responses dominated by boilerplate docs",
+        "impact": "Token exhaustion and context dilution"
+      },
+      {
+        "scenario": "No chunking strategy leads to oversized document retrievals",
+        "symptom": "Single 500KB PDF consumes entire thread context",
+        "impact": "Model ignores subsequent user messages"
+      },
+      {
+        "scenario": "Missing metadata filtering retrieves internal docs for customer queries",
+        "symptom": "Agent exposes 'internal-use-only' file annotations",
+        "impact": "Security violations and compliance failures"
+      }
+    ],
+    "detection": [
+      {
+        "name": "Retrieval Relevance Score Check",
+        "description": "Extracts file citations from assistant responses and computes semantic similarity to query",
+        "code": "import openai\nimport numpy as np\nfrom openai import OpenAI\n\nclient = OpenAI()\n\ndef check_retrieval_relevance(thread_id: str, query: str) -> dict:\n    messages = client.beta.threads.messages.list(thread_id)\n    latest_msg = messages.data[0]\n    \n    if latest_msg.annotations:\n        cited_files = [ann.file_citation.file_id for ann in latest_msg.annotations \n                      if ann.type == 'file_citation']\n        \n        # Fetch file content (simplified)\n        retrieved_content = \"\"\n        for file_id in cited_files[:3]:  # Limit for perf\n            file = client.files.content(file_id)\n            retrieved_content += file.text[:2000]\n        \n        # Compute similarity\n        emb_query = client.embeddings.create(input=query, model='text-embedding-3-small').data[0].embedding\n        emb_retrieved = client.embeddings.create(input=retrieved_content, model='text-embedding-3-small').data[0].embedding\n        \n        similarity = np.dot(emb_query, emb_retrieved) / (np.linalg.norm(emb_query) * np.linalg.norm(emb_retrieved))\n        \n        return {'relevance_score': similarity, 'threshold_met': similarity > 0.75}\n    return {'relevance_score': 0, 'threshold_met': False}",
+        "language": "python"
+      },
+      {
+        "name": "File Citation Coverage Analysis",
+        "description": "Verifies if response cites relevant files and measures citation density",
+        "code": "import re\nfrom typing import List, Dict\n\ndef analyze_citation_coverage(response_text: str, expected_files: List[str]) -> Dict:\n    citations = re.findall(r'\\[\\[[Citation\\s*(\\d+)\\]\\]\\]', response_text)\n    citation_count = len(set(citations))\n    \n    total_length = len(response_text)\n    factual_sentences = len([s for s in response_text.split('.') if len(s) > 20])\n    \n    coverage_ratio = citation_count / max(factual_sentences, 1)\n    \n    return {\n        'citation_count': citation_count,\n        'coverage_ratio': coverage_ratio,\n        'healthy': coverage_ratio > 0.3 and citation_count > 0\n    }",
+        "language": "python"
+      },
+      {
+        "name": "Thread Context Bloat Monitor",
+        "description": "Tracks token usage from retrieved files vs conversation",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\ndef monitor_thread_bloat(thread_id: str) -> dict:\n    messages = client.beta.threads.messages.list(thread_id)\n    \n    file_token_estimate = 0\n    user_token_estimate = 0\n    \n    for msg in messages.data:\n        if msg.role == 'user':\n            user_token_estimate += len(msg.content[0].text.value) // 4\n        elif msg.annotations:\n            file_citations = [ann for ann in msg.annotations if ann.type == 'file_citation']\n            file_token_estimate += len(file_citations) * 2000  # Conservative estimate\n    \n    bloat_ratio = file_token_estimate / max(user_token_estimate, 1)\n    \n    return {\n        'file_tokens_pct': file_token_estimate / (file_token_estimate + user_token_estimate),\n        'bloat_ratio': bloat_ratio,\n        'alert': bloat_ratio > 3.0\n    }",
+        "language": "python"
+      }
+    ],
+    "fixes": [
+      {
+        "name": "Query Rewriting with Metadata Filters",
+        "description": "Pre-processes user queries to include file metadata constraints",
+        "code": "def rewrite_rag_query(user_query: str, metadata_filters: dict) -> str:\n    filters = []\n    if metadata_filters.get('category'):\n        filters.append(f\"category:{metadata_filters['category']}\")\n    if metadata_filters.get('date_after'):\n        filters.append(f\"date_after:{metadata_filters['date_after']}\")\n    \n    filter_str = \" \" + \" \".join(filters) if filters else \"\"\n    return f\"{user_query}{filter_str}\"",
+        "language": "python"
+      },
+      {
+        "name": "Dynamic Chunk Size Optimization",
+        "description": "Configures assistant with adaptive file processing settings",
+        "code": "from openai import OpenAI\n\nclient = OpenAI()\n\nassistant = client.beta.assistants.create(\n    name=\"Optimized RAG Assistant\",\n    instructions=\"Use precise citations. Focus on most relevant sections.\",\n    model=\"gpt-4o\",\n    tools=[{\n        \"type\": \"file_search\",\n        \"file_search\": {\n            \"vector_store_ids\": [\"vs_prod_docs\"],\n            \"max_num_results\": 3  # Reduced from default\n        }\n    }],\n    tool_resources={\n        \"file_search\": {\n            \"vector_store_ids\": [\"vs_prod_docs\"]\n        }\n    }\n)",
+        "language": "python"
+      },
+      {
+        "name": "Post-Retrieval Reranking",
+        "description": "Re-ranks retrieved files by semantic relevance before response generation",
+        "code": "import operator\n\ndef rerank_retrievals(query: str, file_results: list) -> list:\n    client = OpenAI()\n    \n    reranked = []\n    for file_info in file_results:\n        # Get file preview\n        file_content = client.files.content(file_info.id).text[:1000]\n        \n        emb_query = client.embeddings.create(input=query, model='text-embedding-3-small')\n        emb_file = client.embeddings.create(input=file_content, model='text-embedding-3-small')\n        \n        score = np.dot(emb_query.data[0].embedding, emb_file.data[0].embedding)\n        reranked.append((file_info, score))\n    \n    return [f for f, s in sorted(reranked, key=operator.itemgetter(1), reverse=True)[:2]]",
+        "language": "python"
+      }
+    ],
+    "vexAutomation": {
+      "heading": "Automating RAG Retrieval Quality Optimization Detection with Vex",
+      "description": "Vex integrates as a webhook on OpenAI Assistants run completion events, automatically analyzing every agent response for retrieval quality issues. It extracts file citations, computes semantic relevance scores against the original query, and flags responses with low coverage (<30%) or poor similarity (<0.75 cosine). Beyond detection, Vex can trigger automated remediation flows like query rewriting or fallback to curated Q&A datasets.\n\nThe platform maintains historical baselines per assistant, alerting when retrieval quality drops below organizational thresholds. Integration takes <5 minutes with the vex-sdk, and provides production-ready dashboards for RAG health monitoring across all deployed assistants.",
+      "code": "import vex\n\nfrom openai import OpenAI\n\n# Install: pip install openai vex-sdk\n\n@vex.check(name=\"rag_retrieval_quality\", severity=\"high\")\ndef verify_rag_quality(run: dict, client: OpenAI) -> dict:\n    thread_id = run['thread_id']\n    \n    # Get latest assistant message\n    messages = client.beta.threads.messages.list(thread_id)\n    msg = messages.data[0]\n    \n    if not msg.annotations:\n        return {'pass': False, 'reason': 'No file citations found'}\n    \n    # Extract query context\n    query = next((m.content[0].text.value for m in messages.data[1:] \n                  if m.role == 'user'), '')\n    \n    # Run relevance check\n    relevance = check_retrieval_relevance(thread_id, query)\n    coverage = analyze_citation_coverage(msg.content[0].text.value, [])\n    \n    if relevance['threshold_met'] and coverage['healthy']:\n        return {'pass': True}\n    \n    return {\n        'pass': False,\n        'metrics': {\n            'relevance_score': relevance['relevance_score'],\n            'coverage_ratio': coverage['coverage_ratio']\n        },\n        'fix': 'Rewrite query with metadata filters or reduce max_results'\n    }\n\n# Deploy as webhook\nvex.deploy_webhook(\n    'openai-assistants-rag-quality',\n    'https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}',\n    verify_rag_quality\n)",
+      "language": "python"
+    },
+    "cta": {
+      "heading": "Detect and Fix This Automatically with Vex",
+      "description": "Deploy production RAG quality monitoring across all your OpenAI Assistants in 5 minutes → Get Vex Free Trial"
+    }
+  }
+}

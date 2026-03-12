@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "framework": "mastra",
+    "useCase": "customer-support",
+    "generatedAt": "2026-03-12"
+  },
+  "seo": {
+    "title": "Building Customer Support with Mastra + Vex Guardrails",
+    "description": "Learn how to build customer support with Mastra + Vex guardrails. Detect failures, prevent drift, and ensure reliability.",
+    "keywords": [
+      "Mastra customer support",
+      "Mastra guardrails",
+      "customer support reliability",
+      "Vex Mastra",
+      "AI agent guardrails"
+    ]
+  },
+  "content": {
+    "intro": "Building customer support agents with Mastra enables powerful RAG workflows with CRM integrations and tool-calling for ticket management. However, high-risk scenarios like PII exposure and policy violations demand robust guardrails. Vex provides middleware verification to ensure response accuracy, compliance, and safe escalations in production deployments.",
+    "architectureOverview": {
+      "heading": "Customer Support Architecture with Mastra",
+      "description": "Mastra orchestrates a RAG agent that retrieves from knowledge bases and CRM systems (e.g., Salesforce) for order lookups and ticket creation. The workflow includes memory retrieval for conversation history, LLM reasoning for response generation, and tool calls for actions like updating tickets or escalating issues. Middleware layers handle validation between steps to prevent data propagation errors.\n\nKey components include: AgentExecutor for tool orchestration, VectorStore for KB retrieval, and CRM connectors for real-time data sync. Failures often occur when stale CRM data confuses the agent or malformed tool outputs break workflows.\n\nVex integrates as pipeline middleware to verify outputs at critical junctions: post-retrieval, pre-tool-call, and final response generation.",
+      "diagram": "┌─────────────────┐    ┌──────────────────┐\n│   User Query    │───▶│   Mastra Agent   │\n└─────────────────┘    │  + Vex Middleware │\n                       │     Verification  │\n                       ├──────────────────┤\n                       │ 1. KB Retrieval  │◀── VectorStore\n                       │ 2. CRM Lookup    │◀── Salesforce\n                       │ 3. Tool Calls    │──▶ Ticket/Order\n                       │ 4. Response Gen  │──▶ User\n                       └──────────────────┘"
+    },
+    "risks": [
+      {
+        "name": "Workflow step outputs not validated between transitions",
+        "description": "Unvalidated KB retrieval injects irrelevant context, causing hallucinated order details",
+        "severity": "critical",
+        "mitigation": "Vex schema validation middleware between retrieval and LLM steps"
+      },
+      {
+        "name": "Agent tool calls returning malformed data",
+        "description": "CRM lookup returns partial order data, breaking ticket creation schema",
+        "severity": "high",
+        "mitigation": "Vex JSON schema enforcement on tool outputs before workflow continuation"
+      },
+      {
+        "name": "Memory retrieval injecting stale context",
+        "description": "Previous conversation context contains outdated customer info from resolved tickets",
+        "severity": "high",
+        "mitigation": "Vex temporal validation and staleness checks on memory retrieval"
+      },
+      {
+        "name": "Sync integration data causing agent confusion",
+        "description": "Real-time CRM sync conflicts with KB data, creating contradictory order status",
+        "severity": "medium",
+        "mitigation": "Vex data consistency checks across multiple retrieval sources"
+      }
+    ],
+    "implementation": [
+      {
+        "title": "Mastra Agent with RAG + CRM Tools",
+        "description": "Basic customer support agent setup with knowledge retrieval and Salesforce tool integration",
+        "code": "import { Mastra, Agent, Tool, VectorStore } from 'mastra';\nimport { z } from 'zod';\n\nconst mastra = new Mastra();\n\nconst orderLookupTool = new Tool({\n  name: 'order_lookup',\n  description: 'Lookup customer order by ID',\n  schema: z.object({\n    orderId: z.string().describe('Order ID'),\n  }),\n  execute: async ({ orderId }) => {\n    // Salesforce CRM integration\n    const order = await fetchSalesforceOrder(orderId);\n    return { status: order.status, total: order.total };\n  },\n});\n\nconst supportAgent = new Agent({\n  name: 'support-agent',\n  tools: [orderLookupTool],\n  vectorStore: new VectorStore({ /* KB config */ }),\n  systemPrompt: 'You are a helpful customer support agent...',\n});\n\nmastra.registerAgent(supportAgent);",
+        "language": "typescript"
+      },
+      {
+        "title": "Ticket Creation Workflow",
+        "description": "Workflow step for validated ticket creation with PII filtering",
+        "code": "import { Workflow, Step } from 'mastra';\n\nconst ticketWorkflow = new Workflow({\n  name: 'create-support-ticket',\n  steps: [\n    new Step({\n      name: 'validate_issue',\n      llmPrompt: 'Classify issue severity and extract PII...',\n      outputSchema: z.object({\n        severity: z.enum(['low', 'medium', 'high']),\n        piiFiltered: z.boolean(),\n        ticketData: z.object({}),\n      }),\n    }),\n    new Step({\n      name: 'create_ticket',\n      tools: [ticketCreationTool],\n      condition: (prev) => prev.severity !== 'low',\n    }),\n  ],\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Memory + Retrieval Pipeline",
+        "description": "Conversation memory retrieval combined with KB and CRM data sources",
+        "code": "const retrievalStep = new Step({\n  name: 'retrieve_context',\n  execute: async (input) => {\n    const memory = await agentMemory.getRecentMessages(input.sessionId);\n    const kbResults = await vectorStore.similaritySearch(input.query);\n    const crmData = await crmClient.getCustomerProfile(input.customerId);\n    \n    return {\n      combinedContext: [...memory, ...kbResults, crmData],\n      sources: ['memory', 'kb', 'crm'],\n    };\n  },\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Escalation Trigger Logic",
+        "description": "Policy-based escalation detection in final response generation",
+        "code": "const finalResponseStep = new Step({\n  name: 'generate_response',\n  llmPrompt: `Generate helpful response. ESCALATE if: refund>1000, legal/compliance, VIP customer...`,\n  outputSchema: z.object({\n    response: z.string(),\n    requiresEscalation: z.boolean().default(false),\n    escalationReason: z.string().optional(),\n  }),\n  postProcess: (output) => {\n    if (output.requiresEscalation) {\n      triggerHumanEscalation(output.escalationReason);\n    }\n    return output;\n  },\n});",
+        "language": "typescript"
+      }
+    ],
+    "vexIntegration": [
+      {
+        "title": "Vex Middleware for Retrieval Validation",
+        "description": "Add Vex schema validation after KB/CRM retrieval to prevent stale data propagation",
+        "code": "import { Vex } from '@vex_dev/sdk';\n\nconst vex = new Vex({\n  apiKey: process.env.VEX_API_KEY,\n  projectId: 'cs-mastra-prod',\n});\n\nconst validatedRetrieval = new Step({\n  name: 'vex_retrieval_validation',\n  execute: async (input) => {\n    const context = await retrievalStep.execute(input);\n    \n    const verified = await vex.verify({\n      data: context.combinedContext,\n      checks: [\n        'temporal_freshness',\n        {\n          type: 'json_schema',\n          schema: {\n            type: 'array',\n            items: { type: 'object', properties: { timestamp: { type: 'string' } } },\n          },\n        },\n      ],\n      riskProfile: 'high',\n    });\n    \n    if (!verified.passed) throw new Error('Context validation failed');\n    return context;\n  },\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Tool Output Schema Enforcement",
+        "description": "Vex validates CRM tool responses before workflow continuation",
+        "code": "const safeOrderLookup = orderLookupTool.overrideExecute(async (params) => {\n  const rawResult = await originalExecute(params);\n  \n  const verified = await vex.verify({\n    data: rawResult,\n    checks: [\n      {\n        type: 'json_schema',\n        schema: z.object({\n          status: z.string(),\n          total: z.number(),\n          orderId: z.string(),\n        }).parse,\n      },\n      'pii_filtering',\n      { type: 'regex', pattern: 'PII_BLOCKED' },\n    ],\n  });\n  \n  return verified.cleanData;\n});",
+        "language": "typescript"
+      },
+      {
+        "title": "Final Response Guardrails",
+        "description": "Comprehensive Vex verification for response accuracy, tone, and compliance",
+        "code": "const guardedResponseStep = finalResponseStep.overridePostProcess(async (output) => {\n  const verified = await vex.verify({\n    data: output,\n    checks: [\n      'response_accuracy',\n      'tone_consistency',\n      {\n        type: 'policy_compliance',\n        policies: ['no_refunds_without_approval', 'vip_escalation'],\n      },\n      'pii_filtering',\n      {\n        type: 'custom',\n        name: 'escalation_triggers',\n        fn: (data) => data.requiresEscalation || data.severity === 'high',\n      },\n    ],\n    riskProfile: 'high',\n  });\n  \n  return {\n    ...output,\n    verified: verified.passed,\n    issues: verified.issues,\n  };\n});",
+        "language": "typescript"
+      }
+    ],
+    "cta": {
+      "heading": "Secure Your Mastra Customer Support",
+      "description": "Add Vex middleware today to protect your production agents from compliance failures and data errors."
+    }
+  }
+}
