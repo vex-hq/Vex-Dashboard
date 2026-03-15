@@ -5,10 +5,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 import { formatDistanceStrict } from 'date-fns';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import {
   AlertTriangle,
+  ArrowRight,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -19,6 +18,8 @@ import {
   Wrench,
   XCircle,
 } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { Badge } from '@kit/ui/badge';
 import {
@@ -271,6 +272,70 @@ function CheckBreakdown({ checks }: { checks: CheckResult[] }) {
   );
 }
 
+function CorrectionInline({ turn }: { turn: SessionTurn }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!turn.corrected) return null;
+
+  const meta = turn.metadata ?? {};
+  const originalOutput =
+    typeof meta.original_output === 'string' ? meta.original_output : null;
+  const correctedOutput =
+    typeof meta.corrected_output === 'string' ? meta.corrected_output : null;
+
+  if (!originalOutput && !correctedOutput) return null;
+
+  return (
+    <div className="mx-11">
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        )}
+        <Wrench className="h-3 w-3 shrink-0" />
+        <span className="font-medium">
+          <Trans i18nKey="agentguard:sessions.correctionDetails" defaults="Correction Details" />
+        </span>
+        <ArrowRight className="h-3 w-3 shrink-0" />
+        <span className="text-green-600 dark:text-green-400">
+          <Trans i18nKey="agentguard:sessions.outputCorrected" defaults="Output was corrected" />
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-1 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {originalOutput && (
+            <div className="flex flex-col gap-1.5">
+              <span className="px-1 text-xs font-medium text-red-700 dark:text-red-400">
+                <Trans i18nKey="agentguard:correction.original" defaults="Original" />
+              </span>
+              <div className="prose prose-sm dark:prose-invert prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none max-h-64 max-w-none overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/50">
+                <Markdown remarkPlugins={[remarkGfm]}>{originalOutput}</Markdown>
+              </div>
+            </div>
+          )}
+          {correctedOutput && (
+            <div className="flex flex-col gap-1.5">
+              <span className="px-1 text-xs font-medium text-green-700 dark:text-green-400">
+                <Trans i18nKey="agentguard:correction.corrected" defaults="Corrected" />
+              </span>
+              <div className="prose prose-sm dark:prose-invert prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none max-h-64 max-w-none overflow-auto rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/50">
+                <Markdown remarkPlugins={[remarkGfm]}>
+                  {correctedOutput}
+                </Markdown>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function VerificationBar({
   turn,
   accountSlug,
@@ -344,7 +409,7 @@ function ConversationTurnView({
       {/* User input */}
       {inputText && (
         <ContentBubble variant="user">
-          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none">
+          <div className="prose prose-sm dark:prose-invert prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none max-w-none">
             <Markdown remarkPlugins={[remarkGfm]}>{inputText}</Markdown>
           </div>
         </ContentBubble>
@@ -358,7 +423,7 @@ function ConversationTurnView({
       {/* Agent response */}
       {outputText && (
         <ContentBubble variant="agent">
-          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none">
+          <div className="prose prose-sm dark:prose-invert prose-p:my-1 prose-pre:my-2 prose-ul:my-1 prose-ol:my-1 prose-headings:my-2 prose-code:before:content-none prose-code:after:content-none max-w-none">
             <Markdown remarkPlugins={[remarkGfm]}>{outputText}</Markdown>
           </div>
         </ContentBubble>
@@ -367,6 +432,7 @@ function ConversationTurnView({
       {/* Verification bar */}
       <VerificationBar turn={turn} accountSlug={accountSlug} />
       {checks && checks.length > 0 && <CheckBreakdown checks={checks} />}
+      <CorrectionInline turn={turn} />
     </div>
   );
 }
@@ -442,6 +508,11 @@ function FallbackTurnView({
         {checks && checks.length > 0 && (
           <div className="mt-2">
             <CheckBreakdown checks={checks} />
+          </div>
+        )}
+        {turn.corrected && (
+          <div className="mt-2">
+            <CorrectionInline turn={turn} />
           </div>
         )}
       </div>
