@@ -272,16 +272,24 @@ function CheckBreakdown({ checks }: { checks: CheckResult[] }) {
   );
 }
 
+function formatCorrectionValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value || null;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function CorrectionInline({ turn }: { turn: SessionTurn }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!turn.corrected) return null;
 
   const meta = turn.metadata ?? {};
-  const originalOutput =
-    typeof meta.original_output === 'string' ? meta.original_output : null;
-  const correctedOutput =
-    typeof meta.corrected_output === 'string' ? meta.corrected_output : null;
+  const originalOutput = formatCorrectionValue(meta.original_output);
+  const correctedOutput = formatCorrectionValue(meta.corrected_output);
 
   if (!originalOutput && !correctedOutput) return null;
 
