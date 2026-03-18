@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { enhanceRouteHandler } from '@kit/next/routes';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
+import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 import { createNangoService } from '~/lib/integrations/nango.service';
 
 /**
@@ -24,15 +25,14 @@ export const GET = enhanceRouteHandler(
     }
 
     // Verify connection ownership: resolve org from slug, then check connection belongs to it
+    const orgId = await resolveOrgId(accountSlug);
     const pool = getAgentGuardPool();
     const ownershipCheck = await pool.query<{ id: string }>(
       `SELECT ic.id
        FROM integration_connections ic
-       JOIN organizations o ON o.org_id = ic.org_id
-       JOIN accounts a ON a.id = o.account_id
        WHERE ic.nango_connection_id = $1
-         AND a.slug = $2`,
-      [connectionId, accountSlug],
+         AND ic.org_id = $2`,
+      [connectionId, orgId],
     );
 
     if (ownershipCheck.rows.length === 0) {
