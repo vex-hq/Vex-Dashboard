@@ -73,6 +73,18 @@ export async function deleteConnection(
   return (result.rowCount ?? 0) > 0;
 }
 
+export async function getConnectionNangoId(
+  orgId: string,
+  connectionId: string,
+): Promise<string | null> {
+  const pool = getAgentGuardPool();
+  const result = await pool.query<{ nango_connection_id: string }>(
+    `SELECT nango_connection_id FROM integration_connections WHERE id = $1 AND org_id = $2`,
+    [connectionId, orgId],
+  );
+  return result.rows[0]?.nango_connection_id ?? null;
+}
+
 export async function listAlertRules(
   orgId: string,
 ): Promise<AlertRuleWithChannel[]> {

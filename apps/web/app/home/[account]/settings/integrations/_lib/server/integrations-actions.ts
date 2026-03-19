@@ -13,6 +13,7 @@ import {
   createConnection,
   deleteAlertRule,
   deleteConnection,
+  getConnectionNangoId,
   toggleAlertRule,
 } from '~/lib/agentguard/integrations';
 import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
@@ -113,6 +114,24 @@ export const createAlertRuleAction = enhanceAction(
       throw new Error('Authentication required');
     }
     const orgId = await resolveOrgId(data.accountSlug);
+
+    // Ensure the bot has joined the target Slack channel before saving the rule
+    const nangoConnectionId = await getConnectionNangoId(
+      orgId,
+      data.connectionId,
+    );
+
+    if (!nangoConnectionId) {
+      throw new Error('Slack connection not found');
+    }
+
+    const nango = createNangoService();
+
+    await nango.joinSlackChannel({
+      connectionId: nangoConnectionId,
+      channelId: data.slackChannelId,
+    });
+
     const rule = await createAlertRule({
       orgId,
       name: data.name,

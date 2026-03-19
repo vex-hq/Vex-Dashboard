@@ -130,4 +130,33 @@ class NangoService {
 
     return response.data as T;
   }
+
+  async joinSlackChannel(params: {
+    connectionId: string;
+    channelId: string;
+  }): Promise<void> {
+    const logger = await getLogger();
+
+    const ctx = {
+      name: 'nango.joinSlackChannel',
+      connectionId: params.connectionId,
+      channelId: params.channelId,
+    };
+
+    logger.info(ctx, 'Joining Slack channel via Nango');
+
+    const result = await this.post<{ ok: boolean; error?: string }>({
+      provider: 'slack',
+      connectionId: params.connectionId,
+      endpoint: '/conversations.join',
+      data: { channel: params.channelId },
+    });
+
+    if (!result.ok && result.error !== 'already_in_channel') {
+      logger.error(ctx, `Failed to join Slack channel: ${result.error}`);
+      throw new Error(`Failed to join Slack channel: ${result.error}`);
+    }
+
+    logger.info(ctx, 'Bot joined Slack channel');
+  }
 }
