@@ -427,3 +427,126 @@ export interface FailurePattern {
   check_type: string;
   failure_count: number;
 }
+
+/**
+ * A Nango-managed OAuth integration connection.
+ */
+export interface IntegrationConnection {
+  id: string;
+  org_id: string;
+  provider: string;
+  nango_connection_id: string;
+  workspace_name: string | null;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A user-defined alert threshold rule.
+ */
+export interface AlertRule {
+  id: string;
+  account_id: string;
+  name: string;
+  confidence_threshold: number;
+  enabled: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A delivery channel attached to an alert rule.
+ */
+export interface AlertRuleChannel {
+  id: string;
+  alert_rule_id: string;
+  channel_type: string;
+  connection_id: string | null;
+  slack_channel_id: string | null;
+  slack_channel_name: string | null;
+  created_at: string;
+}
+
+/**
+ * Alert rule with joined channel info for display.
+ */
+export interface AlertRuleWithChannel extends AlertRule {
+  channel_type: string | null;
+  slack_channel_name: string | null;
+}
+
+/**
+ * A variant configuration within an A/B experiment.
+ */
+export interface ExperimentVariant {
+  key: string;
+  label: string;
+  config?: Record<string, unknown>;
+}
+
+/**
+ * An A/B testing experiment that compares agent variants.
+ */
+export interface Experiment {
+  id: string;
+  org_id: string;
+  name: string;
+  description: string | null;
+  mode: 'offline' | 'live';
+  status: 'draft' | 'running' | 'completed';
+  variants: ExperimentVariant[];
+  dataset_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A dataset used for offline experiment evaluation.
+ */
+export interface Dataset {
+  id: string;
+  org_id: string;
+  name: string;
+  items: DatasetItem[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A single item within a dataset.
+ */
+export interface DatasetItem {
+  input: string;
+  expected_output?: string;
+  ground_truth?: unknown;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Aggregated metrics for a single experiment variant.
+ */
+export interface VariantMetrics {
+  variant: string;
+  execution_count: number;
+  avg_confidence: number | null;
+  pass_count: number;
+  flag_count: number;
+  block_count: number;
+  avg_latency: number | null;
+  avg_cost: number | null;
+  corrected_count: number;
+}
+
+/**
+ * Per-check-type score breakdown by variant for experiment comparison.
+ */
+export interface CheckScoreByVariant {
+  variant: string;
+  check_type: string;
+  avg_score: number | null;
+}
