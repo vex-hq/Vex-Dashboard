@@ -62,4 +62,5 @@ export const NAV_ITEMS: NavItem[] = [
   PRODUCT_GROUP,
   RESOURCES_GROUP,
   { label: 'Blog', href: '/blog' },
+  { label: 'Changelog', href: '/changelog' },
 ];
