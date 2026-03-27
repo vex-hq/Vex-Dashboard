@@ -1,7 +1,10 @@
 import {
   Activity,
   AlertTriangle,
+  Database,
+  FlaskConical,
   Hexagon,
+  Plug,
   Shield,
   ShieldAlert,
   Sparkles,
@@ -68,12 +71,32 @@ const getRoutes = (account: string) => [
     ],
   },
   {
+    label: 'agentguard:nav.evals',
+    children: [
+      {
+        label: 'agentguard:nav.experiments',
+        path: createPath(pathsConfig.app.accountExperiments, account),
+        Icon: <FlaskConical className={iconClasses} />,
+      },
+      {
+        label: 'agentguard:nav.datasets',
+        path: createPath(pathsConfig.app.accountDatasets, account),
+        Icon: <Database className={iconClasses} />,
+      },
+    ],
+  },
+  {
     label: 'agentguard:nav.configuration',
     children: [
       {
         label: 'agentguard:nav.guardrails',
         path: createPath(pathsConfig.app.accountGuardrails, account),
         Icon: <Shield className={iconClasses} />,
+      },
+      {
+        label: 'agentguard:nav.integrations',
+        path: createPath(pathsConfig.app.accountIntegrations, account),
+        Icon: <Plug className={iconClasses} />,
       },
     ],
   },
