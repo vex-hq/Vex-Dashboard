@@ -2,7 +2,13 @@ import 'server-only';
 
 import { SupabaseClient } from '@supabase/supabase-js';
 
+import { createAccountsApi } from '@kit/accounts/api';
+
 import { loadTeamWorkspace } from '~/home/[account]/_lib/server/team-account-workspace.loader';
+import {
+  canAddSeat,
+  resolvePlanFromSubscriptionItems,
+} from '~/lib/agentguard/plan-limits';
 import { Database } from '~/lib/database.types';
 
 /**
@@ -17,23 +23,45 @@ export async function loadMembersPageData(
   return Promise.all([
     loadAccountMembers(client, slug),
     loadInvitations(client, slug),
-    canAddMember,
+    checkCanAddMember(client, slug),
     loadTeamWorkspace(slug),
   ]);
 }
 
 /**
- * @name canAddMember
- * @description Check if the current user can add a member to the account
- *
- * This needs additional logic to determine if the user can add a member to the account
- * Please implement the logic and return a boolean value
- *
- * The same check needs to be added when creating an invitation
- *
+ * Check if the account can add another member based on the active
+ * subscription plan and current seat count.
  */
-async function canAddMember() {
-  return Promise.resolve(true);
+async function checkCanAddMember(
+  client: SupabaseClient<Database>,
+  slug: string,
+): Promise<boolean> {
+  const { data: accountRow } = await client
+    .from('accounts')
+    .select('id')
+    .eq('slug', slug)
+    .single();
+
+  if (!accountRow) {
+    return false;
+  }
+
+  const api = createAccountsApi(client);
+  const subscription = await api.getSubscription(accountRow.id);
+
+  const plan =
+    subscription?.status === 'active'
+      ? resolvePlanFromSubscriptionItems(subscription.items)
+      : 'free';
+
+  const { count: memberCount } = await client
+    .from('accounts_memberships')
+    .select('*', { count: 'exact', head: true })
+    .eq('account_id', accountRow.id);
+
+  const seatCheck = canAddSeat(plan, memberCount ?? 0);
+
+  return seatCheck.allowed;
 }
 
 /**

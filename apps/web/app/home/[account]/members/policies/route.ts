@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { z } from 'zod';
 
+import { createAccountsApi } from '@kit/accounts/api';
 import { enhanceRouteHandler } from '@kit/next/routes';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import {
@@ -9,8 +10,11 @@ import {
   createInvitationsPolicyEvaluator,
 } from '@kit/team-accounts/policies';
 
-import { getAgentGuardPool } from '~/lib/agentguard/db';
-import { canAddSeat, getPlanLimits } from '~/lib/agentguard/plan-limits';
+import {
+  canAddSeat,
+  getPlanLimits,
+  resolvePlanFromSubscriptionItems,
+} from '~/lib/agentguard/plan-limits';
 
 export const GET = enhanceRouteHandler(
   async function ({ params, user }) {
@@ -19,47 +23,44 @@ export const GET = enhanceRouteHandler(
 
     try {
       // ── Seat-limit enforcement ───────────────────────────────────
-      // Query the AgentGuard organizations table for the current plan
-      // and compare against plan limits before evaluating other policies.
-      const pool = getAgentGuardPool();
+      // Resolve account ID from slug, then check the Supabase
+      // subscription to determine the active plan.
+      const { data: accountRow } = await client
+        .from('accounts')
+        .select('id')
+        .eq('slug', account)
+        .single();
 
-      const orgResult = await pool.query<{ plan: string }>(
-        `SELECT plan FROM organizations WHERE account_slug = $1 LIMIT 1`,
-        [account],
-      );
+      if (accountRow) {
+        const api = createAccountsApi(client);
+        const subscription = await api.getSubscription(accountRow.id);
 
-      if (orgResult.rows[0]) {
-        const plan = orgResult.rows[0].plan;
+        // Derive plan from the subscription's price IDs via billing config
+        const plan =
+          subscription?.status === 'active'
+            ? resolvePlanFromSubscriptionItems(subscription.items)
+            : 'free';
 
-        // Get current member count from Supabase
-        const { data: accountRow } = await client
-          .from('accounts')
-          .select('id')
-          .eq('slug', account)
-          .single();
+        const { count: memberCount } = await client
+          .from('accounts_memberships')
+          .select('*', { count: 'exact', head: true })
+          .eq('account_id', accountRow.id);
 
-        if (accountRow) {
-          const { count: memberCount } = await client
-            .from('accounts_memberships')
-            .select('*', { count: 'exact', head: true })
-            .eq('account_id', accountRow.id);
+        const seatCheck = canAddSeat(plan, memberCount ?? 0);
 
-          const seatCheck = canAddSeat(plan, memberCount ?? 0);
+        if (!seatCheck.allowed) {
+          const limits = getPlanLimits(plan);
 
-          if (!seatCheck.allowed) {
-            const limits = getPlanLimits(plan);
-
-            return NextResponse.json({
-              allowed: false,
-              reasons: [seatCheck.reason],
-              metadata: {
-                plan,
-                currentSeats: memberCount ?? 0,
-                maxSeats: limits.maxSeats,
-                timestamp: new Date().toISOString(),
-              },
-            });
-          }
+          return NextResponse.json({
+            allowed: false,
+            reasons: [seatCheck.reason],
+            metadata: {
+              plan,
+              currentSeats: memberCount ?? 0,
+              maxSeats: limits.maxSeats,
+              timestamp: new Date().toISOString(),
+            },
+          });
         }
       }
 

@@ -1,3 +1,5 @@
+import billingConfig from '~/config/billing.config';
+
 /**
  * TypeScript mirror of services/shared/shared/plan_limits.py
  *
@@ -97,6 +99,52 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     overageAllowed: true,
   },
 };
+
+/**
+ * Build a lookup map from Stripe price ID (variant_id) to internal
+ * product name (starter / pro / team) using the billing config.
+ */
+function buildPriceToProductMap(): Map<string, string> {
+  const map = new Map<string, string>();
+
+  for (const product of billingConfig.products) {
+    for (const plan of product.plans) {
+      for (const lineItem of plan.lineItems) {
+        map.set(lineItem.id, product.id);
+      }
+    }
+  }
+
+  return map;
+}
+
+const priceToProductMap = buildPriceToProductMap();
+
+/**
+ * Resolve the internal plan name from a subscription's line items.
+ *
+ * The Supabase `subscription_items` table stores the Stripe price ID
+ * as `variant_id`. This function maps that back to the internal product
+ * name (`starter`, `pro`, `team`) via the billing config.
+ *
+ * Returns `"free"` if no matching price ID is found.
+ */
+export function resolvePlanFromSubscriptionItems(
+  items: ReadonlyArray<{ variant_id: string }> | null | undefined,
+): string {
+  if (!items?.length) {
+    return 'free';
+  }
+
+  for (const item of items) {
+    const productId = priceToProductMap.get(item.variant_id);
+    if (productId) {
+      return productId;
+    }
+  }
+
+  return 'free';
+}
 
 /**
  * Return the PlanLimits for the given plan name.
