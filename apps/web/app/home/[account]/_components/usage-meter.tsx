@@ -13,16 +13,22 @@ export function UsageMeter({
   limit,
   unit = '',
 }: UsageMeterProps) {
-  const percentage = limit > 0 ? Math.min((current / limit) * 100, 100) : 0;
-  const isWarning = percentage >= 80;
-  const isExceeded = percentage >= 100;
+  const isUnlimited = limit < 0;
+  const percentage = isUnlimited
+    ? 0
+    : limit > 0
+      ? Math.min((current / limit) * 100, 100)
+      : 0;
+  const isWarning = !isUnlimited && percentage >= 80;
+  const isExceeded = !isUnlimited && percentage >= 100;
 
   return (
     <div className="border-border bg-card rounded-lg border p-4">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium">{label}</span>
         <span className="text-muted-foreground text-sm">
-          {current.toLocaleString()} / {limit.toLocaleString()} {unit}
+          {current.toLocaleString()} /{' '}
+          {isUnlimited ? '∞' : limit.toLocaleString()} {unit}
         </span>
       </div>
       <div className="bg-muted h-2 overflow-hidden rounded-full">
@@ -34,7 +40,7 @@ export function UsageMeter({
                 ? 'bg-yellow-500'
                 : 'bg-primary'
           }`}
-          style={{ width: `${percentage}%` }}
+          style={{ width: isUnlimited ? '0%' : `${percentage}%` }}
         />
       </div>
       {isExceeded && (

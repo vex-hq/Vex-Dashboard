@@ -58,6 +58,7 @@ interface HomepageChartsProps {
     planOverrides: Record<string, number> | null;
     observationsUsed: number;
     verificationsUsed: number;
+    correctionsUsed: number;
   };
 }
 
@@ -152,17 +153,24 @@ export default function HomepageCharts({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div
+            className={`grid gap-4 ${planLimits.correctionsEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}
+          >
             <UsageMeter
               label="Observations"
               current={planUsage.observationsUsed}
               limit={planLimits.observationsPerMonth}
             />
+            <UsageMeter
+              label="Verifications"
+              current={planUsage.verificationsUsed}
+              limit={planLimits.verificationsPerMonth}
+            />
             {planLimits.correctionsEnabled ? (
               <UsageMeter
-                label="Verifications"
-                current={planUsage.verificationsUsed}
-                limit={planLimits.verificationsPerMonth}
+                label="Corrections"
+                current={planUsage.correctionsUsed}
+                limit={planLimits.correctionsPerMonth}
               />
             ) : (
               <div className="bg-muted/30 flex items-center gap-2 rounded-lg px-4 py-3">

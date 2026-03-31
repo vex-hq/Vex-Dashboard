@@ -236,12 +236,19 @@ export const loadPlanUsage = cache(
     planOverrides: Record<string, number> | null;
     observationsUsed: number;
     verificationsUsed: number;
+    correctionsUsed: number;
     agentCount: number;
   }> => {
     const pool = getAgentGuardPool();
     const supabase = getSupabaseServerClient();
 
-    const [accountResult, usageResult, agentResult] = await Promise.all([
+    const [
+      accountResult,
+      usageResult,
+      verificationResult,
+      correctionResult,
+      agentResult,
+    ] = await Promise.all([
       supabase
         .from('accounts')
         .select('id, vex_plan, vex_plan_overrides')
@@ -264,6 +271,26 @@ export const loadPlanUsage = cache(
             [orgId],
           ),
         ),
+      pool
+        .query<{ total_verifications: string }>(
+          `SELECT COUNT(*) AS total_verifications
+           FROM executions
+           WHERE org_id = $1
+             AND action IS NOT NULL
+             AND timestamp >= date_trunc('month', NOW())`,
+          [orgId],
+        )
+        .catch(() => ({ rows: [{ total_verifications: '0' }] })),
+      pool
+        .query<{ total_corrections: string }>(
+          `SELECT COUNT(*) AS total_corrections
+           FROM executions
+           WHERE org_id = $1
+             AND corrected = TRUE
+             AND timestamp >= date_trunc('month', NOW())`,
+          [orgId],
+        )
+        .catch(() => ({ rows: [{ total_corrections: '0' }] })),
       pool.query<{ agent_count: string }>(
         'SELECT COUNT(*) AS agent_count FROM agents WHERE org_id = $1',
         [orgId],
@@ -273,6 +300,14 @@ export const loadPlanUsage = cache(
     const account = accountResult.data;
     const totalExecs = parseInt(
       usageResult.rows[0]?.total_executions ?? '0',
+      10,
+    );
+    const totalVerifications = parseInt(
+      verificationResult.rows[0]?.total_verifications ?? '0',
+      10,
+    );
+    const totalCorrections = parseInt(
+      correctionResult.rows[0]?.total_corrections ?? '0',
       10,
     );
     const agentCount = parseInt(agentResult.rows[0]?.agent_count ?? '0', 10);
@@ -303,7 +338,8 @@ export const loadPlanUsage = cache(
       planOverrides:
         (account?.vex_plan_overrides as Record<string, number>) ?? null,
       observationsUsed: totalExecs,
-      verificationsUsed: 0,
+      verificationsUsed: totalVerifications,
+      correctionsUsed: totalCorrections,
       agentCount,
     };
   },
