@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 
 import { z } from 'zod';
 
-import { createAccountsApi } from '@kit/accounts/api';
 import { enhanceRouteHandler } from '@kit/next/routes';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import {
@@ -10,11 +9,7 @@ import {
   createInvitationsPolicyEvaluator,
 } from '@kit/team-accounts/policies';
 
-import {
-  canAddSeat,
-  getPlanLimits,
-  resolvePlanFromSubscriptionItems,
-} from '~/lib/agentguard/plan-limits';
+import { canAddSeat, getPlanLimits } from '~/lib/agentguard/plan-limits';
 
 export const GET = enhanceRouteHandler(
   async function ({ params, user }) {
@@ -23,23 +18,15 @@ export const GET = enhanceRouteHandler(
 
     try {
       // ── Seat-limit enforcement ───────────────────────────────────
-      // Resolve account ID from slug, then check the Supabase
-      // subscription to determine the active plan.
+      // vex_plan is kept in sync with Stripe by the billing webhook.
       const { data: accountRow } = await client
         .from('accounts')
-        .select('id')
+        .select('id, vex_plan')
         .eq('slug', account)
         .single();
 
       if (accountRow) {
-        const api = createAccountsApi(client);
-        const subscription = await api.getSubscription(accountRow.id);
-
-        // Derive plan from the subscription's price IDs via billing config
-        const plan =
-          subscription?.status === 'active'
-            ? resolvePlanFromSubscriptionItems(subscription.items)
-            : 'free';
+        const plan = accountRow.vex_plan ?? 'free';
 
         const { count: memberCount } = await client
           .from('accounts_memberships')

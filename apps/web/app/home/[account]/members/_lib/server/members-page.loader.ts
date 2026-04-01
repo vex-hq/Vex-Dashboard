@@ -2,13 +2,8 @@ import 'server-only';
 
 import { SupabaseClient } from '@supabase/supabase-js';
 
-import { createAccountsApi } from '@kit/accounts/api';
-
 import { loadTeamWorkspace } from '~/home/[account]/_lib/server/team-account-workspace.loader';
-import {
-  canAddSeat,
-  resolvePlanFromSubscriptionItems,
-} from '~/lib/agentguard/plan-limits';
+import { canAddSeat } from '~/lib/agentguard/plan-limits';
 import { Database } from '~/lib/database.types';
 
 /**
@@ -36,9 +31,10 @@ async function checkCanAddMember(
   client: SupabaseClient<Database>,
   slug: string,
 ): Promise<boolean> {
+  // vex_plan is kept in sync with Stripe by the billing webhook.
   const { data: accountRow } = await client
     .from('accounts')
-    .select('id')
+    .select('id, vex_plan')
     .eq('slug', slug)
     .single();
 
@@ -46,13 +42,7 @@ async function checkCanAddMember(
     return false;
   }
 
-  const api = createAccountsApi(client);
-  const subscription = await api.getSubscription(accountRow.id);
-
-  const plan =
-    subscription?.status === 'active'
-      ? resolvePlanFromSubscriptionItems(subscription.items)
-      : 'free';
+  const plan = accountRow.vex_plan ?? 'free';
 
   const { count: memberCount } = await client
     .from('accounts_memberships')

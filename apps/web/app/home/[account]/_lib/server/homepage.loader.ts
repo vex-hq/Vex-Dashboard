@@ -2,11 +2,9 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { createAccountsApi } from '@kit/accounts/api';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
-import { resolvePlanFromSubscriptionItems } from '~/lib/agentguard/plan-limits';
 import {
   TIME_RANGE_INTERVALS,
   type TimeRange,
@@ -302,29 +300,10 @@ export const loadPlanUsage = cache(
     );
     const agentCount = parseInt(agentResult.rows[0]?.agent_count ?? '0', 10);
 
-    // Resolve plan from active Makerkit subscription (source of truth).
-    // Fall back to admin-managed vex_plan for enterprise overrides.
-    let plan = 'free';
-
-    if (account?.id) {
-      const api = createAccountsApi(supabase);
-      const subscription = await api.getSubscription(account.id);
-
-      if (subscription?.status === 'active') {
-        plan = resolvePlanFromSubscriptionItems(subscription.items);
-      }
-    }
-
-    // Admin override: if vex_plan is explicitly set to a non-free value
-    // (e.g. enterprise), it takes precedence over subscription resolution.
-    const adminOverride = account?.vex_plan;
-
-    if (adminOverride && adminOverride !== 'free') {
-      plan = adminOverride;
-    }
-
+    // vex_plan is kept in sync with Stripe by the billing webhook handler.
+    // See: app/api/billing/webhook/route.ts → syncVexPlan()
     return {
-      plan,
+      plan: account?.vex_plan ?? 'free',
       planOverrides:
         (account?.vex_plan_overrides as Record<string, number>) ?? null,
       observationsUsed: totalExecs,
