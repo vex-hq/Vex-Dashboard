@@ -1,7 +1,7 @@
 const faqs = [
   {
     q: 'What is Vex?',
-    a: "Vex is an open-source runtime reliability layer for AI agents. It detects when your agent's behavior silently changes in production — hallucinations, drift, schema violations — and auto-corrects before your users notice.",
+    a: "Vex is a runtime reliability layer for AI agents. It detects when your agent's behavior silently changes in production — hallucinations, drift, schema violations — and auto-corrects before your users notice.",
   },
   {
     q: 'How is Vex different from evals or tracing?',
@@ -14,10 +14,6 @@ const faqs = [
   {
     q: 'What frameworks does Vex support?',
     a: 'Vex works with LangChain, CrewAI, OpenAI Assistants, and any custom Python or TypeScript agent. If your code calls an LLM, Vex can watch it.',
-  },
-  {
-    q: 'Is Vex open source?',
-    a: 'Yes. Vex is fully open source. The SDKs (Python, TypeScript) are Apache 2.0. The core engine and dashboard are AGPLv3. Everything is on GitHub.',
   },
   {
     q: 'Does Vex add latency?',

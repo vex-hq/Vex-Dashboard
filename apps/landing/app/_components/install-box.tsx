@@ -78,7 +78,7 @@ export function InstallBox() {
       </div>
 
       <p className="mt-3 text-center text-[13px] text-[#a2a2a2]">
-        Open source &middot; Zero vendor lock-in &middot;{' '}
+        Zero vendor lock-in &middot;{' '}
         <a
           href="https://github.com/Vex-AI-Dev/Vex"
           target="_blank"
