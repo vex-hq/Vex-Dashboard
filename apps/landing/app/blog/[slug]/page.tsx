@@ -7,6 +7,7 @@ import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
 
 import { getAllPosts, getPostBySlug } from '~/lib/blog';
+import { articleSchema, breadcrumbSchema } from '~/lib/seo/schemas';
 
 import { AuthorByline } from '../_components/author-byline';
 import { mdxComponents } from '../_components/mdx-components';
@@ -46,23 +47,19 @@ export default async function BlogPostPage({ params }: Props) {
   const post = getPostBySlug(slug);
   if (!post) notFound();
 
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@type': 'BlogPosting',
+  const canonicalUrl = `https://tryvex.dev/blog/${slug}`;
+  const article = articleSchema({
     headline: post.title,
     description: post.description,
     datePublished: post.date,
-    author: {
-      '@type': 'Organization',
-      name: post.author,
-    },
-    publisher: {
-      '@type': 'Organization',
-      name: 'Vex',
-      url: 'https://tryvex.dev',
-    },
-    timeRequired: `PT${post.readingTime}M`,
-  };
+    dateModified: post.date,
+    url: canonicalUrl,
+  });
+  const breadcrumbs = breadcrumbSchema([
+    { name: 'Home', url: 'https://tryvex.dev' },
+    { name: 'Blog', url: 'https://tryvex.dev/blog' },
+    { name: post.title, url: canonicalUrl },
+  ]);
 
   return (
     <>
@@ -70,7 +67,9 @@ export default async function BlogPostPage({ params }: Props) {
 
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([article, breadcrumbs]),
+        }}
       />
 
       <div className="container py-24">
