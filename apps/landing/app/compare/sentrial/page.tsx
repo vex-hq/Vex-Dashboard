@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { LAST_UPDATED } from '~/lib/pricing';
 import { compareSchema } from '~/lib/seo/schemas';
 
 export const metadata: Metadata = {
@@ -60,6 +61,9 @@ export default function CompareSentrial() {
         <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
           Vex vs Sentrial
         </h1>
+        <p className="mb-2 text-xs text-[#585858]">
+          Last reviewed: {LAST_UPDATED}
+        </p>
         <p className="mb-12 max-w-[600px] text-lg text-[#a2a2a2]">
           Sentrial monitors AI agent metrics, tracks success rates, and measures
           ROI. Vex verifies output correctness in real-time and auto-corrects

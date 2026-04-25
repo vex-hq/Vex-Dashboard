@@ -101,6 +101,9 @@ export default async function GuidePage({ params }: Props) {
           <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
             {guide.seo.title}
           </h1>
+          <p className="mb-4 text-xs text-[#585858]">
+            Last reviewed: {guide.meta.generatedAt}
+          </p>
           {meta && (
             <div className="mb-8 flex flex-wrap gap-2">
               <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">

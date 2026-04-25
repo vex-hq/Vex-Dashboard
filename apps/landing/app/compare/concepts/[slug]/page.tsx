@@ -98,6 +98,9 @@ export default async function ConceptComparisonPage({ params }: Props) {
           <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
             {comparison.seo.title}
           </h1>
+          <p className="mb-4 text-xs text-[#585858]">
+            Last reviewed: {comparison.meta.generatedAt}
+          </p>
           <ConceptComparisonRenderer comparison={comparison} />
           <RelatedPages pages={related} heading="More Comparisons" />
         </div>

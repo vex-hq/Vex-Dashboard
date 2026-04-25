@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
-import { PLANS } from '~/lib/pricing';
+import { LAST_UPDATED, PLANS } from '~/lib/pricing';
 import { productOfferSchema } from '~/lib/seo/schemas';
 
 import { ComparisonTable } from '../_components/comparison-table';
@@ -74,6 +74,9 @@ export default function PricingPage() {
         <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
           Simple, transparent pricing
         </h1>
+        <p className="mb-2 text-xs text-[#585858]">
+          Last reviewed: {LAST_UPDATED}
+        </p>
         <p className="mx-auto mb-16 max-w-[520px] text-lg text-[#a2a2a2]">
           Start free. Scale as your agents go to production. No hidden fees.
         </p>
