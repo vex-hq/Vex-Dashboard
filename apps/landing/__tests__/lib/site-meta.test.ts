@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { POSITIONING_SENTENCE, ORG, SAME_AS, FAQ } from '~/lib/site-meta';
+
+import { FAQ, ORG, POSITIONING_SENTENCE, SAME_AS } from '~/lib/site-meta';
 
 describe('lib/site-meta', () => {
   it('positioning sentence contains who/outcome/approach markers', () => {
@@ -42,5 +43,10 @@ describe('lib/site-meta', () => {
       expect(entry.question.length).toBeGreaterThan(5);
       expect(entry.answer.length).toBeGreaterThan(20);
     }
+  });
+
+  it('FAQ questions and sameAs URLs are unique', () => {
+    expect(new Set(FAQ.map((e) => e.question)).size).toBe(FAQ.length);
+    expect(new Set(SAME_AS).size).toBe(SAME_AS.length);
   });
 });
