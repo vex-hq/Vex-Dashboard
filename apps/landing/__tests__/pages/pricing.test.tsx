@@ -64,4 +64,11 @@ describe('app/pricing/page.tsx', () => {
       expect(heading).not.toBeNull();
     }
   });
+
+  it('renders the positioning sentence', () => {
+    const { container } = render(<PricingPage />);
+    expect(container.textContent ?? '').toContain(
+      'Vex helps founders shipping AI agents',
+    );
+  });
 });

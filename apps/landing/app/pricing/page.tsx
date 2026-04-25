@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import { LAST_UPDATED, PLANS } from '~/lib/pricing';
 import { productOfferSchema } from '~/lib/seo/schemas';
+import { POSITIONING_SENTENCE } from '~/lib/site-meta';
 
 import { ComparisonTable } from '../_components/comparison-table';
 
@@ -77,8 +78,11 @@ export default function PricingPage() {
         <p className="mb-2 text-xs text-[#585858]">
           Last reviewed: {LAST_UPDATED}
         </p>
-        <p className="mx-auto mb-16 max-w-[520px] text-lg text-[#a2a2a2]">
+        <p className="mx-auto mb-4 max-w-[520px] text-lg text-[#a2a2a2]">
           Start free. Scale as your agents go to production. No hidden fees.
+        </p>
+        <p className="mx-auto mb-12 max-w-[640px] text-sm leading-relaxed text-[#585858]">
+          {POSITIONING_SENTENCE}
         </p>
       </div>
 
