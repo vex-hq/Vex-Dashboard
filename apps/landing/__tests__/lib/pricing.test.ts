@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PLANS, LAST_UPDATED, CURRENCY, type Plan } from '~/lib/pricing';
+
+import { CURRENCY, LAST_UPDATED, PLANS, type Plan } from '~/lib/pricing';
 
 describe('lib/pricing', () => {
   it('exports four plans with stable ids', () => {
@@ -32,5 +33,15 @@ describe('lib/pricing', () => {
     // Compile-time: assigning a Plan with an unknown id would fail tsc.
     const sample: Plan = PLANS[0]!;
     expect(['free', 'starter', 'pro', 'team']).toContain(sample.id);
+  });
+
+  it('all plan ids are unique', () => {
+    expect(new Set(PLANS.map((p) => p.id)).size).toBe(PLANS.length);
+  });
+
+  it('every cta.href is an absolute URL', () => {
+    for (const plan of PLANS) {
+      expect(() => new URL(plan.cta.href)).not.toThrow();
+    }
   });
 });

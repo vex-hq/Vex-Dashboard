@@ -23,7 +23,7 @@ export interface Plan {
   readonly id: 'free' | 'starter' | 'pro' | 'team';
   readonly name: string;
   readonly priceMonthly: number;
-  readonly priceYearly: number | null;
+  readonly priceYearly?: number;
   readonly description: string;
   readonly audience: string;
   readonly features: ReadonlyArray<PlanFeature>;
@@ -31,12 +31,11 @@ export interface Plan {
   readonly cta: { readonly label: string; readonly href: string };
 }
 
-export const PLANS: ReadonlyArray<Plan> = [
+export const PLANS = [
   {
     id: 'free',
     name: 'Free',
     priceMonthly: 0,
-    priceYearly: null,
     description: 'Sandbox for exploring agent reliability.',
     audience: 'Developers exploring AI agent reliability',
     highlighted: false,
@@ -56,7 +55,6 @@ export const PLANS: ReadonlyArray<Plan> = [
     id: 'starter',
     name: 'Starter',
     priceMonthly: 29,
-    priceYearly: null,
     description: 'For founders running 1-2 agents in production.',
     audience: 'Founders running 1-2 agents in production',
     highlighted: false,
@@ -112,4 +110,4 @@ export const PLANS: ReadonlyArray<Plan> = [
       { label: 'Support', value: 'Priority (24h)' },
     ],
   },
-] as const;
+] as const satisfies ReadonlyArray<Plan>;
