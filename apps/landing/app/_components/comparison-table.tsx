@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 
 import Link from 'next/link';
 
@@ -313,6 +313,14 @@ const setupLabels: Record<string, string> = {
   sentrial: 'Moderate',
 };
 
+const supportAriaLabel: Record<Support, string> = {
+  yes: 'yes',
+  no: 'no',
+  partial: 'partial',
+  paid: 'paid only',
+  oss: 'yes',
+};
+
 function Badge({
   value,
   slug,
@@ -334,18 +342,43 @@ function Badge({
     );
   }
 
+  const ariaLabel = supportAriaLabel[value];
+
   switch (value) {
     case 'yes':
-      return <span className="text-emerald-500">&#10003;</span>;
+      return (
+        <span aria-label={ariaLabel} className="text-emerald-500">
+          &#10003;
+        </span>
+      );
     case 'partial':
-      return <span className="text-amber-400">~</span>;
+      return (
+        <span aria-label={ariaLabel} className="text-amber-400">
+          ~
+        </span>
+      );
     case 'paid':
-      return <span className="font-mono text-xs text-amber-400">$</span>;
+      return (
+        <span
+          aria-label={ariaLabel}
+          className="font-mono text-xs text-amber-400"
+        >
+          $
+        </span>
+      );
     case 'oss':
-      return <span className="text-emerald-500">&#10003;</span>;
+      return (
+        <span aria-label={ariaLabel} className="text-emerald-500">
+          &#10003;
+        </span>
+      );
     case 'no':
     default:
-      return <span className="text-[#383838]">&mdash;</span>;
+      return (
+        <span aria-label={ariaLabel} className="text-[#383838]">
+          &mdash;
+        </span>
+      );
   }
 }
 
@@ -374,44 +407,72 @@ function MobileComparison() {
       </div>
 
       {/* 3-column table: Feature | Vex | Competitor */}
-      <div className="overflow-hidden rounded-xl border border-[#252525] bg-[#0a0a0a]">
-        {/* Header */}
-        <div className="grid grid-cols-[1fr_56px_56px] bg-[#111111] px-4 py-2.5 text-[11px] font-semibold tracking-wider uppercase">
-          <span className="text-[#585858]">Feature</span>
-          <span className="text-center text-emerald-500">Vex</span>
-          <span className="truncate text-center text-[#a2a2a2]">
-            {selected.name.split(' ')[0]}
-          </span>
-        </div>
-
+      <table className="w-full table-fixed overflow-hidden rounded-xl border border-[#252525] bg-[#0a0a0a]">
+        <caption className="sr-only">
+          Vex vs {selected.name} feature comparison
+        </caption>
+        <colgroup>
+          <col />
+          <col className="w-14" />
+          <col className="w-14" />
+        </colgroup>
+        <thead className="bg-[#111111] text-[11px] font-semibold tracking-wider uppercase">
+          <tr>
+            <th scope="col" className="px-4 py-2.5 text-left text-[#585858]">
+              Feature
+            </th>
+            <th
+              scope="col"
+              className="px-4 py-2.5 text-center text-emerald-500"
+            >
+              Vex
+            </th>
+            <th
+              scope="col"
+              className="truncate px-4 py-2.5 text-center text-[#a2a2a2]"
+            >
+              {selected.name.split(' ')[0]}
+            </th>
+          </tr>
+        </thead>
         {categories.map((cat) => (
-          <div key={cat.label}>
+          <tbody key={cat.label}>
             {/* Category label */}
-            <div className="bg-[#0f0f0f] px-4 py-2 text-[10px] font-semibold tracking-widest text-[#444] uppercase">
-              {cat.label}
-            </div>
-
-            {cat.rows.map((row) => (
-              <div
-                key={row.feature}
-                className="grid grid-cols-[1fr_56px_56px] border-t border-[#1a1a1a] px-4 py-2.5 text-[13px]"
+            <tr>
+              <th
+                scope="colgroup"
+                colSpan={3}
+                className="bg-[#0f0f0f] px-4 py-2 text-left text-[10px] font-semibold tracking-widest text-[#444] uppercase"
               >
-                <span className="pr-2 text-[#a2a2a2]">{row.feature}</span>
-                <span className="text-center">
+                {cat.label}
+              </th>
+            </tr>
+            {cat.rows.map((row) => (
+              <tr
+                key={row.feature}
+                className="border-t border-[#1a1a1a] text-[13px]"
+              >
+                <th
+                  scope="row"
+                  className="px-4 py-2.5 pr-2 text-left font-normal text-[#a2a2a2]"
+                >
+                  {row.feature}
+                </th>
+                <td className="px-4 py-2.5 text-center">
                   <Badge value={row.vex} feature={row.feature} />
-                </span>
-                <span className="text-center">
+                </td>
+                <td className="px-4 py-2.5 text-center">
                   <Badge
                     value={row.values[selected.slug] ?? 'no'}
                     slug={selected.slug}
                     feature={row.feature}
                   />
-                </span>
-              </div>
+                </td>
+              </tr>
             ))}
-          </div>
+          </tbody>
         ))}
-      </div>
+      </table>
 
       {/* Deep-dive link */}
       <Link
@@ -443,17 +504,28 @@ function DesktopComparison() {
     <div className="hidden md:block">
       <div className="overflow-x-auto rounded-xl border border-[#252525] bg-[#0a0a0a]">
         <table className="w-full min-w-[900px] border-collapse text-sm">
+          <caption className="sr-only">
+            Vex vs {competitors.map((c) => c.name).join(', ')} feature
+            comparison
+          </caption>
           <thead>
             <tr>
-              <th className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3.5 text-left text-[13px] font-semibold text-[#585858]">
+              <th
+                scope="col"
+                className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3.5 text-left text-[13px] font-semibold text-[#585858]"
+              >
                 Feature
               </th>
-              <th className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3.5 text-center text-[13px] font-bold text-emerald-500">
+              <th
+                scope="col"
+                className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3.5 text-center text-[13px] font-bold text-emerald-500"
+              >
                 Vex
               </th>
               {competitors.map((c) => (
                 <th
                   key={c.slug}
+                  scope="col"
                   className="border-b border-[#252525] px-4 py-3.5 text-center"
                 >
                   <Link href={`/compare/${c.slug}`} className="group">
@@ -468,53 +540,55 @@ function DesktopComparison() {
               ))}
             </tr>
           </thead>
-          <tbody>
-            {categories.map((cat) => (
-              <Fragment key={cat.label}>
-                <tr>
-                  <td
-                    colSpan={2 + competitors.length}
-                    className="border-b border-[#252525] bg-[#111111] px-5 py-2.5 text-[11px] font-semibold tracking-widest text-[#585858] uppercase"
+          {categories.map((cat) => (
+            <tbody key={cat.label}>
+              <tr>
+                <th
+                  scope="colgroup"
+                  colSpan={2 + competitors.length}
+                  className="border-b border-[#252525] bg-[#111111] px-5 py-2.5 text-left text-[11px] font-semibold tracking-widest text-[#585858] uppercase"
+                >
+                  {cat.label}
+                </th>
+              </tr>
+              {cat.rows.map((row) => (
+                <tr
+                  key={row.feature}
+                  className="transition-colors hover:bg-[#161616]"
+                >
+                  <th
+                    scope="row"
+                    className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3 text-left font-medium text-white"
                   >
-                    {cat.label}
-                  </td>
-                </tr>
-                {cat.rows.map((row) => (
-                  <tr
-                    key={row.feature}
-                    className="transition-colors hover:bg-[#161616]"
-                  >
-                    <td className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3 font-medium text-white">
-                      <span>{row.feature}</span>
-                      {row.tooltip && (
-                        <span
-                          className="ml-1.5 inline-block cursor-help text-[#585858]"
-                          title={row.tooltip}
-                        >
-                          ?
-                        </span>
-                      )}
-                    </td>
-                    <td className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3 text-center font-semibold">
-                      <Badge value={row.vex} feature={row.feature} />
-                    </td>
-                    {competitors.map((c) => (
-                      <td
-                        key={c.slug}
-                        className="border-b border-[#252525] px-4 py-3 text-center"
+                    <span>{row.feature}</span>
+                    {row.tooltip && (
+                      <span
+                        className="ml-1.5 inline-block cursor-help text-[#585858]"
+                        title={row.tooltip}
                       >
-                        <Badge
-                          value={row.values[c.slug] ?? 'no'}
-                          slug={c.slug}
-                          feature={row.feature}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
+                        ?
+                      </span>
+                    )}
+                  </th>
+                  <td className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3 text-center font-semibold">
+                    <Badge value={row.vex} feature={row.feature} />
+                  </td>
+                  {competitors.map((c) => (
+                    <td
+                      key={c.slug}
+                      className="border-b border-[#252525] px-4 py-3 text-center"
+                    >
+                      <Badge
+                        value={row.values[c.slug] ?? 'no'}
+                        slug={c.slug}
+                        feature={row.feature}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          ))}
         </table>
       </div>
 
