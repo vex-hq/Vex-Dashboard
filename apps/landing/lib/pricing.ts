@@ -31,7 +31,7 @@ export interface Plan {
   readonly cta: { readonly label: string; readonly href: string };
 }
 
-export const PLANS = [
+export const PLANS: ReadonlyArray<Plan> = [
   {
     id: 'free',
     name: 'Free',
@@ -110,4 +110,4 @@ export const PLANS = [
       { label: 'Support', value: 'Priority (24h)' },
     ],
   },
-] as const satisfies ReadonlyArray<Plan>;
+] as const;

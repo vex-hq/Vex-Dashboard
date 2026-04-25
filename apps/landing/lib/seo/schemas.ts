@@ -13,7 +13,7 @@
  * Do not introduce OSS strings ("open source", "Apache 2.0", etc.) —
  * descriptions flow from `POSITIONING_SENTENCE`.
  */
-import { CURRENCY, LAST_UPDATED, PLANS, type Plan } from '~/lib/pricing';
+import { CURRENCY, LAST_UPDATED, PLANS } from '~/lib/pricing';
 import { FAQ, ORG, POSITIONING_SENTENCE, SAME_AS } from '~/lib/site-meta';
 
 const CONTEXT = 'https://schema.org' as const;
@@ -75,7 +75,7 @@ export function productOfferSchema() {
     description: POSITIONING_SENTENCE,
     brand: { '@type': 'Brand' as const, name: ORG.name },
     dateModified: LAST_UPDATED,
-    offers: (PLANS as ReadonlyArray<Plan>).map((plan) => ({
+    offers: PLANS.map((plan) => ({
       '@type': 'Offer' as const,
       name: plan.name,
       description: plan.description,

@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
+
+import { PLANS } from '~/lib/pricing';
 import {
-  softwareApplicationSchema,
-  organizationSchema,
-  faqPageSchema,
-  productOfferSchema,
+  articleSchema,
   breadcrumbSchema,
   compareSchema,
-  articleSchema,
+  faqPageSchema,
+  organizationSchema,
+  productOfferSchema,
+  softwareApplicationSchema,
 } from '~/lib/seo/schemas';
-import { PLANS } from '~/lib/pricing';
-import { FAQ, SAME_AS, ORG } from '~/lib/site-meta';
+import { FAQ, ORG, SAME_AS } from '~/lib/site-meta';
 
 describe('lib/seo/schemas', () => {
   describe('softwareApplicationSchema', () => {
@@ -86,6 +87,8 @@ describe('lib/seo/schemas', () => {
       expect(s.itemListElement[1]?.position).toBe(2);
       expect(s.itemListElement[0]?.name).toBe('Home');
       expect(s.itemListElement[0]?.item).toBe('https://tryvex.dev');
+      expect(s.itemListElement[0]?.['@type']).toBe('ListItem');
+      expect(s.itemListElement[1]?.['@type']).toBe('ListItem');
     });
     it('handles empty array gracefully', () => {
       const empty = breadcrumbSchema([]);
