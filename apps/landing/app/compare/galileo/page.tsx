@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs Galileo — Lightweight Guardrails vs Enterprise Eval Platform',
   description:
@@ -14,7 +16,11 @@ export const metadata: Metadata = {
   ],
 };
 
-const features: { name: string; vex: boolean | string; competitor: boolean | string }[] = [
+const features: {
+  name: string;
+  vex: boolean | string;
+  competitor: boolean | string;
+}[] = [
   { name: 'Hallucination detection', vex: true, competitor: true },
   { name: 'Behavioral drift detection', vex: true, competitor: 'partial' },
   { name: 'Schema validation', vex: true, competitor: false },
@@ -29,13 +35,24 @@ const features: { name: string; vex: boolean | string; competitor: boolean | str
   { name: 'Python SDK', vex: true, competitor: true },
   { name: 'TypeScript SDK', vex: true, competitor: 'partial' },
   { name: 'Free tier', vex: true, competitor: true },
-  { name: 'Open source', vex: true, competitor: false },
   { name: 'Self-hosted option', vex: true, competitor: false },
 ];
 
 export default function CompareGalileo() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'galileo',
+              vendorName: 'Galileo',
+              vendorUrl: 'https://www.rungalileo.io',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -97,7 +114,6 @@ export default function CompareGalileo() {
               Lightweight runtime layer. 3 lines of code to integrate. Verifies
               every output against 4 checks (schema, hallucination, drift,
               coherence) and auto-corrects failures with a graduated cascade.
-              Open source, self-hostable.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
