@@ -7,12 +7,15 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
+    setupFiles: ['./vitest.setup.ts'],
+    include: ['**/*.test.ts', '**/*.test.tsx'],
+    exclude: ['node_modules/**', '.next/**', 'venv/**'],
   },
   resolve: {
-    alias: {
-      '~': path.resolve(__dirname, './app'),
-      '~/lib': path.resolve(__dirname, './lib'),
-    },
+    alias: [
+      { find: /^~\/lib\/(.*)$/, replacement: path.resolve(import.meta.dirname, './lib/$1') },
+      { find: /^~\/components\/(.*)$/, replacement: path.resolve(import.meta.dirname, './components/$1') },
+      { find: /^~\/(.*)$/, replacement: path.resolve(import.meta.dirname, './app/$1') },
+    ],
   },
 });
