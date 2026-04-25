@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { LAST_UPDATED } from '~/lib/pricing';
 import { compareSchema } from '~/lib/seo/schemas';
 
 export const metadata: Metadata = {
@@ -60,6 +61,9 @@ export default function CompareSentrial() {
         <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
           Vex vs Sentrial
         </h1>
+        <p className="mb-2 text-xs text-[#585858]">
+          Last reviewed: {LAST_UPDATED}
+        </p>
         <p className="mb-12 max-w-[600px] text-lg text-[#a2a2a2]">
           Sentrial monitors AI agent metrics, tracks success rates, and measures
           ROI. Vex verifies output correctness in real-time and auto-corrects
@@ -67,39 +71,80 @@ export default function CompareSentrial() {
         </p>
 
         {/* Feature table */}
-        <div className="mb-16 overflow-hidden rounded-xl border border-[#252525]">
-          <div className="grid grid-cols-[1fr_80px_80px] bg-[#161616] px-6 py-3 text-sm font-medium">
-            <span className="text-[#585858]">Feature</span>
-            <span className="text-center text-emerald-500">Vex</span>
-            <span className="text-center text-[#585858]">Sentrial</span>
-          </div>
-          {features.map((f) => (
-            <div
-              key={f.name}
-              className="grid grid-cols-[1fr_80px_80px] border-t border-[#252525] px-6 py-3 text-sm"
-            >
-              <span className="text-[#a2a2a2]">{f.name}</span>
-              <span className="text-center">
-                {f.vex === true ? (
-                  <span className="text-emerald-500">&#10003;</span>
-                ) : f.vex === 'partial' ? (
-                  <span className="text-amber-400">~</span>
-                ) : (
-                  <span className="text-[#585858]">&mdash;</span>
-                )}
-              </span>
-              <span className="text-center">
-                {f.competitor === true ? (
-                  <span className="text-white">&#10003;</span>
-                ) : f.competitor === 'partial' ? (
-                  <span className="text-amber-400">~</span>
-                ) : (
-                  <span className="text-[#585858]">&mdash;</span>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
+        <table className="mb-16 w-full table-fixed overflow-hidden rounded-xl border border-[#252525] text-sm">
+          <caption className="sr-only">
+            Vex vs Sentrial feature comparison
+          </caption>
+          <colgroup>
+            <col />
+            <col className="w-20" />
+            <col className="w-20" />
+          </colgroup>
+          <thead className="bg-[#161616]">
+            <tr>
+              <th
+                scope="col"
+                className="px-6 py-3 text-left font-medium text-[#585858]"
+              >
+                Feature
+              </th>
+              <th
+                scope="col"
+                className="px-6 py-3 text-center font-medium text-emerald-500"
+              >
+                Vex
+              </th>
+              <th
+                scope="col"
+                className="px-6 py-3 text-center font-medium text-[#585858]"
+              >
+                Sentrial
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {features.map((f) => (
+              <tr key={f.name} className="border-t border-[#252525]">
+                <th
+                  scope="row"
+                  className="px-6 py-3 text-left font-normal text-[#a2a2a2]"
+                >
+                  {f.name}
+                </th>
+                <td className="px-6 py-3 text-center">
+                  {f.vex === true ? (
+                    <span aria-label="yes" className="text-emerald-500">
+                      &#10003;
+                    </span>
+                  ) : f.vex === 'partial' ? (
+                    <span aria-label="partial" className="text-amber-400">
+                      ~
+                    </span>
+                  ) : (
+                    <span aria-label="no" className="text-[#585858]">
+                      &mdash;
+                    </span>
+                  )}
+                </td>
+                <td className="px-6 py-3 text-center">
+                  {f.competitor === true ? (
+                    <span aria-label="yes" className="text-white">
+                      &#10003;
+                    </span>
+                  ) : f.competitor === 'partial' ? (
+                    <span aria-label="partial" className="text-amber-400">
+                      ~
+                    </span>
+                  ) : (
+                    <span aria-label="no" className="text-[#585858]">
+                      &mdash;
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
         {/* Key differences */}
         <h2 className="mb-6 text-2xl font-semibold text-white">

@@ -1,3 +1,5 @@
+import { POSITIONING_SENTENCE } from '~/lib/site-meta';
+
 import { CodeExample } from './_components/code-example';
 import { ComparisonTable } from './_components/comparison-table';
 import { FaqAccordion } from './_components/faq-accordion';
@@ -20,10 +22,14 @@ export default function LandingPage() {
                 for AI Agents.
               </h1>
 
-              <p className="mb-10 max-w-[460px] text-[17px] leading-relaxed text-[#a2a2a2]">
+              <p className="mb-6 max-w-[460px] text-[17px] leading-relaxed text-[#a2a2a2]">
                 Detect drift. Auto-correct hallucinations.
                 <br />
                 Ship AI agents your users can trust.
+              </p>
+
+              <p className="mb-10 max-w-[560px] text-sm leading-relaxed text-[#585858]">
+                {POSITIONING_SENTENCE}
               </p>
 
               <div className="flex items-center gap-3">

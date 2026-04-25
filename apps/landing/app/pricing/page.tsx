@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
-import { PLANS } from '~/lib/pricing';
+import { LAST_UPDATED, PLANS } from '~/lib/pricing';
 import { productOfferSchema } from '~/lib/seo/schemas';
+import { POSITIONING_SENTENCE } from '~/lib/site-meta';
 
 import { ComparisonTable } from '../_components/comparison-table';
 
@@ -74,16 +75,26 @@ export default function PricingPage() {
         <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
           Simple, transparent pricing
         </h1>
-        <p className="mx-auto mb-16 max-w-[520px] text-lg text-[#a2a2a2]">
+        <p className="mb-2 text-xs text-[#585858]">
+          Last reviewed: {LAST_UPDATED}
+        </p>
+        <p className="mx-auto mb-4 max-w-[520px] text-lg text-[#a2a2a2]">
           Start free. Scale as your agents go to production. No hidden fees.
+        </p>
+        <p className="mx-auto mb-12 max-w-[640px] text-sm leading-relaxed text-[#585858]">
+          {POSITIONING_SENTENCE}
         </p>
       </div>
 
       {/* Plan cards */}
-      <div className="mx-auto mb-20 grid max-w-[1200px] gap-4 lg:grid-cols-4">
+      <ul
+        role="list"
+        className="mx-auto mb-20 grid max-w-[1200px] list-none gap-4 p-0 lg:grid-cols-4"
+      >
         {PLANS.map((plan) => (
-          <div
+          <li
             key={plan.id}
+            aria-labelledby={`plan-${plan.id}-name`}
             className={`relative flex flex-col rounded-xl border p-8 ${
               plan.highlighted
                 ? 'border-emerald-500/40 bg-emerald-500/5'
@@ -96,7 +107,10 @@ export default function PricingPage() {
               </div>
             )}
 
-            <h2 className="mb-1 text-xl font-semibold text-white">
+            <h2
+              id={`plan-${plan.id}-name`}
+              className="mb-1 text-xl font-semibold text-white"
+            >
               {plan.name}
             </h2>
             <div className="mb-1 flex items-baseline gap-1">
@@ -134,9 +148,9 @@ export default function PricingPage() {
                 </li>
               ))}
             </ul>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
 
       {/* Enterprise CTA */}
       <div className="mx-auto mb-20 max-w-[1200px]">
@@ -167,26 +181,29 @@ export default function PricingPage() {
       </div>
 
       {/* FAQ */}
-      <div className="mx-auto max-w-[800px]">
-        <h2 className="mb-8 text-center text-2xl font-semibold text-white">
+      <section aria-labelledby="faq-heading" className="mx-auto max-w-[800px]">
+        <h2
+          id="faq-heading"
+          className="mb-8 text-center text-2xl font-semibold text-white"
+        >
           Frequently Asked Questions
         </h2>
         <div className="grid gap-4">
           {faqs.map((faq) => (
-            <div
+            <details
               key={faq.question}
-              className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6"
+              className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6 [&>summary]:cursor-pointer"
             >
-              <h3 className="mb-2 text-[15px] font-medium text-white">
+              <summary className="text-[15px] font-medium text-white">
                 {faq.question}
-              </h3>
-              <p className="text-sm leading-relaxed text-[#a2a2a2]">
+              </summary>
+              <p className="mt-2 text-sm leading-relaxed text-[#a2a2a2]">
                 {faq.answer}
               </p>
-            </div>
+            </details>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
