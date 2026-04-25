@@ -288,18 +288,6 @@ const categories: { label: string; rows: FeatureRow[] }[] = [
         },
       },
       {
-        feature: 'Open source',
-        vex: 'yes',
-        values: {
-          'guardrails-ai': 'yes',
-          galileo: 'no',
-          braintrust: 'no',
-          langfuse: 'yes',
-          langsmith: 'no',
-          sentrial: 'no',
-        },
-      },
-      {
         feature: 'Self-hosted option',
         vex: 'yes',
         values: {

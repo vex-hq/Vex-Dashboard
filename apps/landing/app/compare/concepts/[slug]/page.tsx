@@ -5,7 +5,13 @@ import { notFound } from 'next/navigation';
 import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
 import { ConceptComparisonRenderer } from '~/_components/pseo/concept-comparison-renderer';
 import { RelatedPages } from '~/_components/pseo/related-pages';
-import { getAllConceptComparisons, getConceptComparisonBySlug } from '~/lib/pseo/content';
+import {
+  getAllConceptComparisons,
+  getConceptComparisonBySlug,
+} from '~/lib/pseo/content';
+import { breadcrumbSchema, softwareApplicationSchema } from '~/lib/seo/schemas';
+
+const SITE_URL = 'https://tryvex.dev';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -43,15 +49,33 @@ export default async function ConceptComparisonPage({ params }: Props) {
   const related = all
     .filter((c) => c.meta.slug !== slug)
     .slice(0, 5)
-    .map((c) => ({ title: c.seo.title, href: `/compare/concepts/${c.meta.slug}` }));
+    .map((c) => ({
+      title: c.seo.title,
+      href: `/compare/concepts/${c.meta.slug}`,
+    }));
 
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@type': 'Article',
-    headline: comparison.seo.title,
-    description: comparison.seo.description,
-    publisher: { '@type': 'Organization', name: 'Vex', url: 'https://tryvex.dev' },
-  };
+  const jsonLd = [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'Article',
+      headline: comparison.seo.title,
+      description: comparison.seo.description,
+      publisher: {
+        '@type': 'Organization',
+        name: 'Vex',
+        url: SITE_URL,
+      },
+    },
+    softwareApplicationSchema(),
+    breadcrumbSchema([
+      { name: 'Home', url: SITE_URL },
+      { name: 'Compare', url: `${SITE_URL}/compare` },
+      {
+        name: comparison.seo.title,
+        url: `${SITE_URL}/compare/concepts/${slug}`,
+      },
+    ]),
+  ];
 
   return (
     <>

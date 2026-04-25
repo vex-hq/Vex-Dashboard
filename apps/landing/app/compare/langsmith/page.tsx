@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs LangSmith — Runtime Reliability vs Tracing',
   description:
@@ -22,7 +24,6 @@ const features = [
   { name: 'Hallucination blocking', vex: true, competitor: false },
   { name: 'Pre-deploy evals', vex: true, competitor: true },
   { name: 'Framework agnostic', vex: true, competitor: false },
-  { name: 'Open source', vex: true, competitor: false },
   { name: 'Zero-latency async mode', vex: true, competitor: false },
   { name: 'Self-hosted option', vex: true, competitor: true },
 ];
@@ -30,6 +31,18 @@ const features = [
 export default function CompareLangSmith() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'langsmith',
+              vendorName: 'LangSmith',
+              vendorUrl: 'https://www.langchain.com/langsmith',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -86,7 +99,6 @@ export default function CompareLangSmith() {
               Runtime reliability layer. Monitors agent behavior continuously,
               detects drift from learned baselines, and auto-corrects
               hallucinations before they reach users. Works with any framework.
-              Fully open source.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
@@ -96,8 +108,7 @@ export default function CompareLangSmith() {
             <p className="text-sm leading-relaxed text-[#a2a2a2]">
               Tracing and evaluation platform. Deep visibility into LangChain
               execution chains. Best for debugging during development and
-              running pre-deploy evaluations. Closed source, best with
-              LangChain.
+              running pre-deploy evaluations. Best with LangChain.
             </p>
           </div>
         </div>

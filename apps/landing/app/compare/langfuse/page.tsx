@@ -2,10 +2,12 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs Langfuse — Observability vs Runtime Reliability',
   description:
-    'Both open source. Langfuse traces and evaluates. Vex detects drift and auto-corrects. Compare features side by side.',
+    'Langfuse traces and evaluates. Vex detects drift and auto-corrects. Compare features side by side.',
   keywords: [
     'Langfuse alternatives',
     'Vex vs Langfuse',
@@ -23,7 +25,6 @@ const features = [
   { name: 'Auto-correction', vex: true, competitor: false },
   { name: 'Hallucination blocking', vex: true, competitor: false },
   { name: 'Framework agnostic', vex: true, competitor: true },
-  { name: 'Open source', vex: true, competitor: true },
   { name: 'Zero-latency async mode', vex: true, competitor: false },
   { name: 'Self-hosted option', vex: true, competitor: true },
 ];
@@ -31,6 +32,18 @@ const features = [
 export default function CompareLangfuse() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'langfuse',
+              vendorName: 'Langfuse',
+              vendorUrl: 'https://langfuse.com',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -39,8 +52,8 @@ export default function CompareLangfuse() {
           Vex vs Langfuse
         </h1>
         <p className="mb-12 max-w-[600px] text-lg text-[#a2a2a2]">
-          Both open source. Langfuse traces and evaluates. Vex detects drift and
-          auto-corrects. Here&apos;s how they compare.
+          Langfuse traces and evaluates. Vex detects drift and auto-corrects.
+          Here&apos;s how they compare.
         </p>
 
         {/* Feature table */}
@@ -87,7 +100,6 @@ export default function CompareLangfuse() {
               Runtime reliability layer. Monitors agent behavior continuously,
               detects drift from learned baselines, and auto-corrects
               hallucinations before they reach users. Works with any framework.
-              Fully open source.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
@@ -95,8 +107,8 @@ export default function CompareLangfuse() {
               Langfuse
             </h3>
             <p className="text-sm leading-relaxed text-[#a2a2a2]">
-              Open-source LLM observability platform. Traces, evaluates, and
-              manages prompts. Strong integration with LangChain and OpenAI.
+              LLM observability platform. Traces, evaluates, and manages
+              prompts. Strong integration with LangChain and OpenAI.
               Community-driven with self-hosted option.
             </p>
           </div>
@@ -105,10 +117,10 @@ export default function CompareLangfuse() {
         {/* Verdict */}
         <h2 className="mb-4 text-2xl font-semibold text-white">The Verdict</h2>
         <p className="mb-8 text-[15px] leading-relaxed text-[#a2a2a2]">
-          Both are open source, both offer self-hosting. Langfuse excels at
-          observability and prompt management. Vex excels at runtime safety and
-          auto-correction. Use Langfuse for development visibility. Use Vex for
-          production guardrails. They complement each other perfectly.
+          Langfuse excels at observability and prompt management. Vex excels at
+          runtime safety and auto-correction. Use Langfuse for development
+          visibility. Use Vex for production guardrails. They complement each
+          other perfectly.
         </p>
 
         {/* CTA */}

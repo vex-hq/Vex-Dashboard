@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs Guardrails AI — Runtime Reliability vs Schema Validation',
   description:
@@ -23,13 +25,24 @@ const features = [
   { name: 'Auto-correction', vex: true, competitor: false },
   { name: 'Hallucination blocking', vex: true, competitor: false },
   { name: 'Framework agnostic', vex: true, competitor: true },
-  { name: 'Open source', vex: true, competitor: true },
   { name: 'Zero-latency async mode', vex: true, competitor: false },
 ];
 
 export default function CompareGuardrailsAI() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'guardrails-ai',
+              vendorName: 'Guardrails AI',
+              vendorUrl: 'https://www.guardrailsai.com',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -87,7 +100,6 @@ export default function CompareGuardrailsAI() {
               Runtime reliability layer. Monitors agent behavior continuously,
               detects drift from learned baselines, and auto-corrects
               hallucinations before they reach users. Works with any framework.
-              Fully open source.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
@@ -97,7 +109,7 @@ export default function CompareGuardrailsAI() {
             <p className="text-sm leading-relaxed text-[#a2a2a2]">
               Schema validation framework. Enforces structural correctness of
               LLM outputs through validators and guards. Strong at ensuring
-              outputs match expected formats. Open source.
+              outputs match expected formats.
             </p>
           </div>
         </div>

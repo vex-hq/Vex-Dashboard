@@ -6,7 +6,6 @@ import { notFound } from 'next/navigation';
 import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
 import { GuideRenderer } from '~/_components/pseo/guide-renderer';
 import { RelatedPages } from '~/_components/pseo/related-pages';
-
 import {
   getAllFrameworkIndustryGuides,
   getAllFrameworkUseCaseGuides,
@@ -16,6 +15,7 @@ import {
   getIndustries,
   getUseCases,
 } from '~/lib/pseo/content';
+import { articleSchema, breadcrumbSchema } from '~/lib/seo/schemas';
 
 interface Props {
   params: Promise<{ framework: string }>;
@@ -64,19 +64,27 @@ export default async function GuidePage({ params }: Props) {
       };
     });
 
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@type': 'Article',
+  const canonicalUrl = `https://tryvex.dev/guides/${framework}`;
+  const article = articleSchema({
     headline: guide.seo.title,
     description: guide.seo.description,
-    publisher: { '@type': 'Organization', name: 'Vex', url: 'https://tryvex.dev' },
-  };
+    datePublished: guide.meta.generatedAt,
+    dateModified: guide.meta.generatedAt,
+    url: canonicalUrl,
+  });
+  const breadcrumbs = breadcrumbSchema([
+    { name: 'Home', url: 'https://tryvex.dev' },
+    { name: 'Guides', url: 'https://tryvex.dev/guides' },
+    { name: meta?.name ?? framework, url: canonicalUrl },
+  ]);
 
   return (
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([article, breadcrumbs]),
+        }}
       />
       <div className="container py-24">
         <div className="mx-auto max-w-[800px]">
@@ -96,7 +104,9 @@ export default async function GuidePage({ params }: Props) {
           {meta && (
             <div className="mb-8 flex flex-wrap gap-2">
               <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
-                {meta.language === 'both' ? 'Python & TypeScript' : meta.language}
+                {meta.language === 'both'
+                  ? 'Python & TypeScript'
+                  : meta.language}
               </span>
               <span className="rounded-full bg-[#252525] px-2 py-0.5 text-[10px] font-medium text-[#a2a2a2]">
                 {meta.popularity}

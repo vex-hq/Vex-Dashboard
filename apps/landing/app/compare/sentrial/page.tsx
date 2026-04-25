@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs Sentrial — Runtime Verification vs Agent Monitoring',
   description:
@@ -14,7 +16,11 @@ export const metadata: Metadata = {
   ],
 };
 
-const features: { name: string; vex: boolean | string; competitor: boolean | string }[] = [
+const features: {
+  name: string;
+  vex: boolean | string;
+  competitor: boolean | string;
+}[] = [
   { name: 'Hallucination detection', vex: true, competitor: false },
   { name: 'Behavioral drift detection', vex: true, competitor: 'partial' },
   { name: 'Schema validation', vex: true, competitor: false },
@@ -29,13 +35,24 @@ const features: { name: string; vex: boolean | string; competitor: boolean | str
   { name: 'Python SDK', vex: true, competitor: false },
   { name: 'TypeScript SDK', vex: true, competitor: false },
   { name: 'Free tier', vex: true, competitor: true },
-  { name: 'Open source', vex: true, competitor: false },
   { name: 'Self-hosted option', vex: true, competitor: false },
 ];
 
 export default function CompareSentrial() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'sentrial',
+              vendorName: 'Sentrial',
+              vendorUrl: 'https://www.sentrial.com/',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -97,7 +114,7 @@ export default function CompareSentrial() {
               Runtime verification and correction engine. Every agent output is
               scored against hallucination, drift, schema, and coherence checks.
               Failing outputs are automatically corrected through a 3-layer
-              cascade. Python and TypeScript SDKs. Open source.
+              cascade. Python and TypeScript SDKs.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">

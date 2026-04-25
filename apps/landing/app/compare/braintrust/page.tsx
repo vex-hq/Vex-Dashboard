@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { compareSchema } from '~/lib/seo/schemas';
+
 export const metadata: Metadata = {
   title: 'Vex vs Braintrust — Runtime Guardrails vs Eval-First Observability',
   description:
@@ -30,12 +32,23 @@ const features = [
   { name: 'Python SDK', vex: true, competitor: true },
   { name: 'TypeScript SDK', vex: true, competitor: true },
   { name: 'Free tier', vex: true, competitor: true },
-  { name: 'Open source', vex: true, competitor: false },
 ];
 
 export default function CompareBraintrust() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([
+            ...compareSchema({
+              vendorSlug: 'braintrust',
+              vendorName: 'Braintrust',
+              vendorUrl: 'https://www.braintrust.dev',
+            }),
+          ]),
+        }}
+      />
       <div className="mx-auto max-w-[800px]">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
           Comparison
@@ -93,7 +106,7 @@ export default function CompareBraintrust() {
               Runtime reliability layer. Verifies every agent output in
               real-time against hallucination, drift, schema, and coherence
               checks. Auto-corrects failing outputs with a 3-layer cascade
-              before they reach users. Fully open source.
+              before they reach users.
             </p>
           </div>
           <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">

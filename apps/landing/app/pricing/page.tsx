@@ -2,6 +2,9 @@ import type { Metadata } from 'next';
 
 import Link from 'next/link';
 
+import { PLANS } from '~/lib/pricing';
+import { productOfferSchema } from '~/lib/seo/schemas';
+
 import { ComparisonTable } from '../_components/comparison-table';
 
 export const metadata: Metadata = {
@@ -16,86 +19,15 @@ export const metadata: Metadata = {
   ],
 };
 
-const plans = [
-  {
-    name: 'Free',
-    price: '$0',
-    period: '/mo',
-    description: 'Sandbox for exploring agent reliability.',
-    cta: 'Get Started Free',
-    href: 'https://app.tryvex.dev',
-    highlighted: false,
-    features: [
-      { label: 'Observations', value: '1,000 / mo' },
-      { label: 'Verifications', value: '50 / mo' },
-      { label: 'Corrections', value: 'None' },
-      { label: 'Agents', value: 'Unlimited' },
-      { label: 'Data retention', value: '1 day' },
-      { label: 'Rate limit', value: '100 RPM' },
-      { label: 'Overage', value: 'Hard limit' },
-      { label: 'Support', value: 'Community' },
-    ],
-  },
-  {
-    name: 'Starter',
-    price: '$29',
-    period: '/mo',
-    description: 'For founders running 1-2 agents in production.',
-    cta: 'Start Starter',
-    href: 'https://app.tryvex.dev',
-    highlighted: false,
-    features: [
-      { label: 'Observations', value: '25,000 / mo' },
-      { label: 'Verifications', value: '1,000 / mo' },
-      { label: 'Corrections', value: '100 / mo' },
-      { label: 'Agents', value: 'Unlimited' },
-      { label: 'Data retention', value: '7 days' },
-      { label: 'Rate limit', value: '500 RPM' },
-      { label: 'Overage', value: 'Hard limit' },
-      { label: 'Support', value: 'Email' },
-    ],
-  },
-  {
-    name: 'Pro',
-    price: '$99',
-    period: '/mo',
-    yearly: '$990/yr ($83/mo)',
-    description: 'For teams shipping agents to production.',
-    cta: 'Start Pro',
-    href: 'https://app.tryvex.dev',
-    highlighted: true,
-    features: [
-      { label: 'Observations', value: '150,000 / mo' },
-      { label: 'Verifications', value: '15,000 / mo' },
-      { label: 'Corrections', value: 'Full cascade' },
-      { label: 'Agents', value: 'Unlimited' },
-      { label: 'Data retention', value: '30 days' },
-      { label: 'Rate limit', value: '1,000 RPM' },
-      { label: 'Overage', value: '$0.0005/obs, $0.005/verify' },
-      { label: 'Support', value: 'Email (48h)' },
-    ],
-  },
-  {
-    name: 'Team',
-    price: '$349',
-    period: '/mo',
-    yearly: '$3,490/yr ($291/mo)',
-    description: 'For organizations running agents at scale.',
-    cta: 'Start Team',
-    href: 'https://app.tryvex.dev',
-    highlighted: false,
-    features: [
-      { label: 'Observations', value: '1,500,000 / mo' },
-      { label: 'Verifications', value: '150,000 / mo' },
-      { label: 'Corrections', value: 'Full cascade + priority' },
-      { label: 'Agents', value: 'Unlimited' },
-      { label: 'Data retention', value: '90 days' },
-      { label: 'Rate limit', value: '5,000 RPM' },
-      { label: 'Overage', value: '$0.0004/obs, $0.004/verify' },
-      { label: 'Support', value: 'Priority (24h)' },
-    ],
-  },
-];
+const USD = new Intl.NumberFormat('en-US');
+
+function formatYearlyAnnotation(priceYearly: number): string {
+  // Mirrors the prior inline strings:
+  //   priceYearly=990  → "$990/yr ($83/mo)"
+  //   priceYearly=3490 → "$3,490/yr ($291/mo)"
+  const monthlyEquivalent = Math.round(priceYearly / 12);
+  return `$${USD.format(priceYearly)}/yr ($${USD.format(monthlyEquivalent)}/mo)`;
+}
 
 const faqs = [
   {
@@ -123,16 +55,17 @@ const faqs = [
     answer:
       'Yes. Annual billing saves you roughly two months compared to monthly pricing. Pro is $990/yr ($83/mo) and Team is $3,490/yr ($291/mo). Contact us to switch to annual billing.',
   },
-  {
-    question: 'Is Vex open source?',
-    answer:
-      'Yes. Vex is fully open source. The SDKs (Python, TypeScript) are Apache 2.0. The core engine and dashboard are AGPLv3. The managed platform (app.tryvex.dev) provides hosted infrastructure and zero-ops on top of the open-source foundation.',
-  },
 ];
 
 export default function PricingPage() {
   return (
     <div className="container py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(productOfferSchema()),
+        }}
+      />
       {/* Hero */}
       <div className="mx-auto max-w-[1200px] text-center">
         <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
@@ -148,9 +81,9 @@ export default function PricingPage() {
 
       {/* Plan cards */}
       <div className="mx-auto mb-20 grid max-w-[1200px] gap-4 lg:grid-cols-4">
-        {plans.map((plan) => (
+        {PLANS.map((plan) => (
           <div
-            key={plan.name}
+            key={plan.id}
             className={`relative flex flex-col rounded-xl border p-8 ${
               plan.highlighted
                 ? 'border-emerald-500/40 bg-emerald-500/5'
@@ -168,26 +101,26 @@ export default function PricingPage() {
             </h2>
             <div className="mb-1 flex items-baseline gap-1">
               <span className="text-3xl font-bold text-white">
-                {plan.price}
+                ${plan.priceMonthly}
               </span>
-              <span className="text-sm text-[#a2a2a2]">{plan.period}</span>
+              <span className="text-sm text-[#a2a2a2]">/mo</span>
             </div>
-            {plan.yearly && (
+            {plan.priceYearly !== undefined && (
               <p className="mb-3 text-xs text-[#585858]">
-                or {plan.yearly} billed annually
+                or {formatYearlyAnnotation(plan.priceYearly)} billed annually
               </p>
             )}
             <p className="mb-6 text-sm text-[#a2a2a2]">{plan.description}</p>
 
             <Link
-              href={plan.href}
+              href={plan.cta.href}
               className={`mb-8 inline-flex h-11 items-center justify-center rounded-lg text-sm font-semibold transition-colors ${
                 plan.highlighted
                   ? 'bg-emerald-500 text-white hover:bg-emerald-400'
                   : 'border border-[#252525] text-[#a2a2a2] hover:border-[#585858] hover:text-white'
               }`}
             >
-              {plan.cta}
+              {plan.cta.label}
             </Link>
 
             <ul className="flex flex-1 flex-col gap-3">

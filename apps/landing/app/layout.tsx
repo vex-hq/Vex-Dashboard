@@ -3,6 +3,11 @@ import type { Metadata } from 'next';
 import { cn } from '@kit/ui/utils';
 
 import { getFontsClassName } from '~/lib/fonts';
+import {
+  faqPageSchema,
+  organizationSchema,
+  softwareApplicationSchema,
+} from '~/lib/seo/schemas';
 
 import '../styles/globals.css';
 import { SiteFooter } from './_components/site-footer';
@@ -18,7 +23,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://tryvex.dev'),
   title: 'Vex — Runtime reliability for AI agents',
   description:
-    "Vex is the open-source runtime reliability layer that detects when your AI agent's behavior silently changes in production. Before your customers notice.",
+    "Vex is the runtime reliability layer that detects when your AI agent's behavior silently changes in production. Before your customers notice.",
   keywords: [
     'AI agent monitoring',
     'runtime reliability',
@@ -69,6 +74,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn(className, 'overflow-x-hidden')}>
       <head>
+        <link rel="alternate" type="text/plain" href="/llms.txt" />
         <script
           async
           src="https://www.googletagmanager.com/gtag/js?id=G-F5LSR3VNPZ"
@@ -89,94 +95,9 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: JSON.stringify([
-              {
-                '@context': 'https://schema.org',
-                '@type': 'SoftwareApplication',
-                name: 'Vex',
-                description:
-                  'Open-source runtime reliability layer that detects when AI agent behavior silently drifts in production. Observes every LLM call, corrects hallucinations and policy violations in real time.',
-                url: 'https://tryvex.dev',
-                applicationCategory: 'DeveloperApplication',
-                operatingSystem: 'Any',
-                offers: {
-                  '@type': 'Offer',
-                  price: '0',
-                  priceCurrency: 'USD',
-                  description: 'Free tier available',
-                },
-                softwareHelp: {
-                  '@type': 'WebPage',
-                  url: 'https://docs.tryvex.dev',
-                },
-                downloadUrl: 'https://pypi.org/project/vex-sdk/',
-                codeRepository: 'https://github.com/Vex-AI-Dev/Vex',
-                license: 'https://github.com/Vex-AI-Dev/Vex/blob/main/LICENSING.md',
-              },
-              {
-                '@context': 'https://schema.org',
-                '@type': 'Organization',
-                name: 'Vex',
-                url: 'https://tryvex.dev',
-                logo: 'https://tryvex.dev/images/og-image.png',
-                sameAs: [
-                  'https://github.com/Vex-AI-Dev',
-                  'https://x.com/tryvex',
-                ],
-              },
-              {
-                '@context': 'https://schema.org',
-                '@type': 'FAQPage',
-                mainEntity: [
-                  {
-                    '@type': 'Question',
-                    name: 'What is Vex?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: "Vex is an open-source runtime reliability layer for AI agents. It detects when your agent's behavior silently changes in production — hallucinations, drift, schema violations — and auto-corrects before your users notice.",
-                    },
-                  },
-                  {
-                    '@type': 'Question',
-                    name: 'How is Vex different from evals or tracing?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: "Evals test your agent before deployment. Tracing shows you what happened after something breaks. Vex runs continuously in production, catching behavioral drift in real-time and auto-correcting on the fly. They're complementary — Vex fills the gap between pre-deploy testing and post-mortem analysis.",
-                    },
-                  },
-                  {
-                    '@type': 'Question',
-                    name: 'How long does it take to set up?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: 'About 5 minutes. Install the SDK (pip install vex-sdk or npm install @vex_dev/sdk), add 3 lines of code to wrap your agent function, and deploy. Vex starts learning from the first request.',
-                    },
-                  },
-                  {
-                    '@type': 'Question',
-                    name: 'What frameworks does Vex support?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: 'Vex works with LangChain, CrewAI, OpenAI Assistants, and any custom Python or TypeScript agent. If your code calls an LLM, Vex can watch it.',
-                    },
-                  },
-                  {
-                    '@type': 'Question',
-                    name: 'Is Vex open source?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: 'Yes. Vex is fully open source. The SDKs (Python, TypeScript) are Apache 2.0. The core engine and dashboard are AGPLv3. Everything is on GitHub.',
-                    },
-                  },
-                  {
-                    '@type': 'Question',
-                    name: 'Does Vex add latency?',
-                    acceptedAnswer: {
-                      '@type': 'Answer',
-                      text: 'In async mode (default), Vex adds zero latency — verification happens in the background. In sync mode, Vex adds a verification step before returning the output, which typically takes 200-500ms depending on the checks enabled.',
-                    },
-                  },
-                ],
-              },
+              softwareApplicationSchema(),
+              organizationSchema(),
+              faqPageSchema(),
             ]),
           }}
         />
