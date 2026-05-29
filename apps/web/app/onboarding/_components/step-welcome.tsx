@@ -1,11 +1,11 @@
 'use client';
 
-import Image from 'next/image';
-
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@kit/ui/button';
+
+import { KlioMark } from '~/components/klio-mark';
 
 interface StepWelcomeProps {
   onNext: () => void;
@@ -23,22 +23,7 @@ export function StepWelcome({ onNext }: StepWelcomeProps) {
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.7, ease: 'easeOut' }}
       >
-        <Image
-          src="/images/vex-icon-black-transparent.svg"
-          alt="Vex"
-          width={160}
-          height={160}
-          className="block dark:hidden"
-          priority
-        />
-        <Image
-          src="/images/vex-icon-white-transparent.svg"
-          alt="Vex"
-          width={160}
-          height={160}
-          className="hidden dark:block"
-          priority
-        />
+        <KlioMark size={160} className="text-foreground" />
       </motion.div>
 
       {/* Welcome text */}

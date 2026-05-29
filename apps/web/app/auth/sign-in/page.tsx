@@ -51,7 +51,7 @@ async function SignInPage({ searchParams }: SignInPageProps) {
       />
 
       <p className="text-muted-foreground text-sm">
-        <Trans i18nKey={'auth:newToVex'} defaults={'New to Vex?'} />{' '}
+        <Trans i18nKey={'auth:newToKlio'} defaults={'New to Klio?'} />{' '}
         <Link
           href={pathsConfig.auth.signUp}
           className="text-foreground font-medium underline underline-offset-4 hover:no-underline"

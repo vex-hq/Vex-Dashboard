@@ -84,9 +84,9 @@ export function PlanManagement({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Vex Plan Management</CardTitle>
+        <CardTitle>Klio Plan Management</CardTitle>
         <CardDescription>
-          Manage the organization&apos;s Vex plan and custom limit overrides.
+          Manage the organization&apos;s Klio plan and custom limit overrides.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

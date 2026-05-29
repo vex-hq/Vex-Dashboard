@@ -2,7 +2,7 @@
  * TypeScript mirror of services/shared/shared/plan_limits.py
  *
  * These constants define the quotas, rate limits, and feature flags
- * for each Vex pricing plan. Keep in sync with the Python backend.
+ * for each Klio pricing plan. Keep in sync with the Python backend.
  */
 
 export interface PlanLimits {

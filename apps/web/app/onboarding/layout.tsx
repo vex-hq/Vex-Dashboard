@@ -1,7 +1,7 @@
 import { Toaster } from '@kit/ui/sonner';
 
 /*
- * Tessellating chevron / V pattern — echoes the Vex logo shape.
+ * Tessellating chevron pattern — a subtle geometric background texture.
  * Each tile is a downward-pointing V that tiles seamlessly.
  * Tile: 80×48 — two nested V strokes for depth.
  */
