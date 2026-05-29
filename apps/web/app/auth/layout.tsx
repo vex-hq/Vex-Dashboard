@@ -5,7 +5,7 @@ import { KlioMark } from '~/components/klio-mark';
 import { AuthCarousel } from './_components/auth-carousel';
 
 /*
- * Tessellating chevron / V pattern — echoes the Vex logo shape.
+ * Tessellating chevron pattern — a subtle geometric background texture.
  * Tile: 80×48 — two nested V strokes for depth.
  */
 const CHEVRON_TILE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='48'%3E%3Cpath d='M0 0 L40 32 L80 0' fill='none' stroke='rgba(255,255,255,0.15)' stroke-width='1'/%3E%3Cpath d='M0 16 L40 48 L80 16' fill='none' stroke='rgba(255,255,255,0.08)' stroke-width='0.5'/%3E%3C/svg%3E")`;
