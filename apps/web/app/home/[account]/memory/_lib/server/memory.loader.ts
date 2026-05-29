@@ -20,6 +20,7 @@ const KLIO_CLOUD_STATUS = 'active';
  * Falls back to the whole `agent_id` when there is no `/`.
  */
 function deriveTool(agentId: string): string {
+  if (!agentId) return 'unknown';
   const lastSlash = agentId.lastIndexOf('/');
 
   if (lastSlash === -1 || lastSlash === agentId.length - 1) {
@@ -75,7 +76,7 @@ export const loadAgentActivity = cache(
         SELECT
           agent_id,
           COUNT(*) AS captured,
-          MAX(created_at) AS last_captured,
+          MAX(created_at)::text AS last_captured,
           COUNT(*) FILTER (WHERE memory_type = 'fact') AS facts,
           COUNT(*) FILTER (WHERE metadata->>'source' = 'mcp') AS via_mcp,
           COUNT(*) FILTER (WHERE metadata->>'source' LIKE 'hook%') AS via_hook
@@ -90,7 +91,7 @@ export const loadAgentActivity = cache(
         SELECT
           agent_id,
           COUNT(*) AS recalled,
-          MAX(created_at) AS last_recalled
+          MAX(created_at)::text AS last_recalled
         FROM brain_recall_events
         WHERE org_id = $1
         GROUP BY agent_id
@@ -179,7 +180,7 @@ export const loadMemoryVolume = cache(
       pool.query<DailyCountRow>(
         `
         SELECT
-          date_trunc('day', created_at) AS day,
+          to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
           COUNT(*) AS count
         FROM session_memories
         WHERE org_id = $1
@@ -194,7 +195,7 @@ export const loadMemoryVolume = cache(
       pool.query<DailyCountRow>(
         `
         SELECT
-          date_trunc('day', created_at) AS day,
+          to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
           COUNT(*) AS count
         FROM brain_recall_events
         WHERE org_id = $1
@@ -284,11 +285,7 @@ export const loadMemoryList = cache(
     const effectivePage = Math.max(1, filters?.page ?? page);
     const offset = (effectivePage - 1) * MEMORY_PAGE_SIZE;
 
-    const conditions: string[] = [
-      'org_id = $1',
-      'scope = $2',
-      'status = $3',
-    ];
+    const conditions: string[] = ['org_id = $1', 'scope = $2', 'status = $3'];
     const params: unknown[] = [orgId, KLIO_CLOUD_SCOPE, KLIO_CLOUD_STATUS];
     let paramIndex = params.length + 1;
 
