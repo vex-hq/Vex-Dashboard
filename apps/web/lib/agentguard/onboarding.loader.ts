@@ -4,6 +4,8 @@ import { cache } from 'react';
 
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
+import { FINAL_ONBOARDING_STEP } from './onboarding.constants';
+
 export interface OnboardingState {
   completed: boolean;
   currentStep: number;
@@ -59,6 +61,9 @@ export async function completeOnboarding(accountSlug: string): Promise<void> {
 
   await client
     .from('accounts')
-    .update({ onboarding_completed: true, onboarding_step: 4 })
+    .update({
+      onboarding_completed: true,
+      onboarding_step: FINAL_ONBOARDING_STEP,
+    })
     .eq('slug', accountSlug);
 }

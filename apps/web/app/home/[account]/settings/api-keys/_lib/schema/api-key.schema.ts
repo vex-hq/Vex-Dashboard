@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const ALLOWED_SCOPES = ['ingest', 'verify', 'read'] as const;
+const ALLOWED_SCOPES = ['ingest', 'verify', 'read', 'memory'] as const;
 
 export const CreateApiKeySchema = z.object({
   accountSlug: z.string().min(1),
