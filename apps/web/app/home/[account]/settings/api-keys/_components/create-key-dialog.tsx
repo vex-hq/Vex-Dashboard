@@ -38,6 +38,11 @@ const SCOPES = [
     labelKey: 'agentguard:apiKeys.scopeRead',
     descKey: 'agentguard:apiKeys.scopeReadDescription',
   },
+  {
+    value: 'memory',
+    labelKey: 'agentguard:apiKeys.scopeMemory',
+    descKey: 'agentguard:apiKeys.scopeMemoryDescription',
+  },
 ] as const;
 
 interface CreateKeyDialogProps {
@@ -83,7 +88,7 @@ export default function CreateKeyDialog({
       const result = await createApiKeyAction({
         accountSlug,
         name,
-        scopes: scopes as ('ingest' | 'verify' | 'read')[],
+        scopes: scopes as ('ingest' | 'verify' | 'read' | 'memory')[],
         rateLimitRpm,
         expiresAt: expiresAt || null,
       });

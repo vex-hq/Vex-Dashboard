@@ -9,7 +9,7 @@ const KEY_PREFIX = 'ag_live_';
 const RANDOM_LENGTH = 32;
 const MAX_KEYS_PER_ORG = 10;
 const DISPLAY_PREFIX_LENGTH = 12; // "ag_live_k7xR"
-const ALLOWED_SCOPES = new Set(['ingest', 'verify', 'read']);
+const ALLOWED_SCOPES = new Set(['ingest', 'verify', 'read', 'memory']);
 
 /**
  * Generate a cryptographically random API key.

@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Brain,
   Database,
   FlaskConical,
   Hexagon,
@@ -52,6 +53,11 @@ const getRoutes = (account: string) => [
         label: 'agentguard:nav.sessions',
         path: createPath(pathsConfig.app.accountSessions, account),
         Icon: <Activity className={iconClasses} />,
+      },
+      {
+        label: 'agentguard:nav.memory',
+        path: createPath(pathsConfig.app.accountMemory, account),
+        Icon: <Brain className={iconClasses} />,
       },
       {
         label: 'agentguard:nav.failures',

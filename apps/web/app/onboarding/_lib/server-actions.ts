@@ -93,7 +93,7 @@ export const createOnboardingKeyAction = enhanceAction(
     const result = await createKey({
       orgId,
       name: 'Onboarding Key',
-      scopes: ['ingest', 'verify'],
+      scopes: ['ingest', 'verify', 'memory'],
       rateLimitRpm: 60,
       expiresAt: null,
       createdBy: user.id,
