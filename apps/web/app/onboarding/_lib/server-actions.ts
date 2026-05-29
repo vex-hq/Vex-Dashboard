@@ -31,7 +31,10 @@ const CreateOnboardingKeySchema = z.object({
 
 const UpdateStepSchema = z.object({
   accountSlug: z.string().min(1),
-  step: z.number().min(0).max(3),
+  // 6-step onboarding wizard (0..5): Welcome, InviteTeam, ApiKey,
+  // ConnectAgents, InstallSdk, VerifyConnection. goNext persists each
+  // non-terminal transition, so the highest persisted step is 5.
+  step: z.number().min(0).max(5),
 });
 
 const CompleteOnboardingSchema = z.object({

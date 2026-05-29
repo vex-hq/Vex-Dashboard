@@ -59,6 +59,6 @@ export async function completeOnboarding(accountSlug: string): Promise<void> {
 
   await client
     .from('accounts')
-    .update({ onboarding_completed: true, onboarding_step: 4 })
+    .update({ onboarding_completed: true, onboarding_step: 5 })
     .eq('slug', accountSlug);
 }
