@@ -3,7 +3,6 @@
 import { useState, useTransition } from 'react';
 
 import { isRedirectError } from 'next/dist/client/components/redirect-error';
-import Image from 'next/image';
 
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +12,8 @@ import { Button } from '@kit/ui/button';
 import { Input } from '@kit/ui/input';
 import { Label } from '@kit/ui/label';
 import { Trans } from '@kit/ui/trans';
+
+import { KlioMark } from '~/components/klio-mark';
 
 import { createWorkspaceAction } from '../_lib/server-actions';
 
@@ -48,29 +49,14 @@ export function CreateWorkspaceForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
-      {/* Vex logo */}
+      {/* Klio logo */}
       <motion.div
         className="flex justify-center"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <Image
-          src="/images/vex-icon-black-transparent.svg"
-          alt="Vex"
-          width={120}
-          height={120}
-          className="block dark:hidden"
-          priority
-        />
-        <Image
-          src="/images/vex-icon-white-transparent.svg"
-          alt="Vex"
-          width={120}
-          height={120}
-          className="hidden dark:block"
-          priority
-        />
+        <KlioMark size={120} className="text-foreground" />
       </motion.div>
 
       {/* Heading + description */}

@@ -1,6 +1,6 @@
-import Image from 'next/image';
-
 import { Toaster } from '@kit/ui/sonner';
+
+import { KlioMark } from '~/components/klio-mark';
 
 import { AuthCarousel } from './_components/auth-carousel';
 
@@ -16,24 +16,10 @@ function AuthLayout({ children }: React.PropsWithChildren) {
       {/* Left side — form */}
       <div className="flex w-full flex-col items-center justify-center px-8 py-10 lg:w-1/2 lg:px-16 xl:px-24">
         <div className="w-full max-w-sm">
-          {/* Logo — stacked V + Vex */}
-          <div className="mb-8">
-            <Image
-              src="/images/vex-stacked-black-transparent.svg"
-              alt="Vex"
-              width={160}
-              height={160}
-              className="block dark:hidden"
-              priority
-            />
-            <Image
-              src="/images/vex-stacked-white-transparent.svg"
-              alt="Vex"
-              width={160}
-              height={160}
-              className="hidden dark:block"
-              priority
-            />
+          {/* Logo — stacked Klio mark + wordmark */}
+          <div className="text-foreground mb-8 flex flex-col items-start gap-3">
+            <KlioMark size={56} />
+            <span className="text-3xl font-semibold tracking-tight">Klio</span>
           </div>
 
           {children}

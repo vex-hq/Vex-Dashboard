@@ -34,7 +34,7 @@ export const generateRootMetadata = async (): Promise<Metadata> => {
     icons: {
       icon: [
         {
-          url: '/images/vex-icon-black-transparent.svg',
+          url: '/images/klio-mark.svg',
           type: 'image/svg+xml',
         },
         { url: '/images/favicon/favicon.ico', sizes: 'any' },
