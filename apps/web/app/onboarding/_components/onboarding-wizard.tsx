@@ -4,6 +4,11 @@ import { useCallback, useState } from 'react';
 
 import { AnimatePresence, motion } from 'motion/react';
 
+import {
+  FINAL_ONBOARDING_STEP,
+  TOTAL_ONBOARDING_STEPS,
+} from '~/lib/agentguard/onboarding.constants';
+
 import { updateOnboardingStepAction } from '../_lib/server-actions';
 import { StepApiKey } from './step-api-key';
 import { StepConnectAgents } from './step-connect-agents';
@@ -12,7 +17,7 @@ import { StepInviteTeam } from './step-invite-team';
 import { StepVerifyConnection } from './step-verify-connection';
 import { StepWelcome } from './step-welcome';
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = TOTAL_ONBOARDING_STEPS;
 
 interface OnboardingWizardProps {
   accountSlug: string;
@@ -23,7 +28,12 @@ export function OnboardingWizard({
   accountSlug,
   initialStep,
 }: OnboardingWizardProps) {
-  const [currentStep, setCurrentStep] = useState(initialStep);
+  // Clamp the resumed step into the valid range so a stale/out-of-range
+  // persisted value (e.g. left over from a different wizard length) can never
+  // land on the renderStep default and blank the onboarding screen.
+  const [currentStep, setCurrentStep] = useState(() =>
+    Math.min(Math.max(0, initialStep), FINAL_ONBOARDING_STEP),
+  );
   const [apiKey, setApiKey] = useState<string | null>(null);
 
   const goNext = useCallback(async () => {

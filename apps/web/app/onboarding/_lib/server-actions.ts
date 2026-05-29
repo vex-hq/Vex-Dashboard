@@ -9,6 +9,7 @@ import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import { createAccountInvitationsService } from '@kit/team-accounts/services/account-invitations.service';
 
 import { createKey, listKeys, revokeKey } from '~/lib/agentguard/api-keys';
+import { FINAL_ONBOARDING_STEP } from '~/lib/agentguard/onboarding.constants';
 import {
   completeOnboarding,
   updateOnboardingStep,
@@ -31,10 +32,10 @@ const CreateOnboardingKeySchema = z.object({
 
 const UpdateStepSchema = z.object({
   accountSlug: z.string().min(1),
-  // 6-step onboarding wizard (0..5): Welcome, InviteTeam, ApiKey,
-  // ConnectAgents, InstallSdk, VerifyConnection. goNext persists each
-  // non-terminal transition, so the highest persisted step is 5.
-  step: z.number().min(0).max(5),
+  // The wizard's goNext persists every non-terminal transition, so the highest
+  // value sent is the final step index. Bound derives from the shared
+  // onboarding step count so this can't drift when the wizard length changes.
+  step: z.number().min(0).max(FINAL_ONBOARDING_STEP),
 });
 
 const CompleteOnboardingSchema = z.object({
