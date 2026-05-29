@@ -63,13 +63,25 @@ legible from 16px favicon to display size. We reuse it.
 | # | Surface | File(s) | Change |
 |---|---------|---------|--------|
 | 1 | Brand env vars | Vercel prod env + `apps/web/.env` | `NEXT_PUBLIC_PRODUCT_NAME`, `NEXT_PUBLIC_SITE_TITLE`, `NEXT_PUBLIC_SITE_DESCRIPTION` → Klio values; `NEXT_PUBLIC_SITE_URL` → `https://app.klio.tech` (prod) |
-| 2 | Logo component | `apps/web/components/app-logo.tsx` | Render Klio mark inline via `currentColor` + text "Klio"; **remove** the two light/dark `<Image>` tags |
-| 3 | Favicon set | `apps/web/public/images/favicon/*` + ref in `apps/web/lib/root-metadata.ts` (icon url, ~line 37) | Replace with Klio-mark-derived icons; repoint the metadata icon path |
-| 4 | In-app copy | `apps/web/public/locales/en/agentguard.json`, `apps/web/public/locales/en/auth.json` | Prose "Vex" → "Klio". **Keep literal `X-Vex-Key`** in any integration snippet |
-| 5 | New asset | `apps/web/public/images/klio-mark.svg` | Add the canonical Klio mark |
+| 2 | New shared component | `apps/web/components/klio-mark.tsx` | Inline `currentColor` Klio mark — single source for all icon usages |
+| 3 | App logo | `apps/web/components/app-logo.tsx` | Use `<KlioMark>` + text "Klio"; **remove** the two light/dark `<Image>` tags |
+| 4 | Auth (login/signup) logo | `apps/web/app/auth/layout.tsx` | Stacked Klio lockup (mark + "Klio"); drop dual `<Image>` |
+| 5 | Onboarding welcome icon | `apps/web/app/onboarding/_components/step-welcome.tsx` | `<KlioMark>`; drop dual `<Image>` (keep animation) |
+| 6 | Create-workspace icon | `apps/web/app/home/addworkspace/_components/create-workspace-form.tsx` | `<KlioMark>`; drop dual `<Image>` |
+| 7 | Metadata icon | `apps/web/lib/root-metadata.ts` (icon url, ~line 37) | Repoint to `/images/klio-mark.svg` |
+| 8 | Favicon set + manifest | `apps/web/public/images/favicon/*` (16/32, android-chrome 192/512, apple-touch, mstile, `.ico`, safari-pinned-tab) + `site.webmanifest` | Regenerate from the Klio mark via `sharp`; manifest `name`/`short_name` → "Klio" |
+| 9 | In-app copy | `apps/web/public/locales/en/agentguard.json` (7 strings), `apps/web/public/locales/en/auth.json` (1 string) | Prose "Vex" → "Klio". **Keep literal `X-Vex-Key`** in any integration snippet |
+| 10 | New static asset | `apps/web/public/images/klio-mark.svg` | Canonical Klio mark (metadata + favicon source) |
+| 11 | Delete | 8 × `apps/web/public/images/vex-{icon,stacked}-*.svg` | Remove orphaned Vex assets after all refs repointed |
 
-Nothing else in `apps/web` is user-facing brand. (`app.config.ts` itself needs
-no code change — only the env values it reads.)
+**Footprint correction (discovered during planning):** the Vex logo is rendered
+on **five screens**, not one — the nav logo (#3), the auth/login page (#4),
+onboarding welcome (#5), create-workspace (#6), and the metadata favicon (#7) —
+and the favicon set is a full set, not a single icon (#8). All are repointed to
+the one shared `KlioMark` component / `klio-mark.svg`. `app.config.ts` itself
+needs no code change (only the env values it reads). The decorative chevron-"V"
+background in `auth/layout.tsx` is abstract geometry (not a "Vex" string) and is
+left as-is — a redesign of it would be out of this Approach-A rename scope.
 
 ---
 
