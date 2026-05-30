@@ -1,6 +1,9 @@
 # ---------------------------------------------------------------------------
 # Dashboard – Multi-stage Docker build (Next.js standalone in Turborepo)
-# Build context: repository root  (docker build -f Dashboard/Dockerfile .)
+# Build context: the repository root (this repo IS the dashboard).
+#   docker build -f Dockerfile .        (run from the repo root)
+# Railway builds from the connected repo root, so all COPY paths are
+# relative to the repo root — do NOT prefix them with the folder name.
 # ---------------------------------------------------------------------------
 
 # ---- Stage 0: base --------------------------------------------------------
@@ -17,60 +20,60 @@ FROM base AS deps
 WORKDIR /app
 
 # Copy workspace configuration first
-COPY Dashboard/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY Dashboard/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY Dashboard/package.json ./package.json
+COPY pnpm-lock.yaml ./pnpm-lock.yaml
+COPY pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY package.json ./package.json
 
 # Copy all workspace package.json files to satisfy pnpm install
 # -- apps
-COPY Dashboard/apps/web/package.json ./apps/web/package.json
-COPY Dashboard/apps/dev-tool/package.json ./apps/dev-tool/package.json
-COPY Dashboard/apps/e2e/package.json ./apps/e2e/package.json
-COPY Dashboard/apps/landing/package.json ./apps/landing/package.json
+COPY apps/web/package.json ./apps/web/package.json
+COPY apps/dev-tool/package.json ./apps/dev-tool/package.json
+COPY apps/e2e/package.json ./apps/e2e/package.json
+COPY apps/landing/package.json ./apps/landing/package.json
 
 # -- packages (top-level)
-COPY Dashboard/packages/analytics/package.json ./packages/analytics/package.json
-COPY Dashboard/packages/database-webhooks/package.json ./packages/database-webhooks/package.json
-COPY Dashboard/packages/email-templates/package.json ./packages/email-templates/package.json
-COPY Dashboard/packages/i18n/package.json ./packages/i18n/package.json
-COPY Dashboard/packages/mcp-server/package.json ./packages/mcp-server/package.json
-COPY Dashboard/packages/next/package.json ./packages/next/package.json
-COPY Dashboard/packages/otp/package.json ./packages/otp/package.json
-COPY Dashboard/packages/policies/package.json ./packages/policies/package.json
-COPY Dashboard/packages/shared/package.json ./packages/shared/package.json
-COPY Dashboard/packages/supabase/package.json ./packages/supabase/package.json
-COPY Dashboard/packages/ui/package.json ./packages/ui/package.json
+COPY packages/analytics/package.json ./packages/analytics/package.json
+COPY packages/database-webhooks/package.json ./packages/database-webhooks/package.json
+COPY packages/email-templates/package.json ./packages/email-templates/package.json
+COPY packages/i18n/package.json ./packages/i18n/package.json
+COPY packages/mcp-server/package.json ./packages/mcp-server/package.json
+COPY packages/next/package.json ./packages/next/package.json
+COPY packages/otp/package.json ./packages/otp/package.json
+COPY packages/policies/package.json ./packages/policies/package.json
+COPY packages/shared/package.json ./packages/shared/package.json
+COPY packages/supabase/package.json ./packages/supabase/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
 
 # -- packages (nested workspaces under packages/**)
-COPY Dashboard/packages/billing/core/package.json ./packages/billing/core/package.json
-COPY Dashboard/packages/billing/gateway/package.json ./packages/billing/gateway/package.json
-COPY Dashboard/packages/billing/lemon-squeezy/package.json ./packages/billing/lemon-squeezy/package.json
-COPY Dashboard/packages/billing/stripe/package.json ./packages/billing/stripe/package.json
-COPY Dashboard/packages/cms/core/package.json ./packages/cms/core/package.json
-COPY Dashboard/packages/cms/keystatic/package.json ./packages/cms/keystatic/package.json
-COPY Dashboard/packages/cms/types/package.json ./packages/cms/types/package.json
-COPY Dashboard/packages/cms/wordpress/package.json ./packages/cms/wordpress/package.json
-COPY Dashboard/packages/features/accounts/package.json ./packages/features/accounts/package.json
-COPY Dashboard/packages/features/admin/package.json ./packages/features/admin/package.json
-COPY Dashboard/packages/features/auth/package.json ./packages/features/auth/package.json
-COPY Dashboard/packages/features/notifications/package.json ./packages/features/notifications/package.json
-COPY Dashboard/packages/features/team-accounts/package.json ./packages/features/team-accounts/package.json
-COPY Dashboard/packages/mailers/core/package.json ./packages/mailers/core/package.json
-COPY Dashboard/packages/mailers/nodemailer/package.json ./packages/mailers/nodemailer/package.json
-COPY Dashboard/packages/mailers/resend/package.json ./packages/mailers/resend/package.json
-COPY Dashboard/packages/mailers/shared/package.json ./packages/mailers/shared/package.json
-COPY Dashboard/packages/monitoring/api/package.json ./packages/monitoring/api/package.json
-COPY Dashboard/packages/monitoring/core/package.json ./packages/monitoring/core/package.json
-COPY Dashboard/packages/monitoring/sentry/package.json ./packages/monitoring/sentry/package.json
+COPY packages/billing/core/package.json ./packages/billing/core/package.json
+COPY packages/billing/gateway/package.json ./packages/billing/gateway/package.json
+COPY packages/billing/lemon-squeezy/package.json ./packages/billing/lemon-squeezy/package.json
+COPY packages/billing/stripe/package.json ./packages/billing/stripe/package.json
+COPY packages/cms/core/package.json ./packages/cms/core/package.json
+COPY packages/cms/keystatic/package.json ./packages/cms/keystatic/package.json
+COPY packages/cms/types/package.json ./packages/cms/types/package.json
+COPY packages/cms/wordpress/package.json ./packages/cms/wordpress/package.json
+COPY packages/features/accounts/package.json ./packages/features/accounts/package.json
+COPY packages/features/admin/package.json ./packages/features/admin/package.json
+COPY packages/features/auth/package.json ./packages/features/auth/package.json
+COPY packages/features/notifications/package.json ./packages/features/notifications/package.json
+COPY packages/features/team-accounts/package.json ./packages/features/team-accounts/package.json
+COPY packages/mailers/core/package.json ./packages/mailers/core/package.json
+COPY packages/mailers/nodemailer/package.json ./packages/mailers/nodemailer/package.json
+COPY packages/mailers/resend/package.json ./packages/mailers/resend/package.json
+COPY packages/mailers/shared/package.json ./packages/mailers/shared/package.json
+COPY packages/monitoring/api/package.json ./packages/monitoring/api/package.json
+COPY packages/monitoring/core/package.json ./packages/monitoring/core/package.json
+COPY packages/monitoring/sentry/package.json ./packages/monitoring/sentry/package.json
 
 # -- tooling
-COPY Dashboard/tooling/eslint/package.json ./tooling/eslint/package.json
-COPY Dashboard/tooling/prettier/package.json ./tooling/prettier/package.json
-COPY Dashboard/tooling/scripts/package.json ./tooling/scripts/package.json
-COPY Dashboard/tooling/typescript/package.json ./tooling/typescript/package.json
+COPY tooling/eslint/package.json ./tooling/eslint/package.json
+COPY tooling/prettier/package.json ./tooling/prettier/package.json
+COPY tooling/scripts/package.json ./tooling/scripts/package.json
+COPY tooling/typescript/package.json ./tooling/typescript/package.json
 
 # Copy the scripts tooling source so the preinstall hook succeeds
-COPY Dashboard/tooling/scripts/src ./tooling/scripts/src
+COPY tooling/scripts/src ./tooling/scripts/src
 
 RUN pnpm install --frozen-lockfile
 
@@ -80,15 +83,15 @@ FROM base AS builder
 WORKDIR /app
 
 COPY --from=deps /app/ ./
-COPY Dashboard/ .
+COPY . .
 
 # Build-time environment variables (self-hosting defaults)
 ENV NEXT_PUBLIC_SITE_URL=https://localhost:3000
 # Skip HTTPS-only validation during build (overridden at runtime)
 ENV NEXT_PUBLIC_CI=true
-ENV NEXT_PUBLIC_PRODUCT_NAME=Vex
-ENV NEXT_PUBLIC_SITE_TITLE="Vex - Runtime Reliability for AI Agents"
-ENV NEXT_PUBLIC_SITE_DESCRIPTION="Vex is the runtime reliability layer for AI agents in production."
+ENV NEXT_PUBLIC_PRODUCT_NAME=Klio
+ENV NEXT_PUBLIC_SITE_TITLE="Klio — Memory & Reliability for AI Agents"
+ENV NEXT_PUBLIC_SITE_DESCRIPTION="Klio is the memory and reliability layer for AI agents. Persistent cross-session memory plus runtime verification — so your agents remember what matters and you catch bad output before it ships."
 ENV NEXT_PUBLIC_DEFAULT_THEME_MODE=light
 ENV NEXT_PUBLIC_THEME_COLOR="#ffffff"
 ENV NEXT_PUBLIC_THEME_COLOR_DARK="#0a0a0a"
