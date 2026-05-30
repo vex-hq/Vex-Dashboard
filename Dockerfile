@@ -85,12 +85,14 @@ WORKDIR /app
 COPY --from=deps /app/ ./
 COPY . .
 
-# Build-time environment variables (self-hosting defaults).
-# Railway supplies real values as build args for the matching ARG names below.
-# NEXT_PUBLIC_* are inlined into the client bundle at build time, so they must be
-# present at BUILD (not just runtime). Local builds fall back to the defaults.
-ARG NEXT_PUBLIC_SITE_URL=https://localhost:3000
-ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+# Build-time public vars. NEXT_PUBLIC_* are inlined into the client bundle at
+# build, so the real values must be present during `next build`. Railway injects
+# its service variables into the build, and a matching ARG *without a default*
+# receives them — a default value would shadow Railway's injected value. Local
+# `docker build` (no --build-arg) falls back to the :- defaults in the build step.
+ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_PUBLIC_KEY
 # Skip HTTPS-only validation during build (overridden at runtime)
 ENV NEXT_PUBLIC_CI=true
 ENV NEXT_PUBLIC_PRODUCT_NAME=Klio
@@ -104,18 +106,6 @@ ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS=true
 ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS_CREATION=true
 ENV NEXT_PUBLIC_AUTH_PASSWORD=true
 ENV NEXT_TELEMETRY_DISABLED=1
-
-# Supabase public vars — Railway supplies real values as build args. Because
-# NEXT_PUBLIC_* are inlined into the client bundle at build, the real Supabase
-# project URL + public (publishable) key MUST be present here for auth to work;
-# a plain runtime restart can't fix them. The app resolver
-# (packages/supabase/get-supabase-client-keys.ts) reads NEXT_PUBLIC_SUPABASE_PUBLIC_KEY
-# first, with the legacy NEXT_PUBLIC_SUPABASE_ANON_KEY as fallback — so we declare the
-# PUBLIC_KEY ARG (the name Railway/Supabase use). Local builds fall back to placeholders.
-ARG NEXT_PUBLIC_SUPABASE_URL=http://localhost:8443
-ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-ARG NEXT_PUBLIC_SUPABASE_PUBLIC_KEY=placeholder
-ENV NEXT_PUBLIC_SUPABASE_PUBLIC_KEY=${NEXT_PUBLIC_SUPABASE_PUBLIC_KEY}
 
 # Billing / Stripe – not required for self-hosting
 ENV NEXT_PUBLIC_BILLING_PROVIDER=stripe
@@ -133,7 +123,14 @@ ENV NEXT_PUBLIC_KEYSTATIC_CONTENT_PATH=./content
 ARG SUPABASE_SERVICE_ROLE_KEY=placeholder
 ARG SUPABASE_DB_WEBHOOK_SECRET=placeholder-webhook-secret
 
-RUN pnpm --filter web build
+# Diagnostic (lengths only, never the secret values) — proves whether Railway
+# injected the build-time public vars. Safe to remove once verified.
+RUN echo "DIAG site_len=${#NEXT_PUBLIC_SITE_URL} supaurl_len=${#NEXT_PUBLIC_SUPABASE_URL} pubkey_len=${#NEXT_PUBLIC_SUPABASE_PUBLIC_KEY}"
+
+RUN NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://localhost:3000}" \
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:8443}" \
+    NEXT_PUBLIC_SUPABASE_PUBLIC_KEY="${NEXT_PUBLIC_SUPABASE_PUBLIC_KEY:-placeholder}" \
+    pnpm --filter web build
 
 # ---- Stage 3: runner -------------------------------------------------------
 FROM node:20-alpine AS runner
