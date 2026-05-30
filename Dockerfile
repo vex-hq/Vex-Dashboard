@@ -104,7 +104,8 @@ ENV NEXT_PUBLIC_THEME_COLOR_DARK="#0a0a0a"
 ENV NEXT_PUBLIC_ENABLE_THEME_TOGGLE=true
 ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS=true
 ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS_CREATION=true
-ENV NEXT_PUBLIC_AUTH_PASSWORD=true
+# Auth methods are controlled by Railway vars (NEXT_PUBLIC_AUTH_PASSWORD /
+# NEXT_PUBLIC_AUTH_MAGIC_LINK), not hardcoded — production runs magic-link only.
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Billing / Stripe – not required for self-hosting
