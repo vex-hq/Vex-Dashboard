@@ -123,10 +123,6 @@ ENV NEXT_PUBLIC_KEYSTATIC_CONTENT_PATH=./content
 ARG SUPABASE_SERVICE_ROLE_KEY=placeholder
 ARG SUPABASE_DB_WEBHOOK_SECRET=placeholder-webhook-secret
 
-# Diagnostic (lengths only, never the secret values) — proves whether Railway
-# injected the build-time public vars. Safe to remove once verified.
-RUN echo "DIAG site_len=${#NEXT_PUBLIC_SITE_URL} supaurl_len=${#NEXT_PUBLIC_SUPABASE_URL} pubkey_len=${#NEXT_PUBLIC_SUPABASE_PUBLIC_KEY}"
-
 RUN NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://localhost:3000}" \
     NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:8443}" \
     NEXT_PUBLIC_SUPABASE_PUBLIC_KEY="${NEXT_PUBLIC_SUPABASE_PUBLIC_KEY:-placeholder}" \
