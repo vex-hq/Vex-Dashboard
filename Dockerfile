@@ -85,8 +85,12 @@ WORKDIR /app
 COPY --from=deps /app/ ./
 COPY . .
 
-# Build-time environment variables (self-hosting defaults)
-ENV NEXT_PUBLIC_SITE_URL=https://localhost:3000
+# Build-time environment variables (self-hosting defaults).
+# Railway supplies real values as build args for the matching ARG names below.
+# NEXT_PUBLIC_* are inlined into the client bundle at build time, so they must be
+# present at BUILD (not just runtime). Local builds fall back to the defaults.
+ARG NEXT_PUBLIC_SITE_URL=https://localhost:3000
+ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 # Skip HTTPS-only validation during build (overridden at runtime)
 ENV NEXT_PUBLIC_CI=true
 ENV NEXT_PUBLIC_PRODUCT_NAME=Klio
@@ -101,9 +105,14 @@ ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS_CREATION=true
 ENV NEXT_PUBLIC_AUTH_PASSWORD=true
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Supabase placeholders – required at build time but overridden at runtime
-ENV NEXT_PUBLIC_SUPABASE_URL=http://localhost:8443
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder
+# Supabase public vars — Railway supplies real values as build args. Because
+# NEXT_PUBLIC_* are inlined into the client bundle at build, the real Supabase
+# project URL + anon key MUST be present here for auth to work; a plain runtime
+# restart can't fix them. Local builds fall back to the placeholders.
+ARG NEXT_PUBLIC_SUPABASE_URL=http://localhost:8443
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 
 # Billing / Stripe – not required for self-hosting
 ENV NEXT_PUBLIC_BILLING_PROVIDER=stripe
