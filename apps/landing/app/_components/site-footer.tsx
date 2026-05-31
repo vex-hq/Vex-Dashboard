@@ -45,7 +45,8 @@ export function SiteFooter() {
           <div>
             <AppLogo href="/" />
             <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
-              Memory for AI agents. Local-first, encrypted, open source.
+              One shared brain for all your AI agents. Local-first, encrypted,
+              open source.
             </p>
           </div>
 
