@@ -10,20 +10,20 @@ export function RelatedPages({ pages, heading = 'Related' }: { pages: RelatedPag
   if (pages.length === 0) return null;
 
   return (
-    <div className="mt-12 rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
-      <h3 className="mb-4 text-sm font-medium tracking-widest text-[#585858] uppercase">{heading}</h3>
+    <div className="mt-12 rounded-xl border border-border bg-background p-6">
+      <h3 className="mb-4 text-sm font-medium tracking-widest text-muted-foreground uppercase">{heading}</h3>
       <div className="grid gap-3">
         {pages.map((page) => (
           <Link
             key={page.href}
             href={page.href}
-            className="group flex flex-col rounded-lg border border-[#1a1a1a] p-3 transition-colors hover:border-[#252525] hover:bg-[#111]"
+            className="group flex flex-col rounded-lg border border-[#1a1a1a] p-3 transition-colors hover:border-border hover:bg-[#111]"
           >
-            <span className="text-sm font-medium text-white group-hover:text-emerald-400">
+            <span className="text-sm font-medium text-foreground group-hover:text-foreground">
               {page.title}
             </span>
             {page.description && (
-              <span className="mt-1 text-xs text-[#585858]">{page.description}</span>
+              <span className="mt-1 text-xs text-muted-foreground">{page.description}</span>
             )}
           </Link>
         ))}

@@ -92,7 +92,7 @@ export function LiveVerifyDemo() {
         {/* Loading state */}
         {phase === 'verifying' && (
           <div className="animate-in fade-in flex items-center justify-center gap-2 py-4 duration-300">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-transparent" />
             <span className="text-sm text-[#888]">Verifying with Vex...</span>
           </div>
         )}
@@ -115,7 +115,7 @@ export function LiveVerifyDemo() {
         {phase === 'ready' && (
           <button
             onClick={runScenario}
-            className="inline-flex items-center rounded-lg bg-emerald-500 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
+            className="inline-flex items-center rounded-lg bg-foreground px-6 py-2.5 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
           >
             {scenarioIndex === 0 ? 'Start Demo' : 'Run Scenario'}
           </button>
@@ -124,7 +124,7 @@ export function LiveVerifyDemo() {
         {phase === 'result' && !isLastScenario && (
           <button
             onClick={nextScenario}
-            className="inline-flex items-center rounded-lg bg-emerald-500 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
+            className="inline-flex items-center rounded-lg bg-foreground px-6 py-2.5 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
           >
             Next Scenario →
           </button>
@@ -133,7 +133,7 @@ export function LiveVerifyDemo() {
         {phase === 'result' && isLastScenario && (
           <button
             onClick={restart}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#333] px-6 py-2.5 text-sm font-medium text-[#ccc] transition-colors hover:border-[#555] hover:text-white"
+            className="inline-flex items-center gap-2 rounded-lg border border-[#333] px-6 py-2.5 text-sm font-medium text-[#ccc] transition-colors hover:border-[#555] hover:text-foreground"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Replay Demo

@@ -60,7 +60,7 @@ const lines: TerminalLine[] = [
 ];
 
 const statusColor: Record<TerminalLine['status'], string> = {
-  pass: 'text-emerald-500',
+  pass: 'text-foreground',
   block: 'text-red-400',
   warn: 'text-amber-500',
 };
@@ -147,24 +147,24 @@ export function HowItWorks() {
               onMouseLeave={() => setHoverLayer(0)}
               className={`flex cursor-pointer gap-4 border p-4 transition-all duration-300 ${
                 isActive
-                  ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
-                  : 'border-[#252525] bg-transparent'
+                  ? 'border-border/30 bg-foreground/[0.06]'
+                  : 'border-border bg-transparent'
               }`}
             >
               <div
                 className={`flex h-8 w-8 shrink-0 items-center justify-center border text-sm font-semibold transition-all duration-300 ${
                   isActive
-                    ? 'border-emerald-500/50 bg-emerald-500/25 text-emerald-400'
-                    : 'border-[#252525] bg-[#161616] text-emerald-500'
+                    ? 'border-border/50 bg-foreground/25 text-foreground'
+                    : 'border-border bg-card text-foreground'
                 }`}
               >
                 {layer.num}
               </div>
               <div>
-                <h3 className="mb-1 text-[15px] font-semibold text-white">
+                <h3 className="mb-1 text-[15px] font-semibold text-foreground">
                   {layer.title}
                 </h3>
-                <p className="text-sm leading-relaxed text-[#a2a2a2]">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {layer.desc}
                 </p>
               </div>
@@ -176,13 +176,13 @@ export function HowItWorks() {
       {/* Terminal */}
       <div
         ref={ref}
-        className="overflow-hidden border border-[#252525] bg-[#161616] font-mono text-[13px] leading-relaxed"
+        className="overflow-hidden border border-border bg-card font-mono text-[13px] leading-relaxed"
       >
-        <div className="flex items-center gap-1.5 border-b border-[#252525] px-4 py-3">
+        <div className="flex items-center gap-1.5 border-b border-border px-4 py-3">
           <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
           <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-          <span className="ml-2 text-xs text-[#a2a2a2]">
+          <span className="h-2.5 w-2.5 rounded-full bg-foreground" />
+          <span className="ml-2 text-xs text-muted-foreground">
             vex — verification feed
           </span>
         </div>
@@ -202,8 +202,8 @@ export function HowItWorks() {
                 style={isPreFilled ? undefined : { animationDelay: '0ms' }}
               >
                 <pre className="m-0 font-mono text-[13px] leading-relaxed">
-                  <span className="text-[#585858]">[{line.time}]</span>{' '}
-                  <span className="text-white">{line.agent}</span>
+                  <span className="text-muted-foreground">[{line.time}]</span>{' '}
+                  <span className="text-foreground">{line.agent}</span>
                   {'\n  '}
                   <span className={statusColor[line.status]}>
                     {line.details}

@@ -52,7 +52,7 @@ const lines: TerminalLine[] = [
 ];
 
 const statusColor: Record<TerminalLine['status'], string> = {
-  pass: 'text-emerald-500',
+  pass: 'text-foreground',
   block: 'text-red-400',
   warn: 'text-amber-500',
 };
@@ -82,13 +82,13 @@ export function TerminalFeed() {
   return (
     <div
       ref={ref}
-      className="overflow-hidden border border-[#252525] bg-[#161616] font-mono text-[13px] leading-relaxed"
+      className="overflow-hidden border border-border bg-card font-mono text-[13px] leading-relaxed"
     >
-      <div className="flex items-center gap-1.5 border-b border-[#252525] px-4 py-3">
+      <div className="flex items-center gap-1.5 border-b border-border px-4 py-3">
         <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-        <span className="ml-2 text-xs text-[#a2a2a2]">
+        <span className="h-2.5 w-2.5 rounded-full bg-foreground" />
+        <span className="ml-2 text-xs text-muted-foreground">
           vex — verification feed
         </span>
       </div>
@@ -113,8 +113,8 @@ export function TerminalFeed() {
               }
             >
               <pre className="m-0 font-mono text-[13px] leading-relaxed">
-                <span className="text-[#585858]">[{line.time}]</span>{' '}
-                <span className="text-white">{line.agent}</span>
+                <span className="text-muted-foreground">[{line.time}]</span>{' '}
+                <span className="text-foreground">{line.agent}</span>
                 {'\n  '}
                 <span className={statusColor[line.status]}>{line.details}</span>
                 {line.extra && (

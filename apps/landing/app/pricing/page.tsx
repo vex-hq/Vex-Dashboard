@@ -69,19 +69,19 @@ export default function PricingPage() {
       />
       {/* Hero */}
       <div className="mx-auto max-w-[1200px] text-center">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           Pricing
         </div>
-        <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+        <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
           Simple, transparent pricing
         </h1>
-        <p className="mb-2 text-xs text-[#585858]">
+        <p className="mb-2 text-xs text-muted-foreground">
           Last reviewed: {LAST_UPDATED}
         </p>
-        <p className="mx-auto mb-4 max-w-[520px] text-lg text-[#a2a2a2]">
+        <p className="mx-auto mb-4 max-w-[520px] text-lg text-muted-foreground">
           Start free. Scale as your agents go to production. No hidden fees.
         </p>
-        <p className="mx-auto mb-12 max-w-[640px] text-sm leading-relaxed text-[#585858]">
+        <p className="mx-auto mb-12 max-w-[640px] text-sm leading-relaxed text-muted-foreground">
           {POSITIONING_SENTENCE}
         </p>
       </div>
@@ -97,41 +97,41 @@ export default function PricingPage() {
             aria-labelledby={`plan-${plan.id}-name`}
             className={`relative flex flex-col rounded-xl border p-8 ${
               plan.highlighted
-                ? 'border-emerald-500/40 bg-emerald-500/5'
-                : 'border-[#252525] bg-[#161616]'
+                ? 'border-border/40 bg-foreground/5'
+                : 'border-border bg-card'
             }`}
           >
             {plan.highlighted && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-emerald-500 px-3 py-0.5 text-xs font-semibold text-white">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-foreground px-3 py-0.5 text-xs font-semibold text-background">
                 Most Popular
               </div>
             )}
 
             <h2
               id={`plan-${plan.id}-name`}
-              className="mb-1 text-xl font-semibold text-white"
+              className="mb-1 text-xl font-semibold text-foreground"
             >
               {plan.name}
             </h2>
             <div className="mb-1 flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-white">
+              <span className="text-3xl font-bold text-foreground">
                 ${plan.priceMonthly}
               </span>
-              <span className="text-sm text-[#a2a2a2]">/mo</span>
+              <span className="text-sm text-muted-foreground">/mo</span>
             </div>
             {plan.priceYearly !== undefined && (
-              <p className="mb-3 text-xs text-[#585858]">
+              <p className="mb-3 text-xs text-muted-foreground">
                 or {formatYearlyAnnotation(plan.priceYearly)} billed annually
               </p>
             )}
-            <p className="mb-6 text-sm text-[#a2a2a2]">{plan.description}</p>
+            <p className="mb-6 text-sm text-muted-foreground">{plan.description}</p>
 
             <Link
               href={plan.cta.href}
               className={`mb-8 inline-flex h-11 items-center justify-center rounded-lg text-sm font-semibold transition-colors ${
                 plan.highlighted
-                  ? 'bg-emerald-500 text-white hover:bg-emerald-400'
-                  : 'border border-[#252525] text-[#a2a2a2] hover:border-[#585858] hover:text-white'
+                  ? 'bg-foreground text-background hover:bg-[var(--klio-foreground-strong)]'
+                  : 'border border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
               }`}
             >
               {plan.cta.label}
@@ -141,10 +141,10 @@ export default function PricingPage() {
               {plan.features.map((f) => (
                 <li
                   key={f.label}
-                  className="flex items-start justify-between gap-4 border-t border-[#252525]/60 pt-3 text-sm"
+                  className="flex items-start justify-between gap-4 border-t border-border/60 pt-3 text-sm"
                 >
-                  <span className="text-[#585858]">{f.label}</span>
-                  <span className="text-right text-[#a2a2a2]">{f.value}</span>
+                  <span className="text-muted-foreground">{f.label}</span>
+                  <span className="text-right text-muted-foreground">{f.value}</span>
                 </li>
               ))}
             </ul>
@@ -154,15 +154,15 @@ export default function PricingPage() {
 
       {/* Enterprise CTA */}
       <div className="mx-auto mb-20 max-w-[1200px]">
-        <div className="rounded-xl border border-[#252525] bg-[#161616] p-10 text-center">
-          <h2 className="mb-2 text-2xl font-semibold text-white">Enterprise</h2>
-          <p className="mx-auto mb-6 max-w-[480px] text-sm text-[#a2a2a2]">
+        <div className="rounded-xl border border-border bg-card p-10 text-center">
+          <h2 className="mb-2 text-2xl font-semibold text-foreground">Enterprise</h2>
+          <p className="mx-auto mb-6 max-w-[480px] text-sm text-muted-foreground">
             Need custom limits, SLAs, SSO, or on-prem deployment? Let&apos;s
             talk.
           </p>
           <a
             href="mailto:hello@tryvex.dev"
-            className="inline-flex h-11 items-center rounded-lg border border-[#252525] px-7 text-sm font-semibold text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+            className="inline-flex h-11 items-center rounded-lg border border-border px-7 text-sm font-semibold text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
           >
             Contact Sales
           </a>
@@ -171,10 +171,10 @@ export default function PricingPage() {
 
       {/* Competitor comparison */}
       <div className="mx-auto mb-20 max-w-[1100px]">
-        <h2 className="mb-2 text-center text-2xl font-semibold text-white">
+        <h2 className="mb-2 text-center text-2xl font-semibold text-foreground">
           How Vex Compares
         </h2>
-        <p className="mx-auto mb-2 max-w-[520px] text-center text-sm text-[#a2a2a2]">
+        <p className="mx-auto mb-2 max-w-[520px] text-center text-sm text-muted-foreground">
           See how Vex stacks up against other AI agent reliability tools.
         </p>
         <ComparisonTable />
@@ -184,7 +184,7 @@ export default function PricingPage() {
       <section aria-labelledby="faq-heading" className="mx-auto max-w-[800px]">
         <h2
           id="faq-heading"
-          className="mb-8 text-center text-2xl font-semibold text-white"
+          className="mb-8 text-center text-2xl font-semibold text-foreground"
         >
           Frequently Asked Questions
         </h2>
@@ -192,12 +192,12 @@ export default function PricingPage() {
           {faqs.map((faq) => (
             <details
               key={faq.question}
-              className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6 [&>summary]:cursor-pointer"
+              className="rounded-xl border border-border bg-background p-6 [&>summary]:cursor-pointer"
             >
-              <summary className="text-[15px] font-medium text-white">
+              <summary className="text-[15px] font-medium text-foreground">
                 {faq.question}
               </summary>
-              <p className="mt-2 text-sm leading-relaxed text-[#a2a2a2]">
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {faq.answer}
               </p>
             </details>

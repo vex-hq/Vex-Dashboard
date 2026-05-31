@@ -6,8 +6,8 @@ interface AuthorBylineProps {
 
 export function AuthorByline({ author, date, readingTime }: AuthorBylineProps) {
   return (
-    <div className="mt-12 flex items-center gap-4 border-t border-[#252525] pt-8">
-      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[#252525] bg-[#161616] font-mono text-sm font-medium text-emerald-500">
+    <div className="mt-12 flex items-center gap-4 border-t border-border pt-8">
+      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-border bg-card font-mono text-sm font-medium text-foreground">
         {author
           .split(' ')
           .map((w) => w[0])
@@ -16,8 +16,8 @@ export function AuthorByline({ author, date, readingTime }: AuthorBylineProps) {
           .toUpperCase()}
       </div>
       <div>
-        <p className="text-sm font-medium text-white">{author}</p>
-        <p className="text-xs text-[#585858]">
+        <p className="text-sm font-medium text-foreground">{author}</p>
+        <p className="text-xs text-muted-foreground">
           {date} &middot; {readingTime} min read
         </p>
       </div>

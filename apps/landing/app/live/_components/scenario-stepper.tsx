@@ -18,16 +18,16 @@ export function ScenarioStepper({ steps, currentStep }: ScenarioStepperProps) {
           <div key={step.label} className="flex items-center gap-2">
             {i > 0 && (
               <div
-                className={`h-px w-8 ${isComplete ? 'bg-emerald-500' : 'bg-[#333]'}`}
+                className={`h-px w-8 ${isComplete ? 'bg-foreground' : 'bg-[#333]'}`}
               />
             )}
             <div className="flex items-center gap-2">
               <div
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
                   isComplete
-                    ? 'bg-emerald-500 text-white'
+                    ? 'bg-foreground text-background'
                     : isActive
-                      ? 'border-2 border-emerald-500 text-emerald-500'
+                      ? 'border-2 border-border text-foreground'
                       : 'border border-[#333] text-[#666]'
                 }`}
               >
@@ -35,7 +35,7 @@ export function ScenarioStepper({ steps, currentStep }: ScenarioStepperProps) {
               </div>
               <span
                 className={`hidden text-sm sm:inline ${
-                  isActive ? 'font-medium text-white' : 'text-[#666]'
+                  isActive ? 'font-medium text-foreground' : 'text-[#666]'
                 }`}
               >
                 {step.label}

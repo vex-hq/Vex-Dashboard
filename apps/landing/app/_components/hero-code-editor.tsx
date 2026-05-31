@@ -121,11 +121,11 @@ function PythonIcon({ active }: { active?: boolean }) {
     <svg width="20" height="20" viewBox="0 0 24 24">
       <defs>
         <linearGradient id="py1" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0" stopColor={active ? 'rgb(56,126,184)' : '#a2a2a2'} />
+          <stop offset="0" stopColor={active ? 'rgb(56,126,184)' : 'var(--muted-foreground)'} />
           <stop offset="1" stopColor={active ? 'rgb(54,105,148)' : '#888'} />
         </linearGradient>
         <linearGradient id="py2" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0" stopColor={active ? 'rgb(255,224,82)' : '#a2a2a2'} />
+          <stop offset="0" stopColor={active ? 'rgb(255,224,82)' : 'var(--muted-foreground)'} />
           <stop offset="1" stopColor={active ? 'rgb(255,195,49)' : '#888'} />
         </linearGradient>
       </defs>
@@ -148,7 +148,7 @@ function TSIcon({ active }: { active?: boolean }) {
         width="24"
         height="24"
         rx="2.344"
-        fill={active ? '#3178c6' : '#a2a2a2'}
+        fill={active ? '#3178c6' : 'var(--muted-foreground)'}
       />
       <path
         d="M13.922 11.391H5.531V13.316H8.527V21.891H10.912V13.316H13.922ZM16.21 21.885C16.731 21.982 17.28 22.031 17.857 22.031C18.419 22.031 18.954 21.978 19.46 21.87C19.966 21.762 20.41 21.585 20.791 21.338C21.173 21.091 21.475 20.769 21.697 20.37C21.92 19.972 22.031 19.479 22.031 18.893C22.031 18.467 21.968 18.095 21.84 17.774C21.713 17.454 21.53 17.169 21.29 16.92C21.051 16.671 20.763 16.447 20.428 16.249C20.093 16.051 19.716 15.864 19.295 15.688C18.987 15.561 18.71 15.438 18.466 15.318C18.221 15.198 18.013 15.076 17.842 14.951C17.671 14.826 17.539 14.694 17.446 14.555C17.353 14.416 17.307 14.258 17.307 14.082C17.307 13.921 17.348 13.775 17.432 13.646C17.515 13.516 17.632 13.405 17.784 13.312C17.935 13.219 18.121 13.147 18.341 13.096C18.561 13.044 18.806 13.019 19.075 13.019C19.27 13.019 19.477 13.034 19.695 13.063C19.912 13.092 20.131 13.137 20.351 13.198C20.571 13.26 20.785 13.337 20.993 13.429C21.201 13.522 21.393 13.63 21.569 13.752V11.56C21.212 11.423 20.822 11.321 20.399 11.255C19.976 11.189 19.491 11.156 18.943 11.156C18.385 11.156 17.857 11.216 17.358 11.336C16.859 11.456 16.42 11.643 16.041 11.897C15.662 12.151 15.363 12.475 15.143 12.869C14.923 13.262 14.813 13.733 14.813 14.28C14.813 14.979 15.014 15.576 15.418 16.069C15.821 16.563 16.434 16.981 17.255 17.323C17.578 17.455 17.879 17.585 18.158 17.712C18.437 17.839 18.677 17.971 18.88 18.108C19.083 18.245 19.243 18.394 19.361 18.555C19.478 18.717 19.537 18.9 19.537 19.105C19.537 19.257 19.5 19.397 19.427 19.527C19.354 19.657 19.242 19.769 19.093 19.864C18.944 19.96 18.758 20.034 18.536 20.088C18.313 20.142 18.053 20.169 17.754 20.169C17.246 20.169 16.742 20.079 16.243 19.901C15.744 19.723 15.282 19.455 14.856 19.098V21.445C15.238 21.64 15.689 21.787 16.21 21.885Z"
@@ -213,28 +213,28 @@ function HeroLiveDemo() {
   return (
     <div className="flex h-[400px] flex-col">
       {/* Top status bar */}
-      <div className="flex items-center justify-between border-b border-[#252525] px-4 py-2.5">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
             <div
               className={`h-2 w-2 rounded-full ${
                 lastConfidence !== null && lastConfidence < 0.5
                   ? 'animate-pulse bg-red-400'
-                  : 'bg-emerald-500'
+                  : 'bg-foreground'
               }`}
             />
-            <span className="text-[11px] font-medium text-[#a2a2a2]">
+            <span className="text-[11px] font-medium text-muted-foreground">
               support-bot
             </span>
           </div>
 
           {lastConfidence !== null && (
             <>
-              <div className="h-3 w-px bg-[#252525]" />
+              <div className="h-3 w-px bg-border" />
               <span
                 className={`font-mono text-[11px] font-medium ${
                   lastConfidence >= 0.9
-                    ? 'text-emerald-400'
+                    ? 'text-foreground'
                     : lastConfidence >= 0.5
                       ? 'text-amber-400'
                       : 'text-red-400'
@@ -247,12 +247,12 @@ function HeroLiveDemo() {
         </div>
 
         <div className="flex items-center gap-2">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-          <span className="text-[10px] text-[#585858]">vex active</span>
+          <ShieldCheck className="h-3.5 w-3.5 text-foreground" />
+          <span className="text-[10px] text-muted-foreground">vex active</span>
           {done && (
             <button
               onClick={replay}
-              className="ml-2 flex items-center gap-1 text-[10px] text-[#a2a2a2] transition-colors hover:text-white"
+              className="ml-2 flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             >
               <RotateCcw className="h-2.5 w-2.5" />
             </button>
@@ -267,7 +267,7 @@ function HeroLiveDemo() {
       >
         {visibleSteps.length === 0 && (
           <div className="flex h-full items-center justify-center">
-            <span className="text-xs text-[#585858]">Starting session…</span>
+            <span className="text-xs text-muted-foreground">Starting session…</span>
           </div>
         )}
 
@@ -279,10 +279,10 @@ function HeroLiveDemo() {
                 className="animate-[termLine_0.3s_cubic-bezier(0.16,1,0.3,1)_forwards] opacity-0"
               >
                 <div className="flex items-start gap-2">
-                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#252525] text-[9px] font-bold text-[#a2a2a2]">
+                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-border text-[9px] font-bold text-muted-foreground">
                     U
                   </div>
-                  <div className="rounded-lg rounded-tl-none bg-[#1e1e1e] px-3 py-2 text-[13px] text-white">
+                  <div className="rounded-lg rounded-tl-none bg-[#1e1e1e] px-3 py-2 text-[13px] text-foreground">
                     {s.text}
                   </div>
                 </div>
@@ -297,7 +297,7 @@ function HeroLiveDemo() {
                 className="animate-[termLine_0.3s_cubic-bezier(0.16,1,0.3,1)_forwards] opacity-0"
               >
                 <div className="flex items-start gap-2 pl-7">
-                  <div className="rounded-lg rounded-tl-none border border-[#252525] bg-[#161616] px-3 py-2 text-[13px] text-[#a2a2a2]">
+                  <div className="rounded-lg rounded-tl-none border border-border bg-card px-3 py-2 text-[13px] text-muted-foreground">
                     {s.text}
                   </div>
                 </div>
@@ -326,12 +326,12 @@ function HeroLiveDemo() {
                 key={i}
                 className="animate-[termLine_0.3s_cubic-bezier(0.16,1,0.3,1)_forwards] pl-7 opacity-0"
               >
-                <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1">
-                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                  <span className="text-[10px] font-medium text-emerald-400">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 py-1">
+                  <CheckCircle2 className="h-3 w-3 text-foreground" />
+                  <span className="text-[10px] font-medium text-foreground">
                     {s.text}
                   </span>
-                  <span className="font-mono text-[10px] text-emerald-500/60">
+                  <span className="font-mono text-[10px] text-foreground/60">
                     {s.confidence?.toFixed(2)}
                   </span>
                 </div>
@@ -370,23 +370,23 @@ function HeroLiveDemo() {
                 {/* What the end user sees — a normal, clean response */}
                 <div className="pl-7">
                   <div className="mb-1 flex items-center gap-1.5">
-                    <span className="text-[10px] font-medium text-emerald-400">
+                    <span className="text-[10px] font-medium text-foreground">
                       ↓ What your user sees
                     </span>
                   </div>
-                  <div className="rounded-lg rounded-tl-none border border-[#252525] bg-[#161616] px-3 py-2 text-[13px] text-[#a2a2a2]">
+                  <div className="rounded-lg rounded-tl-none border border-border bg-card px-3 py-2 text-[13px] text-muted-foreground">
                     {s.text}
                   </div>
                 </div>
 
                 {/* Developer-only annotation */}
                 <div className="pl-7">
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1">
-                    <ShieldCheck className="h-3 w-3 text-emerald-500" />
-                    <span className="text-[10px] text-emerald-400">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 py-1">
+                    <ShieldCheck className="h-3 w-3 text-foreground" />
+                    <span className="text-[10px] text-foreground">
                       Silently corrected — user never saw the hallucination
                     </span>
-                    <span className="font-mono text-[10px] text-emerald-500/60">
+                    <span className="font-mono text-[10px] text-foreground/60">
                       {s.confidence?.toFixed(2)}
                     </span>
                   </div>
@@ -401,9 +401,9 @@ function HeroLiveDemo() {
                 key={i}
                 className="animate-[termLine_0.3s_cubic-bezier(0.16,1,0.3,1)_forwards] opacity-0"
               >
-                <div className="mt-1 flex items-center gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
-                  <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500" />
-                  <span className="text-[11px] text-emerald-400">{s.text}</span>
+                <div className="mt-1 flex items-center gap-3 rounded-lg border border-border/20 bg-foreground/5 px-3 py-2.5">
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-foreground" />
+                  <span className="text-[11px] text-foreground">{s.text}</span>
                 </div>
               </div>
             );
@@ -447,14 +447,14 @@ export function HeroCodeEditor() {
   return (
     <div className="flex flex-col gap-3">
       {/* Tab bar */}
-      <div className="flex items-center overflow-hidden rounded-[10px] border border-[#252525] bg-[#161616]">
-        <div className="flex items-center gap-0.5 rounded-[10px] bg-[#0a0a0a] p-1">
+      <div className="flex items-center overflow-hidden rounded-[10px] border border-border bg-card">
+        <div className="flex items-center gap-0.5 rounded-[10px] bg-background p-1">
           <button
             onClick={() => setTab('live')}
             className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-all ${
               tab === 'live'
-                ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                : 'text-[#a2a2a2] hover:bg-[#161616]/60 hover:text-white'
+                ? 'border border-border/30 bg-foreground/10 text-foreground'
+                : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
             }`}
           >
             <Play className="h-3.5 w-3.5" />
@@ -464,8 +464,8 @@ export function HeroCodeEditor() {
             onClick={() => setTab('python')}
             className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${
               tab === 'python'
-                ? 'border border-[#252525] bg-[#161616]'
-                : 'hover:bg-[#161616]/60'
+                ? 'border border-border bg-card'
+                : 'hover:bg-card/60'
             }`}
           >
             <PythonIcon active={tab === 'python'} />
@@ -474,8 +474,8 @@ export function HeroCodeEditor() {
             onClick={() => setTab('typescript')}
             className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${
               tab === 'typescript'
-                ? 'border border-[#252525] bg-[#161616]'
-                : 'hover:bg-[#161616]/60'
+                ? 'border border-border bg-card'
+                : 'hover:bg-card/60'
             }`}
           >
             <TSIcon active={tab === 'typescript'} />
@@ -484,13 +484,13 @@ export function HeroCodeEditor() {
 
         {tab !== 'live' && (
           <>
-            <div className="mx-3 h-[18px] w-px bg-[#252525]" />
-            <code className="flex-1 font-mono text-sm text-[#a2a2a2]">
+            <div className="mx-3 h-[18px] w-px bg-border" />
+            <code className="flex-1 font-mono text-sm text-muted-foreground">
               {installCommands[lang]}
             </code>
             <button
               onClick={handleCopyInstall}
-              className="mr-2 flex h-8 w-8 items-center justify-center rounded-lg border border-[#252525] bg-[#161616] transition-colors hover:bg-[#252525]"
+              className="mr-2 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:bg-border"
             >
               {copiedInstall ? (
                 <svg
@@ -506,7 +506,7 @@ export function HeroCodeEditor() {
                   width="16"
                   height="16"
                   viewBox="0 0 256 256"
-                  fill="#a2a2a2"
+                  fill="var(--muted-foreground)"
                 >
                   <path d="M216,28H88A12,12,0,0,0,76,40V76H40A12,12,0,0,0,28,88V216a12,12,0,0,0,12,12H168a12,12,0,0,0,12-12V180h36a12,12,0,0,0,12-12V40A12,12,0,0,0,216,28ZM156,204H52V100H156Zm48-48H180V88a12,12,0,0,0-12-12H100V52H204Z" />
                 </svg>
@@ -517,8 +517,8 @@ export function HeroCodeEditor() {
 
         {tab === 'live' && (
           <>
-            <div className="mx-3 h-[18px] w-px bg-[#252525]" />
-            <span className="flex-1 text-[11px] text-[#585858]">
+            <div className="mx-3 h-[18px] w-px bg-border" />
+            <span className="flex-1 text-[11px] text-muted-foreground">
               support-bot — live session
             </span>
           </>
@@ -526,7 +526,7 @@ export function HeroCodeEditor() {
       </div>
 
       {/* Content */}
-      <div className="relative overflow-hidden rounded-lg border border-[#252525] bg-[#161616]">
+      <div className="relative overflow-hidden rounded-lg border border-border bg-card">
         {tab === 'live' ? (
           <HeroLiveDemo />
         ) : (
@@ -536,23 +536,23 @@ export function HeroCodeEditor() {
               template="vanilla"
               theme={{
                 colors: {
-                  surface1: '#161616',
+                  surface1: 'var(--card)',
                   surface2: '#1e1e1e',
-                  surface3: '#252525',
-                  clickable: '#585858',
-                  base: '#a2a2a2',
-                  disabled: '#585858',
-                  hover: '#a2a2a2',
+                  surface3: 'var(--border)',
+                  clickable: 'var(--muted-foreground)',
+                  base: 'var(--muted-foreground)',
+                  disabled: 'var(--muted-foreground)',
+                  hover: 'var(--muted-foreground)',
                   accent: '#10b981',
                   error: '#ef4444',
                   errorSurface: '#1e1e1e',
                 },
                 syntax: {
-                  plain: '#a2a2a2',
-                  comment: { color: '#585858', fontStyle: 'italic' },
+                  plain: 'var(--muted-foreground)',
+                  comment: { color: 'var(--muted-foreground)', fontStyle: 'italic' },
                   keyword: '#c084fc',
                   tag: '#60a5fa',
-                  punctuation: '#a2a2a2',
+                  punctuation: 'var(--muted-foreground)',
                   definition: '#FFAA00',
                   property: '#34d399',
                   static: '#ff8866',
@@ -584,7 +584,7 @@ export function HeroCodeEditor() {
 
             <button
               onClick={handleCopyCode}
-              className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-lg border border-[#252525] bg-[#161616] transition-colors hover:bg-[#252525]"
+              className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:bg-border"
             >
               {copiedCode ? (
                 <svg
@@ -600,7 +600,7 @@ export function HeroCodeEditor() {
                   width="16"
                   height="16"
                   viewBox="0 0 256 256"
-                  fill="#a2a2a2"
+                  fill="var(--muted-foreground)"
                 >
                   <path d="M216,28H88A12,12,0,0,0,76,40V76H40A12,12,0,0,0,28,88V216a12,12,0,0,0,12,12H168a12,12,0,0,0,12-12V180h36a12,12,0,0,0,12-12V40A12,12,0,0,0,216,28ZM156,204H52V100H156Zm48-48H180V88a12,12,0,0,0-12-12H100V52H204Z" />
                 </svg>

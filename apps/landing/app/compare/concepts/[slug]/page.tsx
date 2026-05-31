@@ -92,13 +92,13 @@ export default async function ConceptComparisonPage({ params }: Props) {
               { label: comparison.seo.title },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             Comparison
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {comparison.seo.title}
           </h1>
-          <p className="mb-4 text-xs text-[#585858]">
+          <p className="mb-4 text-xs text-muted-foreground">
             Last reviewed: {comparison.meta.generatedAt}
           </p>
           <ConceptComparisonRenderer comparison={comparison} />

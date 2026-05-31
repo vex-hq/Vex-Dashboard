@@ -38,7 +38,7 @@ export function AnimatedLogo({
     const cx = width / 2;
     const cy = height / 2;
     const fg = '#ffffff';
-    const bg = '#0a0a0a';
+    const bg = 'var(--background)';
     const scatterRadius = height * 0.7;
     const collapseSpeed = 0.22;
     const trailFade = 0.12;

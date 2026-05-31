@@ -23,20 +23,20 @@ const faqs = [
 
 export function FaqAccordion() {
   return (
-    <section id="faq" className="border-t border-[#252525] py-20">
+    <section id="faq" className="border-t border-border py-20">
       <div className="container">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           FAQ
         </div>
-        <h2 className="mb-12 max-w-[600px] text-3xl leading-tight font-semibold tracking-tight text-white sm:text-4xl">
+        <h2 className="mb-12 max-w-[600px] text-3xl leading-tight font-semibold tracking-tight text-foreground sm:text-4xl">
           Frequently asked questions
         </h2>
 
         <div className="mx-auto max-w-[800px]">
           {faqs.map((faq, i) => (
-            <details key={i} className="group border-b border-[#252525]">
+            <details key={i} className="group border-b border-border">
               <summary className="flex cursor-pointer list-none items-center justify-between py-5 text-left [&::-webkit-details-marker]:hidden">
-                <span className="pr-4 text-[15px] font-medium text-white">
+                <span className="pr-4 text-[15px] font-medium text-foreground">
                   {faq.q}
                 </span>
                 <svg
@@ -46,13 +46,13 @@ export function FaqAccordion() {
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.5"
-                  className="shrink-0 text-[#585858] transition-transform duration-200 group-open:rotate-45"
+                  className="shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-45"
                 >
                   <line x1="10" y1="4" x2="10" y2="16" />
                   <line x1="4" y1="10" x2="16" y2="10" />
                 </svg>
               </summary>
-              <p className="pb-5 text-sm leading-relaxed text-[#a2a2a2]">
+              <p className="pb-5 text-sm leading-relaxed text-muted-foreground">
                 {faq.a}
               </p>
             </details>

@@ -145,9 +145,9 @@ const logos = [
 
 export function LogoBar() {
   return (
-    <section className="border-y border-[#252525] py-10">
+    <section className="border-y border-border py-10">
       <div className="container">
-        <p className="mb-8 text-center text-sm font-medium tracking-widest text-[#585858] uppercase">
+        <p className="mb-8 text-center text-sm font-medium tracking-widest text-muted-foreground uppercase">
           Works with your stack
         </p>
         <div className="relative overflow-hidden">

@@ -159,7 +159,7 @@ export default function AgentHealthScore() {
       ? 'text-red-500'
       : scores.overall < 70
         ? 'text-amber-500'
-        : 'text-emerald-500';
+        : 'text-foreground';
   const scoreLabel =
     scores.overall < 40
       ? 'Needs Attention'
@@ -192,13 +192,13 @@ export default function AgentHealthScore() {
       />
 
       <div className="mx-auto max-w-[720px]">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           Free Tool
         </div>
-        <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+        <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
           AI Agent Health Score
         </h1>
-        <p className="mb-12 text-lg text-[#a2a2a2]">
+        <p className="mb-12 text-lg text-muted-foreground">
           Score your AI agent&apos;s production readiness in 2 minutes. Answer 8
           questions and get personalized recommendations.
         </p>
@@ -208,12 +208,12 @@ export default function AgentHealthScore() {
             {questions.map((q, qi) => (
               <div
                 key={qi}
-                className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6"
+                className="rounded-xl border border-border bg-background p-6"
               >
-                <div className="mb-1 text-[11px] font-medium tracking-widest text-emerald-500/60 uppercase">
+                <div className="mb-1 text-[11px] font-medium tracking-widest text-foreground/60 uppercase">
                   {q.category}
                 </div>
-                <p className="mb-4 text-[15px] font-medium text-white">
+                <p className="mb-4 text-[15px] font-medium text-foreground">
                   {q.question}
                 </p>
                 <div className="space-y-2">
@@ -225,8 +225,8 @@ export default function AgentHealthScore() {
                       }
                       className={`w-full rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
                         answers[qi] === opt.score
-                          ? 'border-emerald-500/50 bg-emerald-500/10 text-white'
-                          : 'border-[#252525] text-[#a2a2a2] hover:border-[#585858] hover:text-white'
+                          ? 'border-border/50 bg-foreground/10 text-foreground'
+                          : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
                       }`}
                     >
                       {opt.label}
@@ -241,8 +241,8 @@ export default function AgentHealthScore() {
               disabled={!allAnswered}
               className={`w-full rounded-lg py-4 text-[15px] font-semibold transition-colors ${
                 allAnswered
-                  ? 'bg-emerald-500 text-white hover:bg-emerald-400'
-                  : 'cursor-not-allowed bg-[#252525] text-[#585858]'
+                  ? 'bg-foreground text-background hover:bg-[var(--klio-foreground-strong)]'
+                  : 'cursor-not-allowed bg-border text-muted-foreground'
               }`}
             >
               {allAnswered
@@ -257,11 +257,11 @@ export default function AgentHealthScore() {
               <div className={`text-7xl font-bold ${scoreColor}`}>
                 {scores.overall}
               </div>
-              <div className="mt-2 text-lg text-[#a2a2a2]">{scoreLabel}</div>
+              <div className="mt-2 text-lg text-muted-foreground">{scoreLabel}</div>
             </div>
 
             {/* Category breakdown */}
-            <h2 className="mb-6 text-xl font-semibold text-white">
+            <h2 className="mb-6 text-xl font-semibold text-foreground">
               Category Breakdown
             </h2>
             <div className="mb-12 space-y-4">
@@ -274,27 +274,27 @@ export default function AgentHealthScore() {
                 return (
                   <div
                     key={cat}
-                    className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6"
+                    className="rounded-xl border border-border bg-background p-6"
                   >
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium text-white">
+                      <span className="text-sm font-medium text-foreground">
                         {cat}
                       </span>
-                      <span className="text-sm text-[#a2a2a2]">{pct}%</span>
+                      <span className="text-sm text-muted-foreground">{pct}%</span>
                     </div>
-                    <div className="mb-3 h-2 overflow-hidden rounded-full bg-[#252525]">
+                    <div className="mb-3 h-2 overflow-hidden rounded-full bg-border">
                       <div
                         className={`h-full rounded-full ${
                           pct < 40
                             ? 'bg-red-500'
                             : pct < 70
                               ? 'bg-amber-500'
-                              : 'bg-emerald-500'
+                              : 'bg-foreground'
                         }`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <p className="text-sm leading-relaxed text-[#a2a2a2]">
+                    <p className="text-sm leading-relaxed text-muted-foreground">
                       {recommendations[cat]?.[level]}
                     </p>
                   </div>
@@ -303,18 +303,18 @@ export default function AgentHealthScore() {
             </div>
 
             {/* CTA */}
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-8 text-center">
-              <h3 className="mb-2 text-lg font-semibold text-white">
+            <div className="rounded-xl border border-border/20 bg-foreground/5 p-8 text-center">
+              <h3 className="mb-2 text-lg font-semibold text-foreground">
                 Improve Your Score with Vex
               </h3>
-              <p className="mb-6 text-sm text-[#a2a2a2]">
+              <p className="mb-6 text-sm text-muted-foreground">
                 Vex adds runtime monitoring, drift detection, and
                 auto-correction to any AI agent in 5 minutes.
               </p>
               <div className="flex items-center justify-center gap-3">
                 <Link
                   href="https://app.tryvex.dev"
-                  className="inline-flex h-12 items-center rounded-lg bg-emerald-500 px-7 text-[15px] font-semibold text-white transition-colors hover:bg-emerald-400"
+                  className="inline-flex h-12 items-center rounded-lg bg-foreground px-7 text-[15px] font-semibold text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
                 >
                   Try Vex Free
                 </Link>
@@ -323,7 +323,7 @@ export default function AgentHealthScore() {
                     setShowResults(false);
                     setAnswers({});
                   }}
-                  className="inline-flex h-12 items-center rounded-lg border border-[#252525] px-7 text-[15px] font-medium text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+                  className="inline-flex h-12 items-center rounded-lg border border-border px-7 text-[15px] font-medium text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
                 >
                   Retake Assessment
                 </button>

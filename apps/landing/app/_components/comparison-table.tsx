@@ -335,7 +335,7 @@ function Badge({
     const isVex = !slug;
     return (
       <span
-        className={`font-mono text-xs ${isVex ? 'text-emerald-500' : 'text-[#a2a2a2]'}`}
+        className={`font-mono text-xs ${isVex ? 'text-foreground' : 'text-muted-foreground'}`}
       >
         {label}
       </span>
@@ -347,7 +347,7 @@ function Badge({
   switch (value) {
     case 'yes':
       return (
-        <span aria-label={ariaLabel} className="text-emerald-500">
+        <span aria-label={ariaLabel} className="text-foreground">
           &#10003;
         </span>
       );
@@ -368,7 +368,7 @@ function Badge({
       );
     case 'oss':
       return (
-        <span aria-label={ariaLabel} className="text-emerald-500">
+        <span aria-label={ariaLabel} className="text-foreground">
           &#10003;
         </span>
       );
@@ -397,8 +397,8 @@ function MobileComparison() {
             onClick={() => setSelectedIdx(i)}
             className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
               i === selectedIdx
-                ? 'bg-emerald-500/15 text-emerald-500 ring-1 ring-emerald-500/30'
-                : 'bg-[#161616] text-[#a2a2a2] hover:text-white'
+                ? 'bg-foreground/15 text-foreground ring-1 ring-foreground/30'
+                : 'bg-card text-muted-foreground hover:text-foreground'
             }`}
           >
             {c.name}
@@ -407,7 +407,7 @@ function MobileComparison() {
       </div>
 
       {/* 3-column table: Feature | Vex | Competitor */}
-      <table className="w-full table-fixed overflow-hidden rounded-xl border border-[#252525] bg-[#0a0a0a]">
+      <table className="w-full table-fixed overflow-hidden rounded-xl border border-border bg-background">
         <caption className="sr-only">
           Vex vs {selected.name} feature comparison
         </caption>
@@ -418,18 +418,18 @@ function MobileComparison() {
         </colgroup>
         <thead className="bg-[#111111] text-[11px] font-semibold tracking-wider uppercase">
           <tr>
-            <th scope="col" className="px-4 py-2.5 text-left text-[#585858]">
+            <th scope="col" className="px-4 py-2.5 text-left text-muted-foreground">
               Feature
             </th>
             <th
               scope="col"
-              className="px-4 py-2.5 text-center text-emerald-500"
+              className="px-4 py-2.5 text-center text-foreground"
             >
               Vex
             </th>
             <th
               scope="col"
-              className="truncate px-4 py-2.5 text-center text-[#a2a2a2]"
+              className="truncate px-4 py-2.5 text-center text-muted-foreground"
             >
               {selected.name.split(' ')[0]}
             </th>
@@ -454,7 +454,7 @@ function MobileComparison() {
               >
                 <th
                   scope="row"
-                  className="px-4 py-2.5 pr-2 text-left font-normal text-[#a2a2a2]"
+                  className="px-4 py-2.5 pr-2 text-left font-normal text-muted-foreground"
                 >
                   {row.feature}
                 </th>
@@ -477,7 +477,7 @@ function MobileComparison() {
       {/* Deep-dive link */}
       <Link
         href={`/compare/${selected.slug}`}
-        className="mt-4 flex items-center justify-center rounded-lg border border-[#252525] py-2.5 text-sm font-medium text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+        className="mt-4 flex items-center justify-center rounded-lg border border-border py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
       >
         Full Vex vs {selected.name} breakdown&ensp;&rarr;
       </Link>
@@ -488,7 +488,7 @@ function MobileComparison() {
           <Link
             key={c.slug}
             href={`/compare/${c.slug}`}
-            className="inline-flex items-center rounded-md border border-[#252525] px-2.5 py-1 text-[11px] text-[#585858] transition-colors hover:border-[#585858] hover:text-white"
+            className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
           >
             vs {c.name}
           </Link>
@@ -502,7 +502,7 @@ function MobileComparison() {
 function DesktopComparison() {
   return (
     <div className="hidden md:block">
-      <div className="overflow-x-auto rounded-xl border border-[#252525] bg-[#0a0a0a]">
+      <div className="overflow-x-auto rounded-xl border border-border bg-background">
         <table className="w-full min-w-[900px] border-collapse text-sm">
           <caption className="sr-only">
             Vex vs {competitors.map((c) => c.name).join(', ')} feature
@@ -512,13 +512,13 @@ function DesktopComparison() {
             <tr>
               <th
                 scope="col"
-                className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3.5 text-left text-[13px] font-semibold text-[#585858]"
+                className="sticky left-0 z-10 border-b border-border bg-background px-5 py-3.5 text-left text-[13px] font-semibold text-muted-foreground"
               >
                 Feature
               </th>
               <th
                 scope="col"
-                className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3.5 text-center text-[13px] font-bold text-emerald-500"
+                className="border-b border-l border-border border-l-border/40 bg-foreground/[0.08] px-4 py-3.5 text-center text-[13px] font-bold text-foreground"
               >
                 Vex
               </th>
@@ -526,13 +526,13 @@ function DesktopComparison() {
                 <th
                   key={c.slug}
                   scope="col"
-                  className="border-b border-[#252525] px-4 py-3.5 text-center"
+                  className="border-b border-border px-4 py-3.5 text-center"
                 >
                   <Link href={`/compare/${c.slug}`} className="group">
-                    <div className="text-[13px] font-semibold text-[#a2a2a2] transition-colors group-hover:text-white">
+                    <div className="text-[13px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
                       {c.name}
                     </div>
-                    <div className="text-[10px] text-[#585858]">
+                    <div className="text-[10px] text-muted-foreground">
                       {c.tagline}
                     </div>
                   </Link>
@@ -546,7 +546,7 @@ function DesktopComparison() {
                 <th
                   scope="colgroup"
                   colSpan={2 + competitors.length}
-                  className="border-b border-[#252525] bg-[#111111] px-5 py-2.5 text-left text-[11px] font-semibold tracking-widest text-[#585858] uppercase"
+                  className="border-b border-border bg-[#111111] px-5 py-2.5 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase"
                 >
                   {cat.label}
                 </th>
@@ -554,29 +554,29 @@ function DesktopComparison() {
               {cat.rows.map((row) => (
                 <tr
                   key={row.feature}
-                  className="transition-colors hover:bg-[#161616]"
+                  className="transition-colors hover:bg-card"
                 >
                   <th
                     scope="row"
-                    className="sticky left-0 z-10 border-b border-[#252525] bg-[#0a0a0a] px-5 py-3 text-left font-medium text-white"
+                    className="sticky left-0 z-10 border-b border-border bg-background px-5 py-3 text-left font-medium text-foreground"
                   >
                     <span>{row.feature}</span>
                     {row.tooltip && (
                       <span
-                        className="ml-1.5 inline-block cursor-help text-[#585858]"
+                        className="ml-1.5 inline-block cursor-help text-muted-foreground"
                         title={row.tooltip}
                       >
                         ?
                       </span>
                     )}
                   </th>
-                  <td className="border-b border-l border-[#252525] border-l-emerald-500/40 bg-emerald-500/[0.08] px-4 py-3 text-center font-semibold">
+                  <td className="border-b border-l border-border border-l-border/40 bg-foreground/[0.08] px-4 py-3 text-center font-semibold">
                     <Badge value={row.vex} feature={row.feature} />
                   </td>
                   {competitors.map((c) => (
                     <td
                       key={c.slug}
-                      className="border-b border-[#252525] px-4 py-3 text-center"
+                      className="border-b border-border px-4 py-3 text-center"
                     >
                       <Badge
                         value={row.values[c.slug] ?? 'no'}
@@ -598,7 +598,7 @@ function DesktopComparison() {
           <Link
             key={c.slug}
             href={`/compare/${c.slug}`}
-            className="inline-flex items-center rounded-md border border-[#252525] px-3 py-1.5 text-xs text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+            className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
           >
             Vex vs {c.name}&ensp;&rarr;
           </Link>
@@ -612,9 +612,9 @@ export function ComparisonTable() {
   return (
     <div className="mt-12">
       {/* Legend */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#585858]">
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="text-emerald-500">&#10003;</span> Supported
+          <span className="text-foreground">&#10003;</span> Supported
         </span>
         <span className="flex items-center gap-1.5">
           <span className="text-amber-400">~</span> Partial

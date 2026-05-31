@@ -23,16 +23,16 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <nav aria-label="Breadcrumb" className="mb-8 flex items-center gap-2 text-sm text-[#585858]">
+      <nav aria-label="Breadcrumb" className="mb-8 flex items-center gap-2 text-sm text-muted-foreground">
         {items.map((crumb, i) => (
           <span key={i} className="flex items-center gap-2">
             {i > 0 && <span>/</span>}
             {crumb.href ? (
-              <Link href={crumb.href} className="transition-colors hover:text-white">
+              <Link href={crumb.href} className="transition-colors hover:text-foreground">
                 {crumb.label}
               </Link>
             ) : (
-              <span className="text-[#a2a2a2]">{crumb.label}</span>
+              <span className="text-muted-foreground">{crumb.label}</span>
             )}
           </span>
         ))}
