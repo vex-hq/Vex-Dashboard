@@ -15,28 +15,28 @@ import { SiteHeader } from './_components/site-header';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://klio.tech'),
-  title: 'Klio — the memory layer that keeps AI agents reliable',
+  title: 'Klio — one shared brain for all your AI agents',
   description:
-    'Klio gives AI agents shared, persistent memory — what one learns, the others know — so they stop forgetting, drifting, and contradicting themselves. Local-first, encrypted, open source.',
+    'Connect Claude, Cursor, Codex, and any MCP agent to one shared memory — so what one learns, they all know. Your agents stop forgetting, repeating work, and contradicting each other. Local-first, encrypted, open source.',
   keywords: [
-    'AI agent memory',
-    'agent memory layer',
-    'persistent memory for AI agents',
+    'shared memory for AI agents',
+    'connect AI agents',
     'cross-agent memory',
+    'AI agent collaboration',
+    'shared brain for agents',
     'MCP memory',
     'Claude Code memory',
     'Cursor memory',
+    'Gemini memory',
     'local-first agent memory',
-    'AI agent reliability',
-    'agent drift',
   ],
   alternates: {
     canonical: 'https://klio.tech',
   },
   openGraph: {
-    title: 'Klio — memory for AI agents',
+    title: 'Klio — one shared brain for your AI agents',
     description:
-      'Shared, persistent memory for AI agents. What one learns, the others know. Local-first, encrypted, open source.',
+      'Connect every AI agent you use to one shared memory. What one learns, they all know. Local-first, encrypted, open source.',
     url: 'https://klio.tech',
     siteName: 'Klio',
     type: 'website',
@@ -44,9 +44,9 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     site: '@klio_tech',
-    title: 'Klio — memory for AI agents',
+    title: 'Klio — one shared brain for your AI agents',
     description:
-      'Shared, persistent memory for AI agents. Local-first, encrypted, open source.',
+      'Connect every AI agent you use to one shared memory. What one learns, they all know.',
   },
 };
 

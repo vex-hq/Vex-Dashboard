@@ -7,27 +7,31 @@
 
 ## Decided direction (the one-paragraph version)
 
-**Lead with memory; sell reliability as the result.** AI agents are stateless —
-they forget. Every session restarts from zero, agents on the same project don't
-share what they learn, and they re-make decisions, re-introduce bugs, and
-contradict their own earlier choices. *That forgetting is the root cause of
-unreliable agents* — drift, hallucination, repeated mistakes. Klio gives agents
-**persistent, shared memory** (across sessions and across tools), and that memory
-is what keeps them **reliable**. Memory is the cause; reliability is the effect.
-This unifies the two halves into ONE story instead of "memory + reliability" as
-two bolted-together products — and it gives the 1,200 reliability pSEO pages a
-coherent home as the "why agents fail / how to make them reliable" knowledge hub
-that funnels to Klio's memory-as-the-fix.
+**Lead with collaboration: "one shared brain for all your AI agents."** Say it in
+plain words a non-expert gets on first read. Today every agent is an island —
+they forget between sessions AND they don't share what they learn with each
+other, so Claude, Cursor, Gemini, and Codex each start from zero and trip over
+each other's work. Klio is **one shared memory that every agent plugs into** —
+what one learns, they all know. The hierarchy, ranked: **collaboration (the WHAT
+— a shared brain across every agent you use) ← memory (the HOW — the mechanism)
+→ reliability (the PAYOFF — less drift, fewer repeats); local-first + encrypted +
+open-source is the TRUST pillar, not the headline.** We previously led with memory
+(one of a crowded shelf) and with local-first/OSS (an objection-answer, not a
+reason to want it) — both undersold the real, defensible category: the
+collaboration layer that connects any agent. Keep "Your agents forget. Klio
+remembers." as the hook; make the shared-brain-across-all-your-agents the lead.
 
 ## Product Overview
-**One-liner:** Klio is the memory layer that keeps AI agents reliable.
-**What it does:** Klio gives AI coding agents (Claude Code, Cursor, Codex, and
-any MCP client) persistent, shared memory — what one agent learns, the others
-know; what one decides, the others build on. It captures session activity, stores
-it encrypted under a user-owned key, and serves it back through MCP tools so
-agents stop forgetting, drifting, and contradicting themselves.
-**Product category:** Agent memory layer (the shelf where mem0 / Zep / Supermemory
-sit) — differentiated as cross-agent, local-first, and reliability-grade.
+**One-liner:** Klio is one shared brain for all your AI agents — what one learns,
+they all know.
+**What it does:** Klio connects every AI agent you use (Claude Code, Cursor,
+Codex, Cline, Zed, Gemini — any MCP agent) to one shared memory. It captures what
+each agent does, stores it encrypted under a user-owned key, and serves it back
+through MCP so agents remember across sessions and share context across tools —
+they stop forgetting, repeating work, and contradicting each other.
+**Product category:** The collaboration / shared-memory layer for AI agents.
+Adjacent to the memory shelf (mem0 / Zep / Supermemory) but differentiated as
+**cross-agent** (a shared brain, not single-agent recall), local-first, and open.
 **Product type:** Open-core developer infrastructure. Local-first OSS engine +
 hosted Klio Cloud.
 **Business model:** Free forever, self-hosted (OSS, runs on your machine).
@@ -118,11 +122,20 @@ setup and no interest in local-first/OSS — not the wedge (yet).
 - "It keeps re-introducing the same bug / contradicting earlier decisions."
 - "It passed evals then drifted in prod."
 **How they describe us (aspirational):**
+- "One shared brain for my agents." / "All my agents share what they learn."
 - "Shared memory for my agents." / "It just remembers."
-**Words to use:** memory, remember, recall, shared, persistent, cross-agent,
-local-first, encrypted, reliable, drift, MCP, open source.
-**Words to avoid:** "AI-powered" hype, "revolutionary," "guardrails" as the lead
-(it's the result, not the wedge), Vex / legacy brand terms.
+**Voice rule — keep it plain.** A non-expert should get it on first read. Prefer
+everyday words ("one shared brain," "every agent you use," "what one learns, they
+all know," "plug in," "work together") over jargon. Lead with the simple picture,
+then back it with the technical specifics.
+**Words to use:** shared brain, shared memory, connect, plug in, every agent, work
+together, what one learns they all know, cross-agent, remember, recall, persistent,
+local-first, encrypted, open source, MCP.
+**Words to avoid:** "sandbox" (implies an *isolated* throwaway space — the opposite
+of shared/connective); coined jargon without a gloss (e.g. "unibrain") as the lead;
+"AI-powered" hype, "revolutionary"; "guardrails"/"reliability" as the lead (payoff,
+not wedge); leading with "local-first/open-source" (trust pillar, not the headline);
+Vex / legacy brand terms.
 **Glossary:**
 | Term | Meaning |
 |------|---------|

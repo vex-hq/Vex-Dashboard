@@ -6,10 +6,13 @@
  */
 const WORKS_WITH = [
   'Claude Code',
+  'Claude Desktop',
   'Cursor',
   'Codex',
-  'Ollama',
-  'any MCP client',
+  'Cline',
+  'Zed',
+  'Gemini',
+  'any MCP agent',
 ];
 
 const METRICS = [
@@ -23,7 +26,7 @@ export function Proof() {
   return (
     <section className="border-border border-t">
       <div className="k-container py-10">
-        <p className="k-eyebrow text-center">Works with</p>
+        <p className="k-eyebrow text-center">Connect any agent</p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
           {WORKS_WITH.map((name) => (
             <span

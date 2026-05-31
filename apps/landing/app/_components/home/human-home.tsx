@@ -23,8 +23,8 @@ export function HumanHome() {
       <Hero />
       <Proof />
       <Problem />
-      <HowMemoryWorks />
       <SharedBrain />
+      <HowMemoryWorks />
       <Tools />
       <Reliability />
       <Security />

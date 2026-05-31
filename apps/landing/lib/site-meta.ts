@@ -19,7 +19,7 @@
  */
 
 export const POSITIONING_SENTENCE =
-  'Klio is the memory layer that keeps AI agents reliable — it gives Claude Code, Cursor, Codex, and any MCP client persistent, shared memory so they stop forgetting, drifting, and repeating mistakes. Local-first, encrypted, and open source.' as const;
+  'Klio is one shared brain for all your AI agents — connect Claude, Cursor, Codex, and any MCP agent to a single shared memory, so what one learns, they all know. Your agents stop forgetting, repeating work, and contradicting each other. Local-first, encrypted, and open source.' as const;
 
 export interface Organization {
   readonly name: string;

@@ -12,7 +12,7 @@ const IDENTITY: [string, string][] = [
   ['repo', 'https://github.com/klio-tech/klio'],
   ['license', 'AGPL-3.0-or-later (engine), Apache-2.0 (MCP shim)'],
   ['author', 'Abhishek Singh'],
-  ['category', 'AI agent memory layer'],
+  ['category', 'shared memory / collaboration layer for AI agents'],
   ['contact', ORG.contactEmail],
 ];
 
@@ -63,11 +63,11 @@ export function MachineView() {
 
       <h2>What it is</h2>
       <p>
-        Klio is a memory layer for AI coding agents (Claude Code, Cursor,
-        Codex, and any MCP client). It gives them persistent, shared memory —
-        what one agent learns, the others know — so they stop forgetting,
-        drifting, and contradicting earlier decisions. Memory is the cause;
-        reliability is the effect.
+        Klio is one shared brain for all your AI agents. Connect Claude Code,
+        Cursor, Codex, and any MCP agent to a single shared memory — what one
+        agent learns, the others know. Agents stop forgetting, repeating work,
+        and contradicting each other. Memory is how it works; the agents working
+        together is the point; reliability is the payoff.
       </p>
 
       <h2>How it works</h2>

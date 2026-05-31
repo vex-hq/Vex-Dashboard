@@ -66,10 +66,10 @@ export default function OpengraphImage() {
           <div style={{ display: 'flex' }}>Klio remembers.</div>
         </div>
         <div
-          style={{ display: 'flex', fontSize: 30, color: MUTED, maxWidth: 940 }}
+          style={{ display: 'flex', fontSize: 30, color: MUTED, maxWidth: 980 }}
         >
-          Shared, persistent memory for AI agents — local-first, encrypted, open
-          source.
+          One shared brain for Claude, Cursor, Codex, and any AI agent — what
+          one learns, they all know.
         </div>
       </div>
 
