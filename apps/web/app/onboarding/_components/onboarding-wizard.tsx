@@ -80,6 +80,7 @@ export function OnboardingWizard({
           <StepConnectAgents
             key="step-3"
             accountSlug={accountSlug}
+            apiKey={apiKey}
             onNext={goNext}
             onBack={goBack}
           />
