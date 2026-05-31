@@ -6,7 +6,10 @@ import { Hero } from './hero';
 import { HowMemoryWorks } from './how-memory-works';
 import { Pricing } from './pricing';
 import { Problem } from './problem';
+import { Proof } from './proof';
 import { Reliability } from './reliability';
+import { Security } from './security';
+import { SharedBrain } from './shared-brain';
 import { Tools } from './tools';
 
 /**
@@ -18,10 +21,13 @@ export function HumanHome() {
   return (
     <div className="landing">
       <Hero />
+      <Proof />
       <Problem />
       <HowMemoryWorks />
+      <SharedBrain />
       <Tools />
       <Reliability />
+      <Security />
       <Compare />
       <Cloud />
       <Pricing />
