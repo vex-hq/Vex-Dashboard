@@ -16,12 +16,14 @@ import {
  * Runs AFTER the gateway's default subscription upsert, so the
  * `subscriptions`/`subscription_items` rows are already current. This closes
  * the gap where paid Stripe plans never drove `vex_plan` (previously only set
- * manually by an admin). Covers create/upgrade/downgrade and
- * cancel-at-period-end (which arrives as a status change, not a delete).
+ * manually by an admin). Covers checkout, upgrades, downgrades, and
+ * cancellations that arrive as a status change (e.g. status → canceled).
  *
- * The hard-delete case (subscription removed entirely) is handled separately
- * by a DB trigger and is intentionally NOT covered here — the
- * `onSubscriptionDeleted` callback only receives an id, never an account.
+ * A cancel-at-period-end keeps the subscription 'active' until the period
+ * ends, so the account correctly retains its plan until Stripe finally removes
+ * the subscription. That removal is a hard delete, handled separately by a DB
+ * trigger — the `onSubscriptionDeleted` callback only receives an id, never an
+ * account, so it cannot perform the downgrade itself.
  */
 async function syncAccountPlanFromSubscription(
   subscription: SubscriptionLike & { target_account_id?: string },
@@ -42,12 +44,17 @@ async function syncAccountPlanFromSubscription(
     .eq('id', accountId);
 
   if (error) {
-    // Log with context and rethrow so Stripe retries the event. The default
-    // subscription upsert is idempotent, so a retry is safe.
     logger.error(
       { accountId, plan, error },
       'Failed to sync accounts.vex_plan from Stripe subscription',
     );
+
+    // A CHECK-constraint violation (Postgres 23514) is permanent: retrying it
+    // would only trigger Stripe's retry storm (~87 attempts over 72h) and risk
+    // the webhook endpoint being auto-disabled. Stop here. Every other error is
+    // treated as transient — rethrow so the route returns 500 and Stripe
+    // retries (the default subscription upsert is idempotent, so retry is safe).
+    if (error.code === '23514') return;
 
     throw new Error(
       `vex_plan sync failed for account ${accountId}: ${error.message}`,
@@ -85,14 +92,23 @@ export const POST = enhanceRouteHandler(
 
     try {
       await service.handleWebhookEvent(request, {
-        // Upgrade/downgrade/cancel-at-period-end all arrive as updates.
+        // Upgrades, downgrades, and status-change cancellations arrive here.
         onSubscriptionUpdated: syncAccountPlanFromSubscription,
-        // Initial checkout. May be a one-time order (no account/subscription
-        // fields); the helper's guard makes that a safe no-op.
-        onCheckoutSessionCompleted: (subscription) =>
-          syncAccountPlanFromSubscription(
-            subscription as SubscriptionLike & { target_account_id?: string },
-          ),
+        // Initial checkout. The payload is either a subscription or a one-time
+        // order — and an order ALSO carries a (required) target_account_id, so
+        // the `!accountId` guard alone is not enough to exclude it. Discriminate
+        // positively on the subscription id: only subscriptions have a plan to
+        // sync. Syncing an order here would resolve to 'free' and clobber a
+        // paying customer's plan.
+        onCheckoutSessionCompleted: (payload) => {
+          if (!('target_subscription_id' in payload)) {
+            return Promise.resolve();
+          }
+
+          return syncAccountPlanFromSubscription(
+            payload as SubscriptionLike & { target_account_id?: string },
+          );
+        },
         // Hard-delete (subscription fully removed) downgrades to free, but the
         // callback only receives an id — no account to write. That case is
         // handled by a DB trigger (a separate task); here we only log.

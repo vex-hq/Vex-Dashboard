@@ -1,6 +1,43 @@
 import billingConfig from '~/config/billing.config';
 
-export type VexPlan = 'free' | 'starter' | 'pro' | 'team' | 'enterprise';
+/**
+ * The set of valid `accounts.vex_plan` values. This MUST stay in sync with the
+ * DB CHECK constraint defined in
+ * `apps/web/supabase/migrations/20260219000000_add_vex_plan_columns.sql`
+ * (extended by `20260220100000_add_starter_plan.sql`). Deriving `VexPlan` from
+ * this single array, and cross-checking `product.id` against it in
+ * `planFromPriceId`, guarantees we never emit a value the constraint rejects.
+ */
+export const VEX_PLAN_VALUES = [
+  'free',
+  'starter',
+  'pro',
+  'team',
+  'enterprise',
+] as const;
+
+export type VexPlan = (typeof VEX_PLAN_VALUES)[number];
+
+const VEX_PLAN_SET: ReadonlySet<string> = new Set(VEX_PLAN_VALUES);
+
+function isVexPlan(value: string): value is VexPlan {
+  return VEX_PLAN_SET.has(value);
+}
+
+/**
+ * Relative tier ordering, used to pick the HIGHEST plan when a subscription (or
+ * an account, in the backfill) is associated with more than one plan-granting
+ * price. Mirrors the `rank` column in the backfill migration
+ * (`20260601000100_backfill_vex_plan.sql`) so the webhook and the backfill
+ * always agree on which plan wins.
+ */
+const PLAN_RANK: Record<VexPlan, number> = {
+  free: 0,
+  starter: 1,
+  pro: 2,
+  team: 3,
+  enterprise: 4,
+};
 
 // A subscription only grants its paid plan while in one of these statuses;
 // anything else (canceled, past_due, unpaid, incomplete*, paused) → free.
@@ -11,6 +48,11 @@ const PLAN_GRANTING_STATUSES = new Set(['active', 'trialing']);
  * Klio plan via billing.config. Unknown/empty → 'free'. This is the single
  * source of truth for price→plan; keep it config-driven (price ids differ
  * between Stripe test/live, and live in billing.config).
+ *
+ * If a billing.config product id is ever not a known `VexPlan` (a new tier
+ * added to the config before this union and the DB CHECK constraint are
+ * updated), this returns 'free' rather than emitting a value the database
+ * would reject — fail safe instead of triggering a write error.
  */
 export function planFromPriceId(priceId: string | null | undefined): VexPlan {
   if (!priceId) return 'free';
@@ -18,7 +60,7 @@ export function planFromPriceId(priceId: string | null | undefined): VexPlan {
     for (const plan of product.plans) {
       for (const item of plan.lineItems) {
         if (item.id === priceId) {
-          return product.id as VexPlan;
+          return isVexPlan(product.id) ? product.id : 'free';
         }
       }
     }
@@ -43,8 +85,9 @@ export interface SubscriptionLike {
 /**
  * Resolve the plan a subscription grants. Returns 'free' when the status is
  * not plan-granting (canceled/past_due/unpaid/incomplete/paused) or when no
- * line item maps to a known plan. Picks the first line item whose price id
- * maps to a non-free plan; this is the plan the account is entitled to.
+ * line item maps to a known plan. When multiple line items map to plans, the
+ * HIGHEST tier wins (matching the backfill migration), so an add-on or a
+ * multi-item subscription can never silently downgrade the account.
  */
 export function resolvePlanFromSubscription(
   subscription: SubscriptionLike,
@@ -53,11 +96,15 @@ export function resolvePlanFromSubscription(
 
   const items = subscription.line_items ?? [];
 
+  let best: VexPlan = 'free';
+
   for (const item of items) {
     const plan = planFromPriceId(item.variant_id);
 
-    if (plan !== 'free') return plan;
+    if (PLAN_RANK[plan] > PLAN_RANK[best]) {
+      best = plan;
+    }
   }
 
-  return 'free';
+  return best;
 }

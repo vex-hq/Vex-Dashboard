@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import billingConfig from '~/config/billing.config';
+
 import {
+  VEX_PLAN_VALUES,
   planFromPriceId,
   resolvePlanFromSubscription,
   statusGrantsPlan,
@@ -111,11 +114,31 @@ describe('resolvePlanFromSubscription', () => {
     ).toBe('free');
   });
 
-  it('skips null/free line items and picks the first plan-granting one', () => {
+  it('skips null/free line items and picks the plan-granting one', () => {
     expect(
       resolvePlanFromSubscription({
         status: 'active',
         line_items: [{ variant_id: null }, { variant_id: TEAM_MONTHLY }],
+      }),
+    ).toBe('team');
+  });
+
+  it('picks the HIGHEST tier when multiple line items map to plans', () => {
+    // Order must not matter: team outranks starter and pro either way.
+    expect(
+      resolvePlanFromSubscription({
+        status: 'active',
+        line_items: [
+          { variant_id: STARTER_MONTHLY },
+          { variant_id: TEAM_MONTHLY },
+        ],
+      }),
+    ).toBe('team');
+
+    expect(
+      resolvePlanFromSubscription({
+        status: 'active',
+        line_items: [{ variant_id: TEAM_MONTHLY }, { variant_id: PRO_MONTHLY }],
       }),
     ).toBe('team');
   });
@@ -136,5 +159,17 @@ describe('resolvePlanFromSubscription', () => {
         line_items: [{ variant_id: PRO_MONTHLY }],
       }),
     ).toBe('free');
+  });
+});
+
+describe('billing.config ↔ VexPlan consistency', () => {
+  // Guards against drift: every product id in billing.config must be a value
+  // the DB CHECK constraint accepts (mirrored by VEX_PLAN_VALUES). If a new
+  // tier is added to billing.config without updating VexPlan + the migration,
+  // planFromPriceId would silently fall back to 'free'; this test fails first.
+  it('maps every billing.config product id to a known plan', () => {
+    for (const product of billingConfig.products) {
+      expect(VEX_PLAN_VALUES).toContain(product.id);
+    }
   });
 });
