@@ -30,3 +30,34 @@ export function planFromPriceId(priceId: string | null | undefined): VexPlan {
 export function statusGrantsPlan(status: string | null | undefined): boolean {
   return !!status && PLAN_GRANTING_STATUSES.has(status);
 }
+
+export interface SubscriptionLineItemLike {
+  variant_id?: string | null;
+}
+
+export interface SubscriptionLike {
+  status?: string | null;
+  line_items?: ReadonlyArray<SubscriptionLineItemLike> | null;
+}
+
+/**
+ * Resolve the plan a subscription grants. Returns 'free' when the status is
+ * not plan-granting (canceled/past_due/unpaid/incomplete/paused) or when no
+ * line item maps to a known plan. Picks the first line item whose price id
+ * maps to a non-free plan; this is the plan the account is entitled to.
+ */
+export function resolvePlanFromSubscription(
+  subscription: SubscriptionLike,
+): VexPlan {
+  if (!statusGrantsPlan(subscription.status)) return 'free';
+
+  const items = subscription.line_items ?? [];
+
+  for (const item of items) {
+    const plan = planFromPriceId(item.variant_id);
+
+    if (plan !== 'free') return plan;
+  }
+
+  return 'free';
+}
