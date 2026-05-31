@@ -31,9 +31,10 @@ sit) — differentiated as cross-agent, local-first, and reliability-grade.
 **Product type:** Open-core developer infrastructure. Local-first OSS engine +
 hosted Klio Cloud.
 **Business model:** Free forever, self-hosted (OSS, runs on your machine).
-Klio Cloud is paid + opt-in: managed hosting, SSO, and the cross-agent
-intelligence layer — including **B2B2C per-end-user memory** for companies
-embedding Klio in their own agent products (priced per end-user).
+Klio Cloud is **live now** — sign up / sign in at **app.klio.tech** (magic-link,
+free to start) — and adds managed hosting, SSO, and the cross-agent intelligence
+layer, including **B2B2C per-end-user memory** for companies embedding Klio in
+their own agent products (priced per end-user). Cloud is opt-in, not a waitlist.
 
 ## Target Audience
 **Target companies:** Teams and solo developers building AI agents / agentic
@@ -150,7 +151,10 @@ one-command install; 0 telemetry; per-space pluggable embedding models.
 ## Goals
 **Business goal:** developer-led adoption of OSS Klio → conversion to Klio Cloud
 (esp. B2B2C per-end-user).
-**Conversion action:** `npx @klio-tech/klio init` (OSS) + Klio Cloud waitlist/signup.
+**Conversion action:** two live paths, both surfaced on the landing —
+(1) OSS: `npx @klio-tech/klio init`; (2) Klio Cloud: **sign up** at
+app.klio.tech/auth/sign-up (free to start, magic-link), with **Sign in**
+persistently available in the nav for returning Cloud users.
 **Current metrics:** pre-launch / early.
 
 ---
@@ -165,3 +169,10 @@ one-command install; 0 telemetry; per-space pluggable embedding models.
   Vex→Klio. They power SEO and feed the funnel — not abandoned, not the headline.
 - **Reuse Vex's conversion muscle** (problem framing, how-it-works, interactive
   demo, pricing, comparison) re-skinned into Klio's look and re-told around memory.
+- **Surface Klio Cloud, not just the OSS install:** persistent **Sign in** +
+  **Get started / Sign up** in the nav (→ app.klio.tech/auth), a dedicated Cloud
+  section (managed, hosted, cross-agent, per-end-user), and Cloud CTAs in pricing
+  and the closing block. Two clear paths: self-host (OSS) or Cloud (sign up).
+- **Social share card (OG image):** a branded klio.tech preview image renders
+  when the URL is shared anywhere — Klio mark + "Your agents forget. Klio
+  remembers." on the cream/mono card — generated via Next `opengraph-image`.

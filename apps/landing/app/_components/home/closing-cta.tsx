@@ -1,4 +1,4 @@
-import { GITHUB_REPO_URL } from '../nav/nav-config';
+import { CLOUD_SIGNUP_URL, GITHUB_REPO_URL } from '../nav/nav-config';
 
 /**
  * Closing CTA — the one command, restated. Quiet confidence, no hard sell.
@@ -20,15 +20,22 @@ export function ClosingCta() {
             <span className="text-muted-foreground mr-2 select-none">$</span>
             npx @klio-tech/klio init
           </code>
+          <a href={CLOUD_SIGNUP_URL} className="k-btn k-btn--primary">
+            Or sign up for Klio Cloud
+          </a>
+        </div>
+
+        <p className="text-muted-foreground mt-6 text-[13px]">
+          Prefer the source?{' '}
           <a
             href={GITHUB_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="k-btn k-btn--ghost"
+            className="k-link"
           >
-            Star on GitHub
+            Star it on GitHub
           </a>
-        </div>
+        </p>
       </div>
     </section>
   );

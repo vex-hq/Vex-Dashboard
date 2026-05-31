@@ -1,5 +1,6 @@
-import { Compare } from './compare';
 import { ClosingCta } from './closing-cta';
+import { Cloud } from './cloud';
+import { Compare } from './compare';
 import { HomeFaq } from './faq';
 import { Hero } from './hero';
 import { HowMemoryWorks } from './how-memory-works';
@@ -22,6 +23,7 @@ export function HumanHome() {
       <Tools />
       <Reliability />
       <Compare />
+      <Cloud />
       <Pricing />
       <HomeFaq />
       <ClosingCta />

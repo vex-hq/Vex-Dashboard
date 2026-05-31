@@ -20,7 +20,8 @@ import { cn } from '@kit/ui/utils';
 
 import { GitHubStarsBadge } from './github-stars-badge';
 import {
-  APP_URL,
+  CLOUD_SIGNIN_URL,
+  CLOUD_SIGNUP_URL,
   NAV_ITEMS,
   type NavGroup,
   type NavItem,
@@ -150,8 +151,19 @@ export function MobileNav({ formatted }: { formatted: string | null }) {
               className="w-full justify-center"
             />
             <SheetClose asChild>
-              <a href={APP_URL} className="k-btn k-btn--primary w-full justify-center">
+              <a
+                href={CLOUD_SIGNUP_URL}
+                className="k-btn k-btn--primary w-full justify-center"
+              >
                 Get started
+              </a>
+            </SheetClose>
+            <SheetClose asChild>
+              <a
+                href={CLOUD_SIGNIN_URL}
+                className="k-btn k-btn--ghost w-full justify-center"
+              >
+                Sign in
               </a>
             </SheetClose>
           </div>

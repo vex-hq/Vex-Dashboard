@@ -1,4 +1,4 @@
-import { APP_URL, GITHUB_REPO_URL } from '../nav/nav-config';
+import { CLOUD_SIGNUP_URL, GITHUB_REPO_URL } from '../nav/nav-config';
 
 /**
  * Home pricing — scales to zero. Self-host is free forever (OSS); Klio Cloud
@@ -10,16 +10,26 @@ const TIERS = [
     name: 'Self-host',
     price: 'Free forever',
     desc: 'The open-source engine on your machine. Local-first, encrypted under your key, all seven MCP tools.',
-    points: ['Unlimited memory, local', 'Encrypted at rest', 'No telemetry', 'AGPL + Apache shim'],
+    points: [
+      'Unlimited memory, local',
+      'Encrypted at rest',
+      'No telemetry',
+      'AGPL + Apache shim',
+    ],
     cta: { label: 'Install', href: GITHUB_REPO_URL, external: true },
     primary: true,
   },
   {
     name: 'Klio Cloud',
-    price: 'Opt-in',
+    price: 'Free to start',
     desc: 'Managed hosting, SSO, and the cross-agent intelligence layer — including per-end-user memory for products that embed Klio.',
-    points: ['Managed + backed up', 'Cross-agent sync', 'Per-end-user isolation', 'SSO & audit'],
-    cta: { label: 'Join the waitlist', href: APP_URL, external: true },
+    points: [
+      'Managed + backed up',
+      'Cross-agent sync',
+      'Per-end-user isolation',
+      'SSO & audit',
+    ],
+    cta: { label: 'Sign up', href: CLOUD_SIGNUP_URL, external: true },
     primary: false,
   },
 ] as const;

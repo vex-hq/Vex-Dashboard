@@ -31,7 +31,7 @@ export interface Organization {
 export const ORG = {
   name: 'Klio',
   url: 'https://klio.tech',
-  logo: 'https://klio.tech/images/og-image.png',
+  logo: 'https://klio.tech/icon.svg',
   contactEmail: 'contact@klio.tech',
 } as const satisfies Organization;
 
