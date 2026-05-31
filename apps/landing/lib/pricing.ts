@@ -39,7 +39,10 @@ export const PLANS: ReadonlyArray<Plan> = [
     description: 'Sandbox for exploring agent reliability.',
     audience: 'Developers exploring AI agent reliability',
     highlighted: false,
-    cta: { label: 'Get Started Free', href: 'https://app.tryvex.dev' },
+    cta: {
+      label: 'Get Started Free',
+      href: 'https://app.klio.tech/auth/sign-up',
+    },
     features: [
       { label: 'Observations', value: '1,000 / mo' },
       { label: 'Verifications', value: '50 / mo' },
@@ -58,7 +61,7 @@ export const PLANS: ReadonlyArray<Plan> = [
     description: 'For founders running 1-2 agents in production.',
     audience: 'Founders running 1-2 agents in production',
     highlighted: false,
-    cta: { label: 'Start Starter', href: 'https://app.tryvex.dev' },
+    cta: { label: 'Start Starter', href: 'https://app.klio.tech/auth/sign-up' },
     features: [
       { label: 'Observations', value: '25,000 / mo' },
       { label: 'Verifications', value: '1,000 / mo' },
@@ -78,7 +81,7 @@ export const PLANS: ReadonlyArray<Plan> = [
     description: 'For teams shipping agents to production.',
     audience: 'Teams shipping agents to production',
     highlighted: true,
-    cta: { label: 'Start Pro', href: 'https://app.tryvex.dev' },
+    cta: { label: 'Start Pro', href: 'https://app.klio.tech/auth/sign-up' },
     features: [
       { label: 'Observations', value: '150,000 / mo' },
       { label: 'Verifications', value: '15,000 / mo' },
@@ -98,7 +101,7 @@ export const PLANS: ReadonlyArray<Plan> = [
     description: 'For organizations running agents at scale.',
     audience: 'Organizations running agents at scale',
     highlighted: false,
-    cta: { label: 'Start Team', href: 'https://app.tryvex.dev' },
+    cta: { label: 'Start Team', href: 'https://app.klio.tech/auth/sign-up' },
     features: [
       { label: 'Observations', value: '1,500,000 / mo' },
       { label: 'Verifications', value: '150,000 / mo' },
