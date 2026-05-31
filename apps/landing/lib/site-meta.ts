@@ -71,4 +71,19 @@ export const FAQ = [
     answer:
       'Klio is MCP-native, so it works with Claude Code, Cursor, Codex, and any MCP client out of the box.',
   },
+  {
+    question: 'Can I change the embedding model?',
+    answer:
+      'Yes. Embeddings are pluggable per space — nomic-embed-text by default, with snowflake-arctic-embed2, OpenAI text-embedding-3-small, and others supported. Pick the model that fits each store.',
+  },
+  {
+    question: 'Does Klio run on Windows?',
+    answer:
+      'The self-hosted engine runs anywhere Docker does, including Windows via WSL2. If you’d rather not run anything locally, Klio Cloud works from any OS with zero install.',
+  },
+  {
+    question: 'Is it really encrypted?',
+    answer:
+      'Yes — memory is encrypted at rest under a key you own, and every write is chained with SHA-256 so the history is tamper-evident and inspectable. It’s auditable by design, not “trust us”.',
+  },
 ] as const satisfies ReadonlyArray<FaqEntry>;
