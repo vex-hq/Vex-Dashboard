@@ -1,4 +1,4 @@
-const GITHUB_API_URL = 'https://api.github.com/repos/Vex-AI-Dev/Vex';
+const GITHUB_API_URL = 'https://api.github.com/repos/klio-tech/klio';
 
 function formatStarCount(n: number): string {
   if (n < 1000) return String(n);

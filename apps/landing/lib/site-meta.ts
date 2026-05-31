@@ -2,14 +2,16 @@
  * Single source of truth for landing-site identity, positioning, and FAQ.
  *
  * Consumed by:
- * - `lib/schemas.ts` (JSON-LD generators for Organization + FAQPage)
+ * - `lib/seo/schemas.ts` (JSON-LD generators for Organization + FAQPage)
  * - `app/layout.tsx` (root JSON-LD)
  * - `app/_components/faq-accordion.tsx` (FAQ UI)
  * - `/llms.txt` route (positioning sentence)
  *
- * Positioning facts locked during brainstorm: Vex is no longer marketed as
- * open source. Do not introduce the strings "open source", "Apache 2.0",
- * "AGPLv3", or "MIT" anywhere in this module.
+ * Positioning: Klio leads with memory and sells reliability as the result.
+ * Klio is open-core — free, self-hostable OSS engine + hosted Klio Cloud —
+ * so "open source" IS part of the wedge here (this reverses the old Vex-era
+ * rule that forbade it). Keep wire-protocol identifiers (X-Vex-Key, org_id,
+ * published SDK package names) untouched — they live in code, not copy.
  *
  * Data shape is intentionally `readonly` end-to-end so consumers cannot
  * mutate the catalog at runtime. Use `[...FAQ]` if a mutable copy is
@@ -17,7 +19,7 @@
  */
 
 export const POSITIONING_SENTENCE =
-  'Vex helps founders shipping AI agents prevent hallucinations, drift, and policy violations from reaching customers through continuous runtime verification with 3-layer auto-correction.' as const;
+  'Klio is the memory layer that keeps AI agents reliable — it gives Claude Code, Cursor, Codex, and any MCP client persistent, shared memory so they stop forgetting, drifting, and repeating mistakes. Local-first, encrypted, and open source.' as const;
 
 export interface Organization {
   readonly name: string;
@@ -27,19 +29,15 @@ export interface Organization {
 }
 
 export const ORG = {
-  name: 'Vex',
-  url: 'https://tryvex.dev',
-  logo: 'https://tryvex.dev/images/og-image.png',
-  contactEmail: 'hello@tryvex.dev',
+  name: 'Klio',
+  url: 'https://klio.tech',
+  logo: 'https://klio.tech/images/og-image.png',
+  contactEmail: 'contact@klio.tech',
 } as const satisfies Organization;
 
 export const SAME_AS = [
-  'https://github.com/Vex-AI-Dev',
-  'https://x.com/tryvex',
-  // Placeholders — uncomment after listings exist:
-  // 'https://www.g2.com/products/vex',
-  // 'https://www.producthunt.com/products/vex',
-  // 'https://www.linkedin.com/company/tryvex',
+  'https://github.com/klio-tech',
+  'https://x.com/klio_tech',
 ] as const satisfies ReadonlyArray<string>;
 
 export interface FaqEntry {
@@ -49,28 +47,28 @@ export interface FaqEntry {
 
 export const FAQ = [
   {
-    question: 'What is Vex?',
+    question: 'What is Klio?',
     answer:
-      "Vex is a runtime reliability layer for AI agents. It detects when your agent's behavior silently changes in production — hallucinations, drift, schema violations — and auto-corrects before your users notice.",
+      'Klio is a memory layer for AI agents. It captures what your agents learn, stores it encrypted under a key you own, and serves it back through MCP so your agents remember across sessions and share context across tools — which is what keeps them reliable.',
   },
   {
-    question: 'How is Vex different from evals or tracing?',
+    question: 'Does my data leave my machine?',
     answer:
-      "Evals test your agent before deployment. Tracing shows you what happened after something breaks. Vex runs continuously in production, catching behavioral drift in real-time and auto-correcting on the fly. They're complementary — Vex fills the gap between pre-deploy testing and post-mortem analysis.",
+      'No. Klio is local-first: memory is stored on your machine, encrypted under a user-owned key. Nothing leaves unless you explicitly opt into Klio Cloud.',
+  },
+  {
+    question: 'How is Klio different from mem0, Zep, or observability tools?',
+    answer:
+      'Memory tools like mem0 and Zep recall for a single agent. Observability tools watch output after the agent acts. Klio gives multiple agents a shared, persistent memory — preventing drift at the source instead of recalling for just one agent or flagging problems after the fact.',
   },
   {
     question: 'How long does it take to set up?',
     answer:
-      'About 5 minutes. Install the SDK (pip install vex-sdk or npm install @vex_dev/sdk), add 3 lines of code to wrap your agent function, and deploy. Vex starts learning from the first request.',
+      'One command: `npx @klio-tech/klio init`. It wires Klio into Claude Code, Cursor, or Codex and starts remembering from the next session.',
   },
   {
-    question: 'What frameworks does Vex support?',
+    question: 'Which agents does Klio work with?',
     answer:
-      'Vex works with LangChain, CrewAI, OpenAI Assistants, and any custom Python or TypeScript agent. If your code calls an LLM, Vex can watch it.',
-  },
-  {
-    question: 'Does Vex add latency?',
-    answer:
-      'In async mode (default), Vex adds zero latency — verification happens in the background. In sync mode, Vex adds a verification step before returning the output, which typically takes 200-500ms depending on the checks enabled.',
+      'Klio is MCP-native, so it works with Claude Code, Cursor, Codex, and any MCP client out of the box.',
   },
 ] as const satisfies ReadonlyArray<FaqEntry>;

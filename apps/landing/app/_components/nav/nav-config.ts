@@ -16,10 +16,10 @@ export function isNavGroup(item: NavItem): item is NavGroup {
   return 'items' in item;
 }
 
-export const GITHUB_REPO_URL = 'https://github.com/Vex-AI-Dev/Vex';
-export const GITHUB_API_URL = 'https://api.github.com/repos/Vex-AI-Dev/Vex';
-export const APP_URL = 'https://app.tryvex.dev';
-export const DOCS_URL = 'https://docs.tryvex.dev';
+export const GITHUB_REPO_URL = 'https://github.com/klio-tech/klio';
+export const GITHUB_API_URL = 'https://api.github.com/repos/klio-tech/klio';
+export const APP_URL = 'https://app.klio.tech';
+export const DOCS_URL = 'https://docs.klio.tech';
 
 export const PRODUCT_GROUP: NavGroup = {
   label: 'Product',
@@ -27,23 +27,23 @@ export const PRODUCT_GROUP: NavGroup = {
     {
       label: 'How It Works',
       href: '/#how-it-works',
-      description: 'See how Vex catches drift in production',
+      description: 'How shared memory keeps your agents reliable',
     },
     {
       label: 'Quick Start',
       href: '/#code',
-      description: 'Instrument your agent in 5 minutes',
+      description: 'Give your agents memory in one command',
     },
     {
       label: 'Pricing',
       href: '/pricing',
-      description: 'Free tier, no credit card required',
+      description: 'Free self-host, no credit card required',
     },
     {
       label: 'Docs',
       href: DOCS_URL,
       external: true,
-      description: 'Full SDK and API reference',
+      description: 'MCP tools, hooks, and API reference',
     },
   ],
 };

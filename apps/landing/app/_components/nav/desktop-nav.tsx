@@ -32,19 +32,19 @@ function NavDropdownItem({ item }: { item: NavLink }) {
         <Comp
           href={item.href}
           {...externalProps}
-          className="group block rounded-lg px-3.5 py-3 no-underline transition-all outline-none select-none hover:bg-white/[0.06] focus:bg-white/[0.06]"
+          className="group hover:bg-foreground/[0.06] focus:bg-foreground/[0.06] block rounded-lg px-3.5 py-3 no-underline transition-all outline-none select-none"
         >
           <div className="flex flex-col gap-1">
-            <span className="text-[13px] font-medium leading-none text-[#e0e0e0] group-hover:text-white">
+            <span className="text-foreground text-[13px] leading-none font-medium">
               {item.label}
               {item.external && (
-                <span className="ml-1 text-[#555]" aria-hidden="true">
+                <span className="text-muted-foreground ml-1" aria-hidden="true">
                   ↗
                 </span>
               )}
             </span>
             {item.description && (
-              <span className="text-[12px] leading-relaxed text-[#555] group-hover:text-[#777]">
+              <span className="text-muted-foreground group-hover:text-foreground text-[12px] leading-relaxed">
                 {item.description}
               </span>
             )}
@@ -62,9 +62,9 @@ function NavDropdown({ group }: { group: NavGroup }) {
     <NavigationMenuItem>
       <NavigationMenuTrigger
         className={cn(
-          'bg-transparent text-[#a2a2a2] hover:bg-transparent hover:text-white',
-          'focus:bg-transparent focus:text-white',
-          'data-[state=open]:bg-transparent data-[state=open]:text-white',
+          'text-muted-foreground hover:text-foreground bg-transparent hover:bg-transparent',
+          'focus:text-foreground focus:bg-transparent',
+          'data-[state=open]:text-foreground data-[state=open]:bg-transparent',
           'h-9 px-3 text-sm font-medium',
         )}
       >
@@ -98,7 +98,7 @@ function NavDirectLink({ item }: { item: NavLink }) {
         <Comp
           href={item.href}
           {...externalProps}
-          className="inline-flex h-9 items-center px-3 text-sm font-medium text-[#a2a2a2] transition-colors hover:text-white"
+          className="text-muted-foreground hover:text-foreground inline-flex h-9 items-center px-3 text-sm font-medium transition-colors"
         >
           {item.label}
         </Comp>
@@ -114,9 +114,9 @@ export function DesktopNav() {
         className={cn(
           '[&_[data-radix-navigation-menu-viewport]]:!rounded-xl',
           '[&_[data-radix-navigation-menu-viewport]]:!border',
-          '[&_[data-radix-navigation-menu-viewport]]:!border-white/[0.08]',
-          '[&_[data-radix-navigation-menu-viewport]]:!bg-[#141414]',
-          '[&_[data-radix-navigation-menu-viewport]]:!shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9),0_0_0_1px_rgba(255,255,255,0.05),0_0_40px_-15px_rgba(16,185,129,0.06)]',
+          '[&_[data-radix-navigation-menu-viewport]]:!border-border',
+          '[&_[data-radix-navigation-menu-viewport]]:!bg-popover',
+          '[&_[data-radix-navigation-menu-viewport]]:!shadow-[0_20px_60px_-10px_rgba(10,10,10,0.14)]',
           '[&_[data-radix-navigation-menu-viewport]]:!backdrop-blur-xl',
         )}
       >

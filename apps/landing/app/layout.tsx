@@ -13,50 +13,41 @@ import '../styles/globals.css';
 import { SiteFooter } from './_components/site-footer';
 import { SiteHeader } from './_components/site-header';
 
-/*
- * Tessellating chevron / V pattern — echoes the Vex logo shape.
- * Tile: 80×48 — two nested V strokes for depth.
- */
-const CHEVRON_TILE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='48'%3E%3Cpath d='M0 0 L40 32 L80 0' fill='none' stroke='rgba(255,255,255,0.12)' stroke-width='1'/%3E%3Cpath d='M0 16 L40 48 L80 16' fill='none' stroke='rgba(255,255,255,0.06)' stroke-width='0.5'/%3E%3C/svg%3E")`;
-
 export const metadata: Metadata = {
-  metadataBase: new URL('https://tryvex.dev'),
-  title: 'Vex — Runtime reliability for AI agents',
+  metadataBase: new URL('https://klio.tech'),
+  title: 'Klio — the memory layer that keeps AI agents reliable',
   description:
-    "Vex is the runtime reliability layer that detects when your AI agent's behavior silently changes in production. Before your customers notice.",
+    'Klio gives AI agents shared, persistent memory — what one learns, the others know — so they stop forgetting, drifting, and contradicting themselves. Local-first, encrypted, open source.',
   keywords: [
-    'AI agent monitoring',
-    'runtime reliability',
-    'LLM observability',
-    'agent drift detection',
-    'hallucination detection',
-    'AI guardrails',
-    'LangChain monitoring',
-    'CrewAI monitoring',
-    'OpenAI agent monitoring',
-    'production AI agents',
+    'AI agent memory',
+    'agent memory layer',
+    'persistent memory for AI agents',
+    'cross-agent memory',
+    'MCP memory',
+    'Claude Code memory',
+    'Cursor memory',
+    'local-first agent memory',
+    'AI agent reliability',
+    'agent drift',
   ],
   alternates: {
-    canonical: 'https://tryvex.dev',
-  },
-  icons: {
-    icon: '/favicon.ico',
+    canonical: 'https://klio.tech',
   },
   openGraph: {
-    title: 'Vex — Runtime reliability for AI agents',
+    title: 'Klio — memory for AI agents',
     description:
-      "Detect when your AI agent's behavior silently changes in production. Before your customers notice.",
-    url: 'https://tryvex.dev',
+      'Shared, persistent memory for AI agents. What one learns, the others know. Local-first, encrypted, open source.',
+    url: 'https://klio.tech',
     images: [{ url: '/images/og-image.png', width: 1200, height: 630 }],
-    siteName: 'Vex',
+    siteName: 'Klio',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    site: '@tryvex',
-    title: 'Vex — Runtime reliability for AI agents',
+    site: '@klio_tech',
+    title: 'Klio — memory for AI agents',
     description:
-      "Detect when your AI agent's behavior silently changes in production.",
+      'Shared, persistent memory for AI agents. Local-first, encrypted, open source.',
     images: ['/images/og-image.png'],
   },
 };
@@ -99,26 +90,6 @@ export default function RootLayout({
               organizationSchema(),
               faqPageSchema(),
             ]),
-          }}
-        />
-
-        {/* Chevron V-pattern background */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-0"
-          style={{
-            backgroundImage: CHEVRON_TILE,
-            backgroundSize: '80px 48px',
-          }}
-        />
-
-        {/* Radial vignette — pattern fades toward edges */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-0"
-          style={{
-            background:
-              'radial-gradient(ellipse 90% 70% at 50% 30%, transparent 0%, #0a0a0a 100%)',
           }}
         />
 

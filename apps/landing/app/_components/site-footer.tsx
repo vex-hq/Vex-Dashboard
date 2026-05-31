@@ -4,9 +4,8 @@ const sections = [
   {
     heading: 'Product',
     links: [
-      { href: 'https://docs.tryvex.dev', label: 'Docs' },
-      { href: 'https://github.com/Vex-AI-Dev/Vex', label: 'GitHub' },
-      { href: 'https://api.tryvex.dev', label: 'API' },
+      { href: 'https://docs.klio.tech', label: 'Docs' },
+      { href: 'https://github.com/klio-tech/klio', label: 'GitHub' },
       { href: '/blog', label: 'Blog' },
       { href: '/changelog', label: 'Changelog' },
       { href: '/pricing', label: 'Pricing' },
@@ -24,9 +23,9 @@ const sections = [
   {
     heading: 'Company',
     links: [
-      { href: 'https://tryvex.dev', label: 'About' },
-      { href: 'https://x.com/tryvex', label: 'Twitter / X' },
-      { href: 'mailto:info@tryvex.dev', label: 'info@tryvex.dev' },
+      { href: 'https://klio.tech', label: 'About' },
+      { href: 'https://x.com/klio_tech', label: 'Twitter / X' },
+      { href: 'mailto:contact@klio.tech', label: 'contact@klio.tech' },
     ],
   },
   {
@@ -40,19 +39,19 @@ const sections = [
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-[#252525]">
+    <footer className="border-border border-t">
       <div className="container py-16">
         <div className="grid gap-12 md:grid-cols-5">
           <div>
             <AppLogo href="/" />
-            <p className="mt-4 text-sm leading-relaxed text-[#a2a2a2]">
-              Runtime reliability for AI agents in production.
+            <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
+              Memory for AI agents. Local-first, encrypted, open source.
             </p>
           </div>
 
           {sections.map((section) => (
             <div key={section.heading}>
-              <h3 className="mb-4 text-sm font-semibold text-white">
+              <h3 className="text-foreground mb-4 text-sm font-semibold">
                 {section.heading}
               </h3>
               <ul className="space-y-3">
@@ -68,7 +67,7 @@ export function SiteFooter() {
                           ? 'noopener noreferrer'
                           : undefined
                       }
-                      className="text-sm text-[#a2a2a2] transition-colors hover:text-white"
+                      className="text-muted-foreground hover:text-foreground text-sm transition-colors"
                     >
                       {link.label}
                     </a>

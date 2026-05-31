@@ -80,11 +80,11 @@ function MobileNavLink({ item }: { item: NavLink }) {
       <Comp
         href={item.href}
         {...externalProps}
-        className="block rounded-md px-3 py-2 text-sm text-[#a2a2a2] transition-colors hover:bg-[#161616] hover:text-white"
+        className="text-muted-foreground hover:bg-card hover:text-foreground block rounded-md px-3 py-2 text-sm transition-colors"
       >
         {item.label}
         {isExternal && (
-          <span className="ml-1 text-[#585858]" aria-hidden="true">
+          <span className="text-muted-foreground ml-1" aria-hidden="true">
             ↗
           </span>
         )}
@@ -98,7 +98,7 @@ function MobileNavGroup({ group }: { group: NavGroup }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-[#a2a2a2] transition-colors hover:bg-[#161616] hover:text-white">
+      <CollapsibleTrigger className="text-muted-foreground hover:bg-card hover:text-foreground flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors">
         {group.label}
         <ChevronDown
           className={cn(
@@ -107,7 +107,7 @@ function MobileNavGroup({ group }: { group: NavGroup }) {
           )}
         />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1 ml-3 space-y-0.5 border-l border-[#252525] pl-3">
+      <CollapsibleContent className="border-border mt-1 ml-3 space-y-0.5 border-l pl-3">
         {group.items.map((item) => (
           <MobileNavLink key={item.href} item={item} />
         ))}
@@ -122,14 +122,14 @@ export function MobileNav({ formatted }: { formatted: string | null }) {
       <SheetTrigger asChild>
         <button
           aria-label="Open navigation menu"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#a2a2a2] transition-colors hover:bg-[#161616] hover:text-white md:hidden"
+          className="text-muted-foreground hover:bg-card hover:text-foreground inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors md:hidden"
         >
           <MenuIcon />
         </button>
       </SheetTrigger>
       <SheetContent
         side="left"
-        className="w-72 border-r border-[#252525] bg-[#0a0a0a] p-0"
+        className="border-border bg-background w-72 border-r p-0"
       >
         <SheetTitle className="sr-only">Navigation</SheetTitle>
 
@@ -144,17 +144,14 @@ export function MobileNav({ formatted }: { formatted: string | null }) {
             )}
           </div>
 
-          <div className="space-y-3 border-t border-[#252525] pt-4">
+          <div className="border-border space-y-3 border-t pt-4">
             <GitHubStarsBadge
               formatted={formatted}
               className="w-full justify-center"
             />
             <SheetClose asChild>
-              <a
-                href={APP_URL}
-                className="flex h-9 w-full items-center justify-center rounded-md bg-emerald-500 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
-              >
-                Get Started
+              <a href={APP_URL} className="k-btn k-btn--primary w-full justify-center">
+                Get started
               </a>
             </SheetClose>
           </div>
