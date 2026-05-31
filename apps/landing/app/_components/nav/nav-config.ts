@@ -20,6 +20,9 @@ export const GITHUB_REPO_URL = 'https://github.com/klio-tech/klio';
 export const GITHUB_API_URL = 'https://api.github.com/repos/klio-tech/klio';
 export const APP_URL = 'https://app.klio.tech';
 export const DOCS_URL = 'https://docs.klio.tech';
+// Klio Cloud auth (live, magic-link) — the hosted dashboard at app.klio.tech.
+export const CLOUD_SIGNUP_URL = 'https://app.klio.tech/auth/sign-up';
+export const CLOUD_SIGNIN_URL = 'https://app.klio.tech/auth/sign-in';
 
 export const PRODUCT_GROUP: NavGroup = {
   label: 'Product',

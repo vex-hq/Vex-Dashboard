@@ -38,7 +38,6 @@ export const metadata: Metadata = {
     description:
       'Shared, persistent memory for AI agents. What one learns, the others know. Local-first, encrypted, open source.',
     url: 'https://klio.tech',
-    images: [{ url: '/images/og-image.png', width: 1200, height: 630 }],
     siteName: 'Klio',
     type: 'website',
   },
@@ -48,7 +47,6 @@ export const metadata: Metadata = {
     title: 'Klio — memory for AI agents',
     description:
       'Shared, persistent memory for AI agents. Local-first, encrypted, open source.',
-    images: ['/images/og-image.png'],
   },
 };
 

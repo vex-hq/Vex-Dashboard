@@ -4,7 +4,7 @@ import { getGitHubStars } from '~/lib/github';
 import { DesktopNav } from './nav/desktop-nav';
 import { GitHubStarsBadge } from './nav/github-stars-badge';
 import { MobileNav } from './nav/mobile-nav';
-import { APP_URL } from './nav/nav-config';
+import { CLOUD_SIGNIN_URL, CLOUD_SIGNUP_URL } from './nav/nav-config';
 
 export async function SiteHeader() {
   const { formatted } = await getGitHubStars();
@@ -22,7 +22,13 @@ export async function SiteHeader() {
 
           <div className="hidden items-center gap-3 md:flex">
             <GitHubStarsBadge formatted={formatted} />
-            <a href={APP_URL} className="k-btn k-btn--primary">
+            <a
+              href={CLOUD_SIGNIN_URL}
+              className="text-muted-foreground hover:text-foreground px-2 text-sm font-medium transition-colors"
+            >
+              Sign in
+            </a>
+            <a href={CLOUD_SIGNUP_URL} className="k-btn k-btn--primary">
               Get started
             </a>
           </div>
