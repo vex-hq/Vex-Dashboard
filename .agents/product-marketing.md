@@ -1,0 +1,167 @@
+# Product Marketing Context — Klio
+
+*Last updated: 2026-05-31*
+
+> Source of truth for klio.tech positioning + messaging. The merged landing
+> (re-skinned `apps/landing`) and all marketing copy should reference this.
+
+## Decided direction (the one-paragraph version)
+
+**Lead with memory; sell reliability as the result.** AI agents are stateless —
+they forget. Every session restarts from zero, agents on the same project don't
+share what they learn, and they re-make decisions, re-introduce bugs, and
+contradict their own earlier choices. *That forgetting is the root cause of
+unreliable agents* — drift, hallucination, repeated mistakes. Klio gives agents
+**persistent, shared memory** (across sessions and across tools), and that memory
+is what keeps them **reliable**. Memory is the cause; reliability is the effect.
+This unifies the two halves into ONE story instead of "memory + reliability" as
+two bolted-together products — and it gives the 1,200 reliability pSEO pages a
+coherent home as the "why agents fail / how to make them reliable" knowledge hub
+that funnels to Klio's memory-as-the-fix.
+
+## Product Overview
+**One-liner:** Klio is the memory layer that keeps AI agents reliable.
+**What it does:** Klio gives AI coding agents (Claude Code, Cursor, Codex, and
+any MCP client) persistent, shared memory — what one agent learns, the others
+know; what one decides, the others build on. It captures session activity, stores
+it encrypted under a user-owned key, and serves it back through MCP tools so
+agents stop forgetting, drifting, and contradicting themselves.
+**Product category:** Agent memory layer (the shelf where mem0 / Zep / Supermemory
+sit) — differentiated as cross-agent, local-first, and reliability-grade.
+**Product type:** Open-core developer infrastructure. Local-first OSS engine +
+hosted Klio Cloud.
+**Business model:** Free forever, self-hosted (OSS, runs on your machine).
+Klio Cloud is paid + opt-in: managed hosting, SSO, and the cross-agent
+intelligence layer — including **B2B2C per-end-user memory** for companies
+embedding Klio in their own agent products (priced per end-user).
+
+## Target Audience
+**Target companies:** Teams and solo developers building AI agents / agentic
+workflows; and **agent-builder companies** embedding a memory layer for their
+own users (B2B2C).
+**Decision-makers:** Engineers / founding engineers / AI platform leads. Bottom-up,
+developer-led adoption (OSS install first).
+**Primary use case:** Give my agents memory that persists across sessions and is
+shared across tools, so they stop repeating work, re-introducing bugs, and drifting.
+**Jobs to be done:**
+- "Stop my agents from forgetting context between sessions."
+- "Let my different agents/tools share what each one learns."
+- "Make my production agents reliable — fewer hallucinations, less drift."
+- (B2B2C) "Give every one of MY product's users their own private agent memory."
+**Use cases:** cross-session recall in Claude Code/Cursor/Codex; cross-agent
+hand-off; per-end-user memory in an embedded agent product (e.g. a game studio
+giving each player a remembering companion); team "shared brain" for a project.
+
+## Personas
+| Persona | Cares about | Challenge | Value we promise |
+|---------|-------------|-----------|------------------|
+| Agent developer (user) | Agents that don't forget; low setup friction; privacy | Agents restart from zero, drift, repeat mistakes | Persistent shared memory in one command; encrypted, local |
+| Agent-builder company (champion/buyer) | Per-user memory they don't have to build; isolation | Building+operating a memory layer is a distraction | Drop-in per-end-user memory via MCP, paid per end-user |
+| Privacy/security-conscious dev | Data never leaving the machine; auditability | "Memory SaaS" means shipping their data out | Local-first, user-owned key, cryptographic audit chain |
+
+## Problems & Pain Points
+**Core problem:** AI agents are stateless and siloed — they forget across sessions
+and don't share context across tools, so they drift, hallucinate, and redo work.
+**Why alternatives fall short:**
+- Single-agent memory tools (mem0/Zep) recall for one agent; they don't make
+  *multiple* agents share a brain.
+- Reliability/observability tools (LangSmith, Guardrails) watch or gate output
+  *after* the agent acts — they don't fix the root cause (the agent has no memory).
+- "Memory SaaS" ships your data to someone else's cloud.
+**What it costs them:** wasted tokens/time on repeated work, production incidents
+from drift, and the build-vs-buy cost of rolling their own memory layer.
+**Emotional tension:** "My agent passed every eval, shipped, then quietly started
+doing 90% of the job — and I found out from a user."
+
+## Competitive Landscape
+**Direct (memory):** mem0, Zep, Supermemory — single-agent recall; not cross-agent,
+not local-first/encrypted by default, not MCP-native, closed.
+**Secondary (reliability):** LangSmith, Langfuse, Guardrails AI, Braintrust, Galileo
+— observe/guardrail after the fact; treat symptoms (drift/hallucination) rather
+than the cause (no memory). Klio prevents drift by giving the agent context.
+**Indirect:** rolling your own (Postgres + pgvector + glue) — works until you need
+encryption, cross-agent pub/sub, audit, and per-user isolation.
+
+## Differentiation
+**Key differentiators:**
+- **Cross-agent shared memory** (Redis pub/sub) — not just per-agent recall.
+- **Local-first + encrypted under a user-owned key** — data stays on the machine.
+- **MCP-native** — works with Claude Code, Cursor, Codex out of the box.
+- **Cryptographically auditable** (SHA-256 hash chain) — inspectable, not "trust us".
+- **Open-core** — free self-host; paid Cloud only when we host.
+- **Reliability as a built-in outcome**, plus a runtime-verification engine for Cloud.
+**How we do it differently:** memory is the foundation, reliability is the result.
+**Why customers choose us:** they get a remembering, reliable agent in one command,
+without shipping their data out or building the layer themselves.
+
+## Objections
+| Objection | Response |
+|-----------|----------|
+| "Does my data leave my machine?" | No — local-first, encrypted under your key; nothing leaves unless you opt into Cloud. |
+| "Isn't this just another memory SaaS?" | It's OSS and runs on your laptop; Cloud is opt-in. And it's cross-agent, not single-agent. |
+| "Reliability tools already exist." | They watch output after the fact. Klio prevents drift by giving the agent memory/context. |
+| "Setup looks heavy (Docker)." | One command: `npx @klio-tech/klio init`. ~30s warm. |
+
+**Anti-persona:** a non-technical buyer wanting a turnkey hosted SaaS with zero
+setup and no interest in local-first/OSS — not the wedge (yet).
+
+## Switching Dynamics
+**Push:** agents forget, drift, repeat mistakes; rolling your own memory is a tax.
+**Pull:** one-command shared memory, local + encrypted, MCP-native, reliability payoff.
+**Habit:** "I just re-paste context each session" / "we built a little memory hack."
+**Anxiety:** "Is my code/data safe?" → answered by local-first + user-owned key + audit.
+
+## Customer Language
+**How they describe the problem:**
+- "My agent forgets everything between sessions."
+- "It keeps re-introducing the same bug / contradicting earlier decisions."
+- "It passed evals then drifted in prod."
+**How they describe us (aspirational):**
+- "Shared memory for my agents." / "It just remembers."
+**Words to use:** memory, remember, recall, shared, persistent, cross-agent,
+local-first, encrypted, reliable, drift, MCP, open source.
+**Words to avoid:** "AI-powered" hype, "revolutionary," "guardrails" as the lead
+(it's the result, not the wedge), Vex / legacy brand terms.
+**Glossary:**
+| Term | Meaning |
+|------|---------|
+| recall / remember / observe / plan / decide / note / space | The 7 MCP memory tools |
+| space | A scoped memory store |
+| cross-agent | Memory shared across multiple agents/tools |
+
+## Brand Voice
+**Tone:** technical, candid, anti-hype ("Questions, answered honestly").
+**Style:** direct, developer-first, shows real specimens (real recall output,
+ciphertext, vectors) instead of claims.
+**Personality:** precise, trustworthy, understated, craft-driven, a little contrarian.
+
+## Proof Points
+**Metrics/specs:** 7 MCP tools; 768-d embeddings; ~4ms recall; SHA-256 audit chain;
+one-command install; 0 telemetry; per-space pluggable embedding models.
+**Customers:** early — embed case (per-end-user memory for an agent product).
+**Value themes:**
+| Theme | Proof |
+|-------|-------|
+| It remembers across sessions/agents | recall() specimens, cross-agent pub/sub diagram |
+| Private by default | local-first, user-owned key, encrypted-at-rest, audit chain |
+| Reliability as a result | the reliability knowledge hub (former pSEO) + Cloud verification engine |
+| Open + zero-lock-in | OSS, self-host free forever |
+
+## Goals
+**Business goal:** developer-led adoption of OSS Klio → conversion to Klio Cloud
+(esp. B2B2C per-end-user).
+**Conversion action:** `npx @klio-tech/klio init` (OSS) + Klio Cloud waitlist/signup.
+**Current metrics:** pre-launch / early.
+
+---
+
+## How this shapes the merged klio.tech (the landing direction)
+
+- **Home = memory-led, one causal story:** hero leads with cross-agent shared
+  memory → the reliability payoff. Not two co-equal pillars.
+- **Keep Klio's aesthetic + HUMAN/MACHINE dual-mode** as the home spine.
+- **The 1,200 reliability pages = the "Agent Reliability" knowledge hub**, reframed
+  as "why agents fail (no memory/context)" → "how Klio fixes it," rebranded
+  Vex→Klio. They power SEO and feed the funnel — not abandoned, not the headline.
+- **Reuse Vex's conversion muscle** (problem framing, how-it-works, interactive
+  demo, pricing, comparison) re-skinned into Klio's look and re-told around memory.
