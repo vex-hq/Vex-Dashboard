@@ -1,4 +1,4 @@
-import { PLANS } from '~/lib/pricing';
+import { PLANS, PLATFORM } from '~/lib/pricing';
 
 import { GITHUB_REPO_URL } from '../nav/nav-config';
 
@@ -79,13 +79,36 @@ export function Pricing() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`mt-8 ${
-                  plan.highlighted ? 'k-btn k-btn--primary' : 'k-btn k-btn--ghost'
+                  plan.highlighted
+                    ? 'k-btn k-btn--primary'
+                    : 'k-btn k-btn--ghost'
                 } justify-center`}
               >
                 {plan.cta.label}
               </a>
             </div>
           ))}
+        </div>
+
+        {/* B2B2C / embed lane — per-end-user, sales-led */}
+        <div className="border-border bg-card mt-6 flex flex-col gap-5 rounded-lg border p-7 md:flex-row md:items-center md:justify-between">
+          <div className="md:max-w-[60ch]">
+            <div className="flex items-baseline gap-3">
+              <h3 className="k-h3">{PLATFORM.name}</h3>
+              <span className="text-muted-foreground font-mono text-[13px]">
+                {PLATFORM.priceLabel}
+              </span>
+            </div>
+            <p className="text-muted-foreground mt-2 text-[14px] leading-relaxed">
+              {PLATFORM.description}
+            </p>
+          </div>
+          <a
+            href={PLATFORM.cta.href}
+            className="k-btn k-btn--primary shrink-0 justify-center"
+          >
+            {PLATFORM.cta.label}
+          </a>
         </div>
 
         <p className="text-muted-foreground mt-8 text-[14px]">
