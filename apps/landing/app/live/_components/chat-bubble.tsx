@@ -19,7 +19,7 @@ export function ChatBubble({
     status === 'block'
       ? 'border-red-500/50'
       : status === 'pass' || status === 'corrected'
-        ? 'border-emerald-500/50'
+        ? 'border-border/50'
         : 'border-[#333]';
 
   return (

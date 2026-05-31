@@ -13,15 +13,15 @@ export default function DemoPage() {
     <div className="container py-24">
       {/* Hero */}
       <div className="mx-auto max-w-3xl text-center">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           Live Demo
         </div>
 
-        <h1 className="mb-4 text-4xl font-bold tracking-tight text-white lg:text-5xl">
+        <h1 className="mb-4 text-4xl font-bold tracking-tight text-foreground lg:text-5xl">
           Watch Vex Protect an Agent in Real-Time
         </h1>
 
-        <p className="text-lg text-[#a2a2a2]">
+        <p className="text-lg text-muted-foreground">
           A support ticket classifier runs live. When the model drifts, Vex
           detects the issue and auto-corrects — before bad outputs reach
           production.
@@ -54,13 +54,13 @@ export default function DemoPage() {
         ].map((card) => (
           <div
             key={card.title}
-            className="rounded-xl border border-[#252525] bg-[#161616] p-6"
+            className="rounded-xl border border-border bg-card p-6"
           >
-            <h3 className="mb-2 text-lg font-semibold text-white">
+            <h3 className="mb-2 text-lg font-semibold text-foreground">
               {card.title}
             </h3>
 
-            <p className="text-sm text-[#a2a2a2]">{card.description}</p>
+            <p className="text-sm text-muted-foreground">{card.description}</p>
           </div>
         ))}
       </div>
@@ -69,7 +69,7 @@ export default function DemoPage() {
       <div className="mt-16 text-center">
         <a
           href="https://app.tryvex.dev"
-          className="inline-flex items-center rounded-lg bg-emerald-500 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-600"
+          className="inline-flex items-center rounded-lg bg-foreground px-6 py-3 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
         >
           Start Protecting Your Agents
         </a>

@@ -9,9 +9,9 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return (
     <div className="container py-24">
-      <h1 className="mb-8 text-3xl font-bold text-white">Privacy Policy</h1>
-      <div className="prose prose-invert prose-headings:text-white prose-headings:font-semibold prose-h2:text-xl prose-h2:mt-10 prose-h2:mb-4 prose-p:leading-relaxed prose-p:text-[#a2a2a2] prose-li:text-[#a2a2a2] prose-strong:text-white max-w-[720px] text-[#a2a2a2]">
-        <p className="text-sm text-[#585858]">
+      <h1 className="mb-8 text-3xl font-bold text-foreground">Privacy Policy</h1>
+      <div className="prose prose-invert prose-headings:text-foreground prose-headings:font-semibold prose-h2:text-xl prose-h2:mt-10 prose-h2:mb-4 prose-p:leading-relaxed prose-p:text-muted-foreground prose-li:text-muted-foreground prose-strong:text-foreground max-w-[720px] text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Last updated: February 19, 2026
         </p>
 
@@ -108,7 +108,7 @@ export default function PrivacyPage() {
           If you have questions about this Privacy Policy, contact us at{' '}
           <a
             href="mailto:info@tryvex.dev"
-            className="text-emerald-500 hover:text-emerald-400"
+            className="text-foreground hover:text-foreground"
           >
             info@tryvex.dev
           </a>

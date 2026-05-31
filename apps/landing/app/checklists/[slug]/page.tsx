@@ -73,10 +73,10 @@ export default async function ChecklistPage({ params }: Props) {
               { label: checklist.seo.title },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             Checklist
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {checklist.seo.title}
           </h1>
           <ChecklistRenderer checklist={checklist} />

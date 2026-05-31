@@ -75,10 +75,10 @@ export default async function ProblemGuidePage({ params }: Props) {
               { label: guide.seo.title },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             Guide
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {guide.seo.title}
           </h1>
           <ProblemGuideRenderer guide={guide} />
@@ -94,8 +94,8 @@ export default async function ProblemGuidePage({ params }: Props) {
             const fwMap = new Map(frameworks.map((f) => [f.slug, f.name]));
 
             return (
-              <div className="mt-16 border-t border-[#252525] pt-12">
-                <h2 className="mb-6 text-xl font-bold text-white">
+              <div className="mt-16 border-t border-border pt-12">
+                <h2 className="mb-6 text-xl font-bold text-foreground">
                   Framework-Specific Guides
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -103,10 +103,10 @@ export default async function ProblemGuidePage({ params }: Props) {
                     <Link
                       key={g.meta.framework}
                       href={`/learn/${slug}/${g.meta.framework}`}
-                      className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                      className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors hover:border-border/30 hover:bg-card"
                     >
                       {guide.seo.title} in{' '}
-                      <span className="text-emerald-400">
+                      <span className="text-foreground">
                         {fwMap.get(g.meta.framework) ?? g.meta.framework}
                       </span>
                     </Link>

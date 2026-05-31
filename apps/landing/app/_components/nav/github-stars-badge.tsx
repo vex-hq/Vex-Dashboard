@@ -35,15 +35,15 @@ export function GitHubStarsBadge({
       href={GITHUB_REPO_URL}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Star Vex on GitHub"
+      aria-label="Star Klio on GitHub"
       className={cn(
-        'inline-flex items-center gap-2 rounded-full border border-[#252525] bg-[#161616] px-3 py-1.5 text-sm transition-colors hover:border-[#3a3a3a] hover:bg-[#1e1e1e]',
+        'border-border bg-card hover:bg-muted inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors hover:border-[color:var(--klio-border-strong)]',
         className,
       )}
     >
-      <GitHubIcon className="text-[#a2a2a2]" />
+      <GitHubIcon className="text-muted-foreground" />
       {formatted && (
-        <span className="font-mono text-sm font-medium text-white">
+        <span className="text-foreground font-mono text-sm font-medium">
           {formatted}
         </span>
       )}

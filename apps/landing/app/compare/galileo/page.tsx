@@ -55,23 +55,23 @@ export default function CompareGalileo() {
         }}
       />
       <div className="mx-auto max-w-[800px]">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           Comparison
         </div>
-        <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+        <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
           Vex vs Galileo
         </h1>
-        <p className="mb-2 text-xs text-[#585858]">
+        <p className="mb-2 text-xs text-muted-foreground">
           Last reviewed: {LAST_UPDATED}
         </p>
-        <p className="mb-12 max-w-[600px] text-lg text-[#a2a2a2]">
+        <p className="mb-12 max-w-[600px] text-lg text-muted-foreground">
           Galileo is an enterprise AI reliability platform ($68M raised) with
           eval-to-guardrail lifecycle. Vex is a lightweight runtime verification
           layer with auto-correction.
         </p>
 
         {/* Feature table */}
-        <table className="mb-16 w-full table-fixed overflow-hidden rounded-xl border border-[#252525] text-sm">
+        <table className="mb-16 w-full table-fixed overflow-hidden rounded-xl border border-border text-sm">
           <caption className="sr-only">
             Vex vs Galileo feature comparison
           </caption>
@@ -80,23 +80,23 @@ export default function CompareGalileo() {
             <col className="w-20" />
             <col className="w-20" />
           </colgroup>
-          <thead className="bg-[#161616]">
+          <thead className="bg-card">
             <tr>
               <th
                 scope="col"
-                className="px-6 py-3 text-left font-medium text-[#585858]"
+                className="px-6 py-3 text-left font-medium text-muted-foreground"
               >
                 Feature
               </th>
               <th
                 scope="col"
-                className="px-6 py-3 text-center font-medium text-emerald-500"
+                className="px-6 py-3 text-center font-medium text-foreground"
               >
                 Vex
               </th>
               <th
                 scope="col"
-                className="px-6 py-3 text-center font-medium text-[#585858]"
+                className="px-6 py-3 text-center font-medium text-muted-foreground"
               >
                 Galileo
               </th>
@@ -104,16 +104,16 @@ export default function CompareGalileo() {
           </thead>
           <tbody>
             {features.map((f) => (
-              <tr key={f.name} className="border-t border-[#252525]">
+              <tr key={f.name} className="border-t border-border">
                 <th
                   scope="row"
-                  className="px-6 py-3 text-left font-normal text-[#a2a2a2]"
+                  className="px-6 py-3 text-left font-normal text-muted-foreground"
                 >
                   {f.name}
                 </th>
                 <td className="px-6 py-3 text-center">
                   {f.vex === true ? (
-                    <span aria-label="yes" className="text-emerald-500">
+                    <span aria-label="yes" className="text-foreground">
                       &#10003;
                     </span>
                   ) : f.vex === 'partial' ? (
@@ -121,14 +121,14 @@ export default function CompareGalileo() {
                       ~
                     </span>
                   ) : (
-                    <span aria-label="no" className="text-[#585858]">
+                    <span aria-label="no" className="text-muted-foreground">
                       &mdash;
                     </span>
                   )}
                 </td>
                 <td className="px-6 py-3 text-center">
                   {f.competitor === true ? (
-                    <span aria-label="yes" className="text-white">
+                    <span aria-label="yes" className="text-foreground">
                       &#10003;
                     </span>
                   ) : f.competitor === 'partial' ? (
@@ -136,7 +136,7 @@ export default function CompareGalileo() {
                       ~
                     </span>
                   ) : (
-                    <span aria-label="no" className="text-[#585858]">
+                    <span aria-label="no" className="text-muted-foreground">
                       &mdash;
                     </span>
                   )}
@@ -147,25 +147,25 @@ export default function CompareGalileo() {
         </table>
 
         {/* Key differences */}
-        <h2 className="mb-6 text-2xl font-semibold text-white">
+        <h2 className="mb-6 text-2xl font-semibold text-foreground">
           Key Differences
         </h2>
         <div className="mb-16 grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
-            <h3 className="mb-2 font-mono text-sm font-medium text-emerald-500">
+          <div className="rounded-xl border border-border bg-background p-6">
+            <h3 className="mb-2 font-mono text-sm font-medium text-foreground">
               Vex
             </h3>
-            <p className="text-sm leading-relaxed text-[#a2a2a2]">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Lightweight runtime layer. 3 lines of code to integrate. Verifies
               every output against 4 checks (schema, hallucination, drift,
               coherence) and auto-corrects failures with a graduated cascade.
             </p>
           </div>
-          <div className="rounded-xl border border-[#252525] bg-[#0a0a0a] p-6">
-            <h3 className="mb-2 font-mono text-sm font-medium text-[#a2a2a2]">
+          <div className="rounded-xl border border-border bg-background p-6">
+            <h3 className="mb-2 font-mono text-sm font-medium text-muted-foreground">
               Galileo
             </h3>
-            <p className="text-sm leading-relaxed text-[#a2a2a2]">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Enterprise eval platform. Custom Luna-2 evaluators adapt with
               minimal labeled data. Pre-production evals automatically become
               production guardrails. Strong multi-agent support with CrewAI,
@@ -176,8 +176,8 @@ export default function CompareGalileo() {
         </div>
 
         {/* Verdict */}
-        <h2 className="mb-4 text-2xl font-semibold text-white">The Verdict</h2>
-        <p className="mb-8 text-[15px] leading-relaxed text-[#a2a2a2]">
+        <h2 className="mb-4 text-2xl font-semibold text-foreground">The Verdict</h2>
+        <p className="mb-8 text-[15px] leading-relaxed text-muted-foreground">
           Galileo is the enterprise choice for teams that need custom evaluators
           and a full eval-to-guardrail pipeline. Vex is the developer choice for
           teams that want runtime verification and auto-correction with minimal
@@ -190,13 +190,13 @@ export default function CompareGalileo() {
         <div className="flex items-center gap-3">
           <Link
             href="https://app.tryvex.dev"
-            className="inline-flex h-12 items-center rounded-lg bg-emerald-500 px-7 text-[15px] font-semibold text-white transition-colors hover:bg-emerald-400"
+            className="inline-flex h-12 items-center rounded-lg bg-foreground px-7 text-[15px] font-semibold text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
           >
             Try Vex Free
           </Link>
           <Link
             href="/pricing"
-            className="inline-flex h-12 items-center rounded-lg border border-[#252525] px-7 text-[15px] font-medium text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+            className="inline-flex h-12 items-center rounded-lg border border-border px-7 text-[15px] font-medium text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
           >
             Compare Plans&ensp;&rarr;
           </Link>

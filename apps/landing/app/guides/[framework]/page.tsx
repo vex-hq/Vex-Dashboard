@@ -95,23 +95,23 @@ export default async function GuidePage({ params }: Props) {
               { label: meta?.name ?? framework },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             Framework Guide
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {guide.seo.title}
           </h1>
-          <p className="mb-4 text-xs text-[#585858]">
+          <p className="mb-4 text-xs text-muted-foreground">
             Last reviewed: {guide.meta.generatedAt}
           </p>
           {meta && (
             <div className="mb-8 flex flex-wrap gap-2">
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+              <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-medium text-foreground">
                 {meta.language === 'both'
                   ? 'Python & TypeScript'
                   : meta.language}
               </span>
-              <span className="rounded-full bg-[#252525] px-2 py-0.5 text-[10px] font-medium text-[#a2a2a2]">
+              <span className="rounded-full bg-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {meta.popularity}
               </span>
             </div>
@@ -136,10 +136,10 @@ export default async function GuidePage({ params }: Props) {
             }
 
             return (
-              <div className="mt-16 border-t border-[#252525] pt-12">
+              <div className="mt-16 border-t border-border pt-12">
                 {useCaseGuides.length > 0 && (
                   <div className="mb-12">
-                    <h2 className="mb-6 text-xl font-bold text-white">
+                    <h2 className="mb-6 text-xl font-bold text-foreground">
                       {meta?.name ?? framework} Use Case Guides
                     </h2>
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -147,10 +147,10 @@ export default async function GuidePage({ params }: Props) {
                         <Link
                           key={g.meta.useCase}
                           href={`/guides/${framework}/${g.meta.useCase}`}
-                          className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                          className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors hover:border-border/30 hover:bg-card"
                         >
                           Building{' '}
-                          <span className="text-emerald-400">
+                          <span className="text-foreground">
                             {ucMap.get(g.meta.useCase) ?? g.meta.useCase}
                           </span>{' '}
                           with {meta?.name ?? framework}
@@ -161,7 +161,7 @@ export default async function GuidePage({ params }: Props) {
                 )}
                 {industryGuides.length > 0 && (
                   <div>
-                    <h2 className="mb-6 text-xl font-bold text-white">
+                    <h2 className="mb-6 text-xl font-bold text-foreground">
                       {meta?.name ?? framework} Industry Guides
                     </h2>
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -169,10 +169,10 @@ export default async function GuidePage({ params }: Props) {
                         <Link
                           key={g.meta.industry}
                           href={`/guides/${framework}/${g.meta.industry}`}
-                          className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-4 py-3 text-sm text-white transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                          className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground transition-colors hover:border-border/30 hover:bg-card"
                         >
                           {meta?.name ?? framework} Guardrails for{' '}
-                          <span className="text-emerald-400">
+                          <span className="text-foreground">
                             {indMap.get(g.meta.industry) ?? g.meta.industry}
                           </span>
                         </Link>

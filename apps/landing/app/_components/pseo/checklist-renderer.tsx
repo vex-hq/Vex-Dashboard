@@ -26,19 +26,19 @@ export function ChecklistRenderer({ checklist }: { checklist: ChecklistPage }) {
   return (
     <div>
       {/* Intro */}
-      <p className="mb-8 text-lg leading-relaxed text-[#a2a2a2]">{content.intro}</p>
+      <p className="mb-8 text-lg leading-relaxed text-muted-foreground">{content.intro}</p>
 
       {/* Progress bar */}
-      <div className="mb-10 rounded-lg border border-[#252525] bg-[#0a0a0a] p-4">
+      <div className="mb-10 rounded-lg border border-border bg-background p-4">
         <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="text-[#a2a2a2]">Progress</span>
-          <span className="font-mono text-emerald-400">
+          <span className="text-muted-foreground">Progress</span>
+          <span className="font-mono text-foreground">
             {checked.size}/{totalItems} ({progress}%)
           </span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-[#252525]">
+        <div className="h-2 overflow-hidden rounded-full bg-border">
           <div
-            className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+            className="h-full rounded-full bg-foreground transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -47,8 +47,8 @@ export function ChecklistRenderer({ checklist }: { checklist: ChecklistPage }) {
       {/* Sections */}
       {content.sections.map((section, si) => (
         <div key={si} className="mb-10">
-          <h2 className="mb-2 text-xl font-bold text-white">{section.heading}</h2>
-          <p className="mb-4 text-sm text-[#a2a2a2]">{section.description}</p>
+          <h2 className="mb-2 text-xl font-bold text-foreground">{section.heading}</h2>
+          <p className="mb-4 text-sm text-muted-foreground">{section.description}</p>
           <div className="grid gap-2">
             {section.items.map((item, ii) => {
               const id = `${si}-${ii}`;
@@ -58,26 +58,26 @@ export function ChecklistRenderer({ checklist }: { checklist: ChecklistPage }) {
                   key={id}
                   className={`flex cursor-pointer gap-3 rounded-lg border p-3 transition-colors ${
                     isChecked
-                      ? 'border-emerald-500/30 bg-emerald-500/5'
-                      : 'border-[#252525] bg-[#0a0a0a] hover:border-[#333]'
+                      ? 'border-border/30 bg-foreground/5'
+                      : 'border-border bg-background hover:border-[#333]'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={isChecked}
                     onChange={() => toggle(id)}
-                    className="mt-1 h-4 w-4 rounded border-[#585858] bg-transparent text-emerald-500 accent-emerald-500"
+                    className="mt-1 h-4 w-4 rounded border-muted-foreground bg-transparent text-foreground accent-foreground"
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`text-sm font-medium ${isChecked ? 'text-[#585858] line-through' : 'text-white'}`}
+                        className={`text-sm font-medium ${isChecked ? 'text-muted-foreground line-through' : 'text-foreground'}`}
                       >
                         {item.label}
                       </span>
                       <SeverityBadge level={item.priority} />
                     </div>
-                    <p className="mt-0.5 text-xs text-[#585858]">{item.description}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
                   </div>
                 </label>
               );
@@ -88,16 +88,16 @@ export function ChecklistRenderer({ checklist }: { checklist: ChecklistPage }) {
 
       {/* Regulatory Notes */}
       <div className="mb-10 rounded-xl border border-orange-500/20 bg-orange-500/5 p-6">
-        <h2 className="mb-3 text-lg font-bold text-white">{content.regulatoryNotes.heading}</h2>
+        <h2 className="mb-3 text-lg font-bold text-foreground">{content.regulatoryNotes.heading}</h2>
         <ul className="grid gap-2">
           {content.regulatoryNotes.notes.map((note, i) => {
             const text = typeof note === 'string' ? note : (note as { rule?: string; note?: string }).note ?? (note as { rule?: string }).rule ?? '';
             const rule = typeof note === 'string' ? undefined : (note as { rule?: string }).rule;
             return (
-              <li key={i} className="flex gap-2 text-sm text-[#a2a2a2]">
+              <li key={i} className="flex gap-2 text-sm text-muted-foreground">
                 <span className="text-orange-400">&#9888;</span>
                 <div>
-                  {rule && <span className="font-medium text-white">{rule}: </span>}
+                  {rule && <span className="font-medium text-foreground">{rule}: </span>}
                   {text}
                 </div>
               </li>

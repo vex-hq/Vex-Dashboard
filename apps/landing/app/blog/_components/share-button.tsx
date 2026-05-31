@@ -13,7 +13,7 @@ export function ShareOnX({ title, slug }: ShareOnXProps) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-2 rounded-md border border-[#252525] px-4 py-2 text-sm text-[#a2a2a2] transition-colors hover:border-[#585858] hover:text-white"
+      className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
     >
       <svg
         width="14"

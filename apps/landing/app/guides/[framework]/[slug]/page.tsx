@@ -150,20 +150,20 @@ export default async function FrameworkCrossProductPage({ params }: Props) {
               { label: slugName },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             {subtitleBadge}
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {guide.seo.title}
           </h1>
           {frameworkMeta && (
             <div className="mb-8 flex flex-wrap gap-2">
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+              <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-medium text-foreground">
                 {frameworkMeta.language === 'both'
                   ? 'Python & TypeScript'
                   : frameworkMeta.language}
               </span>
-              <span className="rounded-full bg-[#252525] px-2 py-0.5 text-[10px] font-medium text-[#a2a2a2]">
+              <span className="rounded-full bg-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {frameworkMeta.popularity}
               </span>
             </div>

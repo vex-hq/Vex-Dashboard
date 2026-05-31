@@ -13,15 +13,15 @@ export default function LiveDemoPage() {
     <div className="container py-24">
       {/* Hero */}
       <div className="mx-auto max-w-2xl text-center">
-        <div className="mb-4 text-[13px] font-medium tracking-widest uppercase text-emerald-500">
+        <div className="mb-4 text-[13px] font-medium tracking-widest uppercase text-foreground">
           Live Demo
         </div>
 
-        <h1 className="mb-4 text-4xl font-bold tracking-tight text-white lg:text-5xl">
+        <h1 className="mb-4 text-4xl font-bold tracking-tight text-foreground lg:text-5xl">
           See Vex in Action
         </h1>
 
-        <p className="text-lg text-[#a2a2a2]">
+        <p className="text-lg text-muted-foreground">
           Watch a customer support agent hallucinate — and Vex catch and correct
           it in real-time. Every verification below is a live API call.
         </p>
@@ -36,7 +36,7 @@ export default function LiveDemoPage() {
       <div className="mt-20 text-center">
         <a
           href="https://app.tryvex.dev"
-          className="inline-flex items-center rounded-lg bg-emerald-500 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-600"
+          className="inline-flex items-center rounded-lg bg-foreground px-6 py-3 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
         >
           Start Protecting Your Agents
         </a>

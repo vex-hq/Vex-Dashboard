@@ -238,11 +238,11 @@ export function LiveDemo() {
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 currentPhase === p.phase
                   ? p.phase === 1
-                    ? 'bg-emerald-500/20 text-emerald-400'
+                    ? 'bg-foreground/20 text-foreground'
                     : p.phase === 2
                       ? 'bg-amber-500/20 text-amber-400'
-                      : 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-[#1a1a1a] text-[#585858]'
+                      : 'bg-foreground/20 text-foreground'
+                  : 'bg-[#1a1a1a] text-muted-foreground'
               }`}
             >
               {p.label}
@@ -253,7 +253,7 @@ export function LiveDemo() {
         {done && (
           <button
             onClick={replay}
-            className="flex items-center gap-1.5 text-xs text-[#a2a2a2] transition-colors hover:text-white"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <RotateCcw className="h-3 w-3" />
             Replay
@@ -264,21 +264,21 @@ export function LiveDemo() {
       {/* Split panel */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Left: Ticket Feed */}
-        <div className="rounded-xl border border-[#252525] bg-[#161616] p-5">
-          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-white">
-            <Shield className="h-4 w-4 text-emerald-500" />
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">
+            <Shield className="h-4 w-4 text-foreground" />
             Incoming Tickets
           </div>
 
           <div className="space-y-3">
             {visibleTickets.length === 0 && !started && (
-              <p className="py-8 text-center text-sm text-[#585858]">
+              <p className="py-8 text-center text-sm text-muted-foreground">
                 Scroll down to start the demo…
               </p>
             )}
 
             {visibleTickets.length === 0 && started && !done && (
-              <p className="py-8 text-center text-sm text-[#585858]">
+              <p className="py-8 text-center text-sm text-muted-foreground">
                 Processing…
               </p>
             )}
@@ -286,9 +286,9 @@ export function LiveDemo() {
             {visibleTickets.map((ticket) => (
               <div
                 key={`${ticket.id}-${ticket.phase}`}
-                className="animate-[termLine_0.4s_cubic-bezier(0.16,1,0.3,1)_forwards] rounded-lg border border-[#252525] bg-[#0f0f0f] p-3 opacity-0"
+                className="animate-[termLine_0.4s_cubic-bezier(0.16,1,0.3,1)_forwards] rounded-lg border border-border bg-[#0f0f0f] p-3 opacity-0"
               >
-                <div className="mb-2 text-sm text-white">
+                <div className="mb-2 text-sm text-foreground">
                   &quot;{ticket.text}&quot;
                 </div>
 
@@ -297,10 +297,10 @@ export function LiveDemo() {
                     <span
                       className={`rounded px-1.5 py-0.5 text-xs font-medium ${
                         ticket.status === 'pass'
-                          ? 'bg-emerald-500/10 text-emerald-400'
+                          ? 'bg-foreground/10 text-foreground'
                           : ticket.status === 'flag'
                             ? 'bg-amber-500/10 text-amber-400'
-                            : 'bg-emerald-500/10 text-emerald-400'
+                            : 'bg-foreground/10 text-foreground'
                       }`}
                     >
                       {ticket.status === 'corrected' ? (
@@ -313,7 +313,7 @@ export function LiveDemo() {
                       )}
                     </span>
 
-                    <span className="text-xs text-[#a2a2a2]">
+                    <span className="text-xs text-muted-foreground">
                       → {ticket.classification}
                     </span>
 
@@ -327,7 +327,7 @@ export function LiveDemo() {
                   <span
                     className={`font-mono text-xs ${
                       ticket.confidence >= 0.9
-                        ? 'text-emerald-400'
+                        ? 'text-foreground'
                         : ticket.confidence >= 0.7
                           ? 'text-amber-400'
                           : 'text-red-400'
@@ -342,20 +342,20 @@ export function LiveDemo() {
         </div>
 
         {/* Right: Vex Monitor */}
-        <div className="rounded-xl border border-[#252525] bg-[#161616] p-5">
-          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-white">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">
+            <CheckCircle2 className="h-4 w-4 text-foreground" />
             Vex Monitor
           </div>
 
           {/* Confidence meter */}
-          <div className="mb-4 rounded-lg border border-[#252525] bg-[#0f0f0f] p-3">
+          <div className="mb-4 rounded-lg border border-border bg-[#0f0f0f] p-3">
             <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="text-[#a2a2a2]">Model Confidence</span>
+              <span className="text-muted-foreground">Model Confidence</span>
 
               <span
                 className={`font-mono ${
-                  currentPhase === 2 ? 'text-amber-400' : 'text-emerald-400'
+                  currentPhase === 2 ? 'text-amber-400' : 'text-foreground'
                 }`}
               >
                 {currentPhase === 2
@@ -366,10 +366,10 @@ export function LiveDemo() {
               </span>
             </div>
 
-            <div className="h-1.5 overflow-hidden rounded-full bg-[#252525]">
+            <div className="h-1.5 overflow-hidden rounded-full bg-border">
               <div
                 className={`h-full rounded-full transition-all duration-700 ${
-                  currentPhase === 2 ? 'bg-amber-500' : 'bg-emerald-500'
+                  currentPhase === 2 ? 'bg-amber-500' : 'bg-foreground'
                 }`}
                 style={{
                   width:
@@ -389,7 +389,7 @@ export function LiveDemo() {
               className={`mb-4 flex animate-[termLine_0.4s_cubic-bezier(0.16,1,0.3,1)_forwards] items-center gap-2 rounded-lg border p-3 text-xs opacity-0 ${
                 currentPhase === 2
                   ? 'border-amber-500/30 bg-amber-500/5 text-amber-400'
-                  : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400'
+                  : 'border-border/30 bg-foreground/5 text-foreground'
               }`}
             >
               {currentPhase === 2 ? (
@@ -407,8 +407,8 @@ export function LiveDemo() {
           )}
 
           {/* Terminal log */}
-          <div className="rounded-lg border border-[#252525] bg-[#0a0a0a] p-3">
-            <div className="mb-2 text-[10px] font-medium tracking-wider text-[#585858] uppercase">
+          <div className="rounded-lg border border-border bg-background p-3">
+            <div className="mb-2 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
               Terminal
             </div>
 
@@ -420,17 +420,17 @@ export function LiveDemo() {
                     log.type === 'warn'
                       ? 'text-amber-400'
                       : log.type === 'success'
-                        ? 'text-emerald-400'
-                        : 'text-[#a2a2a2]'
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
                   }`}
                 >
-                  <span className="mr-2 text-[#585858]">$</span>
+                  <span className="mr-2 text-muted-foreground">$</span>
                   {log.text}
                 </div>
               ))}
 
               {visibleLogs.length === 0 && (
-                <div className="text-[#585858]">
+                <div className="text-muted-foreground">
                   <span className="mr-2">$</span>
                   awaiting session…
                 </div>
@@ -440,21 +440,21 @@ export function LiveDemo() {
 
           {/* Summary (Phase 3 complete) */}
           {done && (
-            <div className="mt-4 animate-[termLine_0.4s_cubic-bezier(0.16,1,0.3,1)_forwards] rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 opacity-0">
+            <div className="mt-4 animate-[termLine_0.4s_cubic-bezier(0.16,1,0.3,1)_forwards] rounded-lg border border-border/30 bg-foreground/5 p-3 opacity-0">
               <div className="flex items-center justify-around text-center text-xs">
                 <div>
-                  <div className="text-lg font-bold text-emerald-400">2</div>
-                  <div className="text-[#a2a2a2]">Issues caught</div>
+                  <div className="text-lg font-bold text-foreground">2</div>
+                  <div className="text-muted-foreground">Issues caught</div>
                 </div>
 
                 <div>
-                  <div className="text-lg font-bold text-emerald-400">2</div>
-                  <div className="text-[#a2a2a2]">Auto-corrected</div>
+                  <div className="text-lg font-bold text-foreground">2</div>
+                  <div className="text-muted-foreground">Auto-corrected</div>
                 </div>
 
                 <div>
-                  <div className="text-lg font-bold text-white">0</div>
-                  <div className="text-[#a2a2a2]">Reached production</div>
+                  <div className="text-lg font-bold text-foreground">0</div>
+                  <div className="text-muted-foreground">Reached production</div>
                 </div>
               </div>
             </div>

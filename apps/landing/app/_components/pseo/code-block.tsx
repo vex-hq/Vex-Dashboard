@@ -18,17 +18,17 @@ export function CodeBlock({
   };
 
   return (
-    <div className="group relative my-4 rounded-xl border border-[#252525] bg-[#0a0a0a]">
-      <div className="flex items-center justify-between border-b border-[#252525] px-4 py-2">
-        <span className="text-xs text-[#585858]">{language}</span>
+    <div className="group relative my-4 rounded-xl border border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2">
+        <span className="text-xs text-muted-foreground">{language}</span>
         <button
           onClick={copy}
-          className="text-xs text-[#585858] transition-colors hover:text-white"
+          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           {copied ? 'Copied!' : 'Copy'}
         </button>
       </div>
-      <pre className="overflow-x-auto p-4 text-sm leading-relaxed text-[#a2a2a2]">
+      <pre className="overflow-x-auto p-4 text-sm leading-relaxed text-muted-foreground">
         <code>{code}</code>
       </pre>
     </div>

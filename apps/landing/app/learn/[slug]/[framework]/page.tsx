@@ -102,10 +102,10 @@ export default async function ProblemFrameworkPage({ params }: Props) {
               { label: frameworkName },
             ]}
           />
-          <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+          <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
             Problem × Framework Guide
           </div>
-          <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl">
+          <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl">
             {guide.seo.title}
           </h1>
           <ProblemFrameworkRenderer guide={guide} />

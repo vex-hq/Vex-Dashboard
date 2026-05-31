@@ -25,14 +25,14 @@ export default function GuidesIndexPage() {
 
   return (
     <div className="container py-24">
-      <div className="mb-16 border-b border-[#252525] pb-12">
-        <div className="mb-4 text-[13px] font-medium tracking-widest text-emerald-500 uppercase">
+      <div className="mb-16 border-b border-border pb-12">
+        <div className="mb-4 text-[13px] font-medium tracking-widest text-foreground uppercase">
           Guides
         </div>
-        <h1 className="mb-4 text-3xl font-bold text-white sm:text-4xl lg:text-5xl">
+        <h1 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl lg:text-5xl">
           Framework Integration Guides
         </h1>
-        <p className="max-w-[520px] text-[17px] leading-relaxed text-[#a2a2a2]">
+        <p className="max-w-[520px] text-[17px] leading-relaxed text-muted-foreground">
           Learn how to add runtime guardrails to your AI agent framework.
           Each guide covers failure modes, integration steps, and best
           practices specific to the framework.
@@ -40,7 +40,7 @@ export default function GuidesIndexPage() {
       </div>
 
       {guides.length === 0 ? (
-        <p className="text-[#a2a2a2]">No guides yet. Check back soon.</p>
+        <p className="text-muted-foreground">No guides yet. Check back soon.</p>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {guides.map((guide) => {
@@ -50,24 +50,24 @@ export default function GuidesIndexPage() {
               <Link
                 key={guide.meta.framework}
                 href={`/guides/${guide.meta.framework}`}
-                className="group rounded-xl border border-[#252525] bg-[#0a0a0a] p-6 transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                className="group rounded-xl border border-border bg-background p-6 transition-colors hover:border-border/30 hover:bg-card"
               >
                 <div className="mb-3 flex items-center gap-2">
                   {fw && (
-                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+                    <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-medium text-foreground">
                       {fw.language}
                     </span>
                   )}
                   {fw && (
-                    <span className="rounded-full border border-[#333] px-2 py-0.5 text-[10px] font-medium text-[#a2a2a2]">
+                    <span className="rounded-full border border-[#333] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       {fw.popularity}
                     </span>
                   )}
                 </div>
-                <h2 className="mb-2 text-lg font-semibold text-white group-hover:text-emerald-400">
+                <h2 className="mb-2 text-lg font-semibold text-foreground group-hover:text-foreground">
                   {guide.seo.title}
                 </h2>
-                <p className="text-sm leading-relaxed text-[#a2a2a2]">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {guide.seo.description}
                 </p>
               </Link>
@@ -78,10 +78,10 @@ export default function GuidesIndexPage() {
 
       {useCaseGuides.length > 0 && (
         <div className="mt-20">
-          <h2 className="mb-3 text-2xl font-bold text-white">
+          <h2 className="mb-3 text-2xl font-bold text-foreground">
             Framework × Use Case Guides
           </h2>
-          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-[#a2a2a2]">
+          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
             {useCaseGuides.length} guides covering how to build specific use
             cases with each framework, including architecture patterns and Vex
             integration.
@@ -96,10 +96,10 @@ export default function GuidesIndexPage() {
                 <Link
                   key={fw.slug}
                   href={`/guides/${fw.slug}`}
-                  className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                  className="rounded-lg border border-border bg-background px-5 py-4 transition-colors hover:border-border/30 hover:bg-card"
                 >
-                  <span className="font-medium text-white">{fw.name}</span>
-                  <span className="ml-2 text-sm text-[#a2a2a2]">
+                  <span className="font-medium text-foreground">{fw.name}</span>
+                  <span className="ml-2 text-sm text-muted-foreground">
                     {count} use case {count === 1 ? 'guide' : 'guides'}
                   </span>
                 </Link>
@@ -111,10 +111,10 @@ export default function GuidesIndexPage() {
 
       {industryGuides.length > 0 && (
         <div className="mt-16">
-          <h2 className="mb-3 text-2xl font-bold text-white">
+          <h2 className="mb-3 text-2xl font-bold text-foreground">
             Framework × Industry Guides
           </h2>
-          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-[#a2a2a2]">
+          <p className="mb-6 max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
             {industryGuides.length} guides covering industry-specific compliance
             requirements and guardrail configurations for each framework.
           </p>
@@ -128,10 +128,10 @@ export default function GuidesIndexPage() {
                 <Link
                   key={fw.slug}
                   href={`/guides/${fw.slug}`}
-                  className="rounded-lg border border-[#252525] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-emerald-500/30 hover:bg-[#161616]"
+                  className="rounded-lg border border-border bg-background px-5 py-4 transition-colors hover:border-border/30 hover:bg-card"
                 >
-                  <span className="font-medium text-white">{fw.name}</span>
-                  <span className="ml-2 text-sm text-[#a2a2a2]">
+                  <span className="font-medium text-foreground">{fw.name}</span>
+                  <span className="ml-2 text-sm text-muted-foreground">
                     {count} industry {count === 1 ? 'guide' : 'guides'}
                   </span>
                 </Link>

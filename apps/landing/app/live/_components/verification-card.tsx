@@ -42,10 +42,10 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
     pass: {
       icon: ShieldCheck,
       label: 'PASSED',
-      color: 'text-emerald-400',
-      bg: 'bg-emerald-500/10',
-      border: 'border-emerald-500/30',
-      barColor: 'bg-emerald-500',
+      color: 'text-foreground',
+      bg: 'bg-foreground/10',
+      border: 'border-border/30',
+      barColor: 'bg-foreground',
     },
     flag: {
       icon: AlertTriangle,
@@ -103,7 +103,7 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
         <div className="mt-4">
           <button
             onClick={() => setChecksExpanded(!checksExpanded)}
-            className="flex w-full items-center justify-between text-xs text-[#888] transition-colors hover:text-white"
+            className="flex w-full items-center justify-between text-xs text-[#888] transition-colors hover:text-foreground"
           >
             <span>{checks.length} checks ran</span>
             {checksExpanded ? (
@@ -118,11 +118,11 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
               {checks.map(([name, check]) => (
                 <div
                   key={name}
-                  className="flex items-center justify-between rounded-lg bg-[#0a0a0a]/50 px-3 py-1.5 text-xs"
+                  className="flex items-center justify-between rounded-lg bg-background/50 px-3 py-1.5 text-xs"
                 >
                   <div className="flex items-center gap-2">
                     {check.passed ? (
-                      <Check className="h-3 w-3 text-emerald-400" />
+                      <Check className="h-3 w-3 text-foreground" />
                     ) : (
                       <X className="h-3 w-3 text-red-400" />
                     )}
@@ -132,7 +132,7 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
                   </div>
                   <span
                     className={
-                      check.passed ? 'text-emerald-400' : 'text-red-400'
+                      check.passed ? 'text-foreground' : 'text-red-400'
                     }
                   >
                     {(check.score * 100).toFixed(0)}%
@@ -147,7 +147,7 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
       {/* Correction */}
       {result.corrected && result.original_output != null && (
         <div className="mt-4 space-y-3 border-t border-[#333] pt-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
+          <div className="flex items-center gap-2 text-xs font-medium text-foreground">
             <Shield className="h-3.5 w-3.5" />
             Auto-Corrected by Vex
           </div>
@@ -161,8 +161,8 @@ export function VerificationCard({ result, visible }: VerificationCardProps) {
             </p>
           </div>
 
-          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-            <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-emerald-400">
+          <div className="rounded-lg border border-border/20 bg-foreground/5 p-3">
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-foreground">
               Corrected (sent to customer)
             </div>
             <p className="text-xs text-[#ccc]">{String(result.output)}</p>
