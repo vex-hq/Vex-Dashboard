@@ -154,6 +154,132 @@ export const loadAgentActivity = cache(
 );
 
 // ---------------------------------------------------------------------------
+// loadAgentMemorySummary
+// ---------------------------------------------------------------------------
+
+/**
+ * Capture + recall summary for a SINGLE identity (agent_id), org-scoped.
+ * Mirrors loadAgentActivity's aggregates but for one agent. COUNT(*) with no
+ * GROUP BY always yields one row (zeros when the identity has no rows), so the
+ * returned AgentActivityRow is always defined.
+ */
+export const loadAgentMemorySummary = cache(
+  async (orgId: string, agentId: string): Promise<AgentActivityRow> => {
+    const pool = getAgentGuardPool();
+
+    const [captureResult, recallResult] = await Promise.all([
+      pool.query<{
+        captured: string;
+        last_captured: string | null;
+        facts: string;
+        via_mcp: string;
+        via_hook: string;
+      }>(
+        `
+        SELECT
+          COUNT(*) AS captured,
+          MAX(created_at)::text AS last_captured,
+          COUNT(*) FILTER (WHERE memory_type = 'fact') AS facts,
+          COUNT(*) FILTER (WHERE metadata->>'source' = 'mcp') AS via_mcp,
+          COUNT(*) FILTER (WHERE metadata->>'source' LIKE 'hook%') AS via_hook
+        FROM session_memories
+        WHERE org_id = $1 AND scope = $2 AND status = $3 AND agent_id = $4
+        `,
+        [orgId, KLIO_CLOUD_SCOPE, KLIO_CLOUD_STATUS, agentId],
+      ),
+      pool.query<{ recalled: string; last_recalled: string | null }>(
+        `
+        SELECT COUNT(*) AS recalled, MAX(created_at)::text AS last_recalled
+        FROM brain_recall_events
+        WHERE org_id = $1 AND agent_id = $2
+        `,
+        [orgId, agentId],
+      ),
+    ]);
+
+    const cap = captureResult.rows[0];
+    const rec = recallResult.rows[0];
+
+    return {
+      agent_id: agentId,
+      tool: deriveTool(agentId),
+      captured: parseInt(cap?.captured ?? '0', 10),
+      facts: parseInt(cap?.facts ?? '0', 10),
+      via_mcp: parseInt(cap?.via_mcp ?? '0', 10),
+      via_hook: parseInt(cap?.via_hook ?? '0', 10),
+      last_captured: cap?.last_captured ?? null,
+      recalled: parseInt(rec?.recalled ?? '0', 10),
+      last_recalled: rec?.last_recalled ?? null,
+    };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// loadAgentRecalls
+// ---------------------------------------------------------------------------
+
+export interface AgentRecallRow {
+  id: string;
+  query_text: string | null;
+  result_count: number;
+  source: string | null;
+  created_at: string;
+}
+
+export interface AgentRecallResult {
+  rows: AgentRecallRow[];
+  pageCount: number;
+}
+
+/**
+ * Paginated recall-activity rows for a single identity, org-scoped, newest
+ * first. Backed by the (org_id, agent_id) index on brain_recall_events.
+ */
+export const loadAgentRecalls = cache(
+  async (
+    orgId: string,
+    agentId: string,
+    page = 1,
+  ): Promise<AgentRecallResult> => {
+    const pool = getAgentGuardPool();
+    const effectivePage = Math.max(1, page);
+    const offset = (effectivePage - 1) * MEMORY_PAGE_SIZE;
+
+    const result = await pool.query<AgentRecallRow & { total_count: string }>(
+      `
+      SELECT
+        id,
+        query_text,
+        result_count,
+        source,
+        created_at,
+        COUNT(*) OVER() AS total_count
+      FROM brain_recall_events
+      WHERE org_id = $1 AND agent_id = $2
+      ORDER BY created_at DESC
+      LIMIT $3 OFFSET $4
+      `,
+      [orgId, agentId, MEMORY_PAGE_SIZE, offset],
+    );
+
+    const totalCount = parseInt(result.rows[0]?.total_count ?? '0', 10);
+    const pageCount =
+      totalCount === 0 ? 0 : Math.ceil(totalCount / MEMORY_PAGE_SIZE);
+
+    return {
+      rows: result.rows.map((row) => ({
+        id: row.id,
+        query_text: row.query_text,
+        result_count: row.result_count,
+        source: row.source,
+        created_at: row.created_at,
+      })),
+      pageCount,
+    };
+  },
+);
+
+// ---------------------------------------------------------------------------
 // loadMemoryVolume
 // ---------------------------------------------------------------------------
 
