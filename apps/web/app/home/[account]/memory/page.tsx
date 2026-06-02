@@ -9,9 +9,7 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 import { TeamAccountLayoutPageHeader } from '../_components/team-account-layout-page-header';
 import { AgentActivity } from './_components/agent-activity';
 import { MemoryBrowser } from './_components/memory-browser';
-import {
-  MEMORY_SEARCH_MAX_LENGTH,
-} from './_components/memory-table';
+import { MEMORY_SEARCH_MAX_LENGTH } from './_components/memory-table';
 import { MemoryVolumeChart } from './_components/memory-volume-chart';
 import {
   loadAgentActivity,
@@ -59,7 +57,8 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
   const page = Math.max(1, parseInt(filters.page ?? '1', 10) || 1);
 
   // Clamp the search term before it reaches the loader (reviewer hardening).
-  const query = filters.q?.trim().slice(0, MEMORY_SEARCH_MAX_LENGTH) || undefined;
+  const query =
+    filters.q?.trim().slice(0, MEMORY_SEARCH_MAX_LENGTH) || undefined;
 
   const [agentActivity, memoryVolume, memoryResult] = await Promise.all([
     loadAgentActivity(orgId),
@@ -85,7 +84,9 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
     .map((agent) => ({ value: agent.agent_id, label: agent.agent_id }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  const memoryTypes = distinctSorted(memoryResult.rows.map((r) => r.memory_type));
+  const memoryTypes = distinctSorted(
+    memoryResult.rows.map((r) => r.memory_type),
+  );
   const sources = distinctSorted(memoryResult.rows.map((r) => r.source));
   const projects = distinctSorted(
     memoryResult.rows.map((r) => r.project_id),
@@ -112,7 +113,7 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
               </p>
             </div>
 
-            <AgentActivity agents={agentActivity} />
+            <AgentActivity agents={agentActivity} accountSlug={account} />
           </section>
 
           <MemoryVolumeChart volume={memoryVolume} />

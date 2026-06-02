@@ -51,6 +51,28 @@ interface MemoryTableProps {
   projects: FilterOption[];
   page: number;
   pageCount: number;
+  /**
+   * When true, the agent/type/source/project filter bar is omitted. Used on the
+   * single-identity drill-in page where the agent is already fixed and the
+   * cross-agent filters would be meaningless. Defaults to false so the main
+   * memory browser keeps its filter bar.
+   */
+  hideFilters?: boolean;
+  /**
+   * Search-param the embedded pagination reads and writes. Defaults to `page`
+   * so the main browser is unchanged; the drill-in page passes `capturesPage`
+   * so this table paginates independently of the recall table on the same
+   * route.
+   */
+  pageParam?: string;
+  /**
+   * When true, the table Card's own header (the "Memories" title and
+   * description) is omitted. Used on the drill-in page where the surrounding
+   * section already renders a "Captured memories" heading, so rendering the
+   * Card header too would produce a duplicate title. Defaults to false so the
+   * main memory browser keeps its header.
+   */
+  hideTitle?: boolean;
 }
 
 function truncateContent(value: string): string {
@@ -70,6 +92,9 @@ export default function MemoryTable({
   projects,
   page,
   pageCount,
+  hideFilters = false,
+  pageParam = 'page',
+  hideTitle = false,
 }: MemoryTableProps) {
   const { t } = useTranslation('agentguard');
   const router = useRouter();
@@ -99,10 +124,10 @@ export default function MemoryTable({
         params.delete(key);
       }
 
-      params.delete('page');
+      params.delete(pageParam);
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, pageParam],
   );
 
   const submitSearch = useCallback(
@@ -116,120 +141,124 @@ export default function MemoryTable({
   return (
     <div className="flex flex-col space-y-4">
       {/* Filter Bar */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Trans i18nKey="agentguard:memory.filters" />
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-muted-foreground text-xs">
-                <Trans i18nKey="agentguard:memory.agent" />
-              </label>
-              <select
-                value={currentAgent}
-                onChange={(e) => updateFilter('agent', e.target.value)}
-                className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
-              >
-                <option value="">{t('memory.allAgents')}</option>
-                {agents.map((agent) => (
-                  <option key={agent.value} value={agent.value}>
-                    {agent.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-muted-foreground text-xs">
-                <Trans i18nKey="agentguard:memory.type" />
-              </label>
-              <select
-                value={currentType}
-                onChange={(e) => updateFilter('type', e.target.value)}
-                className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
-              >
-                <option value="">{t('memory.allTypes')}</option>
-                {memoryTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-muted-foreground text-xs">
-                <Trans i18nKey="agentguard:memory.source" />
-              </label>
-              <select
-                value={currentSource}
-                onChange={(e) => updateFilter('source', e.target.value)}
-                className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
-              >
-                <option value="">{t('memory.allSources')}</option>
-                {sources.map((source) => (
-                  <option key={source} value={source}>
-                    {source}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {projects.length > 0 ? (
+      {hideFilters ? null : (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <Trans i18nKey="agentguard:memory.filters" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-end gap-4">
               <div className="flex flex-col gap-1">
                 <label className="text-muted-foreground text-xs">
-                  <Trans i18nKey="agentguard:memory.project" />
+                  <Trans i18nKey="agentguard:memory.agent" />
                 </label>
                 <select
-                  value={currentProject}
-                  onChange={(e) => updateFilter('project', e.target.value)}
+                  value={currentAgent}
+                  onChange={(e) => updateFilter('agent', e.target.value)}
                   className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
                 >
-                  <option value="">{t('memory.allProjects')}</option>
-                  {projects.map((project) => (
-                    <option key={project.value} value={project.value}>
-                      {project.label}
+                  <option value="">{t('memory.allAgents')}</option>
+                  {agents.map((agent) => (
+                    <option key={agent.value} value={agent.value}>
+                      {agent.label}
                     </option>
                   ))}
                 </select>
               </div>
-            ) : null}
 
-            <form
-              onSubmit={submitSearch}
-              className="flex flex-1 flex-col gap-1"
-            >
-              <label className="text-muted-foreground text-xs">
-                <Trans i18nKey="agentguard:memory.search" />
-              </label>
-              <div className="relative min-w-48">
-                <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2" />
-                <Input
-                  value={searchValue}
-                  onChange={(e) => setSearchValue(e.target.value)}
-                  maxLength={MEMORY_SEARCH_MAX_LENGTH}
-                  placeholder={t('memory.searchPlaceholder')}
-                  className="h-9 pl-8"
-                />
+              <div className="flex flex-col gap-1">
+                <label className="text-muted-foreground text-xs">
+                  <Trans i18nKey="agentguard:memory.type" />
+                </label>
+                <select
+                  value={currentType}
+                  onChange={(e) => updateFilter('type', e.target.value)}
+                  className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
+                >
+                  <option value="">{t('memory.allTypes')}</option>
+                  {memoryTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </form>
-          </div>
-        </CardContent>
-      </Card>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-muted-foreground text-xs">
+                  <Trans i18nKey="agentguard:memory.source" />
+                </label>
+                <select
+                  value={currentSource}
+                  onChange={(e) => updateFilter('source', e.target.value)}
+                  className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
+                >
+                  <option value="">{t('memory.allSources')}</option>
+                  {sources.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {projects.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  <label className="text-muted-foreground text-xs">
+                    <Trans i18nKey="agentguard:memory.project" />
+                  </label>
+                  <select
+                    value={currentProject}
+                    onChange={(e) => updateFilter('project', e.target.value)}
+                    className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
+                  >
+                    <option value="">{t('memory.allProjects')}</option>
+                    {projects.map((project) => (
+                      <option key={project.value} value={project.value}>
+                        {project.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              <form
+                onSubmit={submitSearch}
+                className="flex flex-1 flex-col gap-1"
+              >
+                <label className="text-muted-foreground text-xs">
+                  <Trans i18nKey="agentguard:memory.search" />
+                </label>
+                <div className="relative min-w-48">
+                  <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2" />
+                  <Input
+                    value={searchValue}
+                    onChange={(e) => setSearchValue(e.target.value)}
+                    maxLength={MEMORY_SEARCH_MAX_LENGTH}
+                    placeholder={t('memory.searchPlaceholder')}
+                    className="h-9 pl-8"
+                  />
+                </div>
+              </form>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Memory Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>
-            <Trans i18nKey="agentguard:memory.browserTitle" />
-          </CardTitle>
-          <CardDescription>
-            <Trans i18nKey="agentguard:memory.browserDescription" />
-          </CardDescription>
-        </CardHeader>
+        {hideTitle ? null : (
+          <CardHeader>
+            <CardTitle>
+              <Trans i18nKey="agentguard:memory.browserTitle" />
+            </CardTitle>
+            <CardDescription>
+              <Trans i18nKey="agentguard:memory.browserDescription" />
+            </CardDescription>
+          </CardHeader>
+        )}
         <CardContent>
           {rows.length === 0 ? (
             <p className="text-muted-foreground text-sm">
@@ -296,7 +325,11 @@ export default function MemoryTable({
             </Table>
           )}
 
-          <PaginationBar page={page} pageCount={pageCount} />
+          <PaginationBar
+            page={page}
+            pageCount={pageCount}
+            pageParam={pageParam}
+          />
         </CardContent>
       </Card>
     </div>

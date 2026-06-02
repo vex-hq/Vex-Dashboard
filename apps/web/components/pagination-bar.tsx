@@ -11,9 +11,20 @@ import { Button } from '@kit/ui/button';
 interface PaginationBarProps {
   page: number;
   pageCount: number;
+  /**
+   * Name of the search-param this bar reads and writes. Defaults to `page` so
+   * existing single-table pages keep working unchanged; pass a distinct value
+   * (e.g. `capturesPage`) when several independently-paginated tables share a
+   * single route.
+   */
+  pageParam?: string;
 }
 
-export function PaginationBar({ page, pageCount }: PaginationBarProps) {
+export function PaginationBar({
+  page,
+  pageCount,
+  pageParam = 'page',
+}: PaginationBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -23,14 +34,14 @@ export function PaginationBar({ page, pageCount }: PaginationBarProps) {
       const params = new URLSearchParams(searchParams.toString());
 
       if (newPage <= 1) {
-        params.delete('page');
+        params.delete(pageParam);
       } else {
-        params.set('page', String(newPage));
+        params.set(pageParam, String(newPage));
       }
 
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, pageParam],
   );
 
   if (pageCount <= 1) {
