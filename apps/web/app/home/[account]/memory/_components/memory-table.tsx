@@ -65,6 +65,14 @@ interface MemoryTableProps {
    * route.
    */
   pageParam?: string;
+  /**
+   * When true, the table Card's own header (the "Memories" title and
+   * description) is omitted. Used on the drill-in page where the surrounding
+   * section already renders a "Captured memories" heading, so rendering the
+   * Card header too would produce a duplicate title. Defaults to false so the
+   * main memory browser keeps its header.
+   */
+  hideTitle?: boolean;
 }
 
 function truncateContent(value: string): string {
@@ -86,6 +94,7 @@ export default function MemoryTable({
   pageCount,
   hideFilters = false,
   pageParam = 'page',
+  hideTitle = false,
 }: MemoryTableProps) {
   const { t } = useTranslation('agentguard');
   const router = useRouter();
@@ -115,10 +124,10 @@ export default function MemoryTable({
         params.delete(key);
       }
 
-      params.delete('page');
+      params.delete(pageParam);
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, pathname, searchParams],
+    [router, pathname, searchParams, pageParam],
   );
 
   const submitSearch = useCallback(
@@ -240,14 +249,16 @@ export default function MemoryTable({
 
       {/* Memory Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>
-            <Trans i18nKey="agentguard:memory.browserTitle" />
-          </CardTitle>
-          <CardDescription>
-            <Trans i18nKey="agentguard:memory.browserDescription" />
-          </CardDescription>
-        </CardHeader>
+        {hideTitle ? null : (
+          <CardHeader>
+            <CardTitle>
+              <Trans i18nKey="agentguard:memory.browserTitle" />
+            </CardTitle>
+            <CardDescription>
+              <Trans i18nKey="agentguard:memory.browserDescription" />
+            </CardDescription>
+          </CardHeader>
+        )}
         <CardContent>
           {rows.length === 0 ? (
             <p className="text-muted-foreground text-sm">

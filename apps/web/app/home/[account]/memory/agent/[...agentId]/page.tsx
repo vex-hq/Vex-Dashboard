@@ -32,13 +32,14 @@ function parsePage(value: string | undefined): number {
   return Math.max(1, parseInt(value ?? '1', 10) || 1);
 }
 
-export const generateMetadata = async () => {
+export const generateMetadata = async (props: {
+  params: Promise<{ account: string; agentId: string[] }>;
+}) => {
+  const { agentId } = await props.params;
+  const id = decodeAgentIdPath(agentId);
   const i18n = await createI18nServerInstance();
-  const title = i18n.t('agentguard:memory.detailTitle');
 
-  return {
-    title,
-  };
+  return { title: i18n.t('agentguard:memory.memoryForTitle', { agent: id }) };
 };
 
 async function AgentMemoryPage({ params, searchParams }: AgentMemoryPageProps) {
@@ -97,6 +98,7 @@ async function AgentMemoryPage({ params, searchParams }: AgentMemoryPageProps) {
               page={capturesPage}
               pageCount={captures.pageCount}
               hideFilters
+              hideTitle
               pageParam="capturesPage"
             />
           </section>

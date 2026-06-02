@@ -250,7 +250,7 @@ export const loadAgentRecalls = cache(
       SELECT
         id,
         query_text,
-        result_count,
+        result_count::int AS result_count,
         source,
         created_at,
         COUNT(*) OVER() AS total_count
