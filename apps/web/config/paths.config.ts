@@ -9,6 +9,9 @@ const PathsSchema = z.object({
     passwordReset: z.string().min(1),
     passwordUpdate: z.string().min(1),
   }),
+  oauth: z.object({
+    consent: z.string().min(1),
+  }),
   app: z.object({
     home: z.string().min(1),
     personalAccountSettings: z.string().min(1),
@@ -49,6 +52,9 @@ const pathsConfig = PathsSchema.parse({
     callback: '/auth/callback',
     passwordReset: '/auth/password-reset',
     passwordUpdate: '/update-password',
+  },
+  oauth: {
+    consent: '/oauth/consent',
   },
   app: {
     home: '/home',
