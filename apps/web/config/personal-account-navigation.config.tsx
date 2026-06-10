@@ -1,4 +1,4 @@
-import { CreditCard, Home, User } from 'lucide-react';
+import { CreditCard, Home, Link2, User } from 'lucide-react';
 import { z } from 'zod';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
@@ -35,6 +35,11 @@ const routes = [
             Icon: <CreditCard className={iconClasses} />,
           }
         : undefined,
+      {
+        label: 'agentguard:connectedApps.navLabel',
+        path: pathsConfig.app.personalConnectedApps,
+        Icon: <Link2 className={iconClasses} />,
+      },
     ].filter((route) => !!route),
   },
 ] satisfies z.infer<typeof NavigationConfigSchema>['routes'];
