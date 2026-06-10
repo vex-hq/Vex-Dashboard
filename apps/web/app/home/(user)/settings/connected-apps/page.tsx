@@ -2,13 +2,11 @@ import { use } from 'react';
 
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import { PageBody } from '@kit/ui/page';
-import { Trans } from '@kit/ui/trans';
 
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 import { requireUserInServerComponent } from '~/lib/server/require-user-in-server-component';
 
-import { HomeLayoutPageHeader } from '../../_components/home-page-header';
 import ConnectedAppsTable from './_components/connected-apps-table';
 import { loadConnectedApps } from './_lib/server/connected-apps.loader';
 
@@ -27,23 +25,14 @@ function ConnectedAppsPage() {
   const client = getSupabaseServerClient();
   const apps = use(loadConnectedApps(client));
 
+  // The (user)/settings layout already renders the page header; this page
+  // contributes body content only (same pattern as the settings root page).
   return (
-    <>
-      <HomeLayoutPageHeader
-        title={<Trans i18nKey="agentguard:connectedApps.pageTitle" />}
-        description={
-          <Trans i18nKey="agentguard:connectedApps.pageDescription" />
-        }
-      >
-        <Trans i18nKey="agentguard:connectedApps.pageTitle" />
-      </HomeLayoutPageHeader>
-
-      <PageBody>
-        <div className="animate-in fade-in flex flex-col space-y-6 pb-36 duration-500">
-          <ConnectedAppsTable apps={apps} />
-        </div>
-      </PageBody>
-    </>
+    <PageBody>
+      <div className="animate-in fade-in flex flex-col space-y-6 pb-36 duration-500">
+        <ConnectedAppsTable apps={apps} />
+      </div>
+    </PageBody>
   );
 }
 

@@ -93,7 +93,7 @@ async function ConsentPage(props: ConsentPageProps) {
       <ConsentCard
         details={details}
         workspaces={workspaces}
-        addWorkspacePath="/home/addworkspace"
+        addWorkspacePath={pathsConfig.app.addWorkspace}
       />
     </AuthLayoutShell>
   );
@@ -121,11 +121,7 @@ function AuthorizationErrorCard({
           <Trans i18nKey="agentguard:oauthConsent.errorTitle" />
         </CardTitle>
         <CardDescription>
-          {i18nKey ? (
-            <Trans i18nKey={i18nKey} />
-          ) : (
-            <span>{message}</span>
-          )}
+          {i18nKey ? <Trans i18nKey={i18nKey} /> : <span>{message}</span>}
         </CardDescription>
       </CardHeader>
       <CardContent>
