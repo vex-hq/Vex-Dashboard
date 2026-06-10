@@ -133,6 +133,26 @@ select throws_ok(
 );
 
 -- -------------------------------------------------------------------------
+-- RLS INSERT: personal-account slug is rejected
+-- -------------------------------------------------------------------------
+-- Even if a caller supplies the user's own UUID as a text slug (mimicking
+-- how personal accounts were historically identified), the INSERT policy
+-- must reject it because personal workspaces are not supported.
+
+select makerkit.authenticate_as('grant_user1');
+
+select throws_ok(
+  format(
+    $$ insert into public.oauth_grants (user_id, oauth_client_id, account_slug)
+       values ('%s', 'client_fake_abc', '%s') $$,
+    tests.get_supabase_uid('grant_user1'),
+    tests.get_supabase_uid('grant_user1')
+  ),
+  'new row violates row-level security policy for table "oauth_grants"',
+  'INSERT with a personal-account UUID as slug is rejected by the INSERT policy'
+);
+
+-- -------------------------------------------------------------------------
 -- RLS UPDATE: user cannot revoke another user grant
 -- -------------------------------------------------------------------------
 
