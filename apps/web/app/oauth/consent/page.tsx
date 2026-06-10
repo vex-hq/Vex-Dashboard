@@ -53,9 +53,17 @@ async function ConsentPage(props: ConsentPageProps) {
   const client = getSupabaseServerClient();
 
   // Build the return URL that sign-in will redirect back to after login.
+  // The whole URL must be percent-encoded before becoming the `next` query
+  // value: requireUser/getRedirectTo concatenate it raw (`?next=${next}`), so
+  // an un-encoded `?authorization_id=...` would be parsed as a SEPARATE
+  // sign-in query param and dropped after login — leaving the consent page
+  // without its authorization id. Encoding mirrors the join flow (see
+  // app/join/page.tsx).
   const returnUrl = `${pathsConfig.oauth.consent}?${AUTHORIZATION_ID_PARAM}=${encodeURIComponent(authorizationId)}`;
 
-  const auth = await requireUser(client, { next: returnUrl });
+  const auth = await requireUser(client, {
+    next: encodeURIComponent(returnUrl),
+  });
 
   if (auth.error ?? !auth.data) {
     redirect(auth.redirectTo);
