@@ -9,6 +9,9 @@ const PathsSchema = z.object({
     passwordReset: z.string().min(1),
     passwordUpdate: z.string().min(1),
   }),
+  oauth: z.object({
+    consent: z.string().min(1),
+  }),
   app: z.object({
     home: z.string().min(1),
     personalAccountSettings: z.string().min(1),
@@ -26,6 +29,8 @@ const PathsSchema = z.object({
     accountAlerts: z.string().min(1),
     accountFailures: z.string().min(1),
     accountApiKeys: z.string().min(1),
+    personalConnectedApps: z.string().min(1),
+    addWorkspace: z.string().min(1),
     accountDocs: z.string().min(1),
     accountOnboarding: z.string().min(1),
     accountSessions: z.string().min(1),
@@ -50,6 +55,9 @@ const pathsConfig = PathsSchema.parse({
     passwordReset: '/auth/password-reset',
     passwordUpdate: '/update-password',
   },
+  oauth: {
+    consent: '/oauth/consent',
+  },
   app: {
     home: '/home',
     personalAccountSettings: '/home/settings',
@@ -67,6 +75,8 @@ const pathsConfig = PathsSchema.parse({
     accountAlerts: '/home/[account]/alerts',
     accountFailures: '/home/[account]/agents/failures',
     accountApiKeys: '/home/[account]/settings/api-keys',
+    personalConnectedApps: '/home/settings/connected-apps',
+    addWorkspace: '/home/addworkspace',
     accountDocs: '/home/[account]/docs',
     accountOnboarding: '/onboarding',
     accountSessions: '/home/[account]/sessions',
