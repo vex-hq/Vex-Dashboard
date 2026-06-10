@@ -4,9 +4,9 @@
  * Transport is fully mocked: we inject a fake SupabaseClient whose
  * `auth.oauth.*` methods are vitest spies. No network calls are made.
  */
-
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   ConsentServiceError,
@@ -45,8 +45,7 @@ function buildMockClient(overrides?: {
   return {
     auth: {
       oauth: {
-        getAuthorizationDetails:
-          overrides?.getAuthorizationDetails ?? vi.fn(),
+        getAuthorizationDetails: overrides?.getAuthorizationDetails ?? vi.fn(),
         approveAuthorization: overrides?.approveAuthorization ?? vi.fn(),
         denyAuthorization: overrides?.denyAuthorization ?? vi.fn(),
       },
@@ -59,7 +58,7 @@ function buildMockClient(overrides?: {
 // ---------------------------------------------------------------------------
 
 describe('getAuthorizationDetails', () => {
-  it('maps a full details response to AuthorizationDetails', async () => {
+  it('maps a full details response to consent_required with AuthorizationDetails', async () => {
     const mockGet = vi.fn().mockResolvedValue({
       data: {
         authorization_id: FAKE_AUTH_ID,
@@ -79,7 +78,9 @@ describe('getAuthorizationDetails', () => {
     const client = buildMockClient({ getAuthorizationDetails: mockGet });
     const result = await getAuthorizationDetails(client, FAKE_AUTH_ID);
 
-    expect(result).toEqual({
+    expect(result.kind).toBe('consent_required');
+    if (result.kind !== 'consent_required') throw new Error('unreachable');
+    expect(result.details).toEqual({
       authorizationId: FAKE_AUTH_ID,
       clientId: FAKE_CLIENT_ID,
       clientName: FAKE_CLIENT_NAME,
@@ -104,7 +105,9 @@ describe('getAuthorizationDetails', () => {
     const client = buildMockClient({ getAuthorizationDetails: mockGet });
     const result = await getAuthorizationDetails(client, FAKE_AUTH_ID);
 
-    expect(result.scopes).toEqual(['read:agents', 'write:sessions']);
+    expect(result.kind).toBe('consent_required');
+    if (result.kind !== 'consent_required') throw new Error('unreachable');
+    expect(result.details.scopes).toEqual(['read:agents', 'write:sessions']);
   });
 
   it('returns an empty scopes array when scope is an empty string', async () => {
@@ -122,23 +125,23 @@ describe('getAuthorizationDetails', () => {
     const client = buildMockClient({ getAuthorizationDetails: mockGet });
     const result = await getAuthorizationDetails(client, FAKE_AUTH_ID);
 
-    expect(result.scopes).toEqual([]);
+    expect(result.kind).toBe('consent_required');
+    if (result.kind !== 'consent_required') throw new Error('unreachable');
+    expect(result.details.scopes).toEqual([]);
   });
 
-  it('throws ConsentServiceError with alreadyConsented when Supabase returns only redirect_url', async () => {
+  it('returns already_consented variant when Supabase returns only redirect_url', async () => {
     const mockGet = vi.fn().mockResolvedValue({
       data: { redirect_url: FAKE_REDIRECT_URL },
       error: null,
     });
 
     const client = buildMockClient({ getAuthorizationDetails: mockGet });
+    const result = await getAuthorizationDetails(client, FAKE_AUTH_ID);
 
-    await expect(
-      getAuthorizationDetails(client, FAKE_AUTH_ID),
-    ).rejects.toSatisfy((err: unknown) => {
-      if (!(err instanceof ConsentServiceError)) return false;
-      const cause = err.cause as Record<string, unknown> | undefined;
-      return cause?.alreadyConsented === true && cause?.redirectTo === FAKE_REDIRECT_URL;
+    expect(result).toEqual({
+      kind: 'already_consented',
+      redirectTo: FAKE_REDIRECT_URL,
     });
   });
 
@@ -215,31 +218,30 @@ describe('approveAuthorization', () => {
 
     const client = buildMockClient({ approveAuthorization: mockApprove });
 
-    await expect(
-      approveAuthorization(client, FAKE_AUTH_ID),
-    ).rejects.toSatisfy((err: unknown) => {
-      return (
-        err instanceof ConsentServiceError &&
-        (err.message.toLowerCase().includes('expired') ||
-          err.message.toLowerCase().includes('approve'))
-      );
-    });
+    await expect(approveAuthorization(client, FAKE_AUTH_ID)).rejects.toSatisfy(
+      (err: unknown) => {
+        return (
+          err instanceof ConsentServiceError &&
+          (err.message.toLowerCase().includes('expired') ||
+            err.message.toLowerCase().includes('approve'))
+        );
+      },
+    );
   });
 
   it('throws ConsentServiceError when the SDK call itself throws (network error)', async () => {
-    const mockApprove = vi
-      .fn()
-      .mockRejectedValue(new Error('fetch failed'));
+    const mockApprove = vi.fn().mockRejectedValue(new Error('fetch failed'));
 
     const client = buildMockClient({ approveAuthorization: mockApprove });
 
-    await expect(
-      approveAuthorization(client, FAKE_AUTH_ID),
-    ).rejects.toSatisfy((err: unknown) => {
-      return (
-        err instanceof ConsentServiceError && err.message.includes('fetch failed')
-      );
-    });
+    await expect(approveAuthorization(client, FAKE_AUTH_ID)).rejects.toSatisfy(
+      (err: unknown) => {
+        return (
+          err instanceof ConsentServiceError &&
+          err.message.includes('fetch failed')
+        );
+      },
+    );
   });
 
   it('throws ConsentServiceError immediately for an empty authorization ID', async () => {
@@ -249,6 +251,18 @@ describe('approveAuthorization', () => {
       (err: unknown) =>
         err instanceof ConsentServiceError &&
         err.message.includes('must not be empty'),
+    );
+  });
+
+  it('throws ConsentServiceError when approval succeeds but redirect_url is missing', async () => {
+    const mockApprove = vi.fn().mockResolvedValue({ data: {}, error: null });
+
+    const client = buildMockClient({ approveAuthorization: mockApprove });
+
+    await expect(approveAuthorization(client, FAKE_AUTH_ID)).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof ConsentServiceError &&
+        err.message.toLowerCase().includes('no redirect url was returned'),
     );
   });
 });
@@ -287,9 +301,7 @@ describe('denyAuthorization', () => {
 
   it('throws ConsentServiceError with a useful message on SDK error', async () => {
     const sdkError = { message: 'Expired', status: 410 };
-    const mockDeny = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: sdkError });
+    const mockDeny = vi.fn().mockResolvedValue({ data: null, error: sdkError });
 
     const client = buildMockClient({ denyAuthorization: mockDeny });
 
@@ -328,6 +340,18 @@ describe('denyAuthorization', () => {
       (err: unknown) =>
         err instanceof ConsentServiceError &&
         err.message.includes('must not be empty'),
+    );
+  });
+
+  it('throws ConsentServiceError when denial succeeds but redirect_url is missing', async () => {
+    const mockDeny = vi.fn().mockResolvedValue({ data: {}, error: null });
+
+    const client = buildMockClient({ denyAuthorization: mockDeny });
+
+    await expect(denyAuthorization(client, FAKE_AUTH_ID)).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof ConsentServiceError &&
+        err.message.toLowerCase().includes('no redirect url was returned'),
     );
   });
 });

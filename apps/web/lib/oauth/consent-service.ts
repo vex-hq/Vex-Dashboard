@@ -6,7 +6,8 @@
  * module wraps the three SDK calls needed to implement that page:
  *
  *   1. `getAuthorizationDetails` – fetch client name, requested scopes, and
- *      redirect URI so the consent UI can render them.
+ *      redirect URI so the consent UI can render them. Returns a discriminated
+ *      union: `{ kind: 'consent_required' }` or `{ kind: 'already_consented' }`.
  *   2. `approveAuthorization` – record consent and receive the redirect URL
  *      (including the authorization code) to send the user back to the client.
  *   3. `denyAuthorization` – reject the request and receive the redirect URL
@@ -27,7 +28,6 @@
  *   https://supabase.com/docs/guides/auth/oauth-server/oauth-flows
  *   https://supabase.com/docs/guides/auth/oauth-server/mcp-authentication
  */
-
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +40,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * `redirectHint` is the base redirect URI registered by the OAuth client (no
  * code/state appended yet). It can be displayed to reassure users where they
  * will be sent after consent.
+ *
+ * Note on nullability: the SDK types `client.name` and `redirect_uri` as
+ * required strings (OAuthAuthorizationDetails, @supabase/auth-js 2.95.3).
+ * `clientName` and `redirectHint` are kept `string | null` in the public
+ * interface for forward-compatibility; the `?? null` fallbacks in the
+ * implementation are deliberately retained as a belt-and-suspenders guard.
  */
 export interface AuthorizationDetails {
   authorizationId: string;
@@ -48,6 +54,19 @@ export interface AuthorizationDetails {
   scopes: string[];
   redirectHint: string | null;
 }
+
+/**
+ * Discriminated-union return type of `getAuthorizationDetails`.
+ *
+ * - `consent_required`: the SDK returned full authorization details; the
+ *   caller should render the consent page.
+ * - `already_consented`: Supabase auto-approved the request because the user
+ *   previously consented to the same scopes; the caller should redirect
+ *   immediately to `redirectTo` without rendering the consent page.
+ */
+export type ConsentDetailsResult =
+  | { kind: 'consent_required'; details: AuthorizationDetails }
+  | { kind: 'already_consented'; redirectTo: string };
 
 /**
  * Returned by `approveAuthorization` and `denyAuthorization`.
@@ -96,11 +115,16 @@ function messageFrom(error: unknown): string {
 /**
  * Fetch the details needed to render the consent screen.
  *
- * When the user has already consented to the same set of scopes Supabase may
- * return only a `redirect_url` (auto-approve). In that case this function
- * throws a `ConsentServiceError` with `cause` set to `{ alreadyConsented: true,
- * redirectTo: string }` so the caller can redirect immediately without
- * rendering the consent page.
+ * Returns a `ConsentDetailsResult` discriminated union:
+ * - `{ kind: 'consent_required', details }` — full authorization details are
+ *   available; the caller should render the consent page.
+ * - `{ kind: 'already_consented', redirectTo }` — the user has already
+ *   consented to these scopes; Supabase auto-approved and returned only a
+ *   redirect URL. The caller should redirect immediately without rendering the
+ *   consent page. This is a **success** outcome, not an error.
+ *
+ * Genuine failures (network error, expired authorization, empty response)
+ * still throw `ConsentServiceError`.
  *
  * Requires an active authenticated session on `client`.
  *
@@ -110,7 +134,7 @@ function messageFrom(error: unknown): string {
 export async function getAuthorizationDetails(
   client: SupabaseClient,
   authorizationId: string,
-): Promise<AuthorizationDetails> {
+): Promise<ConsentDetailsResult> {
   if (!authorizationId.trim()) {
     throw new ConsentServiceError('Authorization ID must not be empty.');
   }
@@ -123,9 +147,8 @@ export async function getAuthorizationDetails(
   >['error'];
 
   try {
-    ({ data, error } = await client.auth.oauth.getAuthorizationDetails(
-      authorizationId,
-    ));
+    ({ data, error } =
+      await client.auth.oauth.getAuthorizationDetails(authorizationId));
   } catch (thrown: unknown) {
     throw new ConsentServiceError(
       `Failed to fetch authorization details: ${messageFrom(thrown)}`,
@@ -146,29 +169,32 @@ export async function getAuthorizationDetails(
     );
   }
 
-  // Type-narrow: if `authorization_id` is absent the user already consented
-  // and Supabase returned only a redirect_url. Surface this so the caller can
-  // handle the redirect rather than rendering the (now pointless) consent page.
+  // SDK discriminant: `authorization_id` absent → user already consented;
+  // Supabase returned only a redirect_url (auto-approve path).
   if (!('authorization_id' in data)) {
-    throw new ConsentServiceError(
-      'Authorization was already approved. Redirecting back to the application.',
-      { alreadyConsented: true, redirectTo: data.redirect_url },
-    );
+    return { kind: 'already_consented', redirectTo: data.redirect_url };
   }
 
-  const scopeString: string = data.scope ?? '';
-  const scopes = scopeString
+  // `scope` is typed as required by the SDK; `?? ''` is a belt-and-suspenders
+  // guard retained for forward-compatibility with possible future SDK changes.
+  const scopes = data.scope
     .split(' ')
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return {
+  const details: AuthorizationDetails = {
     authorizationId: data.authorization_id,
     clientId: data.client.id,
+    // SDK types `client.name` as required; `?? null` retained deliberately —
+    // see AuthorizationDetails JSDoc.
     clientName: data.client.name ?? null,
     scopes,
+    // SDK types `redirect_uri` as required; `?? null` retained deliberately —
+    // see AuthorizationDetails JSDoc.
     redirectHint: data.redirect_uri ?? null,
   };
+
+  return { kind: 'consent_required', details };
 }
 
 /**
