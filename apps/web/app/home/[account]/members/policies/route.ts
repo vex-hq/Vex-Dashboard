@@ -9,8 +9,8 @@ import {
   createInvitationsPolicyEvaluator,
 } from '@kit/team-accounts/policies';
 
-import { getAgentGuardPool } from '~/lib/agentguard/db';
 import { canAddSeat, getPlanLimits } from '~/lib/agentguard/plan-limits';
+import type { PlanLimits } from '~/lib/agentguard/plan-limits';
 
 export const GET = enhanceRouteHandler(
   async function ({ params, user }) {
@@ -19,47 +19,47 @@ export const GET = enhanceRouteHandler(
 
     try {
       // ── Seat-limit enforcement ───────────────────────────────────
-      // Query the AgentGuard organizations table for the current plan
-      // and compare against plan limits before evaluating other policies.
-      const pool = getAgentGuardPool();
+      // The plan comes from `accounts.vex_plan` — the SAME source of truth used
+      // by the admin plan action, the Stripe billing webhook, the dashboard
+      // usage meters, and the engine's entitlement checks.
+      //
+      // This previously read `organizations.plan` from the engine database,
+      // which is written by nothing (it still holds its `'free'` column
+      // default), so an account upgraded to any paid/enterprise plan was still
+      // gated at the free tier's 1 seat. Reading `vex_plan` here removes that
+      // split-brain. `vex_plan_overrides` is honoured too, so a per-account
+      // custom seat grant works without changing the plan.
+      const { data: accountRow } = await client
+        .from('accounts')
+        .select('id, vex_plan, vex_plan_overrides')
+        .eq('slug', account)
+        .single();
 
-      const orgResult = await pool.query<{ plan: string }>(
-        `SELECT plan FROM organizations WHERE account_slug = $1 LIMIT 1`,
-        [account],
-      );
+      if (accountRow) {
+        const plan = accountRow.vex_plan ?? 'free';
+        const overrides = (accountRow.vex_plan_overrides ??
+          null) as Partial<PlanLimits> | null;
 
-      if (orgResult.rows[0]) {
-        const plan = orgResult.rows[0].plan;
+        const { count: memberCount } = await client
+          .from('accounts_memberships')
+          .select('*', { count: 'exact', head: true })
+          .eq('account_id', accountRow.id);
 
-        // Get current member count from Supabase
-        const { data: accountRow } = await client
-          .from('accounts')
-          .select('id')
-          .eq('slug', account)
-          .single();
+        const seatCheck = canAddSeat(plan, memberCount ?? 0, 1, overrides);
 
-        if (accountRow) {
-          const { count: memberCount } = await client
-            .from('accounts_memberships')
-            .select('*', { count: 'exact', head: true })
-            .eq('account_id', accountRow.id);
+        if (!seatCheck.allowed) {
+          const limits = getPlanLimits(plan, overrides);
 
-          const seatCheck = canAddSeat(plan, memberCount ?? 0);
-
-          if (!seatCheck.allowed) {
-            const limits = getPlanLimits(plan);
-
-            return NextResponse.json({
-              allowed: false,
-              reasons: [seatCheck.reason],
-              metadata: {
-                plan,
-                currentSeats: memberCount ?? 0,
-                maxSeats: limits.maxSeats,
-                timestamp: new Date().toISOString(),
-              },
-            });
-          }
+          return NextResponse.json({
+            allowed: false,
+            reasons: [seatCheck.reason],
+            metadata: {
+              plan,
+              currentSeats: memberCount ?? 0,
+              maxSeats: limits.maxSeats,
+              timestamp: new Date().toISOString(),
+            },
+          });
         }
       }
 

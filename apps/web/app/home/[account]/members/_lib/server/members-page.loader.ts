@@ -17,7 +17,7 @@ export async function loadMembersPageData(
   return Promise.all([
     loadAccountMembers(client, slug),
     loadInvitations(client, slug),
-    canAddMember,
+    canAddMember(),
     loadTeamWorkspace(slug),
   ]);
 }
