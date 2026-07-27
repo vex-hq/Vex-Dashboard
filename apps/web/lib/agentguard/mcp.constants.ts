@@ -1,11 +1,17 @@
 /**
  * Single source of truth for connecting an external MCP client to Klio Cloud.
  *
- * Any MCP-capable agent (Claude Desktop, Cursor, ChatGPT, Gemini, a custom
- * agent, …) can write into the same shared memory by pointing at the hosted
- * Klio MCP server over Streamable HTTP. The engine serves the transport at
- * `MCP_ENDPOINT_PATH` ("/mcp"); auth travels in the `X-Vex-Key` header (an
- * optional `X-Vex-Agent` header labels the calling agent).
+ * Any MCP client that accepts a remote server URL plus custom headers (Claude
+ * Desktop, Cursor, Codex, a self-built agent, …) can write into the same
+ * shared memory by pointing at the hosted Klio MCP server over Streamable
+ * HTTP. The engine serves the transport at `MCP_ENDPOINT_PATH` ("/mcp"); auth
+ * travels in the `X-Vex-Key` header (an optional `X-Vex-Agent` header labels
+ * the calling agent).
+ *
+ * The consumer ChatGPT and Gemini apps cannot add an arbitrary remote MCP
+ * server with a custom auth header, so they are NOT part of this path.
+ * Claude.ai reaches the same URL through the OAuth custom-connector flow
+ * instead — no header, consent granted at `app/oauth/consent`.
  *
  * Directive-free (no `'use client'`/`'use server'`) so it is safe to import
  * from client components and server code alike.

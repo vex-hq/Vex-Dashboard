@@ -371,6 +371,7 @@ export interface MemoryFilters {
   memory_type?: string;
   source?: string;
   project_id?: string;
+  space_id?: string;
   q?: string;
   page?: number;
 }
@@ -381,6 +382,8 @@ export interface MemoryListRow {
   memory_type: string;
   content: string;
   project_id: string | null;
+  space_id: string | null;
+  space_name: string | null;
   source: string | null;
   created_at: string;
 }
@@ -395,7 +398,10 @@ interface MemoryListQueryRow extends MemoryListRow {
 }
 
 /**
- * Paginated org-shared memory rows from `session_memories`.
+ * Paginated org-shared memory rows from `session_memories`, LEFT JOINed to
+ * `spaces` so each row can display the space it belongs to. The join is itself
+ * org-scoped (`s.org_id = m.org_id`) as defense in depth, so a space id shared
+ * across tenants could never surface another org's space name.
  *
  * The WHERE clause is assembled dynamically but every dynamic value is bound
  * as a positional parameter ($1, $2, …) — user-supplied filters are NEVER
@@ -411,36 +417,46 @@ export const loadMemoryList = cache(
     const effectivePage = Math.max(1, filters?.page ?? page);
     const offset = (effectivePage - 1) * MEMORY_PAGE_SIZE;
 
-    const conditions: string[] = ['org_id = $1', 'scope = $2', 'status = $3'];
+    const conditions: string[] = [
+      'm.org_id = $1',
+      'm.scope = $2',
+      'm.status = $3',
+    ];
     const params: unknown[] = [orgId, KLIO_CLOUD_SCOPE, KLIO_CLOUD_STATUS];
     let paramIndex = params.length + 1;
 
     if (filters?.agent_id) {
-      conditions.push(`agent_id = $${paramIndex}`);
+      conditions.push(`m.agent_id = $${paramIndex}`);
       params.push(filters.agent_id);
       paramIndex++;
     }
 
     if (filters?.memory_type) {
-      conditions.push(`memory_type = $${paramIndex}`);
+      conditions.push(`m.memory_type = $${paramIndex}`);
       params.push(filters.memory_type);
       paramIndex++;
     }
 
     if (filters?.source) {
-      conditions.push(`metadata->>'source' = $${paramIndex}`);
+      conditions.push(`m.metadata->>'source' = $${paramIndex}`);
       params.push(filters.source);
       paramIndex++;
     }
 
     if (filters?.project_id) {
-      conditions.push(`project_id = $${paramIndex}`);
+      conditions.push(`m.project_id = $${paramIndex}`);
       params.push(filters.project_id);
       paramIndex++;
     }
 
+    if (filters?.space_id) {
+      conditions.push(`m.space_id = $${paramIndex}`);
+      params.push(filters.space_id);
+      paramIndex++;
+    }
+
     if (filters?.q) {
-      conditions.push(`content ILIKE '%' || $${paramIndex} || '%'`);
+      conditions.push(`m.content ILIKE '%' || $${paramIndex} || '%'`);
       params.push(filters.q);
       paramIndex++;
     }
@@ -450,17 +466,20 @@ export const loadMemoryList = cache(
     const result = await pool.query<MemoryListQueryRow>(
       `
       SELECT
-        id,
-        agent_id,
-        memory_type,
-        content,
-        project_id,
-        metadata->>'source' AS source,
-        created_at,
+        m.id,
+        m.agent_id,
+        m.memory_type,
+        m.content,
+        m.project_id,
+        m.space_id,
+        s.name AS space_name,
+        m.metadata->>'source' AS source,
+        m.created_at,
         COUNT(*) OVER() AS total_count
-      FROM session_memories
+      FROM session_memories m
+      LEFT JOIN spaces s ON s.id = m.space_id AND s.org_id = m.org_id
       WHERE ${whereClause}
-      ORDER BY created_at DESC
+      ORDER BY m.created_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
       `,
       [...params, MEMORY_PAGE_SIZE, offset],
@@ -477,11 +496,48 @@ export const loadMemoryList = cache(
         memory_type: row.memory_type,
         content: row.content,
         project_id: row.project_id,
+        space_id: row.space_id,
+        space_name: row.space_name,
         source: row.source,
         created_at: row.created_at,
       })),
       pageCount,
     };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// loadSpaces
+// ---------------------------------------------------------------------------
+
+export interface SpaceOptionRow {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/**
+ * All spaces belonging to an org, used to populate the memory browser's space
+ * filter. Unlike the type/source/project options (derived from the current
+ * page of rows), spaces come from the `spaces` table directly so the dropdown
+ * offers every space the org has — including ones with no memory on page one.
+ * Tenant-scoped by `org_id`, so one org can never see another org's spaces.
+ */
+export const loadSpaces = cache(
+  async (orgId: string): Promise<SpaceOptionRow[]> => {
+    const pool = getAgentGuardPool();
+
+    const result = await pool.query<SpaceOptionRow>(
+      `
+      SELECT id, name, slug
+      FROM spaces
+      WHERE org_id = $1
+      ORDER BY name ASC
+      `,
+      [orgId],
+    );
+
+    return result.rows;
   },
 );
 

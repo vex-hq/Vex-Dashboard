@@ -15,6 +15,7 @@ import {
   loadAgentActivity,
   loadMemoryList,
   loadMemoryVolume,
+  loadSpaces,
 } from './_lib/server/memory.loader';
 
 interface MemoryPageProps {
@@ -24,6 +25,7 @@ interface MemoryPageProps {
     type?: string;
     source?: string;
     project?: string;
+    space?: string;
     q?: string;
     page?: string;
   }>;
@@ -60,26 +62,30 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
   const query =
     filters.q?.trim().slice(0, MEMORY_SEARCH_MAX_LENGTH) || undefined;
 
-  const [agentActivity, memoryVolume, memoryResult] = await Promise.all([
-    loadAgentActivity(orgId),
-    loadMemoryVolume(orgId, 30),
-    loadMemoryList(
-      orgId,
-      {
-        agent_id: filters.agent,
-        memory_type: filters.type,
-        source: filters.source,
-        project_id: filters.project,
-        q: query,
-      },
-      page,
-    ),
-  ]);
+  const [agentActivity, memoryVolume, memoryResult, spaceRows] =
+    await Promise.all([
+      loadAgentActivity(orgId),
+      loadMemoryVolume(orgId, 30),
+      loadMemoryList(
+        orgId,
+        {
+          agent_id: filters.agent,
+          memory_type: filters.type,
+          source: filters.source,
+          project_id: filters.project,
+          space_id: filters.space,
+          q: query,
+        },
+        page,
+      ),
+      loadSpaces(orgId),
+    ]);
 
   // Filter options. Agents come from the activity rollup (authoritative set of
   // agents that have written memory); type/source/project are derived from the
   // current page of rows so the dropdowns reflect real data without an extra
-  // query.
+  // query. Spaces come from the `spaces` table so the dropdown offers every
+  // space the org has, not just the ones present on the current page.
   const agentOptions = agentActivity
     .map((agent) => ({ value: agent.agent_id, label: agent.agent_id }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -91,6 +97,10 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
   const projects = distinctSorted(
     memoryResult.rows.map((r) => r.project_id),
   ).map((value) => ({ value, label: value }));
+  const spaces = spaceRows.map((space) => ({
+    value: space.id,
+    label: space.name,
+  }));
 
   return (
     <>
@@ -126,6 +136,7 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
             memoryTypes={memoryTypes}
             sources={sources}
             projects={projects}
+            spaces={spaces}
             page={page}
             pageCount={memoryResult.pageCount}
           />

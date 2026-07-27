@@ -49,12 +49,13 @@ interface MemoryTableProps {
   memoryTypes: string[];
   sources: string[];
   projects: FilterOption[];
+  spaces: FilterOption[];
   page: number;
   pageCount: number;
   /**
-   * When true, the agent/type/source/project filter bar is omitted. Used on the
-   * single-identity drill-in page where the agent is already fixed and the
-   * cross-agent filters would be meaningless. Defaults to false so the main
+   * When true, the agent/type/source/project/space filter bar is omitted. Used
+   * on the single-identity drill-in page where the agent is already fixed and
+   * the cross-agent filters would be meaningless. Defaults to false so the main
    * memory browser keeps its filter bar.
    */
   hideFilters?: boolean;
@@ -90,6 +91,7 @@ export default function MemoryTable({
   memoryTypes,
   sources,
   projects,
+  spaces,
   page,
   pageCount,
   hideFilters = false,
@@ -105,6 +107,7 @@ export default function MemoryTable({
   const currentType = searchParams.get('type') ?? '';
   const currentSource = searchParams.get('source') ?? '';
   const currentProject = searchParams.get('project') ?? '';
+  const currentSpace = searchParams.get('space') ?? '';
   const currentQuery = searchParams.get('q') ?? '';
 
   const [searchValue, setSearchValue] = useState(currentQuery);
@@ -224,6 +227,26 @@ export default function MemoryTable({
                 </div>
               ) : null}
 
+              {spaces.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  <label className="text-muted-foreground text-xs">
+                    <Trans i18nKey="agentguard:memory.space" />
+                  </label>
+                  <select
+                    value={currentSpace}
+                    onChange={(e) => updateFilter('space', e.target.value)}
+                    className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
+                  >
+                    <option value="">{t('memory.allSpaces')}</option>
+                    {spaces.map((space) => (
+                      <option key={space.value} value={space.value}>
+                        {space.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
               <form
                 onSubmit={submitSearch}
                 className="flex flex-1 flex-col gap-1"
@@ -281,6 +304,9 @@ export default function MemoryTable({
                     <Trans i18nKey="agentguard:memory.colSource" />
                   </TableHead>
                   <TableHead>
+                    <Trans i18nKey="agentguard:memory.colSpace" />
+                  </TableHead>
+                  <TableHead>
                     <Trans i18nKey="agentguard:memory.colCreated" />
                   </TableHead>
                 </TableRow>
@@ -316,6 +342,7 @@ export default function MemoryTable({
                       {truncateId(row.agent_id, 24)}
                     </TableCell>
                     <TableCell>{row.source ?? '—'}</TableCell>
+                    <TableCell>{row.space_name ?? '—'}</TableCell>
                     <TableCell className="whitespace-nowrap">
                       {formatTimestamp(row.created_at)}
                     </TableCell>
