@@ -49,10 +49,7 @@ describe('loadAgentMemorySummary', () => {
 
     const { loadAgentMemorySummary } = await import('./memory.loader');
 
-    const row = await loadAgentMemorySummary(
-      'org-1',
-      'klio-host/claude-code',
-    );
+    const row = await loadAgentMemorySummary('org-1', 'klio-host/claude-code');
 
     expect(row).toEqual({
       agent_id: 'klio-host/claude-code',
@@ -101,6 +98,100 @@ describe('loadAgentMemorySummary', () => {
   });
 });
 
+describe('loadMemoryList', () => {
+  it('binds the space filter as a parameter and keeps the query org-scoped', async () => {
+    queueRows({ rows: [] });
+
+    const { loadMemoryList, MEMORY_PAGE_SIZE } =
+      await import('./memory.loader');
+
+    const spaceId = '11111111-2222-3333-4444-555555555555';
+
+    await loadMemoryList('org-5', { space_id: spaceId });
+
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+    // The org id is always the first bound parameter, so a space filter can
+    // never widen the read beyond the caller's org.
+    expect(params[0]).toBe('org-5');
+    expect(params).toContain(spaceId);
+
+    // Bound, never interpolated: the raw value must not appear in the SQL text.
+    expect(sql).not.toContain(spaceId);
+    expect(params).toEqual([
+      'org-5',
+      'org',
+      'active',
+      spaceId,
+      MEMORY_PAGE_SIZE,
+      0,
+    ]);
+  });
+
+  it('maps the joined space name onto each row', async () => {
+    queueRows({
+      rows: [
+        {
+          id: 'mem-1',
+          agent_id: 'klio-host/claude-code',
+          memory_type: 'fact',
+          content: 'deploys run on Fly',
+          project_id: null,
+          space_id: 'space-1',
+          space_name: 'Platform',
+          source: 'mcp',
+          created_at: '2026-06-02T09:00:00.000Z',
+          total_count: '1',
+        },
+        {
+          id: 'mem-2',
+          agent_id: 'klio-host/cursor',
+          memory_type: 'note',
+          content: 'org-brain write with no space',
+          project_id: null,
+          space_id: null,
+          space_name: null,
+          source: null,
+          created_at: '2026-06-01T09:00:00.000Z',
+          total_count: '1',
+        },
+      ],
+    });
+
+    const { loadMemoryList } = await import('./memory.loader');
+
+    const result = await loadMemoryList('org-6');
+
+    expect(result.rows[0]?.space_id).toBe('space-1');
+    expect(result.rows[0]?.space_name).toBe('Platform');
+    expect(result.rows[1]?.space_id).toBeNull();
+    expect(result.rows[1]?.space_name).toBeNull();
+  });
+});
+
+describe('loadSpaces', () => {
+  it('returns the org-scoped space rows for the filter dropdown', async () => {
+    queueRows({
+      rows: [
+        { id: 'space-1', name: 'Platform', slug: 'platform' },
+        { id: 'space-2', name: 'Research', slug: 'research' },
+      ],
+    });
+
+    const { loadSpaces } = await import('./memory.loader');
+
+    const spaces = await loadSpaces('org-7');
+
+    const [, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+    expect(params).toEqual(['org-7']);
+    expect(spaces).toEqual([
+      { id: 'space-1', name: 'Platform', slug: 'platform' },
+      { id: 'space-2', name: 'Research', slug: 'research' },
+    ]);
+  });
+});
+
 describe('loadAgentRecalls', () => {
   it('maps rows and computes pageCount from total_count', async () => {
     queueRows({
@@ -124,9 +215,8 @@ describe('loadAgentRecalls', () => {
       ],
     });
 
-    const { loadAgentRecalls, MEMORY_PAGE_SIZE } = await import(
-      './memory.loader'
-    );
+    const { loadAgentRecalls, MEMORY_PAGE_SIZE } =
+      await import('./memory.loader');
 
     const result = await loadAgentRecalls('org-3', 'klio-host/cursor', 1);
 

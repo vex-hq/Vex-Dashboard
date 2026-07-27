@@ -95,6 +95,7 @@ async function AgentMemoryPage({ params, searchParams }: AgentMemoryPageProps) {
               memoryTypes={[]}
               sources={[]}
               projects={[]}
+              spaces={[]}
               page={capturesPage}
               pageCount={captures.pageCount}
               hideFilters
