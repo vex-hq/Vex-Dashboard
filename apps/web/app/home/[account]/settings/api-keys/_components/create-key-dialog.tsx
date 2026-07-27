@@ -50,7 +50,16 @@ const SCOPES = [
  * layer (`klio init` rejects a key without the `memory` scope), so `memory` is
  * the pre-ticked default. Every other scope stays one checkbox away.
  */
-const DEFAULT_SCOPES: ReadonlyArray<string> = ['memory'];
+// `memory` is required for the Klio brain (MCP + `klio init`); it was missing
+// from the defaults, so keys minted here could not access memory at all. The
+// reliability scopes stay in the default set so key creation for that product
+// is unchanged — this is additive, not a swap.
+const DEFAULT_SCOPES: ReadonlyArray<string> = [
+  'ingest',
+  'verify',
+  'read',
+  'memory',
+];
 
 interface CreateKeyDialogProps {
   accountSlug: string;
