@@ -26,7 +26,7 @@ async function DocsPage({ params }: DocsPageProps) {
       />
 
       <PageBody>
-        <DocsContent />
+        <DocsContent accountSlug={account} />
       </PageBody>
     </>
   );

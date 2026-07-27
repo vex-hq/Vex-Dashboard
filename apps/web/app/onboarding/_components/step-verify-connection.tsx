@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@kit/ui/button';
 
+import { KLIO_DOCS_URL } from '~/lib/agentguard/mcp.constants';
+
 import { completeOnboardingAction } from '../_lib/server-actions';
 
 interface VerifyResponse {
@@ -196,7 +198,7 @@ export function StepVerifyConnection({
 
         {connected ? (
           <a
-            href="https://docs.oppla.ai"
+            href={KLIO_DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="text-muted-foreground hover:text-foreground text-sm transition-colors"

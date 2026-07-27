@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+import Link from 'next/link';
+
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -14,6 +16,16 @@ import {
   CardTitle,
 } from '@kit/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kit/ui/tabs';
+
+import {
+  KLIO_DOCS_MCP_ANCHOR,
+  KLIO_INIT_COMMAND,
+  KLIO_MCP_AGENT_HEADER,
+  KLIO_MCP_KEY_HEADER,
+  KLIO_MCP_KEY_PLACEHOLDER,
+  KLIO_MCP_URL,
+  buildKlioMcpConfig,
+} from '~/lib/agentguard/mcp.constants';
 
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -45,11 +57,161 @@ function CodeBlock({ code }: { code: string }) {
   );
 }
 
-export function DocsContent() {
+interface DocsContentProps {
+  accountSlug: string;
+}
+
+export function DocsContent({ accountSlug }: DocsContentProps) {
   const { t } = useTranslation('agentguard');
 
   return (
     <div className="space-y-8">
+      {/* ----------------------------------------------------------------- */}
+      {/* Klio memory (MCP). Additive: the Vex SDK reference below is        */}
+      {/* unchanged. Anchored so onboarding can deep-link straight here.     */}
+      {/* ----------------------------------------------------------------- */}
+      <div id={KLIO_DOCS_MCP_ANCHOR} className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('docs.klioMemory')}</CardTitle>
+            <CardDescription>{t('docs.klioMemoryDescription')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-muted-foreground text-sm">
+              Klio exposes memory to your agents over the Model Context Protocol
+              (MCP). Any MCP-capable client — Claude Code, Claude Desktop,
+              Cursor, Codex, or your own agent — reads and writes the same
+              org-shared memory, so context captured in one tool is available in
+              the next.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="py-2 pr-4 text-left font-medium">Tool</th>
+                    <th className="py-2 pr-4 text-left font-medium">
+                      Direction
+                    </th>
+                    <th className="py-2 text-left font-medium">What it does</th>
+                  </tr>
+                </thead>
+                <tbody className="text-muted-foreground">
+                  <tr className="border-b">
+                    <td className="py-2 pr-4">
+                      <code className="text-xs">recall</code>
+                    </td>
+                    <td className="py-2 pr-4">Read</td>
+                    <td className="py-2">
+                      Semantic search over the org&apos;s memory. Call it before
+                      acting to retrieve prior decisions, preferences, and
+                      project facts relevant to the current task.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-4">
+                      <code className="text-xs">remember</code>
+                    </td>
+                    <td className="py-2 pr-4">Write</td>
+                    <td className="py-2">
+                      Persist a durable fact, decision, or preference.
+                      Extracted, de-duplicated, and superseded automatically —
+                      transient steps and tool output should not be stored.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-muted-foreground text-sm">
+              Everything captured shows up in{' '}
+              <Link
+                href={`/home/${accountSlug}/memory`}
+                className="text-primary hover:underline"
+              >
+                Memory
+              </Link>
+              , per agent and per day.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('docs.klioLocalSetup')}</CardTitle>
+            <CardDescription>
+              One command — detects the coding agents installed on this machine
+              and writes their MCP config for you.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <CodeBlock code={KLIO_INIT_COMMAND} />
+            <p className="text-muted-foreground text-sm">
+              Run it from your project directory. Re-running it is safe — it
+              updates existing entries rather than duplicating them.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('docs.klioRemoteSetup')}</CardTitle>
+            <CardDescription>
+              Point any MCP client at the hosted Klio server over Streamable
+              HTTP.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Endpoint</p>
+              <CodeBlock code={KLIO_MCP_URL} />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Authentication</p>
+              <CodeBlock
+                code={`${KLIO_MCP_KEY_HEADER}: ${KLIO_MCP_KEY_PLACEHOLDER}`}
+              />
+              <p className="text-muted-foreground text-sm">
+                Your API key travels in the{' '}
+                <code className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                  {KLIO_MCP_KEY_HEADER}
+                </code>{' '}
+                header and resolves the org whose memory you read and write.
+                Send an optional{' '}
+                <code className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                  {KLIO_MCP_AGENT_HEADER}
+                </code>{' '}
+                header with a stable per-agent identifier so activity is
+                attributed to the right agent; clients that omit it share one
+                default agent.{' '}
+                <Link
+                  href={`/home/${accountSlug}/settings/api-keys`}
+                  className="text-primary hover:underline"
+                >
+                  Manage API keys
+                </Link>
+                .
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Client configuration</p>
+              <CodeBlock code={buildKlioMcpConfig(null)} />
+              <p className="text-muted-foreground text-sm">
+                Paste this into your client&apos;s MCP config (
+                <code className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                  mcpServers
+                </code>{' '}
+                is the shape Cursor and most MCP clients use), replacing{' '}
+                <code className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                  {KLIO_MCP_KEY_PLACEHOLDER}
+                </code>{' '}
+                with your key.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Installation */}
       <Card>
         <CardHeader>
