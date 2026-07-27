@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cache } from 'react';
 
+import { getLogger } from '@kit/shared/logger';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
@@ -221,9 +222,64 @@ export const loadRecentActivity = cache(
 );
 
 /**
+ * Month-to-date Klio memory usage for the memory quota meters.
+ *
+ * Read from `memory_usage_counters` — the SAME per-(org, month) rollup the
+ * engine increments on every capture/recall and reads back in
+ * `shared/usage.py::check_memory_quota` before hard-blocking with HTTP 402.
+ * Counting `session_memories` / `brain_recall_events` instead would drift from
+ * what is actually metered: those tables are subject to plan retention deletes
+ * (migration 025), while the counter is not.
+ *
+ * A missing row means "nothing used this period" (matching the engine's
+ * `get_counters`, which returns zeros for a missing row). `null` is returned
+ * only when the counter genuinely cannot be read, so callers can omit the
+ * meters rather than show a fabricated number.
+ */
+export const loadMemoryUsage = cache(
+  async (
+    orgId: string,
+  ): Promise<{ memoriesUsed: number; recallsUsed: number } | null> => {
+    const pool = getAgentGuardPool();
+
+    try {
+      const result = await pool.query<{
+        memories_captured: string;
+        recalls: string;
+      }>(
+        `
+        SELECT memories_captured, recalls
+        FROM memory_usage_counters
+        WHERE org_id = $1
+          AND period_month = date_trunc('month', NOW() AT TIME ZONE 'utc')::date
+        `,
+        [orgId],
+      );
+
+      const row = result.rows[0];
+
+      return {
+        memoriesUsed: parseInt(row?.memories_captured ?? '0', 10),
+        recallsUsed: parseInt(row?.recalls ?? '0', 10),
+      };
+    } catch (error) {
+      const logger = await getLogger();
+
+      logger.error(
+        { name: 'homepage.memoryUsage', orgId, error },
+        'Failed to read memory_usage_counters; omitting memory quota meters',
+      );
+
+      return null;
+    }
+  },
+);
+
+/**
  * Load current month usage counts and plan info for the usage meters.
  * Plan data: Supabase accounts table (source of truth).
- * Usage data: TimescaleDB hourly_agent_stats (analytics).
+ * Usage data: TimescaleDB hourly_agent_stats (analytics) for reliability,
+ * `memory_usage_counters` for the Klio memory value metrics.
  */
 export const loadPlanUsage = cache(
   async (
@@ -234,39 +290,43 @@ export const loadPlanUsage = cache(
     planOverrides: Record<string, number> | null;
     observationsUsed: number;
     verificationsUsed: number;
+    memoriesUsed: number | null;
+    recallsUsed: number | null;
     agentCount: number;
   }> => {
     const pool = getAgentGuardPool();
     const supabase = getSupabaseServerClient();
 
-    const [accountResult, usageResult, agentResult] = await Promise.all([
-      supabase
-        .from('accounts')
-        .select('vex_plan, vex_plan_overrides')
-        .eq('slug', accountSlug)
-        .single(),
-      pool
-        .query<{ total_executions: string }>(
-          `SELECT COALESCE(SUM(execution_count), 0) AS total_executions
+    const [accountResult, usageResult, agentResult, memoryUsage] =
+      await Promise.all([
+        supabase
+          .from('accounts')
+          .select('vex_plan, vex_plan_overrides')
+          .eq('slug', accountSlug)
+          .single(),
+        pool
+          .query<{ total_executions: string }>(
+            `SELECT COALESCE(SUM(execution_count), 0) AS total_executions
            FROM hourly_agent_stats
            WHERE org_id = $1
              AND bucket >= date_trunc('month', NOW())`,
-          [orgId],
-        )
-        .catch(() =>
-          pool.query<{ total_executions: string }>(
-            `SELECT COUNT(*) AS total_executions
+            [orgId],
+          )
+          .catch(() =>
+            pool.query<{ total_executions: string }>(
+              `SELECT COUNT(*) AS total_executions
              FROM executions
              WHERE org_id = $1
                AND timestamp >= date_trunc('month', NOW())`,
-            [orgId],
+              [orgId],
+            ),
           ),
+        pool.query<{ agent_count: string }>(
+          'SELECT COUNT(*) AS agent_count FROM agents WHERE org_id = $1',
+          [orgId],
         ),
-      pool.query<{ agent_count: string }>(
-        'SELECT COUNT(*) AS agent_count FROM agents WHERE org_id = $1',
-        [orgId],
-      ),
-    ]);
+        loadMemoryUsage(orgId),
+      ]);
 
     const account = accountResult.data;
     const totalExecs = parseInt(
@@ -281,6 +341,8 @@ export const loadPlanUsage = cache(
         (account?.vex_plan_overrides as Record<string, number>) ?? null,
       observationsUsed: totalExecs,
       verificationsUsed: 0,
+      memoriesUsed: memoryUsage?.memoriesUsed ?? null,
+      recallsUsed: memoryUsage?.recallsUsed ?? null,
       agentCount,
     };
   },

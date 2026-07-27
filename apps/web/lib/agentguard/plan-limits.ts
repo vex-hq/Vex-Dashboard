@@ -12,6 +12,17 @@ export interface PlanLimits {
   verificationsPerMonth: number;
   /** Monthly corrections quota (-1 = unlimited, full cascade) */
   correctionsPerMonth: number;
+  /**
+   * Monthly Klio memory-capture quota (-1 = unlimited, 0 = disabled).
+   * Hard-enforced by the engine (`shared/usage.py::check_memory_quota`) with an
+   * HTTP 402 once the counter reaches this value on a non-overage plan.
+   */
+  memoriesPerMonth: number;
+  /**
+   * Monthly Klio recall quota (-1 = unlimited, 0 = disabled). Enforced by the
+   * same engine path as `memoriesPerMonth`.
+   */
+  recallsPerMonth: number;
   /** Maximum requests per minute (overrides per-key RPM if lower) */
   maxRpm: number;
   /** Maximum number of registered agents (-1 = unlimited) */
@@ -35,6 +46,8 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     observationsPerMonth: 1_000,
     verificationsPerMonth: 50,
     correctionsPerMonth: 0,
+    memoriesPerMonth: 1_000,
+    recallsPerMonth: 10_000,
     maxRpm: 100,
     maxAgents: -1,
     maxSeats: 1,
@@ -48,6 +61,8 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     observationsPerMonth: 25_000,
     verificationsPerMonth: 1_000,
     correctionsPerMonth: 100,
+    memoriesPerMonth: 25_000,
+    recallsPerMonth: 100_000,
     maxRpm: 500,
     maxAgents: -1,
     maxSeats: 3,
@@ -61,6 +76,8 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     observationsPerMonth: 150_000,
     verificationsPerMonth: 15_000,
     correctionsPerMonth: -1,
+    memoriesPerMonth: 150_000,
+    recallsPerMonth: 1_000_000,
     maxRpm: 1_000,
     maxAgents: -1,
     maxSeats: 5,
@@ -74,6 +91,8 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     observationsPerMonth: 1_500_000,
     verificationsPerMonth: 150_000,
     correctionsPerMonth: -1,
+    memoriesPerMonth: 1_500_000,
+    recallsPerMonth: 10_000_000,
     maxRpm: 5_000,
     maxAgents: -1,
     maxSeats: 15,
@@ -87,6 +106,8 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     observationsPerMonth: 10_000_000,
     verificationsPerMonth: 1_000_000,
     correctionsPerMonth: -1,
+    memoriesPerMonth: -1,
+    recallsPerMonth: -1,
     maxRpm: 10_000,
     maxAgents: -1,
     maxSeats: -1, // unlimited
