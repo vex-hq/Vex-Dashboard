@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 import Link from 'next/link';
 
-import { ArrowRight, Check, Copy, Network, Terminal } from 'lucide-react';
+import { ArrowRight, Check, Copy, Network, Plug, Terminal } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 
@@ -180,12 +180,42 @@ export function StepConnectAgents({
         </div>
       </motion.div>
 
+      {/* Card 3 — Claude.ai custom connector (OAuth, no API key) */}
+      <motion.div
+        className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+      >
+        <div className="flex items-center gap-2">
+          <Plug className="text-muted-foreground h-4 w-4 shrink-0" />
+          <h2 className="text-sm font-semibold">
+            {t('onboarding.connectAgentsConnectorLabel')}
+          </h2>
+        </div>
+
+        <p className="text-muted-foreground text-sm">
+          {t('onboarding.connectAgentsConnectorDescription')}
+        </p>
+
+        <div className="space-y-1.5">
+          <p className="text-muted-foreground text-xs font-medium">
+            {t('onboarding.connectAgentsConnectorUrlLabel')}
+          </p>
+          <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy connector URL" />
+        </div>
+
+        <p className="text-muted-foreground text-sm">
+          {t('onboarding.connectAgentsConnectorSteps')}
+        </p>
+      </motion.div>
+
       {/* CTA + back */}
       <motion.div
         className="flex flex-col items-center gap-3"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
+        transition={{ delay: 0.5 }}
       >
         <Button onClick={onNext} className="rounded-lg px-8" size="lg">
           {t('onboarding.next')}
