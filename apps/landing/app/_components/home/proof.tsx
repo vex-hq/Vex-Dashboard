@@ -3,15 +3,21 @@
  * skeptical developer scans for: what Klio works with, and hard numbers.
  * All figures come from the product-marketing proof points (kept honest /
  * approximate where appropriate).
+ *
+ * `WORKS_WITH` lists only clients that can actually reach Klio today: an MCP
+ * client that accepts a remote server URL plus custom headers, or Claude.ai
+ * via the OAuth custom-connector flow. The consumer ChatGPT and Gemini apps
+ * cannot add an arbitrary remote MCP server with a custom auth header, so they
+ * are deliberately absent.
  */
 const WORKS_WITH = [
   'Claude Code',
   'Claude Desktop',
+  'Claude.ai',
   'Cursor',
   'Codex',
   'Cline',
   'Zed',
-  'Gemini',
   'any MCP agent',
 ];
 
