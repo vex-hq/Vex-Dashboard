@@ -45,6 +45,13 @@ const SCOPES = [
   },
 ] as const;
 
+/**
+ * Keys minted here are overwhelmingly used to connect an agent to the memory
+ * layer (`klio init` rejects a key without the `memory` scope), so `memory` is
+ * the pre-ticked default. Every other scope stays one checkbox away.
+ */
+const DEFAULT_SCOPES: ReadonlyArray<string> = ['memory'];
+
 interface CreateKeyDialogProps {
   accountSlug: string;
   disabled?: boolean;
@@ -60,7 +67,7 @@ export default function CreateKeyDialog({
   // Form state
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['ingest', 'verify', 'read']);
+  const [scopes, setScopes] = useState<string[]>([...DEFAULT_SCOPES]);
   const [rateLimitRpm, setRateLimitRpm] = useState(1000);
   const [expiresAt, setExpiresAt] = useState('');
 
@@ -70,7 +77,7 @@ export default function CreateKeyDialog({
 
   function resetForm() {
     setName('');
-    setScopes(['ingest', 'verify', 'read']);
+    setScopes([...DEFAULT_SCOPES]);
     setRateLimitRpm(1000);
     setExpiresAt('');
     setCreatedKey(null);
