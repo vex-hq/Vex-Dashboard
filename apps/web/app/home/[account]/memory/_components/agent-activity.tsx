@@ -12,6 +12,7 @@ import { Badge } from '@kit/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
 
 import { encodeAgentIdPath } from '~/lib/agentguard/agent-id-path';
+import { KLIO_INIT_COMMAND } from '~/lib/agentguard/mcp.constants';
 
 import type { AgentActivityRow } from '../_lib/server/memory.loader';
 
@@ -21,8 +22,6 @@ interface AgentActivityProps {
 }
 
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-const INIT_COMMAND = 'npx @klio-tech/klio@latest init';
 
 /**
  * Map a raw `tool` slug (e.g. `claude-code`) to a friendly display label.
@@ -109,7 +108,7 @@ export function AgentActivity({ agents, accountSlug }: AgentActivityProps) {
           </p>
           <code className="bg-muted text-foreground inline-flex items-center gap-2 rounded-md px-3 py-1.5 font-mono text-sm">
             <Terminal className="text-muted-foreground h-3.5 w-3.5" />
-            {INIT_COMMAND}
+            {KLIO_INIT_COMMAND}
           </code>
         </CardContent>
       </Card>

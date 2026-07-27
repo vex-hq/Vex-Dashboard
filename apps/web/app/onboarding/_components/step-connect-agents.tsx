@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@kit/ui/button';
 
 import {
+  KLIO_DOCS_MCP_ANCHOR,
+  KLIO_INIT_COMMAND,
   KLIO_MCP_KEY_HEADER,
   KLIO_MCP_KEY_PLACEHOLDER,
   KLIO_MCP_URL,
@@ -26,8 +28,6 @@ interface StepConnectAgentsProps {
   onBack: () => void;
 }
 
-const INIT_COMMAND = 'npx @klio-tech/klio@latest init';
-
 export function StepConnectAgents({
   accountSlug,
   apiKey,
@@ -38,7 +38,7 @@ export function StepConnectAgents({
   const [copied, setCopied] = useState(false);
 
   const copyCommand = async () => {
-    await navigator.clipboard.writeText(INIT_COMMAND);
+    await navigator.clipboard.writeText(KLIO_INIT_COMMAND);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -77,7 +77,7 @@ export function StepConnectAgents({
 
         <div className="bg-muted/50 flex items-center gap-3 rounded-lg border p-4">
           <code className="flex-1 truncate font-mono text-sm">
-            {INIT_COMMAND}
+            {KLIO_INIT_COMMAND}
           </code>
           <Button
             type="button"
@@ -171,7 +171,7 @@ export function StepConnectAgents({
           ) : null}
 
           <Link
-            href={`/home/${accountSlug}/docs`}
+            href={`/home/${accountSlug}/docs#${KLIO_DOCS_MCP_ANCHOR}`}
             className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
           >
             {t('onboarding.connectAgentsRemoteGuide')}

@@ -6,8 +6,10 @@ import { format, formatDistanceToNow } from 'date-fns';
 import {
   AlertTriangle,
   ArrowUpRight,
+  Brain,
   CheckCircle2,
   Hexagon,
+  Search,
   ShieldAlert,
   Wrench,
   Zap,
@@ -43,6 +45,12 @@ import type {
 } from '~/lib/agentguard/types';
 import { useAgentGuardUpdates } from '~/lib/agentguard/use-agentguard-updates';
 
+import { AgentActivity } from '../memory/_components/agent-activity';
+import { MemoryVolumeChart } from '../memory/_components/memory-volume-chart';
+import type {
+  AgentActivityRow,
+  MemoryVolumePoint,
+} from '../memory/_lib/server/memory.loader';
 import { UsageMeter } from './usage-meter';
 
 interface HomepageChartsProps {
@@ -58,8 +66,16 @@ interface HomepageChartsProps {
     planOverrides: Record<string, number> | null;
     observationsUsed: number;
     verificationsUsed: number;
+    /** Month-to-date Klio usage; `null` when the counter could not be read. */
+    memoriesUsed: number | null;
+    recallsUsed: number | null;
   };
+  memoryActivity: AgentActivityRow[];
+  memoryVolume: MemoryVolumePoint[];
 }
+
+/** `-1` is the shared plan-limits sentinel for "no cap on this plan". */
+const UNLIMITED = -1;
 
 const trendChartConfig = {
   pass: { label: 'Pass', color: '#34C78E' },
@@ -76,6 +92,8 @@ export default function HomepageCharts({
   anomalyAlerts,
   accountSlug,
   planUsage,
+  memoryActivity,
+  memoryVolume,
 }: HomepageChartsProps) {
   useAgentGuardUpdates();
 
@@ -87,6 +105,18 @@ export default function HomepageCharts({
     flag: row.flag_count,
     block: row.block_count,
   }));
+
+  const hasMemoryActivity = memoryActivity.length > 0;
+
+  const memoriesCaptured = memoryActivity.reduce(
+    (total, agent) => total + agent.captured,
+    0,
+  );
+
+  const memoriesRecalled = memoryActivity.reduce(
+    (total, agent) => total + agent.recalled,
+    0,
+  );
 
   return (
     <div
@@ -120,6 +150,33 @@ export default function HomepageCharts({
           icon={<Wrench className="h-4 w-4 text-[#8C8C8C]" />}
         />
       </div>
+
+      {/* Row 1b: Klio memory summary. Additive to the reliability row above —
+          a compact captured/recalled pair plus the volume chart when there is
+          activity, and the Memory page's own empty state (with the `klio init`
+          command) when there is not. */}
+      {hasMemoryActivity ? (
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <KpiCard
+              titleKey="agentguard:homepage.memoriesCaptured"
+              subtitleKey="agentguard:homepage.memoriesCapturedSubtitle"
+              value={memoriesCaptured.toLocaleString()}
+              icon={<Brain className="h-4 w-4 text-[#8C8C8C]" />}
+            />
+            <KpiCard
+              titleKey="agentguard:homepage.memoriesRecalled"
+              subtitleKey="agentguard:homepage.memoriesRecalledSubtitle"
+              value={memoriesRecalled.toLocaleString()}
+              icon={<Search className="h-4 w-4 text-[#8C8C8C]" />}
+            />
+          </div>
+
+          <MemoryVolumeChart volume={memoryVolume} />
+        </>
+      ) : (
+        <AgentActivity agents={memoryActivity} accountSlug={accountSlug} />
+      )}
 
       {/* Plan Usage */}
       <Card>
@@ -175,6 +232,26 @@ export default function HomepageCharts({
                 </p>
               </div>
             )}
+
+            {/* Klio memory value metrics. The engine hard-blocks these with an
+                HTTP 402, so they belong next to the reliability meters rather
+                than being invisible until a capture fails. */}
+            <QuotaMeter
+              label="Memories"
+              current={planUsage.memoriesUsed}
+              limit={planLimits.memoriesPerMonth}
+              icon={<Brain className="h-4 w-4 shrink-0 text-[#8C8C8C]" />}
+              unlimitedKey="agentguard:homepage.memoriesUnlimited"
+              unlimitedDefault="Memory capture is unlimited on your plan"
+            />
+            <QuotaMeter
+              label="Recalls"
+              current={planUsage.recallsUsed}
+              limit={planLimits.recallsPerMonth}
+              icon={<Search className="h-4 w-4 shrink-0 text-[#8C8C8C]" />}
+              unlimitedKey="agentguard:homepage.recallsUnlimited"
+              unlimitedDefault="Recalls are unlimited on your plan"
+            />
           </div>
         </CardContent>
       </Card>
@@ -548,6 +625,49 @@ function KpiCard({
       </CardContent>
     </Card>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Quota Meter                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A plan-quota meter that copes with the two cases the raw `UsageMeter` cannot
+ * express: an unlimited plan (`limit === -1`, which would otherwise render as
+ * "0 / -1") and an unreadable usage counter (`current === null`, where showing
+ * any number would be a fabrication). Everything else defers to `UsageMeter`.
+ */
+function QuotaMeter({
+  label,
+  current,
+  limit,
+  icon,
+  unlimitedKey,
+  unlimitedDefault,
+}: {
+  label: string;
+  current: number | null;
+  limit: number;
+  icon: React.ReactNode;
+  unlimitedKey: string;
+  unlimitedDefault: string;
+}) {
+  if (limit === UNLIMITED) {
+    return (
+      <div className="bg-muted/30 flex items-center gap-2 rounded-lg px-4 py-3">
+        {icon}
+        <p className="text-muted-foreground text-sm">
+          <Trans i18nKey={unlimitedKey} defaults={unlimitedDefault} />
+        </p>
+      </div>
+    );
+  }
+
+  if (current === null) {
+    return null;
+  }
+
+  return <UsageMeter label={label} current={current} limit={limit} />;
 }
 
 /* ------------------------------------------------------------------ */

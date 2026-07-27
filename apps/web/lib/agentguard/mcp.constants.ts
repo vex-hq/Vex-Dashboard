@@ -18,6 +18,25 @@
  */
 export const KLIO_MCP_URL = 'https://mcp.klio.tech/mcp';
 
+/**
+ * One-command local setup: detects installed coding agents and writes their MCP
+ * client config for them. Single source of truth for the onboarding wizard, the
+ * Memory page's empty state, and the in-app docs.
+ */
+export const KLIO_INIT_COMMAND = 'npx @klio-tech/klio@latest init';
+
+/**
+ * Canonical hosted documentation site (matches the marketing site's `DOCS_URL`
+ * in `apps/landing/app/_components/nav/nav-config.ts`).
+ */
+export const KLIO_DOCS_URL = 'https://docs.klio.tech';
+
+/**
+ * Anchor for the Klio memory / MCP section of the in-app docs page, so links
+ * elsewhere in the product (onboarding) can deep-link straight to it.
+ */
+export const KLIO_DOCS_MCP_ANCHOR = 'klio-memory';
+
 export const KLIO_MCP_KEY_HEADER = 'X-Vex-Key';
 
 export const KLIO_MCP_AGENT_HEADER = 'X-Vex-Agent';

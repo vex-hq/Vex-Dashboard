@@ -7,15 +7,24 @@ const COLUMNS = ['Klio', 'mem0', 'Zep', 'Supermemory'] as const;
 
 const ROWS: { feature: string; cells: boolean[] }[] = [
   { feature: 'Cross-agent shared memory', cells: [true, false, false, false] },
-  { feature: 'Local-first (runs on your machine)', cells: [true, false, false, false] },
-  { feature: 'Encrypted under a user-owned key', cells: [true, false, false, false] },
+  {
+    feature: 'Local-first (runs on your machine)',
+    cells: [true, false, false, false],
+  },
+  {
+    feature: 'Encrypted under a user-owned key (self-hosted)',
+    cells: [true, false, false, false],
+  },
   { feature: 'MCP-native', cells: [true, false, false, false] },
   { feature: 'Open source', cells: [true, false, true, false] },
 ];
 
 function Cell({ on }: { on: boolean }) {
   return on ? (
-    <span className="bg-foreground inline-block h-2 w-2 rounded-full" aria-label="yes" />
+    <span
+      className="bg-foreground inline-block h-2 w-2 rounded-full"
+      aria-label="yes"
+    />
   ) : (
     <span className="bg-foreground/20 inline-block h-px w-3" aria-label="no" />
   );
@@ -41,7 +50,9 @@ export function Compare() {
                   <th
                     key={c}
                     className={`px-4 py-4 text-left font-mono text-[13px] ${
-                      i === 0 ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium'
+                      i === 0
+                        ? 'text-foreground font-semibold'
+                        : 'text-muted-foreground font-medium'
                     }`}
                   >
                     {c}

@@ -24,7 +24,7 @@ const WORKS_WITH = [
 const METRICS = [
   { value: '~4ms', label: 'recall latency' },
   { value: '768-dim', label: 'embeddings' },
-  { value: 'SHA-256', label: 'audit chain' },
+  { value: 'SHA-256', label: 'audit chain (self-hosted)' },
   { value: '0', label: 'telemetry' },
 ];
 

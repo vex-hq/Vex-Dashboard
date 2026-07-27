@@ -13,6 +13,13 @@
  * rule that forbade it). Keep wire-protocol identifiers (X-Vex-Key, org_id,
  * published SDK package names) untouched — they live in code, not copy.
  *
+ * Security claims: user-held encryption keys and the SHA-256 hash chain are
+ * properties of the SELF-HOSTED engine only. Klio Cloud encrypts in transit
+ * and at rest at the infrastructure level, redacts secrets/PII before storage,
+ * and isolates per org — but the keys are ours and writes are not chained.
+ * Any copy naming a user-held key or a hash chain must say "self-hosted";
+ * `__tests__/security-claims.test.ts` enforces that.
+ *
  * Data shape is intentionally `readonly` end-to-end so consumers cannot
  * mutate the catalog at runtime. Use `[...FAQ]` if a mutable copy is
  * required for sorting/filtering.
@@ -49,12 +56,12 @@ export const FAQ = [
   {
     question: 'What is Klio?',
     answer:
-      'Klio is a memory layer for AI agents. It captures what your agents learn, stores it encrypted under a key you own, and serves it back through MCP so your agents remember across sessions and share context across tools — which is what keeps them reliable.',
+      'Klio is a memory layer for AI agents. It captures what your agents learn, stores it, and serves it back through MCP so your agents remember across sessions and share context across tools — which is what keeps them reliable. Self-hosted, that memory is encrypted at rest under a key you own.',
   },
   {
     question: 'Does my data leave my machine?',
     answer:
-      'No. Klio is local-first: memory is stored on your machine, encrypted under a user-owned key. Nothing leaves unless you explicitly opt into Klio Cloud.',
+      'No. Klio is local-first: self-hosted, memory is stored on your machine and encrypted at rest under a key you own. Nothing leaves unless you explicitly opt into Klio Cloud, where memory lives on our infrastructure under keys we manage.',
   },
   {
     question: 'How is Klio different from mem0, Zep, or observability tools?',
@@ -84,6 +91,6 @@ export const FAQ = [
   {
     question: 'Is it really encrypted?',
     answer:
-      'Yes — memory is encrypted at rest under a key you own, and every write is chained with SHA-256 so the history is tamper-evident and inspectable. It’s auditable by design, not “trust us”.',
+      'It depends where you run it, so here is the honest split. Self-hosted: memory is encrypted at rest under a key you own, and every write is chained with SHA-256, so the history is tamper-evident and inspectable. Klio Cloud: memory is encrypted in transit over TLS and at rest at the infrastructure level, secrets and PII are redacted before storage, and every org is isolated — but the keys are ours, not yours, and Cloud writes are not hash-chained today.',
   },
 ] as const satisfies ReadonlyArray<FaqEntry>;
