@@ -52,7 +52,7 @@ export function Hero() {
             </div>
 
             <p className="text-muted-foreground mt-5 font-mono text-[12px]">
-              Local-first · encrypted under your key · open source
+              Local-first · self-host under your own key · open source
             </p>
           </div>
 

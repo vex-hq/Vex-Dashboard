@@ -444,6 +444,18 @@ await vex.close();`}
           {t('onboarding.next')}
         </Button>
 
+        {/*
+          This step teaches the reliability SDK, which memory-only users do not
+          need. Same escape hatch the invite step offers — advances via `onNext`.
+        */}
+        <button
+          type="button"
+          onClick={onNext}
+          className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+        >
+          {t('onboarding.stepSkip')}
+        </button>
+
         <button
           type="button"
           onClick={onBack}

@@ -18,11 +18,12 @@ const IDENTITY: [string, string][] = [
 
 const HOW: string[] = [
   'Captures session activity over MCP + lightweight hooks.',
-  'Stores memory encrypted under a user-owned key (Postgres + pgvector).',
+  'Stores memory in Postgres + pgvector.',
   'Serves it back through MCP so agents recall before acting.',
   'Memory is scoped by org → project, shared across agents on that project.',
   'Cross-agent collaboration via Redis pub/sub.',
-  'Cryptographically auditable via a SHA-256 hash chain.',
+  'Self-hosted: encrypted at rest under a user-owned key, and every write chained with SHA-256 so the history is tamper-evident and inspectable.',
+  'Klio Cloud: encrypted in transit (TLS) and at rest at the infrastructure level, secrets and PII redacted before storage, isolated per org — the keys are ours, and Cloud writes are not hash-chained today.',
 ];
 
 const TOOLS: [string, string][] = [
@@ -38,7 +39,7 @@ const TOOLS: [string, string][] = [
 const COMPARE: [string, string][] = [
   ['Cross-agent shared memory', 'Klio: yes · mem0/Zep/Supermemory: no'],
   ['Local-first', 'Klio: yes · mem0/Zep/Supermemory: no'],
-  ['Encrypted under user-owned key', 'Klio: yes · others: no'],
+  ['Encrypted under user-owned key (self-hosted)', 'Klio: yes · others: no'],
   ['MCP-native', 'Klio: yes · others: no'],
   ['Open source', 'Klio: yes · Zep: yes · mem0/Supermemory: no'],
 ];
