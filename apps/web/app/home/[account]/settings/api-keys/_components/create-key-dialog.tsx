@@ -45,6 +45,20 @@ const SCOPES = [
   },
 ] as const;
 
+/**
+ * Keys minted here are overwhelmingly used to connect an agent to the memory
+ * layer, and `klio init` rejects a key without the `memory` scope — but
+ * `memory` was missing from the defaults, so keys created here could not reach
+ * the Klio brain at all. The reliability scopes stay in the default set, so
+ * key creation for that product is unchanged: this is additive, not a swap.
+ */
+const DEFAULT_SCOPES: ReadonlyArray<string> = [
+  'ingest',
+  'verify',
+  'read',
+  'memory',
+];
+
 interface CreateKeyDialogProps {
   accountSlug: string;
   disabled?: boolean;
@@ -60,7 +74,7 @@ export default function CreateKeyDialog({
   // Form state
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['ingest', 'verify', 'read']);
+  const [scopes, setScopes] = useState<string[]>([...DEFAULT_SCOPES]);
   const [rateLimitRpm, setRateLimitRpm] = useState(1000);
   const [expiresAt, setExpiresAt] = useState('');
 
@@ -70,7 +84,7 @@ export default function CreateKeyDialog({
 
   function resetForm() {
     setName('');
-    setScopes(['ingest', 'verify', 'read']);
+    setScopes([...DEFAULT_SCOPES]);
     setRateLimitRpm(1000);
     setExpiresAt('');
     setCreatedKey(null);

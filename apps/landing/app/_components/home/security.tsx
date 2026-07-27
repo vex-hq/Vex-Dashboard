@@ -2,6 +2,11 @@
  * Private by default — answers the top objection ("does my data leave my
  * machine?") and carries the local-first / encrypted / auditable
  * differentiators with concrete mechanisms, not adjectives.
+ *
+ * Key ownership and the hash chain are properties of the SELF-HOSTED engine.
+ * Klio Cloud does not hold user-supplied keys and does not hash-chain writes
+ * today, so any card naming either one has to say which deployment it means.
+ * `__tests__/security-claims.test.ts` enforces that.
  */
 const GUARANTEES = [
   {
@@ -9,12 +14,12 @@ const GUARANTEES = [
     desc: 'The engine runs on your machine. Nothing leaves it unless you opt into Klio Cloud.',
   },
   {
-    title: 'User-owned key',
-    desc: 'Memory is encrypted at rest under a key you hold — not us, not a shared cloud tenant.',
+    title: 'User-owned key (self-hosted)',
+    desc: 'Self-host and memory is encrypted at rest under a key you hold — we never see it. On Klio Cloud the keys are ours: TLS in transit, encryption at rest, one isolated store per org.',
   },
   {
-    title: 'Cryptographic audit',
-    desc: 'Every write is chained with SHA-256. The history is inspectable — “trust us” isn’t in the design.',
+    title: 'Hash-chained audit (self-hosted)',
+    desc: 'The self-hosted engine chains every write with SHA-256, so the history is tamper-evident and inspectable. Cloud writes are not chained yet.',
   },
   {
     title: 'Zero telemetry',
@@ -31,9 +36,10 @@ export function Security() {
           Your agents’ memory never leaves unless you say so.
         </h2>
         <p className="k-lede mt-5">
-          A memory layer sees everything your agents do. So Klio is built to keep
-          it yours — local-first, encrypted under your own key, and auditable end
-          to end.
+          A memory layer sees everything your agents do. So Klio is built to
+          keep it yours. Self-host it and the encryption key is yours alone, end
+          to end. Use Klio Cloud and we hold the keys — encrypted in transit and
+          at rest, secrets redacted before storage, every org isolated.
         </p>
 
         <div className="border-border mt-12 grid gap-px overflow-hidden rounded-lg border sm:grid-cols-2 lg:grid-cols-4">
