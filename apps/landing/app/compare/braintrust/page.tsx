@@ -177,7 +177,7 @@ export default function CompareBraintrust() {
         {/* CTA */}
         <div className="flex items-center gap-3">
           <Link
-            href="https://app.tryvex.dev"
+            href="https://app.klio.tech"
             className="inline-flex h-12 items-center rounded-lg bg-foreground px-7 text-[15px] font-semibold text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
           >
             Try Vex Free

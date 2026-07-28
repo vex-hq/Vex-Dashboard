@@ -11,7 +11,7 @@ import {
 } from '~/lib/pseo/content';
 import { breadcrumbSchema, softwareApplicationSchema } from '~/lib/seo/schemas';
 
-const SITE_URL = 'https://tryvex.dev';
+const SITE_URL = 'https://klio.tech';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${comparison.seo.title} — Vex`,
     description: comparison.seo.description,
     keywords: comparison.seo.keywords,
-    alternates: { canonical: `https://tryvex.dev/compare/concepts/${slug}` },
+    alternates: { canonical: `https://klio.tech/compare/concepts/${slug}` },
     openGraph: {
       title: comparison.seo.title,
       description: comparison.seo.description,

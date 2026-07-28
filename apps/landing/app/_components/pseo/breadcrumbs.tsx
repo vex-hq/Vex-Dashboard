@@ -13,7 +13,7 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
       '@type': 'ListItem',
       position: i + 1,
       name: item.label,
-      ...(item.href ? { item: `https://tryvex.dev${item.href}` } : {}),
+      ...(item.href ? { item: `https://klio.tech${item.href}` } : {}),
     })),
   };
 

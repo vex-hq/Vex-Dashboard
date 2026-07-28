@@ -1,30 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { buildLlmsTxt } from '~/lib/seo/llms-txt';
 
+import { PLANS } from '~/lib/pricing';
+import { buildLlmsTxt } from '~/lib/seo/llms-txt';
+import { APP_URL, DOCS_URL, ORG, POSITIONING_SENTENCE } from '~/lib/site-meta';
+
+/**
+ * These assertions deliberately derive from `site-meta` and `pricing` rather
+ * than repeating brand strings. The previous version hardcoded "Vex" and
+ * "tryvex.dev", so it kept asserting an identity the product had already left
+ * behind — the test rotted instead of catching the drift.
+ */
 describe('lib/seo/llms-txt', () => {
   const body = buildLlmsTxt();
 
-  it('starts with Vex header', () => {
-    expect(body.startsWith('# Vex\n')).toBe(true);
+  it('starts with the canonical product header', () => {
+    expect(body.startsWith(`# ${ORG.name}\n`)).toBe(true);
   });
 
-  it('includes the positioning sentence', () => {
-    expect(body).toContain('Vex helps founders shipping AI agents');
+  it('includes the positioning sentence verbatim', () => {
+    expect(body).toContain(POSITIONING_SENTENCE);
   });
 
   it('includes every plan name', () => {
-    for (const name of ['Free', 'Starter', 'Pro', 'Team', 'Enterprise']) {
-      expect(body).toContain(name);
+    for (const plan of PLANS) {
+      expect(body).toContain(plan.name);
+    }
+    expect(body).toContain('Enterprise');
+  });
+
+  it('quotes a real metered quota for every priced plan', () => {
+    // Guards the bug this file shipped with: the quoted lever was looked up by
+    // a label no plan carried, so every line rendered an empty field between
+    // two separators.
+    expect(body).not.toMatch(/·\s+·/);
+    for (const plan of PLANS) {
+      const line = body
+        .split('\n')
+        .find((l) => l.startsWith(`- ${plan.name} —`));
+      expect(line, `no line for plan ${plan.name}`).toBeDefined();
+      expect(line).toContain('memories:');
     }
   });
 
   it('points to the machine-readable pricing endpoint', () => {
-    expect(body).toContain('https://tryvex.dev/api/pricing');
+    expect(body).toContain(`${ORG.url}/api/pricing`);
   });
 
-  it('contains no OSS claims', () => {
-    expect(body).not.toMatch(/open[\s-]?source/i);
-    expect(body).not.toMatch(/apache 2\.0/i);
+  it('only advertises URLs on live product domains', () => {
+    const urls = body.match(/https:\/\/[^\s)]+/g) ?? [];
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(new URL(url).hostname).toMatch(/(^|\.)klio\.tech$/);
+    }
+    expect(body).toContain(DOCS_URL);
+    expect(body).toContain(APP_URL);
   });
 
   it('matches snapshot', () => {

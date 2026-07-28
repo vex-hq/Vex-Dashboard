@@ -17,7 +17,7 @@ export default function TermsPage() {
 
         <h2>1. Acceptance of Terms</h2>
         <p>
-          By accessing or using the Vex website (tryvex.dev), SDK, API, or any
+          By accessing or using the Vex website (klio.tech), SDK, API, or any
           related services (collectively, the &quot;Service&quot;), you agree to
           be bound by these Terms of Service. If you do not agree, do not use
           the Service.
@@ -120,10 +120,10 @@ export default function TermsPage() {
         <p>
           For questions about these Terms, contact us at{' '}
           <a
-            href="mailto:info@tryvex.dev"
+            href="mailto:info@klio.tech"
             className="text-foreground hover:text-foreground"
           >
-            info@tryvex.dev
+            info@klio.tech
           </a>
           .
         </p>

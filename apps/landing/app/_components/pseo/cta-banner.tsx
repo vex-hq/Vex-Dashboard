@@ -16,7 +16,7 @@ export function CtaBanner({
           pip install vex-sdk
         </code>
         <Link
-          href="https://app.tryvex.dev"
+          href="https://app.klio.tech"
           className="rounded-lg bg-foreground px-6 py-2 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
         >
           Get API Key

@@ -10,22 +10,22 @@ import {
   productOfferSchema,
   softwareApplicationSchema,
 } from '~/lib/seo/schemas';
-import { FAQ, ORG, SAME_AS } from '~/lib/site-meta';
+import { FAQ, ORG, POSITIONING_SENTENCE, SAME_AS } from '~/lib/site-meta';
 
 describe('lib/seo/schemas', () => {
   describe('softwareApplicationSchema', () => {
     const s = softwareApplicationSchema();
-    it('has SoftwareApplication type and Vex identity', () => {
+    it('has SoftwareApplication type and the canonical identity', () => {
       expect(s['@context']).toBe('https://schema.org');
       expect(s['@type']).toBe('SoftwareApplication');
-      expect(s.name).toBe('Vex');
+      expect(s.name).toBe(ORG.name);
       expect(s.url).toBe(ORG.url);
     });
     it('uses DeveloperApplication category', () => {
       expect(s.applicationCategory).toBe('DeveloperApplication');
     });
-    it('description contains no OSS claims', () => {
-      expect(s.description).not.toMatch(/open[\s-]?source/i);
+    it('carries the canonical positioning as its description', () => {
+      expect(s.description).toBe(POSITIONING_SENTENCE);
     });
   });
 
@@ -70,8 +70,8 @@ describe('lib/seo/schemas', () => {
       expect(pro.priceSpecification).toBeDefined();
       expect(free.priceSpecification).toBeUndefined();
     });
-    it('description contains no OSS claims', () => {
-      expect(s.description).not.toMatch(/open[\s-]?source/i);
+    it('describes the offer with real, non-empty text', () => {
+      expect(s.description.length).toBeGreaterThan(20);
     });
   });
 
@@ -102,7 +102,7 @@ describe('lib/seo/schemas', () => {
       vendorName: 'Braintrust',
       vendorUrl: 'https://www.braintrust.dev',
     });
-    it('returns three nodes: Vex, competitor, breadcrumb', () => {
+    it('returns three nodes: Klio, competitor, breadcrumb', () => {
       expect(nodes).toHaveLength(3);
       const types = nodes.map((n) => n['@type']);
       expect(types).toEqual([
@@ -115,7 +115,7 @@ describe('lib/seo/schemas', () => {
       const breadcrumb = nodes[2];
       const last = breadcrumb.itemListElement.at(-1);
       expect(last?.name).toBe('Braintrust');
-      expect(last?.item).toBe('https://tryvex.dev/compare/braintrust');
+      expect(last?.item).toBe(`${ORG.url}/compare/braintrust`);
     });
   });
 
@@ -125,12 +125,12 @@ describe('lib/seo/schemas', () => {
       description: 'A test description',
       datePublished: '2026-01-01',
       dateModified: '2026-04-25',
-      url: 'https://tryvex.dev/test',
+      url: `${ORG.url}/test`,
     });
-    it('emits Article with publisher = Vex', () => {
+    it('emits Article with the canonical publisher', () => {
       expect(s['@type']).toBe('Article');
       expect(s.headline).toBe('Test Article');
-      expect(s.publisher.name).toBe('Vex');
+      expect(s.publisher.name).toBe(ORG.name);
     });
     it('preserves both date fields', () => {
       expect(s.datePublished).toBe('2026-01-01');

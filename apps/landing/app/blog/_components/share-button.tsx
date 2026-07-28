@@ -1,11 +1,13 @@
+import { ORG, X_HANDLE } from '~/lib/site-meta';
+
 interface ShareOnXProps {
   title: string;
   slug: string;
 }
 
 export function ShareOnX({ title, slug }: ShareOnXProps) {
-  const pageUrl = `https://tryvex.dev/blog/${slug}`;
-  const tweetText = encodeURIComponent(`${title}\n\nvia @tryvex`);
+  const pageUrl = `${ORG.url}/blog/${slug}`;
+  const tweetText = encodeURIComponent(`${title}\n\nvia @${X_HANDLE}`);
   const href = `https://x.com/intent/tweet?text=${tweetText}&url=${encodeURIComponent(pageUrl)}`;
 
   return (

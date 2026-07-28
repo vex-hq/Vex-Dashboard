@@ -3,20 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { FAQ, ORG, POSITIONING_SENTENCE, SAME_AS } from '~/lib/site-meta';
 
 describe('lib/site-meta', () => {
-  it('positioning sentence contains who/outcome/approach markers', () => {
-    expect(POSITIONING_SENTENCE).toMatch(/founders/i);
-    expect(POSITIONING_SENTENCE).toMatch(/hallucinations/i);
-    expect(POSITIONING_SENTENCE).toMatch(/auto-correction/i);
-  });
-
-  it('positioning sentence contains no OSS claims', () => {
-    expect(POSITIONING_SENTENCE).not.toMatch(/open[\s-]?source/i);
-    expect(POSITIONING_SENTENCE).not.toMatch(/apache 2\.0/i);
+  // Klio is positioned on collaboration, not recall — see the header comment
+  // in lib/site-meta.ts. These markers guard that reframe: if the sentence
+  // drifts back to being about memory alone, it is on the crowded shelf again.
+  it('positioning sentence carries the collaboration reframe', () => {
+    expect(POSITIONING_SENTENCE).toMatch(/workplace/i);
+    expect(POSITIONING_SENTENCE).toMatch(/agents/i);
+    expect(POSITIONING_SENTENCE).toMatch(/MCP/i);
   });
 
   it('organization has stable identity fields', () => {
-    expect(ORG.name).toBe('Vex');
-    expect(ORG.url).toBe('https://tryvex.dev');
+    expect(ORG.name).toBe('Klio');
+    expect(ORG.url).toBe('https://klio.tech');
     expect(ORG.logo).toMatch(/^https:\/\//);
     expect(ORG.contactEmail).toMatch(/^[^@]+@[^@]+\.[^@]+$/);
   });
@@ -29,12 +27,14 @@ describe('lib/site-meta', () => {
     }
   });
 
-  it('FAQ has 5 entries (no open-source question)', () => {
-    expect(FAQ).toHaveLength(5);
+  // A hardcoded count rots every time an answer is added, and the old
+  // open-source prohibition was reversed when Klio went open-core. What
+  // actually matters is that every entry is real and none is a placeholder.
+  it('FAQ is non-empty and free of placeholder answers', () => {
+    expect(FAQ.length).toBeGreaterThan(0);
     for (const entry of FAQ) {
-      expect(entry.question).not.toMatch(/open[\s-]?source/i);
-      expect(entry.answer).not.toMatch(/open[\s-]?source/i);
-      expect(entry.answer).not.toMatch(/apache 2\.0/i);
+      expect(entry.question).toMatch(/\?$/);
+      expect(entry.answer).not.toMatch(/\b(TBD|TODO|lorem ipsum)\b/i);
     }
   });
 

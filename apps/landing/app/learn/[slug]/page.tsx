@@ -13,6 +13,7 @@ import {
   getFrameworks,
   getProblemGuideBySlug,
 } from '~/lib/pseo/content';
+import { ORG } from '~/lib/site-meta';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -32,7 +33,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${guide.seo.title} — Vex`,
     description: guide.seo.description,
     keywords: guide.seo.keywords,
-    alternates: { canonical: `https://tryvex.dev/learn/${slug}` },
+    alternates: { canonical: `https://klio.tech/learn/${slug}` },
     openGraph: {
       title: guide.seo.title,
       description: guide.seo.description,
@@ -57,7 +58,7 @@ export default async function ProblemGuidePage({ params }: Props) {
     '@type': 'Article',
     headline: guide.seo.title,
     description: guide.seo.description,
-    publisher: { '@type': 'Organization', name: 'Vex', url: 'https://tryvex.dev' },
+    publisher: { '@type': 'Organization', name: ORG.name, url: ORG.url },
   };
 
   return (

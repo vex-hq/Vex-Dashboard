@@ -178,14 +178,14 @@ export default function AgentHealthScore() {
             name: 'AI Agent Health Score',
             description:
               "Score your AI agent's production readiness in 2 minutes.",
-            url: 'https://tryvex.dev/tools/agent-health-score',
+            url: 'https://klio.tech/tools/agent-health-score',
             applicationCategory: 'DeveloperApplication',
             operatingSystem: 'Web',
             offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
             author: {
               '@type': 'Organization',
               name: 'Vex',
-              url: 'https://tryvex.dev',
+              url: 'https://klio.tech',
             },
           }),
         }}
@@ -313,7 +313,7 @@ export default function AgentHealthScore() {
               </p>
               <div className="flex items-center justify-center gap-3">
                 <Link
-                  href="https://app.tryvex.dev"
+                  href="https://app.klio.tech"
                   className="inline-flex h-12 items-center rounded-lg bg-foreground px-7 text-[15px] font-semibold text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
                 >
                   Try Vex Free

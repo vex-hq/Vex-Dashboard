@@ -35,7 +35,7 @@ export default function LiveDemoPage() {
       {/* CTA */}
       <div className="mt-20 text-center">
         <a
-          href="https://app.tryvex.dev"
+          href="https://app.klio.tech"
           className="inline-flex items-center rounded-lg bg-foreground px-6 py-3 text-sm font-medium text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"
         >
           Start Protecting Your Agents

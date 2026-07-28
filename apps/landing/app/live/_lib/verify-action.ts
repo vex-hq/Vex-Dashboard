@@ -1,6 +1,6 @@
 'use server';
 
-const VEX_API_URL = 'https://api.tryvex.dev/v1/verify';
+const VEX_API_URL = 'https://api.klio.tech/v1/verify';
 const VEX_DEMO_KEY = process.env.NEXT_PUBLIC_VEX_DEMO_KEY ?? '';
 
 interface VerifyPayload {

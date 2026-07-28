@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { prefersReducedMotion } from './motion';
 
 /**
  * The mark, struck as a solid.
@@ -30,7 +31,7 @@ export function MarkSpecimen({ caption = 'The mark, struck' }) {
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (prefersReducedMotion()) return;
 
     let frame: number | null = null;
     let origin: number | null = null;

@@ -18,7 +18,7 @@ export default function PrivacyPage() {
         <h2>1. Introduction</h2>
         <p>
           Vex (&quot;we&quot;, &quot;our&quot;, or &quot;us&quot;) operates the
-          tryvex.dev website and the Vex SDK and API services (collectively, the
+          klio.tech website and the Vex SDK and API services (collectively, the
           &quot;Service&quot;). This Privacy Policy explains how we collect,
           use, disclose, and safeguard your information when you use our
           Service.
@@ -61,7 +61,7 @@ export default function PrivacyPage() {
           We retain your account information for as long as your account is
           active. Agent telemetry data is retained for 90 days by default. You
           can request deletion of your data at any time by contacting us at
-          info@tryvex.dev.
+          info@klio.tech.
         </p>
 
         <h2>5. Data Sharing</h2>
@@ -107,10 +107,10 @@ export default function PrivacyPage() {
         <p>
           If you have questions about this Privacy Policy, contact us at{' '}
           <a
-            href="mailto:info@tryvex.dev"
+            href="mailto:info@klio.tech"
             className="text-foreground hover:text-foreground"
           >
-            info@tryvex.dev
+            info@klio.tech
           </a>
           .
         </p>

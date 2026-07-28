@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { GET } from '~/api/pricing/route';
+import { ORG } from '~/lib/site-meta';
 
 const PlanFeatureZ = z.object({ label: z.string(), value: z.string() });
 
@@ -17,7 +18,7 @@ const PlanZ = z.object({
 });
 
 const ResponseZ = z.object({
-  product: z.literal('Vex'),
+  product: z.literal(ORG.name),
   currency: z.literal('USD'),
   lastUpdated: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   plans: z.array(PlanZ).length(4),

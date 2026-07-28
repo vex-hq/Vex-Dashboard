@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GET } from '~/llms.txt/route';
+import { POSITIONING_SENTENCE } from '~/lib/site-meta';
 
 describe('GET /llms.txt', () => {
   it('returns 200 with text/plain', async () => {
@@ -11,7 +12,7 @@ describe('GET /llms.txt', () => {
   it('body contains positioning sentence and plan names', async () => {
     const res = GET();
     const text = await res.text();
-    expect(text).toContain('Vex helps founders');
+    expect(text).toContain(POSITIONING_SENTENCE);
     expect(text).toContain('Free');
     expect(text).toContain('Pro');
   });
