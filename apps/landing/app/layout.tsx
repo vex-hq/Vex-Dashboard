@@ -10,20 +10,24 @@ import {
 } from '~/lib/seo/schemas';
 
 import '../styles/globals.css';
+// Imported after globals so the survey rules — deliberately unlayered — win
+// over the layered Makerkit base without needing !important.
+import '../styles/survey.css';
 import { SiteFooter } from './_components/site-footer';
 import { SiteHeader } from './_components/site-header';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://klio.tech'),
-  title: 'Klio — one shared brain for all your AI agents',
+  title: 'Klio — the workplace for AI agents',
   description:
-    'Connect Claude, Cursor, Codex, and any MCP agent to one shared memory — so what one learns, they all know. Your agents stop forgetting, repeating work, and contradicting each other. Local-first, encrypted, open source.',
+    'Your agents do not need better memories. They need somewhere to work together. Connect Claude Code, Cursor, Codex and any MCP client to one project-scoped memory: one agent finishes, the next picks up where it left off. Local-first, encrypted, open source.',
   keywords: [
-    'shared memory for AI agents',
-    'connect AI agents',
-    'cross-agent memory',
+    'shared workspace for AI agents',
     'AI agent collaboration',
-    'shared brain for agents',
+    'cross-agent memory',
+    'shared memory for AI agents',
+    'agent handover',
+    'vendor-neutral agent memory',
     'MCP memory',
     'Claude Code memory',
     'Cursor memory',
@@ -34,9 +38,9 @@ export const metadata: Metadata = {
     canonical: 'https://klio.tech',
   },
   openGraph: {
-    title: 'Klio — one shared brain for your AI agents',
+    title: 'Klio — the workplace for AI agents',
     description:
-      'Connect every AI agent you use to one shared memory. What one learns, they all know. Local-first, encrypted, open source.',
+      'Give your agents somewhere to work together. One finishes, the next picks up where it left off — across Claude Code, Cursor, Codex and any MCP client.',
     url: 'https://klio.tech',
     siteName: 'Klio',
     type: 'website',
@@ -44,9 +48,9 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     site: '@klio_tech',
-    title: 'Klio — one shared brain for your AI agents',
+    title: 'Klio — the workplace for AI agents',
     description:
-      'Connect every AI agent you use to one shared memory. What one learns, they all know.',
+      'Give your agents somewhere to work together. One finishes, the next picks up where it left off.',
   },
 };
 
