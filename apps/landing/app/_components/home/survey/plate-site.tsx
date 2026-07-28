@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useEffect, useRef } from 'react';
 
 import { CLOUD_SIGNUP_URL } from '../../nav/nav-config';
+import { prefersReducedMotion } from './motion';
 import { MarkSpecimen } from './mark-specimen';
 
 /**
@@ -26,7 +27,7 @@ export function PlateSite({ surveyedOn }: { surveyedOn: string }) {
     const frame = frameRef.current;
     const mid = midRef.current;
     if (!frame || !mid) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (prefersReducedMotion()) return;
 
     let queued = false;
 

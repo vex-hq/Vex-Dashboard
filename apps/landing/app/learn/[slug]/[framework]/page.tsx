@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description: guide.seo.description,
     keywords: guide.seo.keywords,
     alternates: {
-      canonical: `https://tryvex.dev/learn/${slug}/${framework}`,
+      canonical: `https://klio.tech/learn/${slug}/${framework}`,
     },
     openGraph: {
       title: guide.seo.title,
@@ -82,7 +82,7 @@ export default async function ProblemFrameworkPage({ params }: Props) {
     publisher: {
       '@type': 'Organization',
       name: 'Vex',
-      url: 'https://tryvex.dev',
+      url: 'https://klio.tech',
     },
   };
 

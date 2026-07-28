@@ -161,7 +161,7 @@ export default function PricingPage() {
             talk.
           </p>
           <a
-            href="mailto:hello@tryvex.dev"
+            href="mailto:hello@klio.tech"
             className="inline-flex h-11 items-center rounded-lg border border-border px-7 text-sm font-semibold text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
           >
             Contact Sales

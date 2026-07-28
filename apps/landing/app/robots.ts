@@ -1,5 +1,7 @@
 import type { MetadataRoute } from 'next';
 
+import { ORG } from '~/lib/site-meta';
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
@@ -8,6 +10,6 @@ export default function robots(): MetadataRoute.Robots {
         allow: '/',
       },
     ],
-    sitemap: 'https://tryvex.dev/sitemap.xml',
+    sitemap: `${ORG.url}/sitemap.xml`,
   };
 }

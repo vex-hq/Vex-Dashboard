@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${guide.seo.title} — Vex`,
     description: guide.seo.description,
     keywords: guide.seo.keywords,
-    alternates: { canonical: `https://tryvex.dev/guides/${framework}` },
+    alternates: { canonical: `https://klio.tech/guides/${framework}` },
     openGraph: {
       title: guide.seo.title,
       description: guide.seo.description,
@@ -64,7 +64,7 @@ export default async function GuidePage({ params }: Props) {
       };
     });
 
-  const canonicalUrl = `https://tryvex.dev/guides/${framework}`;
+  const canonicalUrl = `https://klio.tech/guides/${framework}`;
   const article = articleSchema({
     headline: guide.seo.title,
     description: guide.seo.description,
@@ -73,8 +73,8 @@ export default async function GuidePage({ params }: Props) {
     url: canonicalUrl,
   });
   const breadcrumbs = breadcrumbSchema([
-    { name: 'Home', url: 'https://tryvex.dev' },
-    { name: 'Guides', url: 'https://tryvex.dev/guides' },
+    { name: 'Home', url: 'https://klio.tech' },
+    { name: 'Guides', url: 'https://klio.tech/guides' },
     { name: meta?.name ?? framework, url: canonicalUrl },
   ]);
 

@@ -6,6 +6,7 @@ import { Breadcrumbs } from '~/_components/pseo/breadcrumbs';
 import { ChecklistRenderer } from '~/_components/pseo/checklist-renderer';
 import { RelatedPages } from '~/_components/pseo/related-pages';
 import { getAllChecklists, getChecklistBySlug } from '~/lib/pseo/content';
+import { ORG } from '~/lib/site-meta';
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -27,7 +28,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${checklist.seo.title} — Vex`,
     description: checklist.seo.description,
     keywords: checklist.seo.keywords,
-    alternates: { canonical: `https://tryvex.dev/checklists/${slug}` },
+    alternates: { canonical: `https://klio.tech/checklists/${slug}` },
     openGraph: {
       title: checklist.seo.title,
       description: checklist.seo.description,
@@ -55,7 +56,7 @@ export default async function ChecklistPage({ params }: Props) {
     '@type': 'Article',
     headline: checklist.seo.title,
     description: checklist.seo.description,
-    publisher: { '@type': 'Organization', name: 'Vex', url: 'https://tryvex.dev' },
+    publisher: { '@type': 'Organization', name: ORG.name, url: ORG.url },
   };
 
   return (

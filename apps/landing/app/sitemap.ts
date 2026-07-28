@@ -1,5 +1,7 @@
 import type { MetadataRoute } from 'next';
 
+import { ORG } from '~/lib/site-meta';
+
 import { getAllPosts } from '~/lib/blog';
 import {
   getAllChecklists,
@@ -13,56 +15,56 @@ import {
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const blogPosts = getAllPosts().map((post) => ({
-    url: `https://tryvex.dev/blog/${post.slug}`,
+    url: `${ORG.url}/blog/${post.slug}`,
     lastModified: new Date(post.date),
     changeFrequency: 'weekly' as const,
     priority: 0.6,
   }));
 
   const guides = getAllGuides().map((g) => ({
-    url: `https://tryvex.dev/guides/${g.meta.framework}`,
+    url: `${ORG.url}/guides/${g.meta.framework}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.7,
   }));
 
   const checklists = getAllChecklists().map((c) => ({
-    url: `https://tryvex.dev/checklists/${c.meta.industry}-${c.meta.useCase}`,
+    url: `${ORG.url}/checklists/${c.meta.industry}-${c.meta.useCase}`,
     lastModified: new Date(c.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.7,
   }));
 
   const conceptComparisons = getAllConceptComparisons().map((c) => ({
-    url: `https://tryvex.dev/compare/concepts/${c.meta.slug}`,
+    url: `${ORG.url}/compare/concepts/${c.meta.slug}`,
     lastModified: new Date(c.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.7,
   }));
 
   const problemGuides = getAllProblemGuides().map((g) => ({
-    url: `https://tryvex.dev/learn/${g.meta.slug}`,
+    url: `${ORG.url}/learn/${g.meta.slug}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.6,
   }));
 
   const frameworkUseCaseGuides = getAllFrameworkUseCaseGuides().map((g) => ({
-    url: `https://tryvex.dev/guides/${g.meta.framework}/${g.meta.useCase}`,
+    url: `${ORG.url}/guides/${g.meta.framework}/${g.meta.useCase}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.6,
   }));
 
   const frameworkIndustryGuides = getAllFrameworkIndustryGuides().map((g) => ({
-    url: `https://tryvex.dev/guides/${g.meta.framework}/${g.meta.industry}`,
+    url: `${ORG.url}/guides/${g.meta.framework}/${g.meta.industry}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.6,
   }));
 
   const problemFrameworkGuides = getAllProblemFrameworkGuides().map((g) => ({
-    url: `https://tryvex.dev/learn/${g.meta.problem}/${g.meta.framework}`,
+    url: `${ORG.url}/learn/${g.meta.problem}/${g.meta.framework}`,
     lastModified: new Date(g.meta.generatedAt),
     changeFrequency: 'monthly' as const,
     priority: 0.6,
@@ -70,38 +72,38 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   return [
     {
-      url: 'https://tryvex.dev',
+      url: ORG.url,
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 1,
     },
     {
-      url: 'https://tryvex.dev/blog',
+      url: `${ORG.url}/blog`,
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 0.8,
     },
     ...blogPosts,
     {
-      url: 'https://tryvex.dev/pricing',
+      url: `${ORG.url}/pricing`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.9,
     },
     {
-      url: 'https://tryvex.dev/compare/langsmith',
+      url: `${ORG.url}/compare/langsmith`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
     {
-      url: 'https://tryvex.dev/compare/langfuse',
+      url: `${ORG.url}/compare/langfuse`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
     {
-      url: 'https://tryvex.dev/compare/guardrails-ai',
+      url: `${ORG.url}/compare/guardrails-ai`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.7,
@@ -114,19 +116,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...frameworkIndustryGuides,
     ...problemFrameworkGuides,
     {
-      url: 'https://tryvex.dev/tools/agent-health-score',
+      url: `${ORG.url}/tools/agent-health-score`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.6,
     },
     {
-      url: 'https://tryvex.dev/privacy',
+      url: `${ORG.url}/privacy`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.3,
     },
     {
-      url: 'https://tryvex.dev/terms',
+      url: `${ORG.url}/terms`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.3,

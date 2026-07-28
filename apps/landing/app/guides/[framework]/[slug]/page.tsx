@@ -49,7 +49,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${guide.seo.title} — Vex`,
     description: guide.seo.description,
     keywords: guide.seo.keywords,
-    alternates: { canonical: `https://tryvex.dev/guides/${framework}/${slug}` },
+    alternates: { canonical: `https://klio.tech/guides/${framework}/${slug}` },
     openGraph: {
       title: guide.seo.title,
       description: guide.seo.description,
@@ -130,7 +130,7 @@ export default async function FrameworkCrossProductPage({ params }: Props) {
     publisher: {
       '@type': 'Organization',
       name: 'Vex',
-      url: 'https://tryvex.dev',
+      url: 'https://klio.tech',
     },
   };
 

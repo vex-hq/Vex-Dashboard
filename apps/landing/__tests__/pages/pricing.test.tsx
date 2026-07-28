@@ -1,6 +1,8 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
+import { POSITIONING_SENTENCE } from '~/lib/site-meta';
+
 import PricingPage from '~/pricing/page';
 
 describe('app/pricing/page.tsx', () => {
@@ -67,8 +69,6 @@ describe('app/pricing/page.tsx', () => {
 
   it('renders the positioning sentence', () => {
     const { container } = render(<PricingPage />);
-    expect(container.textContent ?? '').toContain(
-      'Vex helps founders shipping AI agents',
-    );
+    expect(container.textContent ?? '').toContain(POSITIONING_SENTENCE);
   });
 });

@@ -14,11 +14,17 @@
  * descriptions flow from `POSITIONING_SENTENCE`.
  */
 import { CURRENCY, LAST_UPDATED, PLANS } from '~/lib/pricing';
-import { FAQ, ORG, POSITIONING_SENTENCE, SAME_AS } from '~/lib/site-meta';
+import {
+  DOCS_URL,
+  FAQ,
+  ORG,
+  POSITIONING_SENTENCE,
+  SAME_AS,
+} from '~/lib/site-meta';
 
 const CONTEXT = 'https://schema.org' as const;
 const SITE_URL = ORG.url;
-const DOCS_URL = 'https://docs.tryvex.dev' as const;
+
 const PYPI_URL = 'https://pypi.org/project/vex-sdk/' as const;
 
 export function softwareApplicationSchema() {

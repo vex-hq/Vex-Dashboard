@@ -50,6 +50,13 @@ export const SAME_AS = [
   'https://x.com/klio_tech',
 ] as const satisfies ReadonlyArray<string>;
 
+/** The X handle, without the @. Used for share intents and Twitter cards. */
+export const X_HANDLE = 'klio_tech' as const;
+
+/** Product surfaces that live off the marketing domain. */
+export const DOCS_URL = 'https://docs.klio.tech' as const;
+export const APP_URL = 'https://app.klio.tech' as const;
+
 export interface FaqEntry {
   readonly question: string;
   readonly answer: string;

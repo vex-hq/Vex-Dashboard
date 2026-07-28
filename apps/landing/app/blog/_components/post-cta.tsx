@@ -13,7 +13,7 @@ export function PostCta() {
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <a
-          href="https://app.tryvex.dev"
+          href="https://app.klio.tech"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex h-11 items-center rounded-lg bg-foreground px-6 text-[15px] font-semibold text-background transition-colors hover:bg-[var(--klio-foreground-strong)]"

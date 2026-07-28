@@ -47,7 +47,7 @@ export default async function BlogPostPage({ params }: Props) {
   const post = getPostBySlug(slug);
   if (!post) notFound();
 
-  const canonicalUrl = `https://tryvex.dev/blog/${slug}`;
+  const canonicalUrl = `https://klio.tech/blog/${slug}`;
   const article = articleSchema({
     headline: post.title,
     description: post.description,
@@ -56,8 +56,8 @@ export default async function BlogPostPage({ params }: Props) {
     url: canonicalUrl,
   });
   const breadcrumbs = breadcrumbSchema([
-    { name: 'Home', url: 'https://tryvex.dev' },
-    { name: 'Blog', url: 'https://tryvex.dev/blog' },
+    { name: 'Home', url: 'https://klio.tech' },
+    { name: 'Blog', url: 'https://klio.tech/blog' },
     { name: post.title, url: canonicalUrl },
   ]);
 
