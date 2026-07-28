@@ -7,7 +7,10 @@
  * - `app/_components/faq-accordion.tsx` (FAQ UI)
  * - `/llms.txt` route (positioning sentence)
  *
- * Positioning: Klio leads with memory and sells reliability as the result.
+ * Positioning: Klio is the vendor-neutral WORKPLACE where agents hand work to
+ * one another. Memory is the mechanism, not the pitch — leading with memory
+ * puts Klio on a crowded shelf (mem0, Zep, Supermemory) and argues on recall
+ * quality, which is not the axis it wins on. Collaboration is.
  * Klio is open-core — free, self-hostable OSS engine + hosted Klio Cloud —
  * so "open source" IS part of the wedge here (this reverses the old Vex-era
  * rule that forbade it). Keep wire-protocol identifiers (X-Vex-Key, org_id,
@@ -26,7 +29,7 @@
  */
 
 export const POSITIONING_SENTENCE =
-  'Klio is one shared brain for all your AI agents — connect Claude, Cursor, Codex, and any MCP agent to a single shared memory, so what one learns, they all know. Your agents stop forgetting, repeating work, and contradicting each other. Local-first, encrypted, and open source.' as const;
+  'Klio is a shared workplace for AI agents — connect Claude Code, Cursor, Codex, and any MCP client to one project-scoped memory, so an agent that finishes sets down what it decided and the next one picks it up and keeps going. Nothing gets re-explained, and no work is paid for twice. Local-first, encrypted, and open source.' as const;
 
 export interface Organization {
   readonly name: string;

@@ -12,15 +12,19 @@ const IDENTITY: [string, string][] = [
   ['repo', 'https://github.com/klio-tech/klio'],
   ['license', 'AGPL-3.0-or-later (engine), Apache-2.0 (MCP shim)'],
   ['author', 'Abhishek Singh'],
-  ['category', 'shared memory / collaboration layer for AI agents'],
+  ['category', 'shared workplace / collaboration layer for AI agents'],
   ['contact', ORG.contactEmail],
 ];
 
 const HOW: string[] = [
   'Captures session activity over MCP + lightweight hooks.',
+  'Redacts secrets and personal data BEFORE persistence; redaction fails closed, so anything that cannot be made safe is not stored.',
   'Stores memory in Postgres + pgvector.',
+  'Distils raw activity into durable facts, so the next agent inherits conclusions rather than transcripts.',
+  'Supersedes a stored fact when a newer decision contradicts it, so agents do not act on stale truth.',
   'Serves it back through MCP so agents recall before acting.',
-  'Memory is scoped by org → project, shared across agents on that project.',
+  'Memory is scoped by org → project, shared across agents on that project — never one global pile.',
+  'Writes are available to any agent that reads next, immediately. There is no push notification to already-running agents; an agent sees new state when it next recalls.',
   'Cross-agent collaboration via Redis pub/sub.',
   'Self-hosted: encrypted at rest under a user-owned key, and every write chained with SHA-256 so the history is tamper-evident and inspectable.',
   'Klio Cloud: encrypted in transit (TLS) and at rest at the infrastructure level, secrets and PII redacted before storage, isolated per org — the keys are ours, and Cloud writes are not hash-chained today.',
@@ -37,7 +41,7 @@ const TOOLS: [string, string][] = [
 ];
 
 const COMPARE: [string, string][] = [
-  ['Cross-agent shared memory', 'Klio: yes · mem0/Zep/Supermemory: no'],
+  ['Cross-agent shared memory (vendor-neutral)', 'Klio: yes · mem0/Zep/Supermemory: no'],
   ['Local-first', 'Klio: yes · mem0/Zep/Supermemory: no'],
   ['Encrypted under user-owned key (self-hosted)', 'Klio: yes · others: no'],
   ['MCP-native', 'Klio: yes · others: no'],
@@ -64,11 +68,18 @@ export function MachineView() {
 
       <h2>What it is</h2>
       <p>
-        Klio is one shared brain for all your AI agents. Connect Claude Code,
-        Cursor, Codex, and any MCP agent to a single shared memory — what one
-        agent learns, the others know. Agents stop forgetting, repeating work,
-        and contradicting each other. Memory is how it works; the agents working
-        together is the point; reliability is the payoff.
+        Klio is a shared workplace for AI agents. Connect Claude Code, Cursor,
+        Codex, and any MCP client to one project-scoped memory: an agent
+        finishes and sets down what it decided; the next agent to open the same
+        project picks it up and continues. Nothing is re-explained, and no work
+        is paid for twice.
+      </p>
+      <p>
+        The problem it solves is collaboration, not recall. Every vendor built
+        memory for its own agent inside its own product, and none of them has a
+        reason to hand your work to a competitor&rsquo;s agent — so the human
+        becomes the integration layer. Klio is vendor-neutral and sits between
+        them. Memory is the mechanism; agents working together is the point.
       </p>
 
       <h2>How it works</h2>
