@@ -2,8 +2,8 @@
  * Unit tests for the onboarding server actions.
  *
  * These actions accept an `accountSlug` straight from the client and then act
- * with the SERVICE-ROLE admin client (which bypasses RLS entirely), so the
- * caller's membership and permissions must be verified server-side first.
+ * on the resolved workspace — minting and revoking API keys, writing onboarding
+ * progress — so the caller's membership must be verified server-side first.
  *
  * Every collaborator is mocked — no network calls, no Supabase process, no
  * Next.js runtime. All fixtures use obviously fake identifiers so the file is
@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const FAKE_USER_ID = 'user-00000000-0000-0000-0000-000000000001';
-const FAKE_ACCOUNT_ID = 'account-00000000-0000-0000-0000-000000000002';
 const MEMBER_SLUG = 'acme-team';
 const VICTIM_SLUG = 'victim-workspace';
 const FAKE_ORG_ID = 'org-00000000-0000-0000-0000-000000000003';
@@ -27,45 +26,11 @@ const FORBIDDEN_MESSAGE = 'Forbidden: not a member of this account';
 // Mock: membership guard
 // ---------------------------------------------------------------------------
 
-const mockRequireMemberAccountId = vi.fn();
 const mockRequireAccountMembership = vi.fn();
 
 vi.mock('~/lib/agentguard/require-account-membership', () => ({
-  requireMemberAccountId: (...args: unknown[]) =>
-    mockRequireMemberAccountId(...args),
   requireAccountMembership: (...args: unknown[]) =>
     mockRequireAccountMembership(...args),
-}));
-
-// ---------------------------------------------------------------------------
-// Mock: invitation permissions (shared with MakerKit's own invite action)
-// ---------------------------------------------------------------------------
-
-const mockCheckInvitationPermissions = vi.fn();
-
-vi.mock('@kit/team-accounts/permissions/invitation-permissions', () => ({
-  checkInvitationPermissions: (...args: unknown[]) =>
-    mockCheckInvitationPermissions(...args),
-}));
-
-// ---------------------------------------------------------------------------
-// Mock: invitations service + admin client
-// ---------------------------------------------------------------------------
-
-const mockSendInvitations = vi.fn();
-const mockCreateAccountInvitationsService = vi.fn(() => ({
-  sendInvitations: mockSendInvitations,
-}));
-
-vi.mock('@kit/team-accounts/services/account-invitations.service', () => ({
-  createAccountInvitationsService: (...args: unknown[]) =>
-    mockCreateAccountInvitationsService(...(args as [])),
-}));
-
-const mockGetSupabaseServerAdminClient = vi.fn(() => ({ admin: true }));
-
-vi.mock('@kit/supabase/server-admin-client', () => ({
-  getSupabaseServerAdminClient: () => mockGetSupabaseServerAdminClient(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -152,13 +117,7 @@ vi.mock('@kit/next/actions', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
 
-  mockRequireMemberAccountId.mockResolvedValue(FAKE_ACCOUNT_ID);
   mockRequireAccountMembership.mockResolvedValue(undefined);
-  mockCheckInvitationPermissions.mockResolvedValue({ allowed: true });
-  mockSendInvitations.mockResolvedValue(undefined);
-  mockCreateAccountInvitationsService.mockReturnValue({
-    sendInvitations: mockSendInvitations,
-  });
   mockListKeys.mockResolvedValue([]);
   mockCreateKey.mockResolvedValue({
     key: 'ag_fake_key',
@@ -169,80 +128,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetModules();
-});
-
-const ONE_INVITE = [{ email: 'invitee@example.test', role: 'member' as const }];
-const OWNER_INVITE = [
-  { email: 'attacker@example.test', role: 'owner' as const },
-];
-
-// ---------------------------------------------------------------------------
-// sendInvitesAction
-// ---------------------------------------------------------------------------
-
-describe('sendInvitesAction — authorisation', () => {
-  it('refuses a caller who is not a member of the target workspace', async () => {
-    mockRequireMemberAccountId.mockRejectedValue(new Error(FORBIDDEN_MESSAGE));
-
-    const { sendInvitesAction } = await import('./server-actions');
-
-    await expect(
-      sendInvitesAction({ accountSlug: VICTIM_SLUG, invites: OWNER_INVITE }),
-    ).rejects.toThrow(/Forbidden: not a member of this account/);
-
-    // The service-role admin client must never be reached.
-    expect(mockGetSupabaseServerAdminClient).not.toHaveBeenCalled();
-    expect(mockSendInvitations).not.toHaveBeenCalled();
-  });
-
-  it('refuses a member who lacks invites.manage / exceeds their role', async () => {
-    mockCheckInvitationPermissions.mockResolvedValue({
-      allowed: false,
-      reason: 'You cannot invite members with the "owner" role',
-    });
-
-    const { sendInvitesAction } = await import('./server-actions');
-
-    await expect(
-      sendInvitesAction({ accountSlug: MEMBER_SLUG, invites: OWNER_INVITE }),
-    ).rejects.toThrow(/owner/);
-
-    expect(mockGetSupabaseServerAdminClient).not.toHaveBeenCalled();
-    expect(mockSendInvitations).not.toHaveBeenCalled();
-    expect(mockUpdateOnboardingStep).not.toHaveBeenCalled();
-  });
-
-  it('checks permissions against the RLS-resolved account id and the caller', async () => {
-    const { sendInvitesAction } = await import('./server-actions');
-
-    await sendInvitesAction({
-      accountSlug: MEMBER_SLUG,
-      invites: OWNER_INVITE,
-    });
-
-    expect(mockRequireMemberAccountId).toHaveBeenCalledWith(MEMBER_SLUG);
-    expect(mockCheckInvitationPermissions).toHaveBeenCalledWith(
-      FAKE_ACCOUNT_ID,
-      FAKE_USER_ID,
-      OWNER_INVITE,
-    );
-  });
-
-  it('sends invitations for a permitted caller', async () => {
-    const { sendInvitesAction } = await import('./server-actions');
-
-    const result = await sendInvitesAction({
-      accountSlug: MEMBER_SLUG,
-      invites: ONE_INVITE,
-    });
-
-    expect(result).toEqual({ success: true, count: 1 });
-    expect(mockSendInvitations).toHaveBeenCalledWith({
-      accountSlug: MEMBER_SLUG,
-      invitations: ONE_INVITE,
-      invitedBy: FAKE_USER_ID,
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,6 +157,16 @@ describe('createOnboardingKeyAction — authorisation', () => {
 
     expect(result.key).toBe('ag_fake_key');
     expect(mockCreateKey).toHaveBeenCalled();
+  });
+
+  it('persists the RunLocal step index so a refresh resumes on that screen', async () => {
+    const { createOnboardingKeyAction } = await import('./server-actions');
+
+    await createOnboardingKeyAction({ accountSlug: MEMBER_SLUG });
+
+    // Step 1 is RunLocal — the screen that mints the key and hands the user the
+    // terminal command. Resuming past it would skip the point of the screen.
+    expect(mockUpdateOnboardingStep).toHaveBeenCalledWith(MEMBER_SLUG, 1);
   });
 });
 
