@@ -36,15 +36,7 @@ export function StepWelcome({ onNext }: StepWelcomeProps) {
           {t('onboarding.welcomeTitle')}
         </h1>
         <p className="text-muted-foreground mx-auto mt-3 max-w-md text-center text-base leading-relaxed">
-          <span className="text-foreground font-medium">
-            Observe, detect, and auto-correct
-          </span>{' '}
-          hallucinations and drift in real time —{' '}
-          <span className="text-foreground font-medium">before</span> your agent
-          makes{' '}
-          <span className="text-foreground font-medium">
-            a mistake that can&apos;t be taken back.
-          </span>
+          {t('onboarding.welcomeDescription')}
         </p>
       </motion.div>
 
