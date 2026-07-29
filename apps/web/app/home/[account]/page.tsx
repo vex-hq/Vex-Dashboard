@@ -31,6 +31,33 @@ interface TeamAccountHomePageProps {
 /** Matches the Memory page's volume window so both read the same series. */
 const MEMORY_VOLUME_DAYS = 30;
 
+/**
+ * Run one dashboard loader, degrading to `fallback` if it fails.
+ *
+ * The homepage fans out to nine loaders against the engine database. They used
+ * to share fate through Promise.all: one cold Neon resume blowing the connect
+ * budget threw an AggregateError(ETIMEDOUT) out of the server component and
+ * the whole page became an error screen (seen in production, digests
+ * 1176364607 / 1376536570). A dashboard tile with no data is worth strictly
+ * more than a crash page, so each loader now fails alone: the error is logged
+ * with its label and the tile renders its empty state.
+ */
+async function orFallback<T>(
+  label: string,
+  fallback: T,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(`[homepage] loader "${label}" failed; rendering fallback`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return fallback;
+  }
+}
+
 export const generateMetadata = async () => {
   const i18n = await createI18nServerInstance();
   const title = i18n.t('agentguard:homepage.pageTitle');
@@ -63,15 +90,44 @@ async function TeamAccountHomePage({
     memoryActivity,
     memoryVolume,
   ] = await Promise.all([
-    loadHomepageKpis(orgId, timeRange),
-    loadAgentHealth(orgId, timeRange),
-    loadAlertSummary(orgId, timeRange),
-    loadHomepageTrend(orgId, timeRange),
-    loadPlanUsage(orgId, account),
-    loadFailurePatterns(orgId, timeRange),
-    loadAnomalyAlerts(orgId, timeRange),
-    loadAgentActivity(orgId),
-    loadMemoryVolume(orgId, MEMORY_VOLUME_DAYS),
+    orFallback(
+      'kpis',
+      {
+        total_verifications: 0,
+        avg_confidence: null,
+        issues_caught: 0,
+        auto_corrected: 0,
+      },
+      () => loadHomepageKpis(orgId, timeRange),
+    ),
+    orFallback('agentHealth', [], () => loadAgentHealth(orgId, timeRange)),
+    orFallback(
+      'alertSummary',
+      { critical: 0, high: 0, medium: 0, low: 0 },
+      () => loadAlertSummary(orgId, timeRange),
+    ),
+    orFallback('trend', [], () => loadHomepageTrend(orgId, timeRange)),
+    orFallback(
+      'planUsage',
+      {
+        plan: 'free',
+        planOverrides: null,
+        observationsUsed: 0,
+        verificationsUsed: 0,
+        memoriesUsed: null,
+        recallsUsed: null,
+        agentCount: 0,
+      },
+      () => loadPlanUsage(orgId, account),
+    ),
+    orFallback('failurePatterns', [], () =>
+      loadFailurePatterns(orgId, timeRange),
+    ),
+    orFallback('anomalyAlerts', [], () => loadAnomalyAlerts(orgId, timeRange)),
+    orFallback('memoryActivity', [], () => loadAgentActivity(orgId)),
+    orFallback('memoryVolume', [], () =>
+      loadMemoryVolume(orgId, MEMORY_VOLUME_DAYS),
+    ),
   ]);
 
   return (
