@@ -177,7 +177,11 @@ export function StepVerifyConnection({
         </AnimatePresence>
       </motion.div>
 
-      {/* Dual CTAs */}
+      {/* Dual CTAs.
+          Verification is a confirmation, not a gate: the finish button must
+          never be held hostage by the poller. A user whose agent has not
+          connected yet (or whose connection the poller misses) can always
+          enter the dashboard and wire agents from there. */}
       <motion.div
         className="flex flex-col items-center gap-3"
         initial={{ opacity: 0, y: 10 }}
@@ -186,15 +190,22 @@ export function StepVerifyConnection({
       >
         <Button
           onClick={handleFinish}
-          disabled={!connected || completing}
+          disabled={completing}
+          variant={connected ? 'default' : 'outline'}
           className="rounded-lg px-8"
           size="lg"
         >
           {completing ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : null}
-          {t('onboarding.finish')}
+          {connected ? t('onboarding.finish') : t('onboarding.step5SkipFinish')}
         </Button>
+
+        {!connected && (
+          <p className="text-muted-foreground text-xs">
+            {t('onboarding.step5SkipHint')}
+          </p>
+        )}
 
         {connected ? (
           <a
