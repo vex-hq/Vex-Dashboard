@@ -22,11 +22,13 @@ interface VerifyResponse {
 
 interface StepVerifyConnectionProps {
   accountSlug: string;
+  onNext: () => void;
   onBack: () => void;
 }
 
 export function StepVerifyConnection({
   accountSlug,
+  onNext,
   onBack,
 }: StepVerifyConnectionProps) {
   const { t } = useTranslation('agentguard');
@@ -35,6 +37,7 @@ export function StepVerifyConnection({
   const [agentId, setAgentId] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const advanceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const poll = async () => {
@@ -54,6 +57,10 @@ export function StepVerifyConnection({
               clearInterval(intervalRef.current);
               intervalRef.current = null;
             }
+
+            // Hold briefly so the arriving memory is visible — the proof is the
+            // point of this screen — then move to the closing screen.
+            advanceTimeoutRef.current = setTimeout(onNext, 2000);
           }
         }
       } catch {
@@ -68,9 +75,15 @@ export function StepVerifyConnection({
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+
+      if (advanceTimeoutRef.current) {
+        clearTimeout(advanceTimeoutRef.current);
+        advanceTimeoutRef.current = null;
       }
     };
-  }, [accountSlug]);
+  }, [accountSlug, onNext]);
 
   const handleFinish = async () => {
     setCompleting(true);
@@ -92,10 +105,10 @@ export function StepVerifyConnection({
         transition={{ delay: 0.1 }}
       >
         <h1 className="text-center text-3xl font-bold tracking-tight">
-          {t('onboarding.step5Title')}
+          {t('onboarding.verifyTitle')}
         </h1>
         <p className="text-muted-foreground mx-auto mt-2 max-w-md text-center">
-          {t('onboarding.step5Description')}
+          {t('onboarding.verifyDescription')}
         </p>
       </motion.div>
 
@@ -138,7 +151,7 @@ export function StepVerifyConnection({
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3 }}
               >
-                {t('onboarding.step5Connected')}
+                {t('onboarding.verifyArrived')}
               </motion.h2>
 
               {agentId && (
@@ -148,7 +161,7 @@ export function StepVerifyConnection({
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.4 }}
                 >
-                  {t('onboarding.step5AgentDetected', { agentId })}
+                  {t('onboarding.verifyAgentDetected', { agentId })}
                 </motion.p>
               )}
             </motion.div>
@@ -170,7 +183,7 @@ export function StepVerifyConnection({
               </motion.div>
 
               <p className="text-muted-foreground">
-                {t('onboarding.step5Waiting')}
+                {t('onboarding.verifyWaiting')}
               </p>
             </motion.div>
           )}
@@ -198,12 +211,12 @@ export function StepVerifyConnection({
           {completing ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : null}
-          {connected ? t('onboarding.finish') : t('onboarding.step5SkipFinish')}
+          {connected ? t('onboarding.doneCta') : t('onboarding.verifySkip')}
         </Button>
 
         {!connected && (
           <p className="text-muted-foreground text-xs">
-            {t('onboarding.step5SkipHint')}
+            {t('onboarding.verifySkipHint')}
           </p>
         )}
 
