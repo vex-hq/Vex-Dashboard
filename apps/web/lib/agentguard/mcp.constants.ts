@@ -8,10 +8,11 @@
  * travels in the `X-Vex-Key` header (an optional `X-Vex-Agent` header labels
  * the calling agent).
  *
- * The consumer ChatGPT and Gemini apps cannot add an arbitrary remote MCP
- * server with a custom auth header, so they are NOT part of this path.
- * Claude.ai reaches the same URL through the OAuth custom-connector flow
- * instead — no header, consent granted at `app/oauth/consent`.
+ * Header-based auth is not available in the consumer ChatGPT and Gemini apps,
+ * which cannot attach a custom auth header to a remote MCP server. Those
+ * clients still reach the same URL through the OAuth custom-connector flow,
+ * the same way Claude.ai does — no header, consent granted at
+ * `app/oauth/consent`.
  *
  * Directive-free (no `'use client'`/`'use server'`) so it is safe to import
  * from client components and server code alike.
