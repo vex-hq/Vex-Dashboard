@@ -109,8 +109,17 @@ export function StepApiKey({
             </Button>
           </div>
         ) : (
-          <div className="bg-destructive/10 text-destructive flex h-14 items-center justify-center rounded-lg border">
-            Failed to generate key. Please try again.
+          <div className="bg-destructive/10 text-destructive flex h-14 items-center justify-between gap-3 rounded-lg border px-4">
+            <span>Failed to generate key.</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={generateKey}
+              className="shrink-0"
+            >
+              Retry
+            </Button>
           </div>
         )}
 
@@ -127,9 +136,13 @@ export function StepApiKey({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
       >
+        {/* Disabled only while minting. If generation failed, the user can
+            still continue — the later steps render a placeholder key, and a
+            real one can be created from the dashboard. A failed mint must
+            never trap someone inside onboarding. */}
         <Button
           onClick={onNext}
-          disabled={!apiKey}
+          disabled={loading}
           className="rounded-lg px-8"
           size="lg"
         >
