@@ -10,10 +10,10 @@ import {
 } from '~/lib/agentguard/onboarding.constants';
 
 import { updateOnboardingStepAction } from '../_lib/server-actions';
-import { StepApiKey } from './step-api-key';
-import { StepConnectAgents } from './step-connect-agents';
-import { StepInstallSdk } from './step-install-sdk';
-import { StepInviteTeam } from './step-invite-team';
+import { ProgressIndicator } from './progress-indicator';
+import { StepConnectCloud } from './step-connect-cloud';
+import { StepDone } from './step-done';
+import { StepRunLocal } from './step-run-local';
 import { StepVerifyConnection } from './step-verify-connection';
 import { StepWelcome } from './step-welcome';
 
@@ -58,50 +58,39 @@ export function OnboardingWizard({
         return <StepWelcome key="step-0" onNext={goNext} />;
       case 1:
         return (
-          <StepInviteTeam
+          <StepRunLocal
             key="step-1"
             accountSlug={accountSlug}
             onNext={goNext}
             onBack={goBack}
+            // Pass the bare state setter: `StepRunLocal` lists this in a
+            // `useCallback`/`useEffect` dependency chain, and an inline arrow
+            // would change identity every render, re-firing the mint effect —
+            // which revokes the prior onboarding key each time.
+            onKeyCreated={setApiKey}
           />
         );
       case 2:
         return (
-          <StepApiKey
+          <StepConnectCloud
             key="step-2"
             accountSlug={accountSlug}
+            apiKey={apiKey}
             onNext={goNext}
             onBack={goBack}
-            onKeyCreated={setApiKey}
           />
         );
       case 3:
         return (
-          <StepConnectAgents
+          <StepVerifyConnection
             key="step-3"
             accountSlug={accountSlug}
-            apiKey={apiKey}
             onNext={goNext}
             onBack={goBack}
           />
         );
       case 4:
-        return (
-          <StepInstallSdk
-            key="step-4"
-            apiKey={apiKey}
-            onNext={goNext}
-            onBack={goBack}
-          />
-        );
-      case 5:
-        return (
-          <StepVerifyConnection
-            key="step-5"
-            accountSlug={accountSlug}
-            onBack={goBack}
-          />
-        );
+        return <StepDone key="step-4" accountSlug={accountSlug} />;
       default:
         return null;
     }
@@ -121,6 +110,8 @@ export function OnboardingWizard({
             {renderStep()}
           </motion.div>
         </AnimatePresence>
+
+        <ProgressIndicator currentStep={currentStep} totalSteps={TOTAL_STEPS} />
       </div>
     </div>
   );

@@ -1,10 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-
 import Link from 'next/link';
 
-import { ArrowRight, Check, Copy, Network, Plug, Terminal } from 'lucide-react';
+import { ArrowRight, KeyRound, Plug } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 
@@ -12,7 +10,6 @@ import { Button } from '@kit/ui/button';
 
 import {
   KLIO_DOCS_MCP_ANCHOR,
-  KLIO_INIT_COMMAND,
   KLIO_MCP_KEY_HEADER,
   KLIO_MCP_KEY_PLACEHOLDER,
   KLIO_MCP_URL,
@@ -21,47 +18,40 @@ import {
 
 import { CodeBlock } from './code-block';
 
-interface StepConnectAgentsProps {
+interface StepConnectCloudProps {
   accountSlug: string;
   apiKey: string | null;
   onNext: () => void;
   onBack: () => void;
 }
 
-export function StepConnectAgents({
+export function StepConnectCloud({
   accountSlug,
   apiKey,
   onNext,
   onBack,
-}: StepConnectAgentsProps) {
+}: StepConnectCloudProps) {
   const { t } = useTranslation('agentguard');
-  const [copied, setCopied] = useState(false);
-
-  const copyCommand = async () => {
-    await navigator.clipboard.writeText(KLIO_INIT_COMMAND);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const keyValue = apiKey ?? KLIO_MCP_KEY_PLACEHOLDER;
 
   return (
     <div className="space-y-8">
-      {/* Heading */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
       >
         <h1 className="text-center text-3xl font-bold tracking-tight">
-          {t('onboarding.connectAgentsTitle')}
+          {t('onboarding.cloudTitle')}
         </h1>
         <p className="text-muted-foreground mx-auto mt-2 max-w-md text-center">
-          {t('onboarding.connectAgentsDescription')}
+          {t('onboarding.cloudDescription')}
         </p>
       </motion.div>
 
-      {/* Card 1 — local coding agents (one command) */}
+      {/* OAuth first: the endpoint advertises
+          /.well-known/oauth-protected-resource, so any MCP client implementing
+          the authorization spec joins with no key at all. */}
       <motion.div
         className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
         initial={{ opacity: 0, y: 10 }}
@@ -69,46 +59,25 @@ export function StepConnectAgents({
         transition={{ delay: 0.2 }}
       >
         <div className="flex items-center gap-2">
-          <Terminal className="text-muted-foreground h-4 w-4 shrink-0" />
+          <Plug className="text-muted-foreground h-4 w-4 shrink-0" />
           <h2 className="text-sm font-semibold">
-            {t('onboarding.connectAgentsLocalLabel')}
+            {t('onboarding.cloudOauthLabel')}
           </h2>
         </div>
 
-        <div className="bg-muted/50 flex items-center gap-3 rounded-lg border p-4">
-          <code className="flex-1 truncate font-mono text-sm">
-            {KLIO_INIT_COMMAND}
-          </code>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={copyCommand}
-            className="shrink-0"
-            aria-label={t('onboarding.connectAgentsCopy')}
-          >
-            {copied ? (
-              <Check className="h-4 w-4 text-green-500" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </Button>
+        <div className="space-y-1.5">
+          <p className="text-muted-foreground text-xs font-medium">
+            {t('onboarding.cloudOauthUrlLabel')}
+          </p>
+          <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy connector URL" />
         </div>
 
         <p className="text-muted-foreground text-sm">
-          {t('onboarding.connectAgentsNote')}
+          {t('onboarding.cloudOauthSteps')}
         </p>
-
-        <Link
-          href={`/home/${accountSlug}/memory`}
-          className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
-        >
-          {t('onboarding.connectAgentsViewMemory')}
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
       </motion.div>
 
-      {/* Card 2 — connect any other MCP agent (remote) */}
+      {/* Secondary: clients without the OAuth flow */}
       <motion.div
         className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
         initial={{ opacity: 0, y: 10 }}
@@ -116,27 +85,27 @@ export function StepConnectAgents({
         transition={{ delay: 0.3 }}
       >
         <div className="flex items-center gap-2">
-          <Network className="text-muted-foreground h-4 w-4 shrink-0" />
+          <KeyRound className="text-muted-foreground h-4 w-4 shrink-0" />
           <h2 className="text-sm font-semibold">
-            {t('onboarding.connectAgentsRemoteLabel')}
+            {t('onboarding.cloudManualLabel')}
           </h2>
         </div>
 
         <p className="text-muted-foreground text-sm">
-          {t('onboarding.connectAgentsRemoteDescription')}
+          {t('onboarding.cloudManualDescription')}
         </p>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
             <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.connectAgentsRemoteEndpointLabel')}
+              {t('onboarding.cloudEndpointLabel')}
             </p>
             <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy MCP endpoint" />
           </div>
 
           <div className="space-y-1.5">
             <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.connectAgentsRemoteHeaderLabel')}
+              {t('onboarding.cloudHeaderLabel')}
             </p>
             <CodeBlock
               code={`${KLIO_MCP_KEY_HEADER}: ${keyValue}`}
@@ -146,7 +115,7 @@ export function StepConnectAgents({
 
           <div className="space-y-1.5">
             <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.connectAgentsRemoteConfigLabel')}
+              {t('onboarding.cloudConfigLabel')}
             </p>
             <CodeBlock
               code={buildKlioMcpConfig(apiKey)}
@@ -155,17 +124,13 @@ export function StepConnectAgents({
           </div>
         </div>
 
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.connectAgentsRemoteNote')}
-        </p>
-
         <div className="flex flex-col gap-2">
           {!apiKey ? (
             <Link
               href={`/home/${accountSlug}/settings/api-keys`}
               className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
             >
-              {t('onboarding.connectAgentsRemoteKeyMissing')}
+              {t('onboarding.cloudKeyMissing')}
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           ) : null}
@@ -174,48 +139,17 @@ export function StepConnectAgents({
             href={`/home/${accountSlug}/docs#${KLIO_DOCS_MCP_ANCHOR}`}
             className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
           >
-            {t('onboarding.connectAgentsRemoteGuide')}
+            {t('onboarding.cloudGuide')}
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
       </motion.div>
 
-      {/* Card 3 — Claude.ai custom connector (OAuth, no API key) */}
-      <motion.div
-        className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-      >
-        <div className="flex items-center gap-2">
-          <Plug className="text-muted-foreground h-4 w-4 shrink-0" />
-          <h2 className="text-sm font-semibold">
-            {t('onboarding.connectAgentsConnectorLabel')}
-          </h2>
-        </div>
-
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.connectAgentsConnectorDescription')}
-        </p>
-
-        <div className="space-y-1.5">
-          <p className="text-muted-foreground text-xs font-medium">
-            {t('onboarding.connectAgentsConnectorUrlLabel')}
-          </p>
-          <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy connector URL" />
-        </div>
-
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.connectAgentsConnectorSteps')}
-        </p>
-      </motion.div>
-
-      {/* CTA + back */}
       <motion.div
         className="flex flex-col items-center gap-3"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
+        transition={{ delay: 0.4 }}
       >
         <Button onClick={onNext} className="rounded-lg px-8" size="lg">
           {t('onboarding.next')}

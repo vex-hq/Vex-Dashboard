@@ -3,8 +3,7 @@
  *
  * The wizard (`app/onboarding/_components/onboarding-wizard.tsx`) renders steps
  * `0 .. TOTAL_ONBOARDING_STEPS - 1`:
- *   0 Welcome · 1 InviteTeam · 2 ApiKey · 3 ConnectAgents · 4 InstallSdk ·
- *   5 VerifyConnection
+ *   0 Welcome · 1 RunLocal · 2 ConnectCloud · 3 VerifyConnection · 4 Done
  *
  * Server-side step handling derives from these constants so the wizard and the
  * server can never drift:
@@ -17,7 +16,7 @@
  * / `'server-only'`) so it is safe to import from the client wizard, the
  * `'use server'` actions, and the `'server-only'` loader alike.
  */
-export const TOTAL_ONBOARDING_STEPS = 6;
+export const TOTAL_ONBOARDING_STEPS = 5;
 
 /** Index of the terminal onboarding step (VerifyConnection). */
 export const FINAL_ONBOARDING_STEP = TOTAL_ONBOARDING_STEPS - 1;
