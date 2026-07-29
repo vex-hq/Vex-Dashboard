@@ -24,7 +24,11 @@ export function getAgentGuardPool(): Pool {
       connectionString,
       max: 5,
       idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 5_000,
+      // Neon suspends idle endpoints; a cold resume routinely takes longer
+      // than the old 5s budget, and blowing it turned the whole dashboard
+      // into an error page for whoever arrived first after a quiet period.
+      connectionTimeoutMillis: 15_000,
+      keepAlive: true,
     });
   }
 
