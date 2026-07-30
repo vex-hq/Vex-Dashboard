@@ -8,41 +8,40 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { TeamAccountLayoutPageHeader } from '../../_components/team-account-layout-page-header';
 import {
-  loadMemorySessionHeader,
-  loadSessionMemories,
-} from '../_lib/server/memory-sessions.loader';
-import { SessionMemories } from './_components/session-memories';
+  loadSessionCheckResults,
+  loadSessionDetail,
+  loadSessionTracePayloads,
+  loadSessionTurns,
+} from '../_lib/server/execution-sessions.loader';
+import { SessionDetailDashboard } from './_components/session-detail-dashboard';
 
 interface SessionDetailPageProps {
   params: Promise<{ account: string; sessionId: string }>;
-  searchParams: Promise<{ page?: string }>;
 }
 
 export const generateMetadata = async () => {
   const i18n = await createI18nServerInstance();
-  const title = i18n.t('agentguard:sessions.detailTitle');
+  const title = i18n.t('agentguard:executionSessions.detailTitle');
 
   return {
     title,
   };
 };
 
-async function SessionDetailPage({
-  params,
-  searchParams,
-}: SessionDetailPageProps) {
-  const { account, sessionId: rawSessionId } = await params;
-  const { page: rawPage } = await searchParams;
-
-  // Session ids contain `:` (`klio-hook:<uuid>`), so the segment arrives
-  // percent-encoded and has to be decoded before it can match the column.
-  const sessionId = decodeURIComponent(rawSessionId);
+async function SessionDetailPage({ params }: SessionDetailPageProps) {
+  const { account, sessionId } = await params;
   const orgId = await resolveOrgId(account);
-  const page = Math.max(1, parseInt(rawPage ?? '1', 10) || 1);
 
-  const [header, memories] = await Promise.all([
-    loadMemorySessionHeader(sessionId, orgId),
-    loadSessionMemories(sessionId, orgId, page),
+  const [header, turns] = await Promise.all([
+    loadSessionDetail(sessionId, orgId),
+    loadSessionTurns(sessionId, orgId),
+  ]);
+
+  const [tracePayloads, checkResults] = await Promise.all([
+    turns.length > 0 ? loadSessionTracePayloads(turns) : Promise.resolve({}),
+    turns.length > 0
+      ? loadSessionCheckResults(turns)
+      : Promise.resolve({} as Record<string, never>),
   ]);
 
   if (!header) {
@@ -50,13 +49,13 @@ async function SessionDetailPage({
       <>
         <TeamAccountLayoutPageHeader
           account={account}
-          title={<Trans i18nKey={'agentguard:sessions.detailTitle'} />}
+          title={<Trans i18nKey={'agentguard:executionSessions.detailTitle'} />}
           description={<AppBreadcrumbs />}
         />
 
         <PageBody>
           <p className="text-muted-foreground text-sm">
-            <Trans i18nKey="agentguard:sessions.sessionNotFound" />
+            <Trans i18nKey="agentguard:executionSessions.sessionNotFound" />
           </p>
         </PageBody>
       </>
@@ -67,17 +66,17 @@ async function SessionDetailPage({
     <>
       <TeamAccountLayoutPageHeader
         account={account}
-        title={<Trans i18nKey={'agentguard:sessions.detailTitle'} />}
+        title={<Trans i18nKey={'agentguard:executionSessions.detailTitle'} />}
         description={<AppBreadcrumbs />}
       />
 
       <PageBody>
-        <SessionMemories
+        <SessionDetailDashboard
           header={header}
-          entries={memories.rows}
+          turns={turns}
+          tracePayloads={tracePayloads}
+          checkResults={checkResults}
           accountSlug={account}
-          page={page}
-          pageCount={memories.pageCount}
         />
       </PageBody>
     </>

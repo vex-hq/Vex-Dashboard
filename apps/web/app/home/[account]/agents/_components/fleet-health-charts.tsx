@@ -315,6 +315,11 @@ function AgentCard({
 /* Session Row                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Fleet health is built from `executions`, so a row's turn count and confidence
+ * come from the reliability tables. It therefore links to the execution session
+ * view — not to the memory session that may share the same `session_id`.
+ */
 function SessionRow({
   session,
   accountSlug,
@@ -336,7 +341,7 @@ function SessionRow({
 
   return (
     <Link
-      href={`/home/${accountSlug}/sessions/${session.session_id}`}
+      href={`/home/${accountSlug}/execution-sessions/${session.session_id}`}
       className="bg-muted/50 hover:bg-muted flex items-center justify-between rounded-md px-3 py-2 text-xs transition-colors"
     >
       <span className="flex items-center gap-2">

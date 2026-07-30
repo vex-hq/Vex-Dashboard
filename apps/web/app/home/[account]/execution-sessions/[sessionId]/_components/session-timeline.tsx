@@ -307,11 +307,11 @@ function CorrectionInline({ turn }: { turn: SessionTurn }) {
         )}
         <Wrench className="h-3 w-3 shrink-0" />
         <span className="font-medium">
-          <Trans i18nKey="agentguard:sessions.correctionDetails" defaults="Correction Details" />
+          <Trans i18nKey="agentguard:executionSessions.correctionDetails" defaults="Correction Details" />
         </span>
         <ArrowRight className="h-3 w-3 shrink-0" />
         <span className="text-green-600 dark:text-green-400">
-          <Trans i18nKey="agentguard:sessions.outputCorrected" defaults="Output was corrected" />
+          <Trans i18nKey="agentguard:executionSessions.outputCorrected" defaults="Output was corrected" />
         </span>
       </button>
       {expanded && (
@@ -368,7 +368,7 @@ function VerificationBar({
             className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
           >
             <Wrench className="mr-1 h-3 w-3" />
-            <Trans i18nKey="agentguard:sessions.corrected" />
+            <Trans i18nKey="agentguard:executionSessions.corrected" />
           </Badge>
         )}
       </div>
@@ -478,7 +478,7 @@ function FallbackTurnView({
                   className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                 >
                   <Wrench className="mr-1 h-3 w-3" />
-                  <Trans i18nKey="agentguard:sessions.corrected" />
+                  <Trans i18nKey="agentguard:executionSessions.corrected" />
                 </Badge>
               )}
             </div>
@@ -572,23 +572,23 @@ export default function SessionTimeline({
         <CardContent>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <StatPill
-              label={<Trans i18nKey="agentguard:sessions.turns" />}
+              label={<Trans i18nKey="agentguard:executionSessions.turns" />}
               value={header.turn_count.toString()}
             />
             <StatPill
-              label={<Trans i18nKey="agentguard:sessions.avgConfidence" />}
+              label={<Trans i18nKey="agentguard:executionSessions.avgConfidence" />}
               value={formatConfidence(header.avg_confidence)}
             />
             <StatPill
-              label={<Trans i18nKey="agentguard:sessions.duration" />}
+              label={<Trans i18nKey="agentguard:executionSessions.duration" />}
               value={duration}
             />
             <StatPill
-              label={<Trans i18nKey="agentguard:sessions.totalTokens" />}
+              label={<Trans i18nKey="agentguard:executionSessions.totalTokens" />}
               value={formatTokens(header.total_tokens)}
             />
             <StatPill
-              label={<Trans i18nKey="agentguard:sessions.totalCost" />}
+              label={<Trans i18nKey="agentguard:executionSessions.totalCost" />}
               value={formatCost(header.total_cost)}
             />
           </div>
@@ -599,10 +599,10 @@ export default function SessionTimeline({
       <Card>
         <CardHeader>
           <CardTitle>
-            <Trans i18nKey="agentguard:sessions.turnTimeline" />
+            <Trans i18nKey="agentguard:executionSessions.turnTimeline" />
           </CardTitle>
           <CardDescription>
-            <Trans i18nKey="agentguard:sessions.detailDescription" />
+            <Trans i18nKey="agentguard:executionSessions.detailDescription" />
           </CardDescription>
         </CardHeader>
         <CardContent>

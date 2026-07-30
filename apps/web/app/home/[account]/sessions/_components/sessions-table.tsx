@@ -5,7 +5,7 @@ import { useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
-import { formatDistanceStrict } from 'date-fns';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@kit/ui/badge';
 import {
@@ -26,70 +26,76 @@ import {
 import { Trans } from '@kit/ui/trans';
 
 import { PaginationBar } from '~/components/pagination-bar';
-import {
-  formatConfidence,
-  formatTimestamp,
-  truncateId,
-} from '~/lib/agentguard/formatters';
-import type { SessionListRow } from '~/lib/agentguard/types';
+import { formatTimestamp, truncateId } from '~/lib/agentguard/formatters';
+
+import type { MemorySessionRow } from '../_lib/server/memory-sessions.loader';
 
 interface SessionsTableProps {
-  sessions: SessionListRow[];
+  sessions: MemorySessionRow[];
   accountSlug: string;
-  agents: Array<{ agent_id: string; name: string }>;
+  agents: string[];
+  memoryTypes: string[];
   page: number;
   pageCount: number;
 }
 
-function getSessionStatus(
-  row: SessionListRow,
-): 'healthy' | 'degraded' | 'risky' {
-  if (row.has_block) return 'risky';
-  if (row.has_flag) return 'degraded';
-  return 'healthy';
-}
+/**
+ * The type mix a session produced, as compact pills. Zero counts are dropped
+ * rather than rendered as "0 decisions" — a row with nothing but observations
+ * should look different at a glance from one that recorded a decision.
+ */
+function TypeBreakdown({ session }: { session: MemorySessionRow }) {
+  const { t } = useTranslation('agentguard');
 
-function StatusBadge({ status }: { status: 'healthy' | 'degraded' | 'risky' }) {
-  const styles: Record<string, string> = {
-    healthy:
-      'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    degraded:
-      'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
-    risky: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-  };
+  const parts: Array<{ key: string; count: number; label: string }> = [
+    { key: 'facts', count: session.facts, label: t('sessions.typeFacts') },
+    {
+      key: 'observations',
+      count: session.observations,
+      label: t('sessions.typeObservations'),
+    },
+    {
+      key: 'summaries',
+      count: session.summaries,
+      label: t('sessions.typeSummaries'),
+    },
+    {
+      key: 'deliberate',
+      count: session.deliberate,
+      label: t('sessions.typeDecisions'),
+    },
+  ].filter((part) => part.count > 0);
+
+  if (parts.length === 0) {
+    return <span className="text-muted-foreground text-xs">—</span>;
+  }
 
   return (
-    <Badge variant="outline" className={styles[status]}>
-      <Trans
-        i18nKey={`agentguard:sessions.status${status.charAt(0).toUpperCase() + status.slice(1)}`}
-      />
-    </Badge>
+    <div className="flex flex-wrap gap-1">
+      {parts.map((part) => (
+        <Badge key={part.key} variant="outline" className="font-normal">
+          {part.count} {part.label}
+        </Badge>
+      ))}
+    </div>
   );
-}
-
-function formatDuration(start: string, end: string): string {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  const diffMs = endDate.getTime() - startDate.getTime();
-
-  if (diffMs < 1000) return '<1s';
-
-  return formatDistanceStrict(startDate, endDate);
 }
 
 export default function SessionsTable({
   sessions,
   accountSlug,
   agents,
+  memoryTypes,
   page,
   pageCount,
 }: SessionsTableProps) {
+  const { t } = useTranslation('agentguard');
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const currentAgent = searchParams.get('agent') ?? '';
-  const currentStatus = searchParams.get('status') ?? '';
+  const currentType = searchParams.get('type') ?? '';
   const currentTimeRange = searchParams.get('timeRange') ?? '';
 
   const updateFilter = useCallback(
@@ -114,7 +120,6 @@ export default function SessionsTable({
         'animate-in fade-in flex flex-col space-y-4 pb-36 duration-500'
       }
     >
-      {/* Filter Bar */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -123,7 +128,6 @@ export default function SessionsTable({
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4">
-            {/* Agent Filter */}
             <div className="flex flex-col gap-1">
               <label className="text-muted-foreground text-xs">
                 <Trans i18nKey="agentguard:sessions.agent" />
@@ -133,33 +137,33 @@ export default function SessionsTable({
                 onChange={(e) => updateFilter('agent', e.target.value)}
                 className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
               >
-                <option value="">All Agents</option>
-                {agents.map((a) => (
-                  <option key={a.agent_id} value={a.agent_id}>
-                    {a.name}
+                <option value="">{t('sessions.allAgents')}</option>
+                {agents.map((agent) => (
+                  <option key={agent} value={agent}>
+                    {agent}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Status Filter */}
             <div className="flex flex-col gap-1">
               <label className="text-muted-foreground text-xs">
-                <Trans i18nKey="agentguard:sessions.status" />
+                <Trans i18nKey="agentguard:sessions.memoryType" />
               </label>
               <select
-                value={currentStatus}
-                onChange={(e) => updateFilter('status', e.target.value)}
+                value={currentType}
+                onChange={(e) => updateFilter('type', e.target.value)}
                 className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
               >
-                <option value="">All Statuses</option>
-                <option value="healthy">Healthy</option>
-                <option value="degraded">Degraded</option>
-                <option value="risky">Risky</option>
+                <option value="">{t('sessions.allTypes')}</option>
+                {memoryTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
               </select>
             </div>
 
-            {/* Time Range Filter */}
             <div className="flex flex-col gap-1">
               <label className="text-muted-foreground text-xs">
                 <Trans i18nKey="agentguard:sessions.timeRange" />
@@ -169,17 +173,16 @@ export default function SessionsTable({
                 onChange={(e) => updateFilter('timeRange', e.target.value)}
                 className="border-input bg-background rounded-md border px-3 py-1.5 text-sm"
               >
-                <option value="">All Time</option>
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
+                <option value="">{t('sessions.allTime')}</option>
+                <option value="24h">{t('sessions.last24h')}</option>
+                <option value="7d">{t('sessions.last7d')}</option>
+                <option value="30d">{t('sessions.last30d')}</option>
               </select>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Sessions Table */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -205,16 +208,16 @@ export default function SessionsTable({
                     <Trans i18nKey="agentguard:sessions.agent" />
                   </TableHead>
                   <TableHead>
-                    <Trans i18nKey="agentguard:sessions.turns" />
+                    <Trans i18nKey="agentguard:sessions.captured" />
                   </TableHead>
                   <TableHead>
-                    <Trans i18nKey="agentguard:sessions.avgConfidence" />
+                    <Trans i18nKey="agentguard:sessions.recallable" />
                   </TableHead>
                   <TableHead>
-                    <Trans i18nKey="agentguard:sessions.status" />
+                    <Trans i18nKey="agentguard:sessions.breakdown" />
                   </TableHead>
                   <TableHead>
-                    <Trans i18nKey="agentguard:sessions.duration" />
+                    <Trans i18nKey="agentguard:sessions.started" />
                   </TableHead>
                   <TableHead>
                     <Trans i18nKey="agentguard:sessions.lastActive" />
@@ -222,60 +225,50 @@ export default function SessionsTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessions.map((session) => {
-                  const status = getSessionStatus(session);
-                  const confidenceValue = session.avg_confidence;
-                  let confidenceColor = 'text-muted-foreground';
-
-                  if (confidenceValue != null) {
-                    if (confidenceValue >= 0.8) {
-                      confidenceColor = 'text-green-600 dark:text-green-400';
-                    } else if (confidenceValue >= 0.5) {
-                      confidenceColor = 'text-yellow-600 dark:text-yellow-400';
-                    } else {
-                      confidenceColor = 'text-red-600 dark:text-red-400';
-                    }
-                  }
-
-                  return (
-                    <TableRow key={session.session_id}>
-                      <TableCell>
+                {sessions.map((session) => (
+                  <TableRow key={session.session_id}>
+                    <TableCell>
+                      <Link
+                        href={`/home/${accountSlug}/sessions/${encodeURIComponent(session.session_id)}`}
+                        className="text-primary font-mono text-sm hover:underline"
+                        title={session.session_id}
+                      >
+                        {truncateId(session.session_id)}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
                         <Link
-                          href={`/home/${accountSlug}/sessions/${session.session_id}`}
-                          className="text-primary font-mono text-sm hover:underline"
+                          href={`/home/${accountSlug}/memory/agent/${session.primary_agent_id}`}
+                          className="text-primary text-sm hover:underline"
                         >
-                          {truncateId(session.session_id)}
+                          {session.primary_agent_id}
                         </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/home/${accountSlug}/agents/${session.agent_id}`}
-                          className="text-primary hover:underline"
-                        >
-                          {session.agent_name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{session.turn_count}</TableCell>
-                      <TableCell>
-                        <span className={`font-medium ${confidenceColor}`}>
-                          {formatConfidence(session.avg_confidence)}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={status} />
-                      </TableCell>
-                      <TableCell>
-                        {formatDuration(
-                          session.first_timestamp,
-                          session.last_timestamp,
+
+                        {session.agent_count > 1 && (
+                          <span className="text-muted-foreground text-xs">
+                            {t('sessions.agents')}: {session.agent_count}
+                          </span>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        {formatTimestamp(session.last_timestamp)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {session.captured.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {session.recallable.toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <TypeBreakdown session={session} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {formatTimestamp(session.first_captured)}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {formatTimestamp(session.last_captured)}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}
