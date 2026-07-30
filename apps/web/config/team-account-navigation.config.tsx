@@ -1,16 +1,4 @@
-import {
-  Activity,
-  AlertTriangle,
-  Brain,
-  Database,
-  FlaskConical,
-  Hexagon,
-  Plug,
-  Shield,
-  ShieldAlert,
-  Sparkles,
-  Wrench,
-} from 'lucide-react';
+import { Activity, BookOpen, Brain, Hexagon, Sparkles } from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -18,6 +6,38 @@ import pathsConfig from '~/config/paths.config';
 
 const iconClasses = 'w-4';
 
+/**
+ * Team account sidebar.
+ *
+ * Pruned to the memory product on 2026-07-29. What was here before was the Vex
+ * reliability console — twelve items across Monitoring / Evals / Configuration
+ * — and for a Klio user most of them could never populate.
+ *
+ * The evidence came from the engine database, reviewed 2026-07-29 across every
+ * active org: all but one had zero executions and zero alerts, so Failures,
+ * Alerts and Tool Usage were dead ends for them. The reliability tables are fed
+ * by a single org that drives them through the Vex SDK rather than through
+ * Klio's MCP surface.
+ *
+ * The Evals group and Guardrails were dead for everyone: `datasets` and
+ * `guardrails` have never held a row, and `experiments` holds two.
+ *
+ * Sessions is the exception, and the first cut got it wrong: the item was
+ * dropped because the page queried `executions`, which is empty for a
+ * memory-only org — but `session_memories` holds 37k rows across 272 sessions.
+ * The need was real, the data source was wrong. The page was repointed at
+ * `session_memories` and the item is back. The old execution-session view was
+ * not deleted; it lives at /home/[account]/execution-sessions.
+ *
+ * IMPORTANT — nothing was deleted. Every route, loader and page is still in the
+ * tree and still reachable by URL, so the org that does use the reliability
+ * console keeps its dashboards; they are simply no longer advertised to people
+ * who signed up for shared memory. To restore an item, uncomment it.
+ *
+ * A per-org solution would be better than commenting: render a nav item only
+ * when that org has data behind it. That needs this config to become
+ * data-aware, which is a bigger change than the pruning it would justify today.
+ */
 const getRoutes = (account: string) => [
   {
     label: '',
@@ -30,24 +50,13 @@ const getRoutes = (account: string) => [
       },
     ],
   },
-  // {
-  //   label: 'agentguard:nav.gettingStarted',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.documentation',
-  //       path: createPath(pathsConfig.app.accountDocs, account),
-  //       Icon: <BookOpen className={iconClasses} />,
-  //     },
-  //   ],
-  // },
   {
-    label: 'agentguard:nav.monitoring',
+    label: 'agentguard:nav.workspace',
     children: [
       {
-        label: 'agentguard:nav.agents',
-        path: createPath(pathsConfig.app.accountAgents, account),
-        Icon: <Sparkles className={iconClasses} />,
-        end: true,
+        label: 'agentguard:nav.memory',
+        path: createPath(pathsConfig.app.accountMemory, account),
+        Icon: <Brain className={iconClasses} />,
       },
       {
         label: 'agentguard:nav.sessions',
@@ -55,57 +64,96 @@ const getRoutes = (account: string) => [
         Icon: <Activity className={iconClasses} />,
       },
       {
-        label: 'agentguard:nav.memory',
-        path: createPath(pathsConfig.app.accountMemory, account),
-        Icon: <Brain className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.failures',
-        path: createPath(pathsConfig.app.accountFailures, account),
-        Icon: <ShieldAlert className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.alerts',
-        path: createPath(pathsConfig.app.accountAlerts, account),
-        Icon: <AlertTriangle className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.toolUsage',
-        path: createPath(pathsConfig.app.accountToolUsage, account),
-        Icon: <Wrench className={iconClasses} />,
+        label: 'agentguard:nav.agents',
+        path: createPath(pathsConfig.app.accountAgents, account),
+        Icon: <Sparkles className={iconClasses} />,
+        end: true,
       },
     ],
   },
   {
-    label: 'agentguard:nav.evals',
+    label: 'agentguard:nav.gettingStarted',
     children: [
       {
-        label: 'agentguard:nav.experiments',
-        path: createPath(pathsConfig.app.accountExperiments, account),
-        Icon: <FlaskConical className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.datasets',
-        path: createPath(pathsConfig.app.accountDatasets, account),
-        Icon: <Database className={iconClasses} />,
+        // Surfaced because a new user needs the connection instructions after
+        // onboarding, and this page already carries them.
+        label: 'agentguard:nav.documentation',
+        path: createPath(pathsConfig.app.accountDocs, account),
+        Icon: <BookOpen className={iconClasses} />,
       },
     ],
   },
-  {
-    label: 'agentguard:nav.configuration',
-    children: [
-      {
-        label: 'agentguard:nav.guardrails',
-        path: createPath(pathsConfig.app.accountGuardrails, account),
-        Icon: <Shield className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.integrations',
-        path: createPath(pathsConfig.app.accountIntegrations, account),
-        Icon: <Plug className={iconClasses} />,
-      },
-    ],
-  },
+
+  // ── Vex reliability console — hidden, not removed ──────────────────────────
+  // Fed only via the Vex SDK; empty for every memory-only org.
+  // Routes remain live at
+  // /home/[account]/{execution-sessions,agents/failures,alerts,tools}.
+  //
+  // {
+  //   label: 'agentguard:nav.monitoring',
+  //   children: [
+  //     {
+  //       label: 'agentguard:nav.executionSessions',
+  //       path: createPath(pathsConfig.app.accountExecutionSessions, account),
+  //       Icon: <Activity className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.failures',
+  //       path: createPath(pathsConfig.app.accountFailures, account),
+  //       Icon: <ShieldAlert className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.alerts',
+  //       path: createPath(pathsConfig.app.accountAlerts, account),
+  //       Icon: <AlertTriangle className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.toolUsage',
+  //       path: createPath(pathsConfig.app.accountToolUsage, account),
+  //       Icon: <Wrench className={iconClasses} />,
+  //     },
+  //   ],
+  // },
+
+  // ── Evals — hidden, not removed ───────────────────────────────────────────
+  // `datasets` has never held a row; `experiments` holds two. Dead for all orgs.
+  //
+  // {
+  //   label: 'agentguard:nav.evals',
+  //   children: [
+  //     {
+  //       label: 'agentguard:nav.experiments',
+  //       path: createPath(pathsConfig.app.accountExperiments, account),
+  //       Icon: <FlaskConical className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.datasets',
+  //       path: createPath(pathsConfig.app.accountDatasets, account),
+  //       Icon: <Database className={iconClasses} />,
+  //     },
+  //   ],
+  // },
+
+  // ── Configuration — hidden, not removed ───────────────────────────────────
+  // `guardrails` has never held a row. Integrations is alert-rule plumbing
+  // (Slack for outbound alerts), so it follows Alerts out of the sidebar.
+  // API keys and members still live under the account settings menu.
+  //
+  // {
+  //   label: 'agentguard:nav.configuration',
+  //   children: [
+  //     {
+  //       label: 'agentguard:nav.guardrails',
+  //       path: createPath(pathsConfig.app.accountGuardrails, account),
+  //       Icon: <Shield className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.integrations',
+  //       path: createPath(pathsConfig.app.accountIntegrations, account),
+  //       Icon: <Plug className={iconClasses} />,
+  //     },
+  //   ],
+  // },
 ];
 
 export function getTeamAccountSidebarConfig(account: string) {
