@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { getAllChangelogs } from '~/lib/changelog';
 
 export const metadata: Metadata = {
-  title: 'Changelog — Vex',
+  title: 'Changelog — Klio',
   description:
-    'New features, improvements, and updates to the Vex platform.',
+    'New features, improvements, and updates to Klio.',
 };
 
 export default function ChangelogPage() {
@@ -24,7 +24,7 @@ export default function ChangelogPage() {
           What&apos;s New
         </h1>
         <p className="max-w-[520px] text-[17px] leading-relaxed text-muted-foreground">
-          New features, improvements, and updates to the Vex platform. Follow
+          New features, improvements, and updates to Klio. Follow
           along as we ship.
         </p>
       </div>

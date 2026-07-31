@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!entry) return {};
 
   return {
-    title: `${entry.title} — Vex Changelog`,
+    title: `${entry.title} — Klio Changelog`,
     description: entry.description,
     openGraph: {
       title: entry.title,

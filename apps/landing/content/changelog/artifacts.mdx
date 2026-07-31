@@ -1,0 +1,89 @@
+---
+title: "Artifacts: files, documents and records"
+description: "Agents can store a file, spec or JSON record in Klio and every other agent finds it through the recall they already use. Two new MCP tools, a new Max plan, and a fix for project scoping outside git repositories."
+date: "2026-07-30"
+version: "0.10.0"
+tags: ["feature", "artifacts", "mcp", "fix"]
+---
+
+## What's new
+
+Memory answered "what does the team know." It could not answer "here is the file."
+
+Artifacts close that gap. An agent stores a file, a long document, or a JSON record, and every other agent in the org can find and read it. Text up to 64KB lives inline; anything larger or binary goes to object storage.
+
+## Discovery is the point
+
+The obvious design would be a separate "list my files" tool. That would mean an agent has to already suspect a file exists before it can find one.
+
+Instead, storing an artifact also writes one short **card** into shared memory. The card is embedded and returned by the existing `recall` like any other memory, tagged `memory_type: "artifact"`. So an agent that never knew the artifact existed finds it by searching normally, then fetches it by id:
+
+```
+recall("how do we rate limit")
+  → [artifact] Rate limiter design — Token bucket at the edge (document, 4.1 KB)
+    metadata.artifact_id = "60a0fa87-…"
+
+artifact_get(artifact_id="60a0fa87-…")
+  → "# Rate limiting\n\nToken bucket, 100 rps per key…"
+```
+
+This also keeps recall payloads bounded. `recall` returns up to 50 results; if artifacts returned their full contents, one call could push megabytes into a context window. A card cannot.
+
+## Storing
+
+`artifact_put` has three behaviours, selected by which arguments you pass.
+
+**Inline** — text up to 64KB, one call:
+
+```json
+{
+  "title": "Rate limiter design",
+  "summary": "Token bucket at the edge, 100 rps per key",
+  "kind": "document",
+  "content": "# Rate limiting\n\nToken bucket, 100 rps per key."
+}
+```
+
+This is the only write path available to ChatGPT connectors and Claude.ai custom connectors. They speak MCP but cannot make an arbitrary HTTP PUT, so an upload-URL-only design would have let them read artifacts and never create one.
+
+**Presigned upload** — omit `content`, pass `mime_type` and `size_bytes`. You get back an `artifact_id` and an `upload_url` valid for 15 minutes. Upload the bytes, then call `artifact_put` again with that `artifact_id` to confirm.
+
+The split matters: your declared `size_bytes` only selects the upload strategy. On confirm the server measures the object itself and charges quota against what was actually stored, so an under-declared upload is rejected rather than silently accepted.
+
+## Reading
+
+`artifact_get` returns either the text or a link.
+
+`mode="text"` pages through the contents — 51,200 characters per call, with `offset` to continue and `has_more` to tell you when to stop. Pages are measured in characters rather than bytes because what they protect is a context window, and for CJK one character is roughly one token but three bytes.
+
+`mode="url"` returns a presigned download link valid for 900 seconds, forced to `Content-Disposition: attachment`.
+
+Binary artifacts asked for as text return `not_text` and point you at `mode="url"`. There is no text extraction from PDFs or Office files in this release — saying so plainly beats returning mojibake.
+
+`forget` now accepts an artifact id: it retracts the artifact and hides its card in one call.
+
+## Plans
+
+Artifacts are available on every plan. Capacity is what you pay for, the same way connecting agents has never been gated.
+
+| Plan | Per file | Total storage |
+| --- | --- | --- |
+| Free | 10 MB | 100 MB |
+| Starter | 50 MB | 5 GB |
+| **Max** *(new)* | **1 GB** | **1 TB** |
+
+Over the pool, writes are rejected with a clear error and **reads keep working**. We do not hold your data hostage.
+
+Artifacts are exempt from the memory retention window. A design document deleted the morning after you uploaded it would be indefensible, so they live until you forget them, supersede them, or the pool fills.
+
+## Also in this release
+
+**Projects now resolve outside git repositories.** A project is detected from the git remote when there is one and from the repository root directory when there is not. Only git remotes and display names resolved on the read path, so non-git projects silently fell back to org-wide recall — two thirds of real projects were affected.
+
+Project identifiers also resolve deterministically now. `display_name` is the last path segment, so an org routinely holds several projects called `web`; matches are ranked by specificity and ordered stably, rather than returning whichever row the database happened to produce first.
+
+Worth restating: filtering by project returns that project's memories first and fills any remaining slots with unfiled ones, and never returns memories filed under a different project. Project is a relevance filter, not a security boundary. The organization remains the only tenancy boundary.
+
+## Not in this release
+
+No dashboard UI for browsing artifacts, no CLI command for pushing them, and no text extraction from binary files. Each is its own piece of work rather than something half-shipped here.
