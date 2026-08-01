@@ -20,13 +20,14 @@ import { APP_URL, DOCS_URL, ORG, POSITIONING_SENTENCE } from '~/lib/site-meta';
  * 'Observations' — a Vex-era label no Klio plan carries — so `find` returned
  * undefined and every plan line rendered an empty field between separators.
  */
-const QUOTED_LEVER = 'Memories captured';
+const QUOTED_LEVER = 'People sharing a brain';
 
 export function buildLlmsTxt(): string {
   const planLines = PLANS.map((plan) => {
     const lever = plan.features.find((f) => f.label === QUOTED_LEVER)?.value;
-    const quota = lever ? ` · memories: ${lever}` : '';
-    return `- ${plan.name} — $${plan.priceMonthly}/mo${quota} · ${plan.audience}`;
+    const shared = lever ? ` · shared with: ${lever}` : '';
+    const unit = plan.priceUnit === 'seat' ? '/user/mo' : '/mo';
+    return `- ${plan.name} — $${plan.priceMonthly}${unit}${shared} · ${plan.audience}`;
   }).join('\n');
 
   return `# ${ORG.name}

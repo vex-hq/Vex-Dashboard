@@ -63,12 +63,25 @@ describe('lib/seo/schemas', () => {
         expect(offer.url).toMatch(/^https?:\/\//);
       }
     });
-    it('emits priceSpecification only for plans with priceYearly', () => {
+    it('emits priceSpecification only for plans that need one', () => {
       const offers = s.offers;
-      const pro = offers.find((o) => o.name === 'Pro')!;
+      const team = offers.find((o) => o.name === 'Team')!;
       const free = offers.find((o) => o.name === 'Free')!;
-      expect(pro.priceSpecification).toBeDefined();
+      expect(team.priceSpecification).toBeDefined();
       expect(free.priceSpecification).toBeUndefined();
+    });
+
+    it('carries BOTH the per-seat unit and the annual rate on a seat plan', () => {
+      // Regression: per-seat and annual were emitted as two `priceSpecification`
+      // keys in one object literal, so the per-seat one was silently dropped and
+      // the offer published a bare "20" that reads as $20 for a whole team.
+      const team = s.offers.find((o) => o.name === 'Team')!;
+      const specs = team.priceSpecification as unknown as Array<
+        Record<string, unknown>
+      >;
+      expect(Array.isArray(specs)).toBe(true);
+      expect(specs.some((sp) => sp.unitText === 'user')).toBe(true);
+      expect(specs.some((sp) => sp.unitCode === 'ANN')).toBe(true);
     });
     it('describes the offer with real, non-empty text', () => {
       expect(s.description.length).toBeGreaterThan(20);

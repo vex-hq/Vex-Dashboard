@@ -6,9 +6,10 @@ import { ORG } from '~/lib/site-meta';
 const PlanFeatureZ = z.object({ label: z.string(), value: z.string() });
 
 const PlanZ = z.object({
-  id: z.enum(['free', 'starter', 'pro', 'team']),
+  id: z.enum(['free', 'team']),
   name: z.string(),
   priceMonthly: z.number().int().nonnegative(),
+  priceUnit: z.enum(['flat', 'seat']),
   priceYearly: z.number().optional(),
   description: z.string(),
   audience: z.string(),
@@ -21,7 +22,7 @@ const ResponseZ = z.object({
   product: z.literal(ORG.name),
   currency: z.literal('USD'),
   lastUpdated: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  plans: z.array(PlanZ).length(4),
+  plans: z.array(PlanZ).length(2),
   enterprise: z.object({ contact: z.string().email() }),
 });
 
@@ -45,8 +46,6 @@ describe('GET /api/pricing', () => {
     const body = await res.json();
     expect(body.plans.map((p: { id: string }) => p.id)).toEqual([
       'free',
-      'starter',
-      'pro',
       'team',
     ]);
   });

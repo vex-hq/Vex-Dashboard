@@ -1,20 +1,47 @@
 /**
  * Single source of truth for landing-site pricing data.
  *
- * Consumed by `app/pricing/page.tsx`, `app/_components/home/pricing.tsx`, and
- * `lib/seo/schemas.ts` (JSON-LD). Klio meters the *use of the shared memory*
- * — memories captured + recalls per month, with memory retention and
- * real-time cross-agent sync as the escalating levers. Connected agents are
- * UNLIMITED on every tier: connecting agents is the wedge, never gated.
+ * Consumed by `app/pricing/page.tsx`, `app/_components/home/survey/plate-schedule.tsx`,
+ * `lib/seo/llms-txt.ts`, `lib/seo/schemas.ts` (JSON-LD) and `app/api/pricing/route.ts`.
  *
- * Prices are unchanged from the original tiers. The per-unit limits below are
- * a starting point sized for memory access patterns (recalls are
- * high-frequency) — tune with real usage data before launch.
+ * ## Why seats, and why nothing else is metered
+ *
+ * Klio is free and unlimited for one person. You pay when a SECOND person's
+ * agents need to see what the first person's agents learned. That is the whole
+ * product, and it is the whole gate.
+ *
+ * The previous model metered memories-captured and recalls per month, with
+ * retention as the escalating lever. Real usage killed it:
+ *
+ *   - July 2026 in the `vex` org: 19,685 memories from 4 agents — one developer.
+ *     Free allowed 1,000/mo (~36 hours of real use) and Starter 25,000/mo, so a
+ *     single active developer nearly capped the $29 tier. There was no viable
+ *     Starter customer.
+ *   - 82% of writes come from passive hooks, not deliberate tool calls. Metering
+ *     memories charges the customer for volume they neither control nor can
+ *     predict — the mechanic that produces support tickets, not revenue.
+ *   - Retention was the cruelest lever: Free purged after 1 day while the README
+ *     sells "memory-that-survives-the-window-close". Every trial user learned the
+ *     product does not work, on day two, by design.
+ *
+ * Seats scale with delivered value (more teammates sharing one brain = more
+ * value), cannot be gamed, and match how this buyer already purchases Cursor,
+ * Claude Code and GitHub. Abuse is handled by the rate limit, not by quotas.
+ *
+ * There is deliberately no middle paid tier. With a linear per-seat metric the
+ * seats ARE the ladder — a 3-person team pays $60, a 20-person team pays $400.
+ * Inventing a middle column to satisfy good-better-best would add a decision
+ * without adding information.
+ *
+ * PRICE POINT IS AN ANCHOR, NOT RESEARCH. $20/seat comes from the band this
+ * buyer already pays (Cursor, Copilot and Linear all sit at $15-25). Nobody has
+ * priced team-memory-for-coding-agents because nobody has won it, so there is no
+ * market rate to read. Replace this with a real number after customer discovery.
  *
  * Data shape is `readonly` end-to-end; use `[...PLANS]` for a mutable copy.
  */
 
-export const LAST_UPDATED = '2026-05-31' as const;
+export const LAST_UPDATED = '2026-07-31' as const;
 export const CURRENCY = 'USD' as const;
 
 export interface PlanFeature {
@@ -23,9 +50,13 @@ export interface PlanFeature {
 }
 
 export interface Plan {
-  readonly id: 'free' | 'starter' | 'pro' | 'team';
+  readonly id: 'free' | 'team';
   readonly name: string;
+  /** Monthly price. For `seat` plans this is the price PER SEAT. */
   readonly priceMonthly: number;
+  /** How `priceMonthly` should be read on the page. */
+  readonly priceUnit: 'flat' | 'seat';
+  /** Per-seat when `priceUnit` is `seat`. */
   readonly priceYearly?: number;
   readonly description: string;
   readonly audience: string;
@@ -41,78 +72,44 @@ export const PLANS: ReadonlyArray<Plan> = [
     id: 'free',
     name: 'Free',
     priceMonthly: 0,
-    description: 'Start sharing memory across your agents.',
-    audience: 'Solo developers giving their agents one shared memory',
+    priceUnit: 'flat',
+    description: 'Everything, for one person, forever.',
+    audience: 'One developer whose agents should stop forgetting',
     highlighted: false,
-    cta: { label: 'Get Started Free', href: CLOUD_SIGNUP },
+    cta: { label: 'Start free', href: CLOUD_SIGNUP },
     features: [
-      { label: 'Memories captured', value: '1,000 / mo' },
-      { label: 'Recalls', value: '10,000 / mo' },
-      { label: 'Cross-agent sync', value: 'Local only' },
+      { label: 'People sharing a brain', value: 'Just you' },
       { label: 'Connected agents', value: 'Unlimited' },
-      { label: 'Memory retention', value: '1 day' },
+      { label: 'Memories', value: 'Unlimited' },
+      { label: 'Memory retention', value: 'Forever' },
+      { label: 'Sync', value: 'Across your own devices' },
+      { label: 'Artifacts', value: '100 MB' },
+      { label: 'Self-hosting', value: 'Full, AGPL-3.0' },
       { label: 'Rate limit', value: '100 RPM' },
-      { label: 'Overage', value: 'Hard limit' },
-      { label: 'Support', value: 'Community' },
-    ],
-  },
-  {
-    id: 'starter',
-    name: 'Starter',
-    priceMonthly: 29,
-    description: 'For solo devs running a few agents together.',
-    audience: 'Founders running 1–2 agents in production',
-    highlighted: false,
-    cta: { label: 'Start Starter', href: CLOUD_SIGNUP },
-    features: [
-      { label: 'Memories captured', value: '25,000 / mo' },
-      { label: 'Recalls', value: '100,000 / mo' },
-      { label: 'Cross-agent sync', value: 'Real-time' },
-      { label: 'Connected agents', value: 'Unlimited' },
-      { label: 'Memory retention', value: '7 days' },
-      { label: 'Rate limit', value: '500 RPM' },
-      { label: 'Overage', value: 'Hard limit' },
-      { label: 'Support', value: 'Email' },
-    ],
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    priceMonthly: 99,
-    priceYearly: 990,
-    description: 'For teams whose agents work together daily.',
-    audience: 'Teams shipping agents to production',
-    highlighted: true,
-    cta: { label: 'Start Pro', href: CLOUD_SIGNUP },
-    features: [
-      { label: 'Memories captured', value: '150,000 / mo' },
-      { label: 'Recalls', value: '1,000,000 / mo' },
-      { label: 'Cross-agent sync', value: 'Real-time' },
-      { label: 'Connected agents', value: 'Unlimited' },
-      { label: 'Memory retention', value: '30 days' },
-      { label: 'Rate limit', value: '1,000 RPM' },
-      { label: 'Overage', value: '$0.0005 / memory, $0.0001 / recall' },
-      { label: 'Support', value: 'Email (48h)' },
+      { label: 'Support', value: 'Community + Discord' },
     ],
   },
   {
     id: 'team',
     name: 'Team',
-    priceMonthly: 349,
-    priceYearly: 3490,
-    description: 'For organizations running many agents at scale.',
-    audience: 'Organizations running agents at scale',
-    highlighted: false,
-    cta: { label: 'Start Team', href: CLOUD_SIGNUP },
+    priceMonthly: 20,
+    priceUnit: 'seat',
+    priceYearly: 200,
+    description:
+      'One shared brain. What any teammate’s agent learns, every other agent knows.',
+    audience: 'Teams running Claude Code, Cursor and Codex on one codebase',
+    highlighted: true,
+    cta: { label: 'Start a team', href: CLOUD_SIGNUP },
     features: [
-      { label: 'Memories captured', value: '1,500,000 / mo' },
-      { label: 'Recalls', value: '10,000,000 / mo' },
-      { label: 'Cross-agent sync', value: 'Real-time + priority' },
+      { label: 'People sharing a brain', value: 'Everyone you invite' },
       { label: 'Connected agents', value: 'Unlimited' },
-      { label: 'Memory retention', value: '90 days' },
-      { label: 'Rate limit', value: '5,000 RPM' },
-      { label: 'Overage', value: '$0.0004 / memory, $0.00008 / recall' },
-      { label: 'Support', value: 'Priority (24h)' },
+      { label: 'Memories', value: 'Unlimited' },
+      { label: 'Memory retention', value: 'Forever' },
+      { label: 'Sync', value: 'Real-time, across the team' },
+      { label: 'Artifacts', value: '5 GB pool' },
+      { label: 'Self-hosting', value: 'Full, AGPL-3.0' },
+      { label: 'Rate limit', value: '1,000 RPM' },
+      { label: 'Support', value: 'Priority' },
     ],
   },
 ] as const;
@@ -121,6 +118,11 @@ export const PLANS: ReadonlyArray<Plan> = [
  * The B2B2C / embed lane — agent-builder companies embedding Klio so each of
  * THEIR end-users gets private, isolated memory. Priced per end-user; sales-led
  * (not a self-serve tier), so it renders as a separate banner, not a column.
+ *
+ * Enterprise conversations also land here for now: SSO, audit trail and a DPA
+ * live behind this contact rather than in a self-serve column. A product with
+ * two GitHub stars does not need an Enterprise tier on its pricing page; it
+ * needs a way for the first interested enterprise to start a conversation.
  */
 export interface EmbedTier {
   readonly name: string;

@@ -14,7 +14,7 @@ describe('GET /llms.txt', () => {
     const text = await res.text();
     expect(text).toContain(POSITIONING_SENTENCE);
     expect(text).toContain('Free');
-    expect(text).toContain('Pro');
+    expect(text).toContain('Team');
   });
 
   it('sets a public Cache-Control header', () => {

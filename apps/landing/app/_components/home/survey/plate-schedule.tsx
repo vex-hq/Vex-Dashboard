@@ -8,17 +8,17 @@ import { PLANS, type Plan } from '~/lib/pricing';
  * /pricing, the pricing API and the JSON-LD offers — so the plate can never
  * drift from the price a visitor is actually charged.
  *
- * The plate shows three columns; Starter is a four-column tier that would
- * crowd them, so it is named in the margin note instead of dropped. Editing
- * PLANS changes both.
+ * Two columns, because there are two self-serve tiers: free for one person,
+ * per-seat when a team shares one brain. The Platform (embed) lane is
+ * sales-led and lives on /pricing, not here. Editing PLANS changes both.
  */
-const SHOWN: ReadonlyArray<Plan['id']> = ['free', 'pro', 'team'];
+const SHOWN: ReadonlyArray<Plan['id']> = ['free', 'team'];
 
-/** The four escalating levers, in the order they matter on a schedule. */
+/** The levers that actually differ between the two tiers. */
 const LEVERS = [
-  'Memories captured',
-  'Recalls',
-  'Cross-agent sync',
+  'People sharing a brain',
+  'Sync',
+  'Artifacts',
   'Memory retention',
 ] as const;
 
@@ -27,19 +27,18 @@ function money(amount: number) {
 }
 
 function terms(plan: Plan) {
-  if (plan.priceMonthly === 0) return 'per month';
+  if (plan.priceMonthly === 0) return 'forever';
+  const per = plan.priceUnit === 'seat' ? 'per user / month' : 'per month';
   if (plan.priceYearly) {
-    return `per month · ${money(plan.priceYearly)} yearly`;
+    return `${per} · ${money(plan.priceYearly)} yearly`;
   }
-  return 'per month';
+  return per;
 }
 
 export function PlateSchedule() {
   const shown = SHOWN.map(
     (id) => PLANS.find((plan) => plan.id === id) as Plan,
   ).filter(Boolean);
-
-  const starter = PLANS.find((plan) => plan.id === 'starter');
 
   return (
     <section className="k-plate k-plate--deep" id="pricing">
@@ -78,13 +77,8 @@ export function PlateSchedule() {
       </div>
 
       <p className="k-marg" style={{ marginTop: '26px', maxWidth: '68ch' }}>
-        {starter ? (
-          <>
-            Starter sits between Free and Pro at{' '}
-            <b>{money(starter.priceMonthly)}</b>.{' '}
-          </>
-        ) : null}
-        Connected agents are unlimited on every tier. Self-hosting the
+        Connected agents, memories and retention are unlimited on every tier —
+        you pay for people, not volume. Self-hosting the
         open-source engine on your own hardware is <b>free</b> — the source is
         at{' '}
         <a href={GITHUB_REPO_URL} style={{ color: 'inherit' }}>
