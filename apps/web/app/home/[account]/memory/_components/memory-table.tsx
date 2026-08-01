@@ -30,7 +30,11 @@ import { Trans } from '@kit/ui/trans';
 import { PaginationBar } from '~/components/pagination-bar';
 import { formatTimestamp, truncateId } from '~/lib/agentguard/formatters';
 
-import type { MemoryListRow } from '../_lib/server/memory.loader';
+import type { MemoryListRow } from '../_lib/server/memory-visibility.types';
+import {
+  ProvenanceBadge,
+  provenanceContentClassName,
+} from './provenance-badge';
 
 /** Maximum search-query length forwarded to the loader (defense in depth). */
 export const MEMORY_SEARCH_MAX_LENGTH = 200;
@@ -74,6 +78,16 @@ interface MemoryTableProps {
    * main memory browser keeps its header.
    */
   hideTitle?: boolean;
+  /**
+   * Copy shown when there are no rows. Defaults to the org-brain wording; the
+   * Mine and Projects tabs pass their own, since "no memories found" reads as
+   * a bug when the real answer is "nothing has been captured privately yet".
+   */
+  emptyMessageKey?: string;
+  /** Card heading. Each tab names its own scope so the copy never lies. */
+  titleKey?: string;
+  /** Card sub-heading, describing who can read the rows below. */
+  descriptionKey?: string;
 }
 
 function truncateContent(value: string): string {
@@ -97,6 +111,9 @@ export default function MemoryTable({
   hideFilters = false,
   pageParam = 'page',
   hideTitle = false,
+  emptyMessageKey = 'agentguard:memory.noMemories',
+  titleKey = 'agentguard:memory.browserTitle',
+  descriptionKey = 'agentguard:memory.browserDescription',
 }: MemoryTableProps) {
   const { t } = useTranslation('agentguard');
   const router = useRouter();
@@ -275,17 +292,17 @@ export default function MemoryTable({
         {hideTitle ? null : (
           <CardHeader>
             <CardTitle>
-              <Trans i18nKey="agentguard:memory.browserTitle" />
+              <Trans i18nKey={titleKey} />
             </CardTitle>
             <CardDescription>
-              <Trans i18nKey="agentguard:memory.browserDescription" />
+              <Trans i18nKey={descriptionKey} />
             </CardDescription>
           </CardHeader>
         )}
         <CardContent>
           {rows.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              <Trans i18nKey="agentguard:memory.noMemories" />
+              <Trans i18nKey={emptyMessageKey} />
             </p>
           ) : (
             <Table>
@@ -326,14 +343,19 @@ export default function MemoryTable({
                       </Badge>
                     </TableCell>
                     <TableCell className="max-w-md">
-                      <Link
-                        href={`/home/${accountSlug}/memory/${row.id}`}
-                        className="hover:text-primary block truncate"
-                        title={row.content}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {truncateContent(row.content)}
-                      </Link>
+                      <div className="flex flex-col gap-1">
+                        <Link
+                          href={`/home/${accountSlug}/memory/${row.id}`}
+                          className={`hover:text-primary block truncate ${provenanceContentClassName(row.provenance)}`}
+                          title={row.content}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {truncateContent(row.content)}
+                        </Link>
+
+                        {/* Renders only for INFERRED / AMBIGUOUS rows. */}
+                        <ProvenanceBadge provenance={row.provenance} />
+                      </div>
                     </TableCell>
                     <TableCell
                       className="font-mono text-xs"

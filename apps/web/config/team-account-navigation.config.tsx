@@ -1,4 +1,11 @@
-import { Activity, BookOpen, Brain, Hexagon, Sparkles } from 'lucide-react';
+import {
+  Activity,
+  BookOpen,
+  Brain,
+  FolderGit2,
+  Hexagon,
+  Sparkles,
+} from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -57,6 +64,11 @@ const getRoutes = (account: string) => [
         label: 'agentguard:nav.memory',
         path: createPath(pathsConfig.app.accountMemory, account),
         Icon: <Brain className={iconClasses} />,
+      },
+      {
+        label: 'agentguard:nav.projects',
+        path: createPath(pathsConfig.app.accountProjects, account),
+        Icon: <FolderGit2 className={iconClasses} />,
       },
       {
         label: 'agentguard:nav.sessions',

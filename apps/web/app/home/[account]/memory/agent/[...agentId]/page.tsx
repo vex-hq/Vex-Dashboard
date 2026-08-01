@@ -17,8 +17,8 @@ import { MemoryBrowser } from '../../_components/memory-browser';
 import {
   loadAgentMemorySummary,
   loadAgentRecalls,
-  loadMemoryList,
 } from '../../_lib/server/memory.loader';
+import { loadTeamMemories } from '../../_lib/server/team-memory.loader';
 import { AgentMemoryHeader } from './_components/agent-memory-header';
 import { RecallActivity } from './_components/recall-activity';
 
@@ -55,7 +55,7 @@ async function AgentMemoryPage({ params, searchParams }: AgentMemoryPageProps) {
 
   const [summary, captures, recalls] = await Promise.all([
     loadAgentMemorySummary(orgId, id),
-    loadMemoryList(orgId, { agent_id: id, page: capturesPage }),
+    loadTeamMemories(orgId, { agent_id: id, page: capturesPage }),
     loadAgentRecalls(orgId, id, recallsPage),
   ]);
 
