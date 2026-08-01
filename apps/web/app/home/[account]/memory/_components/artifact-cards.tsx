@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { FileText } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 
 import { Badge } from '@kit/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
@@ -20,12 +20,11 @@ import type { ArtifactCardRow } from '../_lib/server/memory-visibility.types';
  * would move a boundary out of SQL and into the view layer, which is the
  * pattern the user-silo design rules out.
  *
- * NO DOWNLOAD CONTROL. The design calls for a download that calls
- * `artifact_get(mode='url')`, which mints a presigned URL in the engine. The
- * dashboard has no route that does this today and inventing one here would
- * either fake the affordance or duplicate the engine's signing logic, so the
- * card links to the underlying memory instead. Wiring a real download needs an
- * engine-side endpoint.
+ * The download link is keyed on `memory_id`, NOT on `artifact.id`. The card
+ * row is what carries the scope and the owner; an artifact id carries neither,
+ * so a download route keyed on one would have nothing to authorise against.
+ * The route re-checks entitlement server-side regardless of what this
+ * component renders — a link is a suggestion, not a permission.
  */
 function formatBytes(size: number | null): string | null {
   if (size === null) return null;
@@ -88,12 +87,26 @@ export function ArtifactCards({
                 <span>{formatTimestamp(artifact.created_at)}</span>
               </div>
 
-              <Link
-                href={`/home/${accountSlug}/memory/${artifact.memory_id}`}
-                className="text-primary text-xs hover:underline"
-              >
-                <Trans i18nKey="agentguard:memory.artifactOpen" />
-              </Link>
+              <div className="flex items-center gap-4">
+                <a
+                  href={`/api/agentguard/artifacts/${accountSlug}/${artifact.memory_id}`}
+                  className="text-primary inline-flex items-center gap-1.5 text-xs hover:underline"
+                  // A plain anchor, not a client fetch: the route answers with
+                  // a 302 to a presigned URL, and the browser following it is
+                  // the download.
+                  download
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden />
+                  <Trans i18nKey="agentguard:memory.artifactDownload" />
+                </a>
+
+                <Link
+                  href={`/home/${accountSlug}/memory/${artifact.memory_id}`}
+                  className="text-muted-foreground text-xs hover:underline"
+                >
+                  <Trans i18nKey="agentguard:memory.artifactOpen" />
+                </Link>
+              </div>
             </CardContent>
           </Card>
         );
