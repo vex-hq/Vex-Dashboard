@@ -21,7 +21,9 @@ import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { TeamAccountLayoutPageHeader } from '../../_components/team-account-layout-page-header';
-import { loadMemoryDetail } from '../_lib/server/memory.loader';
+import { loadAccountViewer } from '../../_lib/server/account-viewer';
+import { ProvenanceBadge } from '../_components/provenance-badge';
+import { loadMemoryDetailForViewer } from '../_lib/server/memory-detail.loader';
 
 interface MemoryDetailPageProps {
   params: Promise<{ account: string; id: string }>;
@@ -48,8 +50,11 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
 async function MemoryDetailPage({ params }: MemoryDetailPageProps) {
   const { account, id } = await params;
   const orgId = await resolveOrgId(account);
+  const viewer = await loadAccountViewer(account);
 
-  const memory = await loadMemoryDetail(orgId, id);
+  // Gated by the visibility ladder: a private row belonging to somebody else
+  // comes back as null, indistinguishable from "no such memory".
+  const memory = await loadMemoryDetailForViewer(orgId, id, viewer);
 
   const i18n = await createI18nServerInstance();
 
@@ -84,9 +89,12 @@ async function MemoryDetailPage({ params }: MemoryDetailPageProps) {
                   <CardTitle className="text-base">
                     <Trans i18nKey="agentguard:memory.content" />
                   </CardTitle>
-                  <Badge variant="secondary" className="font-normal">
-                    {memory.memory_type}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <ProvenanceBadge provenance={memory.provenance} />
+                    <Badge variant="secondary" className="font-normal">
+                      {memory.memory_type}
+                    </Badge>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <p className="text-foreground text-sm leading-relaxed whitespace-pre-wrap">

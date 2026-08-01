@@ -4,15 +4,29 @@ import { cache } from 'react';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
 
-export const MEMORY_PAGE_SIZE = 25;
+import {
+  MEMORY_PAGE_SIZE,
+  MEMORY_STATUS_ACTIVE,
+} from './memory-visibility.types';
+
+export { MEMORY_PAGE_SIZE } from './memory-visibility.types';
 
 /**
- * Klio Cloud memories live at the org scope and stay active. Both predicates
- * are applied on every read so we never surface project/space-scoped or
- * archived rows in the org-shared memory views.
+ * ORG-SCOPED ROLLUPS ONLY.
+ *
+ * This file holds the aggregates that describe the org's shared brain: agent
+ * activity, capture/recall volume and the space list. The per-tab memory lists
+ * live in three separate files — `private-memory.loader`,
+ * `project-memory.loader` and `team-memory.loader` — because each carries a
+ * different visibility predicate and merging them into one parameterised
+ * loader is exactly the mistake the user-silo design forbids.
+ *
+ * Nothing here may read `scope = 'private'`. These rollups are rendered to
+ * everyone in the org, so a private row reaching them would disclose one
+ * person's activity to the team.
  */
 const KLIO_CLOUD_SCOPE = 'org';
-const KLIO_CLOUD_STATUS = 'active';
+const KLIO_CLOUD_STATUS = MEMORY_STATUS_ACTIVE;
 
 /**
  * Derive the human-facing tool name from an `agent_id` of the shape
@@ -363,150 +377,6 @@ export const loadMemoryVolume = cache(
 );
 
 // ---------------------------------------------------------------------------
-// loadMemoryList
-// ---------------------------------------------------------------------------
-
-export interface MemoryFilters {
-  agent_id?: string;
-  memory_type?: string;
-  source?: string;
-  project_id?: string;
-  space_id?: string;
-  q?: string;
-  page?: number;
-}
-
-export interface MemoryListRow {
-  id: string;
-  agent_id: string;
-  memory_type: string;
-  content: string;
-  project_id: string | null;
-  space_id: string | null;
-  space_name: string | null;
-  source: string | null;
-  created_at: string;
-}
-
-export interface MemoryListResult {
-  rows: MemoryListRow[];
-  pageCount: number;
-}
-
-interface MemoryListQueryRow extends MemoryListRow {
-  total_count: string;
-}
-
-/**
- * Paginated org-shared memory rows from `session_memories`, LEFT JOINed to
- * `spaces` so each row can display the space it belongs to. The join is itself
- * org-scoped (`s.org_id = m.org_id`) as defense in depth, so a space id shared
- * across tenants could never surface another org's space name.
- *
- * The WHERE clause is assembled dynamically but every dynamic value is bound
- * as a positional parameter ($1, $2, …) — user-supplied filters are NEVER
- * string-interpolated into the SQL text, so the query is injection-safe.
- */
-export const loadMemoryList = cache(
-  async (
-    orgId: string,
-    filters?: MemoryFilters,
-    page = 1,
-  ): Promise<MemoryListResult> => {
-    const pool = getAgentGuardPool();
-    const effectivePage = Math.max(1, filters?.page ?? page);
-    const offset = (effectivePage - 1) * MEMORY_PAGE_SIZE;
-
-    const conditions: string[] = [
-      'm.org_id = $1',
-      'm.scope = $2',
-      'm.status = $3',
-    ];
-    const params: unknown[] = [orgId, KLIO_CLOUD_SCOPE, KLIO_CLOUD_STATUS];
-    let paramIndex = params.length + 1;
-
-    if (filters?.agent_id) {
-      conditions.push(`m.agent_id = $${paramIndex}`);
-      params.push(filters.agent_id);
-      paramIndex++;
-    }
-
-    if (filters?.memory_type) {
-      conditions.push(`m.memory_type = $${paramIndex}`);
-      params.push(filters.memory_type);
-      paramIndex++;
-    }
-
-    if (filters?.source) {
-      conditions.push(`m.metadata->>'source' = $${paramIndex}`);
-      params.push(filters.source);
-      paramIndex++;
-    }
-
-    if (filters?.project_id) {
-      conditions.push(`m.project_id = $${paramIndex}`);
-      params.push(filters.project_id);
-      paramIndex++;
-    }
-
-    if (filters?.space_id) {
-      conditions.push(`m.space_id = $${paramIndex}`);
-      params.push(filters.space_id);
-      paramIndex++;
-    }
-
-    if (filters?.q) {
-      conditions.push(`m.content ILIKE '%' || $${paramIndex} || '%'`);
-      params.push(filters.q);
-      paramIndex++;
-    }
-
-    const whereClause = conditions.join(' AND ');
-
-    const result = await pool.query<MemoryListQueryRow>(
-      `
-      SELECT
-        m.id,
-        m.agent_id,
-        m.memory_type,
-        m.content,
-        m.project_id,
-        m.space_id,
-        s.name AS space_name,
-        m.metadata->>'source' AS source,
-        m.created_at,
-        COUNT(*) OVER() AS total_count
-      FROM session_memories m
-      LEFT JOIN spaces s ON s.id = m.space_id AND s.org_id = m.org_id
-      WHERE ${whereClause}
-      ORDER BY m.created_at DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-      `,
-      [...params, MEMORY_PAGE_SIZE, offset],
-    );
-
-    const totalCount = parseInt(result.rows[0]?.total_count ?? '0', 10);
-    const pageCount =
-      totalCount === 0 ? 0 : Math.ceil(totalCount / MEMORY_PAGE_SIZE);
-
-    return {
-      rows: result.rows.map((row) => ({
-        id: row.id,
-        agent_id: row.agent_id,
-        memory_type: row.memory_type,
-        content: row.content,
-        project_id: row.project_id,
-        space_id: row.space_id,
-        space_name: row.space_name,
-        source: row.source,
-        created_at: row.created_at,
-      })),
-      pageCount,
-    };
-  },
-);
-
-// ---------------------------------------------------------------------------
 // loadSpaces
 // ---------------------------------------------------------------------------
 
@@ -538,59 +408,5 @@ export const loadSpaces = cache(
     );
 
     return result.rows;
-  },
-);
-
-// ---------------------------------------------------------------------------
-// loadMemoryDetail
-// ---------------------------------------------------------------------------
-
-export interface MemoryDetailRow {
-  id: string;
-  org_id: string;
-  agent_id: string;
-  memory_type: string;
-  content: string;
-  scope: string;
-  status: string;
-  space_id: string | null;
-  project_id: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-}
-
-/**
- * Load a single memory row by id, always constrained to the caller's org so
- * one org can never read another org's memory.
- */
-export const loadMemoryDetail = cache(
-  async (orgId: string, id: string): Promise<MemoryDetailRow | null> => {
-    const pool = getAgentGuardPool();
-
-    const result = await pool.query<MemoryDetailRow>(
-      `
-      SELECT
-        id,
-        org_id,
-        agent_id,
-        memory_type,
-        content,
-        scope,
-        status,
-        space_id,
-        project_id,
-        metadata,
-        created_at
-      FROM session_memories
-      WHERE org_id = $1 AND id = $2
-      `,
-      [orgId, id],
-    );
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
-    return result.rows[0]!;
   },
 );
