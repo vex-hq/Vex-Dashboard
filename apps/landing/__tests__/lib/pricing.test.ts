@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { CURRENCY, LAST_UPDATED, PLANS, type Plan } from '~/lib/pricing';
 
 describe('lib/pricing', () => {
-  it('exports four plans with stable ids', () => {
-    expect(PLANS).toHaveLength(4);
-    expect(PLANS.map((p) => p.id)).toEqual(['free', 'starter', 'pro', 'team']);
+  it('exports two self-serve plans with stable ids', () => {
+    // Free for one person, per-seat for a team. The Platform (embed) lane is
+    // sales-led and lives in PLATFORM, not PLANS.
+    expect(PLANS).toHaveLength(2);
+    expect(PLANS.map((p) => p.id)).toEqual(['free', 'team']);
   });
 
   it('all plan prices are non-negative integers', () => {
@@ -32,7 +34,7 @@ describe('lib/pricing', () => {
   it('Plan type exhausts the id union (compile-time check)', () => {
     // Compile-time: assigning a Plan with an unknown id would fail tsc.
     const sample: Plan = PLANS[0]!;
-    expect(['free', 'starter', 'pro', 'team']).toContain(sample.id);
+    expect(['free', 'team']).toContain(sample.id);
   });
 
   it('all plan ids are unique', () => {

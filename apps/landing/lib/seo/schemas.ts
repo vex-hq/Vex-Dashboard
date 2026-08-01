@@ -81,29 +81,57 @@ export function productOfferSchema() {
     description: POSITIONING_SENTENCE,
     brand: { '@type': 'Brand' as const, name: ORG.name },
     dateModified: LAST_UPDATED,
-    offers: PLANS.map((plan) => ({
-      '@type': 'Offer' as const,
-      name: plan.name,
-      description: plan.description,
-      price: String(plan.priceMonthly),
-      priceCurrency: CURRENCY,
-      category: 'SaaS subscription',
-      eligibleCustomerType: plan.audience,
-      url: plan.cta.href,
-      ...(plan.priceYearly !== undefined && {
-        priceSpecification: {
-          '@type': 'UnitPriceSpecification' as const,
-          price: String(plan.priceYearly),
-          priceCurrency: CURRENCY,
-          unitCode: 'ANN',
-          referenceQuantity: {
-            '@type': 'QuantitativeValue' as const,
-            value: 1,
-            unitCode: 'ANN',
-          },
-        },
-      }),
-    })),
+    // Two independent price facts can apply to one plan: the per-seat unit
+    // (so a bare price of "20" is not read as $20 for a whole team) and the
+    // annual rate. They are collected into an ARRAY — emitting both as
+    // separate `priceSpecification` keys in one object literal silently drops
+    // the first, which is what happened when per-seat pricing was introduced.
+    offers: PLANS.map((plan) => {
+      const specs = [
+        ...(plan.priceUnit === 'seat'
+          ? [
+              {
+                '@type': 'UnitPriceSpecification' as const,
+                price: String(plan.priceMonthly),
+                priceCurrency: CURRENCY,
+                unitText: 'user',
+                referenceQuantity: {
+                  '@type': 'QuantitativeValue' as const,
+                  value: 1,
+                  unitText: 'user',
+                },
+              },
+            ]
+          : []),
+        ...(plan.priceYearly !== undefined
+          ? [
+              {
+                '@type': 'UnitPriceSpecification' as const,
+                price: String(plan.priceYearly),
+                priceCurrency: CURRENCY,
+                unitCode: 'ANN',
+                referenceQuantity: {
+                  '@type': 'QuantitativeValue' as const,
+                  value: 1,
+                  unitCode: 'ANN',
+                },
+              },
+            ]
+          : []),
+      ];
+
+      return {
+        '@type': 'Offer' as const,
+        name: plan.name,
+        description: plan.description,
+        price: String(plan.priceMonthly),
+        priceCurrency: CURRENCY,
+        category: 'SaaS subscription',
+        eligibleCustomerType: plan.audience,
+        url: plan.cta.href,
+        ...(specs.length > 0 && { priceSpecification: specs }),
+      };
+    }),
   };
 }
 

@@ -6,7 +6,7 @@ import { POSITIONING_SENTENCE } from '~/lib/site-meta';
 import PricingPage from '~/pricing/page';
 
 describe('app/pricing/page.tsx', () => {
-  it('renders one Product JSON-LD with 4 Offers', () => {
+  it('renders one Product JSON-LD with 2 Offers', () => {
     const { container } = render(<PricingPage />);
     const scripts = container.querySelectorAll(
       'script[type="application/ld+json"]',
@@ -16,7 +16,7 @@ describe('app/pricing/page.tsx', () => {
     );
     const products = blobs.filter((b) => b && b['@type'] === 'Product');
     expect(products).toHaveLength(1);
-    expect(products[0].offers).toHaveLength(4);
+    expect(products[0].offers).toHaveLength(2);
   });
 
   it('does not contain OSS claims in user-visible FAQ copy', () => {
@@ -39,7 +39,7 @@ describe('app/pricing/page.tsx', () => {
   it('renders all 4 plan names', () => {
     const { container } = render(<PricingPage />);
     const text = container.textContent ?? '';
-    for (const name of ['Free', 'Starter', 'Pro', 'Team']) {
+    for (const name of ['Free', 'Team']) {
       expect(text).toContain(name);
     }
   });
@@ -58,7 +58,7 @@ describe('app/pricing/page.tsx', () => {
     const planList = container.querySelector('ul[role="list"]');
     expect(planList).not.toBeNull();
     const items = planList?.querySelectorAll(':scope > li');
-    expect(items?.length).toBe(4);
+    expect(items?.length).toBe(2);
     for (const item of items ?? []) {
       const labelId = item.getAttribute('aria-labelledby');
       expect(labelId).toMatch(/^plan-(free|starter|pro|team)-name$/);
