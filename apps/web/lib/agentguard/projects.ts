@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
+import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
 
 /**
  * Project writes against the engine database.
@@ -33,6 +34,8 @@ export interface CreateProjectParams {
   repoRootPath: string | null;
   /** The creator, who is immediately made a project admin. */
   createdByUserId: string;
+  /** The creator's email, frozen into the audit row for that admin grant. */
+  createdByEmail: string | null;
 }
 
 /**
@@ -60,12 +63,7 @@ export async function createProject(
        VALUES (gen_random_uuid(), $1, $2, $3, $4)
        RETURNING id, org_id, display_name, git_remote, repo_root_path,
                  created_at::text AS created_at, last_seen_at::text AS last_seen_at`,
-      [
-        params.orgId,
-        params.displayName,
-        params.gitRemote,
-        params.repoRootPath,
-      ],
+      [params.orgId, params.displayName, params.gitRemote, params.repoRootPath],
     );
 
     const project = inserted.rows[0]!;
@@ -76,6 +74,20 @@ export async function createProject(
        ON CONFLICT (project_id, user_id) DO NOTHING`,
       [project.id, params.createdByUserId],
     );
+
+    // Creating a project hands its creator admin over it. That is a grant like
+    // any other and is recorded like one — otherwise the audit trail for a
+    // project would begin at its SECOND member, and the person who has held
+    // admin from the start would be the one person it never names.
+    await recordProjectGrantAudit(client, {
+      orgId: params.orgId,
+      projectId: project.id,
+      grantedTo: params.createdByUserId,
+      grantedToEmail: params.createdByEmail,
+      grantedBy: params.createdByUserId,
+      role: 'admin',
+      action: 'grant',
+    });
 
     await client.query('COMMIT');
 
@@ -89,57 +101,130 @@ export async function createProject(
 }
 
 /**
- * Grant a user access to a project.
+ * Grant a user access to a project, and record that grant, atomically.
  *
  * Org-scoped by an `EXISTS` on the project row, so a project id belonging to
  * another tenant inserts nothing rather than silently creating a grant across
- * an org boundary. Returns false when nothing was written.
+ * an org boundary. Returns false when nothing was written — and in that case
+ * no audit row is written either, because nothing happened to audit.
+ *
+ * The membership change and its `project_grant_audit` row share one
+ * transaction. See `project-grant-audit.ts` for why that is not optional.
  */
 export async function grantProjectMember(params: {
   orgId: string;
   projectId: string;
   userId: string;
+  userEmail: string | null;
   role: ProjectMemberRole;
-  grantedByUserId: string;
+  grantedByUserId: string | null;
 }): Promise<boolean> {
   const pool = getAgentGuardPool();
+  const client = await pool.connect();
 
-  const result = await pool.query(
-    `INSERT INTO project_members (project_id, user_id, role, granted_by)
-     SELECT p.id, $3, $4, $5
-     FROM projects p
-     WHERE p.id = $1 AND p.org_id = $2
-     ON CONFLICT (project_id, user_id)
-       DO UPDATE SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by`,
-    [
-      params.projectId,
-      params.orgId,
-      params.userId,
-      params.role,
-      params.grantedByUserId,
-    ],
-  );
+  try {
+    await client.query('BEGIN');
 
-  return (result.rowCount ?? 0) > 0;
+    const result = await client.query(
+      `INSERT INTO project_members (project_id, user_id, role, granted_by)
+       SELECT p.id, $3, $4, $5
+       FROM projects p
+       WHERE p.id = $1 AND p.org_id = $2
+       ON CONFLICT (project_id, user_id)
+         DO UPDATE SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by`,
+      [
+        params.projectId,
+        params.orgId,
+        params.userId,
+        params.role,
+        params.grantedByUserId,
+      ],
+    );
+
+    const granted = (result.rowCount ?? 0) > 0;
+
+    if (granted) {
+      await recordProjectGrantAudit(client, {
+        orgId: params.orgId,
+        projectId: params.projectId,
+        grantedTo: params.userId,
+        grantedToEmail: params.userEmail,
+        grantedBy: params.grantedByUserId,
+        role: params.role,
+        action: 'grant',
+      });
+    }
+
+    await client.query('COMMIT');
+
+    return granted;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-/** Revoke a user's access to a project. Returns false when no row matched. */
+/**
+ * Revoke a user's access to a project, and record that revoke, atomically.
+ * Returns false when no membership row matched.
+ *
+ * A REVOKE IS AUDITED EXACTLY AS A GRANT IS. An access change that leaves no
+ * trace is how an ACL edit becomes invisible: reading only grants, a project
+ * whose entire membership was removed still looks fully staffed.
+ *
+ * `DELETE … RETURNING pm.role` is what makes that recordable. The audit table
+ * requires a role and constrains it to `('member','admin')`, so the row the
+ * revoke writes carries the role the member actually HELD — captured by the
+ * same statement that removes it, which is the only moment it is still known.
+ * Reading it beforehand would be a second query with a race in between.
+ */
 export async function revokeProjectMember(params: {
   orgId: string;
   projectId: string;
   userId: string;
+  userEmail: string | null;
+  revokedByUserId: string | null;
 }): Promise<boolean> {
   const pool = getAgentGuardPool();
+  const client = await pool.connect();
 
-  const result = await pool.query(
-    `DELETE FROM project_members pm
-     USING projects p
-     WHERE pm.project_id = p.id
-       AND p.id = $1
-       AND p.org_id = $2
-       AND pm.user_id = $3`,
-    [params.projectId, params.orgId, params.userId],
-  );
+  try {
+    await client.query('BEGIN');
 
-  return (result.rowCount ?? 0) > 0;
+    const result = await client.query<{ role: string }>(
+      `DELETE FROM project_members pm
+       USING projects p
+       WHERE pm.project_id = p.id
+         AND p.id = $1
+         AND p.org_id = $2
+         AND pm.user_id = $3
+       RETURNING pm.role`,
+      [params.projectId, params.orgId, params.userId],
+    );
+
+    const removed = result.rows[0];
+
+    if (removed) {
+      await recordProjectGrantAudit(client, {
+        orgId: params.orgId,
+        projectId: params.projectId,
+        grantedTo: params.userId,
+        grantedToEmail: params.userEmail,
+        grantedBy: params.revokedByUserId,
+        role: removed.role,
+        action: 'revoke',
+      });
+    }
+
+    await client.query('COMMIT');
+
+    return removed !== undefined;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }

@@ -36,10 +36,16 @@ import { loadMyProjectRole } from './projects.loader';
  *     Supabase account membership and failing closed, so a project grant can
  *     never pull an outsider into an org's data.
  *
- * Every grant and revoke is audit-logged with who, what, when and via which
- * surface. NOTE: this writes to the application log, not to a durable audit
- * table — the engine has no audit table today, and adding one is an engine-side
- * change rather than something the dashboard should invent unilaterally.
+ * Every grant and revoke is recorded twice, and the two are not
+ * interchangeable:
+ *
+ *  - `project_grant_audit` in the engine database is THE RECORD. It is written
+ *    inside the same transaction as the membership change (see
+ *    `lib/agentguard/project-grant-audit.ts`), so a change that cannot be
+ *    recorded does not happen.
+ *  - The app logger line is for OPS — it is where an on-call engineer looks,
+ *    it ships to a different system with a different retention, and it is
+ *    best-effort. It is not, and must not be treated as, the audit trail.
  */
 
 class ProjectPermissionError extends Error {
@@ -103,6 +109,32 @@ async function requireOrgMember(accountSlug: string, userId: string) {
   return member;
 }
 
+/**
+ * The email of an org member, or `null` when it cannot be resolved.
+ *
+ * Used on the REVOKE path, which — unlike the grant path — must not fail
+ * closed on an unknown user. Someone removed from the workspace entirely
+ * should still be removable from its projects, and their audit row should
+ * still be written; `granted_to_email` is nullable precisely so "we no longer
+ * know their email" is expressible rather than a reason to lose the record.
+ */
+async function findOrgMemberEmail(
+  accountSlug: string,
+  userId: string,
+): Promise<string | null> {
+  const client = getSupabaseServerClient();
+
+  const { data, error } = await client.rpc('get_account_members', {
+    account_slug: accountSlug,
+  });
+
+  if (error) {
+    return null;
+  }
+
+  return (data ?? []).find((row) => row.user_id === userId)?.email ?? null;
+}
+
 export const createProjectAction = enhanceAction(
   async (data) => {
     const [orgId, viewer] = await Promise.all([
@@ -116,6 +148,7 @@ export const createProjectAction = enhanceAction(
       gitRemote: data.gitRemote,
       repoRootPath: data.repoRootPath,
       createdByUserId: viewer.userId,
+      createdByEmail: await findOrgMemberEmail(data.accountSlug, viewer.userId),
     });
 
     const logger = await getLogger();
@@ -145,12 +178,13 @@ export const addProjectMemberAction = enhanceAction(
       data.projectId,
     );
 
-    await requireOrgMember(data.accountSlug, data.userId);
+    const member = await requireOrgMember(data.accountSlug, data.userId);
 
     const granted = await grantProjectMember({
       orgId,
       projectId: data.projectId,
       userId: data.userId,
+      userEmail: member.email ?? null,
       role: data.role,
       grantedByUserId: viewer.userId,
     });
@@ -192,6 +226,8 @@ export const removeProjectMemberAction = enhanceAction(
       orgId,
       projectId: data.projectId,
       userId: data.userId,
+      userEmail: await findOrgMemberEmail(data.accountSlug, data.userId),
+      revokedByUserId: viewer.userId,
     });
 
     if (!revoked) {
