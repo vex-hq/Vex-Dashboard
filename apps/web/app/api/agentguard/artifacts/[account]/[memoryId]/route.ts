@@ -51,6 +51,39 @@ function notFound() {
   });
 }
 
+/**
+ * Next's `redirect()` signals itself by throwing an error carrying a
+ * `NEXT_REDIRECT` digest. The session helpers this route depends on call it
+ * when there is no session, which is right for a page and wrong here.
+ */
+function isRedirectError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    typeof (error as { digest?: unknown }).digest === 'string' &&
+    (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+  );
+}
+
+/**
+ * An expired session must fail as a status, never as a redirect.
+ *
+ * The Download control is an `<a download>` link, and a browser does not
+ * follow a sign-in bounce for a download — it saves whatever comes back. A
+ * redirect therefore lands the sign-in page in the user's Downloads folder,
+ * named after the memory id with an extension guessed from the content type,
+ * as a file that will not open. That reads as "the artifact is corrupt" or
+ * "the file is gone" when the truth is only "sign in again", which is the
+ * same illegible failure the comment above `requireEnv()` in
+ * `artifact-storage.ts` argues against for the older trace route.
+ */
+function unauthenticated() {
+  return NextResponse.json(
+    { error: 'Sign in to download this artifact' },
+    { status: 401, headers: { 'Cache-Control': 'no-store' } },
+  );
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ account: string; memoryId: string }> },
@@ -70,6 +103,12 @@ export async function GET(
       // Same 404 as everything else: whether this workspace exists is not
       // something a non-member gets to learn from a download URL.
       return notFound();
+    }
+
+    // No session. The helpers above redirect, which is correct for a page and
+    // corrupt for a download; see `unauthenticated()`.
+    if (isRedirectError(error)) {
+      return unauthenticated();
     }
 
     throw error;
@@ -150,10 +189,7 @@ export async function GET(
     if (error instanceof ArtifactStorageNotConfiguredError) {
       const logger = await getLogger();
 
-      logger.error(
-        { name: 'artifacts.download', orgId },
-        error.message,
-      );
+      logger.error({ name: 'artifacts.download', orgId }, error.message);
 
       return NextResponse.json(
         { error: 'Artifact downloads are not configured' },
