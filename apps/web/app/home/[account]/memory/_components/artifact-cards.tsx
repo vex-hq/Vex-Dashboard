@@ -93,8 +93,19 @@ export function ArtifactCards({
                   className="text-primary inline-flex items-center gap-1.5 text-xs hover:underline"
                   // A plain anchor, not a client fetch: the route answers with
                   // a 302 to a presigned URL, and the browser following it is
-                  // the download.
-                  download
+                  // the download. Large files therefore stream straight from
+                  // object storage instead of through a blob in memory.
+                  //
+                  // NO `download` ATTRIBUTE, deliberately. It does nothing on
+                  // the happy path — the browser ignores it on a cross-origin
+                  // response, and both branches already send their own
+                  // `Content-Disposition: attachment` (ours for inline text,
+                  // `ResponseContentDisposition` on the presign for the rest).
+                  // What it DID do was make every error path save a file: with
+                  // `download` set the browser writes whatever comes back, so a
+                  // 401, 404 or 503 body landed in the user's Downloads folder
+                  // as an unopenable file named after the memory id. Without
+                  // it, a refusal renders as a page the user can actually read.
                 >
                   <Download className="h-3.5 w-3.5" aria-hidden />
                   <Trans i18nKey="agentguard:memory.artifactDownload" />
