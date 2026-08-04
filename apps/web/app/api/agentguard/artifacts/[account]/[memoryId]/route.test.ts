@@ -64,8 +64,24 @@ vi.mock('~/lib/agentguard/resolve-org-id', async () => {
   };
 });
 
+/**
+ * Whether the caller has a session at all. When false the viewer loader
+ * redirects, exactly as `requireUserInServerComponent` does in production —
+ * which in a route handler escapes as a redirect the browser follows.
+ */
+let isAuthenticated = true;
+
 vi.mock('~/home/[account]/_lib/server/account-viewer', () => ({
-  loadAccountViewer: async () => ({ ...viewer, accountSlug: 'acme' }),
+  loadAccountViewer: async () => {
+    if (!isAuthenticated) {
+      // The shape of the error Next's `redirect()` throws.
+      const error = new Error('NEXT_REDIRECT') as Error & { digest: string };
+      error.digest = 'NEXT_REDIRECT;replace;/auth/sign-in;307;';
+      throw error;
+    }
+
+    return { ...viewer, accountSlug: 'acme' };
+  },
 }));
 
 vi.mock('@kit/shared/logger', () => ({
@@ -266,5 +282,49 @@ describe('POSITIVE CONTROL: the owner gets a real, bounded download', () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toContain(ORG_ARTIFACT);
+  });
+});
+
+
+/**
+ * An expired session must not turn a download into a corrupt file.
+ *
+ * The Download control is an `<a download>` link. A browser does not follow a
+ * sign-in bounce for a download — it saves whatever comes back. A redirect to
+ * the sign-in page therefore lands in the user's Downloads folder as an HTML
+ * body named after the memory id, with an extension guessed from the content
+ * type. Observed in production: a file called
+ * `d885272e-…-24de2fb16b9f.js` that would not open, which reads as "the file
+ * is corrupt" when the real cause is "your session expired".
+ */
+describe('an unauthenticated request', () => {
+  it('gets a 401 and NOT a redirect to the sign-in page', async () => {
+    isAuthenticated = false;
+
+    try {
+      const response = await get(ORG_CARD);
+
+      expect(response.status).toBe(401);
+      // The assertions that matter: nothing for the browser to follow, and
+      // nothing it would save as a file.
+      expect(response.headers.get('location')).toBeNull();
+      expect(response.headers.get('content-type')).toContain(
+        'application/json',
+      );
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.text()).not.toContain('<html');
+    } finally {
+      isAuthenticated = true;
+    }
+  });
+
+  it('still serves an authenticated caller — the control', async () => {
+    isAuthenticated = true;
+    viewer = { userId: ALICE, isOrgAdmin: false };
+
+    const response = await get(ORG_CARD);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toContain('X-Amz-Signature');
   });
 });
