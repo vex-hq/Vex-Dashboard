@@ -23,30 +23,27 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-export function GitHubStarsBadge({
-  formatted,
-  className,
-}: {
-  formatted: string | null;
-  className?: string;
-}) {
+/**
+ * Link to the public repository.
+ *
+ * Deliberately shows the word "GitHub" rather than a star count. A count is a
+ * number that can go down as well as up, it reads as a popularity claim rather
+ * than an invitation, and rendering it meant a request to api.github.com on
+ * every render of the header. The link is the point; the number was not.
+ */
+export function GitHubLink({ className }: { className?: string }) {
   return (
     <a
       href={GITHUB_REPO_URL}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Star Klio on GitHub"
       className={cn(
         'border-border bg-card hover:bg-muted inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors hover:border-[color:var(--klio-border-strong)]',
         className,
       )}
     >
       <GitHubIcon className="text-muted-foreground" />
-      {formatted && (
-        <span className="text-foreground font-mono text-sm font-medium">
-          {formatted}
-        </span>
-      )}
+      <span className="text-foreground text-sm font-medium">GitHub</span>
     </a>
   );
 }

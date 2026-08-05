@@ -18,7 +18,7 @@ import {
 } from '@kit/ui/sheet';
 import { cn } from '@kit/ui/utils';
 
-import { GitHubStarsBadge } from './github-stars-badge';
+import { GitHubLink } from './github-link';
 import {
   CLOUD_SIGNIN_URL,
   CLOUD_SIGNUP_URL,
@@ -117,7 +117,7 @@ function MobileNavGroup({ group }: { group: NavGroup }) {
   );
 }
 
-export function MobileNav({ formatted }: { formatted: string | null }) {
+export function MobileNav() {
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -146,10 +146,7 @@ export function MobileNav({ formatted }: { formatted: string | null }) {
           </div>
 
           <div className="border-border space-y-3 border-t pt-4">
-            <GitHubStarsBadge
-              formatted={formatted}
-              className="w-full justify-center"
-            />
+            <GitHubLink className="w-full justify-center" />
             <SheetClose asChild>
               <a
                 href={CLOUD_SIGNUP_URL}
