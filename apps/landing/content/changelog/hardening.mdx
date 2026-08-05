@@ -1,0 +1,85 @@
+---
+title: "Sharper memory, faster writes"
+description: "Klio now keeps more of what it reads, explore reflects where a project actually is, and writes hold up under real concurrency. Nothing for you to do."
+date: "2026-08-05"
+version: "0.12.1"
+tags: ["reliability", "performance", "memory", "curator"]
+---
+
+## The curator keeps more of what it reads
+
+Klio's curator reads your captures and distils them into higher-level facts. When
+a group of memories was too small to be worth distilling, it skipped them — and
+then moved its bookmark past them anyway. It never reads backwards, so anything
+skipped that way was not picked up on a later pass.
+
+A second limit compounded it. The curator has a per-run budget for the entities
+it creates, and it was spending that budget every time it *mentioned* an entity
+rather than every time it created one. A run that referred to the same system
+twenty times could exhaust a budget of twelve and stop early, taking the
+connections between those entities with it.
+
+Both are fixed. The bookmark now stops in front of anything the curator has not
+distilled, and the budget is charged only for entities that are genuinely new.
+If `explore` has felt thinner than your actual history, this is the reason.
+
+## `explore` reflects the present
+
+An entity brief was built from the **oldest** fifty memories about that entity.
+Once a project passed fifty, `explore` kept describing where it started instead
+of where it had got to.
+
+It now reads the newest, and tells you when there was more than it could fit:
+
+```json
+{ "evidence_count": 50, "truncated": true }
+```
+
+Previously there was no way to tell a complete brief from a truncated one. Now a
+brief says so.
+
+## Writes hold up under load
+
+Two things capped how much Klio could do at once. Every write held a database
+connection open while it waited on an embedding, so a burst of concurrent writes
+exhausted the connection pool and started failing. And the memory tools ran their
+database work on the main loop instead of handing it off, which put a ceiling on
+throughput that no amount of capacity could lift.
+
+| | Before | Now |
+| --- | --- | --- |
+| Concurrent writes before failures | 16 | 200, no failures |
+| Writes per second, single replica | ~12 | ~126 |
+
+A single write also embedded the same text twice. It now does it once, which
+makes every write faster on its own.
+
+## Clearer answers when something is wrong
+
+Klio used to tell you your workspace was not connected when the real problem was
+that it was briefly busy. That case now returns a retryable error, so your agent
+waits and tries again rather than sending you off to reconnect something that was
+never disconnected.
+
+Along the same lines, a malformed billing override could return an error on every
+request for an organisation and never recover by itself. A bad override is now
+ignored with a warning instead.
+
+## Rationales are redacted too
+
+`decide` takes an optional rationale. Memory content has always been screened for
+secrets before it is stored; the rationale travelled beside it and was not. It now
+goes through the same redactor as everything else, so an API key that ends up in a
+rationale is masked like one in any other field.
+
+## Artifacts follow project membership
+
+`artifact_get`, `artifact_put` and `forget` now check project membership when an
+artifact belongs to a project, so artifacts behave the same way memories in a
+project already did. A non-member gets the same "not found" as every other
+refusal.
+
+## What you need to do
+
+Nothing. There is no migration, no configuration change, and no action needed on
+your side. Your memories, scopes and projects are exactly where you left them.
