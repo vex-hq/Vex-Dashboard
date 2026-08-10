@@ -49,7 +49,17 @@ const faqs = [
   {
     question: 'Can I self-host instead?',
     answer:
-      'Yes, on every plan including Free. The engine is AGPL-3.0 and the MCP shim is Apache-2.0 — run it on your own hardware and pay nothing. The paid plan buys hosted sync across a team, not access to the software.',
+      'Yes, on every plan including Free. The engine is AGPL-3.0 and the MCP shim is Apache-2.0 — run it on your own hardware and pay nothing. Self-hosting gives you the core memory engine: capture, recall, spaces, the curator, encryption you hold the keys to, and a hash-chained audit trail.',
+  },
+  {
+    question: 'What does Klio Cloud have that self-hosting does not?',
+    answer:
+      'The parts built on top of the store. Cloud runs the knowledge graph that links memories to the entities they are about, hybrid recall that matches exact identifiers as well as meaning, artifacts, compression, and the curator pass that judges when a new fact contradicts an older one and retires it. Self-hosting is the memory engine; Cloud is the memory engine plus everything that reasons over it. All of it is on the Free plan, so you do not need to pay to compare them.',
+  },
+  {
+    question: 'Then why would I self-host?',
+    answer:
+      'Custody. On your own hardware the encryption keys are yours and writes are hash-chained, which Cloud does not offer — we hold the keys there and encrypt at the infrastructure level instead. If your constraint is that memory cannot leave your network, self-host. If your constraint is getting the most out of it, use Cloud.',
   },
   {
     question: 'Can I switch plans at any time?',
@@ -128,8 +138,12 @@ export default function PricingPage() {
             </div>
             {plan.priceYearly !== undefined && (
               <p className="text-muted-foreground mb-3 text-xs">
-                or {formatYearlyAnnotation(plan.priceYearly, plan.priceUnit === 'seat')} billed
-                annually
+                or{' '}
+                {formatYearlyAnnotation(
+                  plan.priceYearly,
+                  plan.priceUnit === 'seat',
+                )}{' '}
+                billed annually
               </p>
             )}
             <p className="text-muted-foreground mb-6 text-sm">
