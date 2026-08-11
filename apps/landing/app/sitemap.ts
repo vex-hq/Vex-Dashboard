@@ -3,6 +3,7 @@ import type { MetadataRoute } from 'next';
 import { ORG } from '~/lib/site-meta';
 
 import { getAllPosts } from '~/lib/blog';
+import { USE_CASES } from '~/lib/use-cases';
 import {
   getAllChecklists,
   getAllConceptComparisons,
@@ -84,6 +85,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     ...blogPosts,
+    {
+      url: `${ORG.url}/use-cases`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.9,
+    },
+    ...USE_CASES.map((u) => ({
+      url: `${ORG.url}/use-cases/${u.slug}`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly' as const,
+      priority: 0.7,
+    })),
     {
       url: `${ORG.url}/pricing`,
       lastModified: new Date(),

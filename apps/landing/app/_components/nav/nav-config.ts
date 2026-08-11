@@ -38,6 +38,11 @@ export const PRODUCT_GROUP: NavGroup = {
       description: 'Give your agents memory in one command',
     },
     {
+      label: 'Use Cases',
+      href: '/use-cases',
+      description: 'Sixteen jobs for one shared workplace',
+    },
+    {
       label: 'Pricing',
       href: '/pricing',
       description: 'Free self-host, no credit card required',
