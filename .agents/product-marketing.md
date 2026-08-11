@@ -117,6 +117,17 @@ decisions contradicted silently.
 the refined experience won the modern segment. Klio does this to context
 management: the category exists as scattered practice, and we win it with the
 experience.
+
+**Approved pitch wording (2026-08-11):**
+> Project management before Linear looked like context management does today —
+> real need, miserable tooling. Jira proved the category; Linear proved the
+> experience wins it. Klio is that move for your team's context.
+
+Usage: the pair carries the argument — Jira/ClickUp are the "before", Linear
+is the "after", Klio claims the Linear seat. Decks and conversations can be
+spicy; the website lets the contrast speak without disparaging Jira (half our
+buyers run it). Keep this analogy about the EXPERIENCE bet only — the
+future-proofing pillar is a separate argument and stays separate.
 **Direct:** mem0, Zep, Supermemory — recall for one agent; fall short on team
 scoping, supersession, and any human-facing surface.
 **Secondary:** Notion/Confluence + "keep the docs updated" — dead on arrival
