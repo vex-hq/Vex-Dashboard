@@ -37,6 +37,34 @@ Supporting use cases (all live at klio.tech/use-cases): cross-tool continuity,
 session pickup, "we already tried that", constraint memory, decision
 archaeology, handover across teammates, auditable belief history.
 
+## The company-intelligence narrative (approved copy, 2026-08-11)
+
+Klio becomes smarter the more your company uses it. It learns your people,
+processes, questions, recurring issues and agreed solutions — building a
+continuously improving, company-specific knowledge base. Proven solutions are
+remembered and made available to the next person or agent, reducing
+duplication, improving consistency — and, as a consequence, reducing token
+usage and AI costs over time (a supporting benefit, never the lead).
+
+**The future-proofing pillar (elevate this — it is the strategic gem):** as AI
+models, providers and technology change, your company's accumulated knowledge,
+processes and solutions remain yours. Klio is a durable intelligence layer
+that works with whatever AI comes next. This is our cross-vendor
+differentiator stated as a buyer's insurance policy, and no model vendor can
+credibly say it.
+
+**Approved closing line:**
+> Klio doesn't just give your company AI. It helps your company build its own
+> intelligence.
+
+**Audience staging (internal, honest):** this narrative addresses the whole
+company — staff, onboarding, HR, operations. The product today serves
+agent-running dev teams, and the human surface that HR/ops would need is
+roadmap, not shipped. Use the company framing for vision surfaces (deck,
+about, investor conversations); keep acquisition surfaces (landing, docs)
+aimed at the dev-team beachhead until the context view exists. Selling to ops
+today would outrun the product.
+
 ## Product Overview
 **One-liner:** Klio is where your team's context lives — every decision,
 constraint and lesson, kept current and handed to whoever needs it next, agent
@@ -108,6 +136,9 @@ cross-vendor scope + supersession + the human surface.
   with no admin override.
 - **(Roadmap) The human surface**: context you can see, browse and trust —
   the "beautify" half of the Linear analogy.
+- **Future-proof by neutrality**: knowledge accumulated in Klio survives any
+  model or vendor change. The switching cost lives with us, not the LLM
+  provider — the inverse of every vendor-native memory.
 
 ## Messaging rules
 **Lead with:** context management, onboarding-in-minutes, handover, retired
