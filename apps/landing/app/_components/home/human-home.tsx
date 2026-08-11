@@ -9,6 +9,7 @@ import { PlateSchedule } from './survey/plate-schedule';
 import { PlateShiftChange } from './survey/plate-shift-change';
 import { PlateSite } from './survey/plate-site';
 import { PlateSpecification } from './survey/plate-specification';
+import { PlateTerminal } from './survey/plate-terminal';
 
 /**
  * The human home, set as a field survey of agent labour.
@@ -40,6 +41,7 @@ export function HumanHome() {
       <span className="k-reg k-reg--br" aria-hidden="true" />
 
       <PlateSite surveyedOn={SURVEYED_ON} />
+      <PlateTerminal />
       <PlateCondition />
       <PlateLedger />
       <PlateApparatus />
