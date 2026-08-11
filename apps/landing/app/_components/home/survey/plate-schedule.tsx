@@ -1,16 +1,18 @@
+import { PLANS, PLATFORM, type Plan } from '~/lib/pricing';
+
 import { GITHUB_REPO_URL } from '../../nav/nav-config';
-import { PLANS, type Plan } from '~/lib/pricing';
 
 /**
  * Plate VII — the schedule.
  *
- * Rendered from the canonical PLANS in `lib/pricing.ts`, which also feeds
- * /pricing, the pricing API and the JSON-LD offers — so the plate can never
- * drift from the price a visitor is actually charged.
+ * Rendered from the canonical PLANS + PLATFORM in `lib/pricing.ts`, which
+ * also feed /pricing, the pricing API and the JSON-LD offers — so the plate
+ * can never drift from the price a visitor is actually charged.
  *
- * Two columns, because there are two self-serve tiers: free for one person,
- * per-seat when a team shares one brain. The Platform (embed) lane is
- * sales-led and lives on /pricing, not here. Editing PLANS changes both.
+ * Three columns: free for one person, per-seat when a team shares one brain,
+ * and the sales-led Platform lane (enterprise + embed). Platform was
+ * originally left to /pricing only; that read as a hole in the schedule — an
+ * enterprise visitor scanning rates found no door to knock on (2026-08-11).
  */
 const SHOWN: ReadonlyArray<Plan['id']> = ['free', 'team'];
 
@@ -74,13 +76,28 @@ export function PlateSchedule() {
             </a>
           </div>
         ))}
+
+        {/* The sales-led lane, from the same canonical source as /pricing. */}
+        <div className="k-rate">
+          <p className="k-rate__nm">{PLATFORM.name} · Enterprise</p>
+          <p className="k-rate__amt">Custom</p>
+          <p className="k-rate__per">{PLATFORM.priceLabel.toLowerCase()}</p>
+          <ul>
+            <li>Embed Klio in your own product</li>
+            <li>Isolated memory — per end-user</li>
+            <li>SSO — audit trail — DPA</li>
+            <li>Support — a person, not a queue</li>
+          </ul>
+          <a className="k-rate__go" href={PLATFORM.cta.href}>
+            {PLATFORM.cta.label} →
+          </a>
+        </div>
       </div>
 
       <p className="k-marg" style={{ marginTop: '26px', maxWidth: '68ch' }}>
         Connected agents, memories and retention are unlimited on every tier —
-        you pay for people, not volume. Self-hosting the
-        open-source engine on your own hardware is <b>free</b> — the source is
-        at{' '}
+        you pay for people, not volume. Self-hosting the open-source engine on
+        your own hardware is <b>free</b> — the source is at{' '}
         <a href={GITHUB_REPO_URL} style={{ color: 'inherit' }}>
           github.com/klio-tech/klio
         </a>

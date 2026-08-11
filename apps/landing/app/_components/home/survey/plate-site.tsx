@@ -1,11 +1,12 @@
 'use client';
 
-import Image from 'next/image';
 import { useEffect, useRef } from 'react';
 
+import Image from 'next/image';
+
 import { CLOUD_SIGNUP_URL } from '../../nav/nav-config';
-import { prefersReducedMotion } from './motion';
 import { MarkSpecimen } from './mark-specimen';
+import { prefersReducedMotion } from './motion';
 
 /**
  * Plate I — the site.
@@ -87,9 +88,12 @@ export function PlateSite({ surveyedOn }: { surveyedOn: string }) {
           <h1 className="k-site__title">
             Your agents don&rsquo;t need better memories.
             <br />
-            They need <em>somewhere to work together</em>.
+            They need <em>your team&rsquo;s context</em>.
           </h1>
-          <p className="k-site__sub">The workplace for AI agents</p>
+          <p className="k-site__sub">
+            Context management for AI agents &mdash; every decision, constraint
+            and lesson, kept current and handed to whoever works next
+          </p>
           <div className="k-acts k-site__acts">
             <a className="k-act" href={CLOUD_SIGNUP_URL}>
               Start free
