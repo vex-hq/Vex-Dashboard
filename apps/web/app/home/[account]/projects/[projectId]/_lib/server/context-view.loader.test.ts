@@ -69,7 +69,12 @@ describe('loadContextView', () => {
   it('returns null for a non-member (membership in SQL, not TS)', async () => {
     const { loadContextView } = await import('./context-view.loader');
     queueRows({ rows: [] }); // membership probe returns nothing
-    expect(await loadContextView('org-1', 'p1', { userId: 'intruder' })).toBeNull();
+    expect(
+      await loadContextView('org-1', 'p1', {
+        kind: 'member',
+        userId: 'intruder',
+      }),
+    ).toBeNull();
     // No further query should have been issued past the probe.
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
@@ -101,14 +106,14 @@ describe('loadContextView', () => {
       }, // chain, newest predecessor first
     );
 
-    const view = await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    const view = await loadContextView('org-1', 'p1', {
+      kind: 'member',
+      userId: 'user-1',
+    });
 
     expect(view).not.toBeNull();
     expect(view!.decisions).toHaveLength(1);
-    expect(view!.decisions[0]!.replaced.map((l) => l.id)).toEqual([
-      'm2',
-      'm1',
-    ]);
+    expect(view!.decisions[0]!.replaced.map((l) => l.id)).toEqual(['m2', 'm1']);
   });
 
   it('maps types to sections: decision/plan/fact; note lands only in recent', async () => {
@@ -128,7 +133,10 @@ describe('loadContextView', () => {
       { rows: [] }, // chain (no predecessors for any active id)
     );
 
-    const view = await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    const view = await loadContextView('org-1', 'p1', {
+      kind: 'member',
+      userId: 'user-1',
+    });
 
     expect(view).not.toBeNull();
     expect(view!.decisions.map((i) => i.id)).toEqual(['d1']);
@@ -146,7 +154,7 @@ describe('loadContextView', () => {
   it('membership probe binds org_id via a projects JOIN (project_members has no org_id column)', async () => {
     const { loadContextView } = await import('./context-view.loader');
     queueRows({ rows: [] });
-    await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/FROM project_members pm/);
     expect(sql).toMatch(/JOIN projects p ON p\.id = pm\.project_id/);
@@ -166,7 +174,7 @@ describe('loadContextView', () => {
       // no chain query: activeIds is empty, loadChains short-circuits
     );
 
-    await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
 
     const [sql, params] = queryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(/scope = 'org'/);
@@ -188,7 +196,7 @@ describe('loadContextView', () => {
       { rows: [EMPTY_HEADER_ROW] },
     );
 
-    await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
 
     const [sql] = queryMock.mock.calls[2] as [string, unknown[]];
     expect(sql).toMatch(/scope = 'org'/);
@@ -205,7 +213,7 @@ describe('loadContextView', () => {
       { rows: [EMPTY_HEADER_ROW] },
     );
 
-    await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
 
     // probe + sections + recent + header = 4 calls, no 5th chain query.
     expect(queryMock).toHaveBeenCalledTimes(4);
@@ -237,7 +245,10 @@ describe('loadContextView', () => {
       { rows: [] },
     );
 
-    const view = await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    const view = await loadContextView('org-1', 'p1', {
+      kind: 'member',
+      userId: 'user-1',
+    });
 
     // Every row the mocked SQL returned is assembled, regardless of its
     // scope/user_id — assembly keys only on memory_type, never re-derives
@@ -265,12 +276,146 @@ describe('loadContextView', () => {
       },
     );
 
-    const view = await loadContextView('org-1', 'p1', { userId: 'user-1' });
+    const view = await loadContextView('org-1', 'p1', {
+      kind: 'member',
+      userId: 'user-1',
+    });
 
     expect(view!.header).toEqual({
       members: 4,
       itemsThisWeek: 9,
       agentsActive: ['claude-code', 'cursor'],
     });
+  });
+
+  // --- Fix round 1, Finding 1: org-admin access -----------------------
+
+  it('returns null for a non-member, non-admin (unchanged by the admin fix)', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows({ rows: [] });
+    expect(
+      await loadContextView('org-1', 'p1', {
+        kind: 'member',
+        userId: 'intruder',
+      }),
+    ).toBeNull();
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an org admin who is not a project member still gets the view (TS-routing test, valid under the mock)', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows(
+      { rows: [{ one: 1 }] }, // admin probe: project exists in this org
+      { rows: [] }, // sections
+      { rows: [] }, // recent
+      { rows: [EMPTY_HEADER_ROW] }, // header
+    );
+
+    const view = await loadContextView('org-1', 'p1', { kind: 'admin' });
+
+    expect(view).not.toBeNull();
+  });
+
+  it('admin probe checks the project exists in this org, no project_members lookup', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows({ rows: [] });
+
+    await loadContextView('org-1', 'p1', { kind: 'admin' });
+
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/FROM projects p/);
+    expect(sql).toMatch(/p\.id = \$1/);
+    expect(sql).toMatch(/p\.org_id = \$2/);
+    expect(sql).not.toMatch(/project_members/);
+    expect(params).toEqual(['p1', 'org-1']);
+  });
+
+  it('admin visibility arms: org + unconditional project arm, no private arm ever', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows(
+      { rows: [{ one: 1 }] }, // admin probe
+      { rows: [] }, // sections
+      { rows: [] }, // recent
+      { rows: [EMPTY_HEADER_ROW] }, // header
+    );
+
+    await loadContextView('org-1', 'p1', { kind: 'admin' });
+
+    const [sectionsSql] = queryMock.mock.calls[1] as [string, unknown[]];
+    expect(sectionsSql).toMatch(/scope = 'org'/);
+    expect(sectionsSql).toMatch(/\(m\.scope = 'project'\)/);
+    expect(sectionsSql).not.toMatch(/scope = 'private'/);
+    expect(sectionsSql).not.toMatch(/project_members/);
+  });
+
+  it('member visibility arms are unchanged: still org + own-private + EXISTS project arm', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows(
+      { rows: [{ one: 1 }] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [EMPTY_HEADER_ROW] },
+    );
+
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
+
+    const [sectionsSql] = queryMock.mock.calls[1] as [string, unknown[]];
+    expect(sectionsSql).toMatch(/scope = 'org'/);
+    expect(sectionsSql).toMatch(/scope = 'private' AND m\.user_id = /);
+    expect(sectionsSql).toMatch(/EXISTS \(\s*SELECT 1 FROM project_members/);
+  });
+
+  // --- Fix round 1, Finding 2: recursive CTE cycle guard ----------------
+
+  it('chain query carries a path-array cycle guard, not just the depth cap', async () => {
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows(
+      { rows: [{ one: 1 }] }, // member
+      { rows: [row({ id: 'm3', memory_type: 'decision' })] }, // sections
+      { rows: [] }, // recent
+      { rows: [EMPTY_HEADER_ROW] }, // header
+      { rows: [] }, // chain
+    );
+
+    await loadContextView('org-1', 'p1', { kind: 'member', userId: 'user-1' });
+
+    const [chainSql] = queryMock.mock.calls[4] as [string, unknown[]];
+    expect(chainSql).toMatch(/ARRAY\[m\.id\] AS path/);
+    expect(chainSql).toMatch(/c\.path \|\| m\.id/);
+    expect(chainSql).toMatch(/m\.id != ALL\(c\.path\)/);
+    expect(chainSql).toMatch(/c\.depth < /); // depth cap still present alongside the guard
+  });
+
+  it('a cyclic superseded_by chain does not duplicate ChainLink rows past what the guarded query returns', async () => {
+    // The guard's job is done in SQL; this pins the TS side's contract that
+    // it trusts and simply groups whatever rows come back, so a query that
+    // (thanks to the guard) returns each predecessor once produces exactly
+    // one ChainLink per row - no client-side dedup masking a bad query.
+    const { loadContextView } = await import('./context-view.loader');
+    queueRows(
+      { rows: [{ one: 1 }] },
+      { rows: [row({ id: 'm3', memory_type: 'decision' })] },
+      { rows: [] },
+      { rows: [EMPTY_HEADER_ROW] },
+      {
+        rows: [
+          {
+            head_id: 'm3',
+            id: 'm2',
+            content: 'v2',
+            created_at: '2026-08-05T00:00:00Z',
+          },
+        ],
+      },
+    );
+
+    const view = await loadContextView('org-1', 'p1', {
+      kind: 'member',
+      userId: 'user-1',
+    });
+
+    expect(view!.decisions[0]!.replaced).toEqual([
+      { id: 'm2', content: 'v2', createdAt: '2026-08-05T00:00:00Z' },
+    ]);
   });
 });
