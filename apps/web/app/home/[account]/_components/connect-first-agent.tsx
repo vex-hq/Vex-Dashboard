@@ -4,10 +4,21 @@ import { useState, useTransition } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { useTranslation } from 'react-i18next';
+
 import { Button } from '@kit/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
+import { Trans } from '@kit/ui/trans';
+import { cn } from '@kit/ui/utils';
 
 import { createApiKeyAction } from '../settings/api-keys/_lib/server/api-keys-actions';
+
+/**
+ * Minimum interactive tap target (44px) — matches context-stream.tsx's
+ * MIN_TAP_TARGET_CLASS convention: nothing here is hover-only or smaller
+ * than a thumb.
+ */
+const MIN_TAP_TARGET_CLASS = 'min-h-11';
 
 /**
  * First-run: connect an agent without leaving this screen.
@@ -34,7 +45,15 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [checking, startCheckTransition] = useTransition();
+  const [hasChecked, setHasChecked] = useState(false);
+  // Previous-render snapshot of `checking`, compared during render (not in
+  // an effect) to catch the falling edge — see React's "adjusting state
+  // when a prop changes" pattern. Guarded by the `!==` check so it settles
+  // in one extra render instead of looping.
+  const [previousChecking, setPreviousChecking] = useState(checking);
   const router = useRouter();
+  const { t } = useTranslation('agentguard');
 
   const mint = () => {
     setError(null);
@@ -74,6 +93,42 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
     } catch {
       // Clipboard denied — the command is selectable either way.
     }
+  };
+
+  /**
+   * Same shape as `mint` above: an async callback inside `startTransition`.
+   * `router.refresh()` returns void, not a promise, but `await`-ing it still
+   * keeps `checking` true for as long as the refreshed server payload is
+   * being fetched and applied, not just until this call returns
+   * synchronously.
+   */
+  const checkForMemory = () => {
+    startCheckTransition(async () => {
+      await router.refresh();
+    });
+  };
+
+  /**
+   * `checking` flips back to `false` once the transition above has fully
+   * committed. That falling edge — not the click itself — is "the check
+   * finished." If this component is still mounted after that, the parent
+   * server component looked and found no memory yet: unmounting the whole
+   * card is how it reports success, so still being here means "not yet."
+   */
+  if (checking !== previousChecking) {
+    setPreviousChecking(checking);
+
+    if (previousChecking && !checking) {
+      setHasChecked(true);
+    }
+  }
+
+  const reloadPage = () => {
+    // router.refresh() only refetches the server payload for THIS tab. A
+    // tab left open across a deploy can keep rendering an older build, so
+    // for anyone who thinks the card is stuck, a hard reload of the whole
+    // page is the reliable last resort.
+    window.location.reload();
   };
 
   return (
@@ -132,10 +187,49 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.refresh()}
+              className={cn(MIN_TAP_TARGET_CLASS)}
+              onClick={checkForMemory}
+              disabled={checking}
             >
-              I ran it — check for my first memory
+              {checking
+                ? t('connectFirstAgent.checking', 'Checking…')
+                : t(
+                    'connectFirstAgent.checkButton',
+                    'I ran it — check for my first memory',
+                  )}
             </Button>
+            {hasChecked && !checking ? (
+              <div
+                className="border-input bg-muted/40 flex flex-col gap-2 rounded-lg border p-3"
+                role="status"
+                aria-live="polite"
+              >
+                <p className="text-foreground text-sm font-medium">
+                  <Trans i18nKey="agentguard:connectFirstAgent.notCapturedTitle">
+                    No memory captured yet.
+                  </Trans>
+                </p>
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  <Trans i18nKey="agentguard:connectFirstAgent.notCapturedHint">
+                    Two things worth checking: that the command ran in your
+                    terminal without an error, and that you restarted your agent
+                    afterward.
+                  </Trans>
+                </p>
+                <button
+                  type="button"
+                  onClick={reloadPage}
+                  className={cn(
+                    'text-primary flex w-fit items-center text-left text-xs hover:underline',
+                    MIN_TAP_TARGET_CLASS,
+                  )}
+                >
+                  <Trans i18nKey="agentguard:connectFirstAgent.reload">
+                    Reload the page
+                  </Trans>
+                </button>
+              </div>
+            ) : null}
           </>
         )}
       </CardContent>
