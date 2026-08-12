@@ -18,7 +18,7 @@ import { SiteHeader } from './_components/site-header';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://klio.tech'),
-  title: 'Klio — the workplace for AI agents',
+  title: 'Klio — context management for AI agents',
   description:
     'Your agents do not need better memories. They need somewhere to work together. Connect Claude Code, Cursor, Codex and any MCP client to one project-scoped memory: one agent finishes, the next picks up where it left off. Local-first, encrypted, open source.',
   keywords: [
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     canonical: 'https://klio.tech',
   },
   openGraph: {
-    title: 'Klio — the workplace for AI agents',
+    title: 'Klio — context management for AI agents',
     description:
       'Give your agents somewhere to work together. One finishes, the next picks up where it left off — across Claude Code, Cursor, Codex and any MCP client.',
     url: 'https://klio.tech',
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     site: '@klio_tech',
-    title: 'Klio — the workplace for AI agents',
+    title: 'Klio — context management for AI agents',
     description:
       'Give your agents somewhere to work together. One finishes, the next picks up where it left off.',
   },

@@ -32,7 +32,7 @@ export function PlateCondition() {
         <div>
           {OBSERVATIONS.map((observation) => (
             <div className="k-obs" key={observation.ordinal}>
-              <h3>{observation.ordinal}</h3>
+              <h2>{observation.ordinal}</h2>
               <p>{observation.text}</p>
             </div>
           ))}

@@ -52,7 +52,7 @@ export function HandoverStrip({
             <code
               key={verb}
               className={`border-background/30 rounded-full border px-2 py-0.5 font-mono ${
-                compact ? 'text-[10px]' : 'text-[11px] md:text-xs'
+                compact ? 'text-[11px]' : 'text-[11px] md:text-xs'
               }`}
             >
               {verb}

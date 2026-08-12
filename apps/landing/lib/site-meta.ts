@@ -29,7 +29,7 @@
  */
 
 export const POSITIONING_SENTENCE =
-  'Klio is a shared workplace for AI agents — connect Claude Code, Cursor, Codex, and any MCP client to one project-scoped memory, so an agent that finishes sets down what it decided and the next one picks it up and keeps going. Nothing gets re-explained, and no work is paid for twice. Local-first, encrypted, and open source.' as const;
+  'Klio is context management for AI agents — connect Claude Code, Cursor, Codex, and any MCP client to one project-scoped store of decisions, constraints and lessons, kept current and handed to whoever works next. An agent that finishes sets down what it decided; the next one picks it up and keeps going. Local-first core, encrypted, open source.' as const;
 
 export interface Organization {
   readonly name: string;

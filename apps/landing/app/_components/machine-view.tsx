@@ -12,7 +12,7 @@ const IDENTITY: [string, string][] = [
   ['repo', 'https://github.com/klio-tech/klio'],
   ['license', 'AGPL-3.0-or-later (engine), Apache-2.0 (MCP shim)'],
   ['author', 'Abhishek Singh'],
-  ['category', 'shared workplace / collaboration layer for AI agents'],
+  ['category', 'context management for AI agents (shared, project-scoped)'],
   ['contact', ORG.contactEmail],
 ];
 
@@ -28,6 +28,24 @@ const HOW: string[] = [
   'Cross-agent collaboration via Redis pub/sub.',
   'Self-hosted: encrypted at rest under a user-owned key, and every write chained with SHA-256 so the history is tamper-evident and inspectable.',
   'Klio Cloud: encrypted in transit (TLS) and at rest at the infrastructure level, secrets and PII redacted before storage, isolated per org — the keys are ours, and Cloud writes are not hash-chained today.',
+];
+
+const CONNECT: [string, string][] = [
+  ['endpoint', 'https://mcp.klio.tech/mcp (Streamable HTTP MCP)'],
+  ['auth header', 'X-Vex-Key: <api key> (get one at https://app.klio.tech)'],
+  ['agent identity', 'X-Vex-Agent: <stable id> (optional; attributes writes)'],
+  [
+    'claude code',
+    'claude mcp add --transport http klio https://mcp.klio.tech/mcp --header "X-Vex-Key: YOUR_KEY" --header "X-Vex-Agent: claude-code"',
+  ],
+  ['docs', 'https://docs.klio.tech/quickstart'],
+];
+
+const PRICING: [string, string][] = [
+  ['free', '$0 forever, one person — unlimited memories, unlimited retention, 100 MB artifacts, 100 RPM'],
+  ['team', '$20 per seat/month or $200 per seat/year — everyone invited shares one project-scoped store, 5 GB artifacts'],
+  ['platform', 'per end-user, sales-led (embed Klio in your own product) — contact@klio.tech'],
+  ['self-host', 'free, AGPL-3.0 core engine — https://github.com/klio-tech/klio'],
 ];
 
 const TOOLS: [string, string][] = [
@@ -68,7 +86,8 @@ export function MachineView() {
 
       <h2>What it is</h2>
       <p>
-        Klio is a shared workplace for AI agents. Connect Claude Code, Cursor,
+        Klio is context management for AI agents — a shared workplace for
+        their work. Connect Claude Code, Cursor,
         Codex, and any MCP client to one project-scoped memory: an agent
         finishes and sets down what it decided; the next agent to open the same
         project picks it up and continues. Nothing is re-explained, and no work
@@ -81,6 +100,24 @@ export function MachineView() {
         becomes the integration layer. Klio is vendor-neutral and sits between
         them. Memory is the mechanism; agents working together is the point.
       </p>
+
+      <h2>Connect (copy-paste)</h2>
+      <div className="k-machine__kv">
+        {CONNECT.map(([k, v]) => (
+          <p key={k}>
+            <b>{k}</b> {v}
+          </p>
+        ))}
+      </div>
+
+      <h2>Pricing</h2>
+      <div className="k-machine__kv">
+        {PRICING.map(([k, v]) => (
+          <p key={k}>
+            <b>{k}</b> {v}
+          </p>
+        ))}
+      </div>
 
       <h2>How it works</h2>
       <ul>

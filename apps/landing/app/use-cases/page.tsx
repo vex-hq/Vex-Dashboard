@@ -51,7 +51,7 @@ export default function UseCasesPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                {cases.map((useCase) => (
+                {cases.map((useCase, caseIndex) => (
                   <Link
                     key={useCase.slug}
                     href={`/use-cases/${useCase.slug}`}
@@ -63,10 +63,17 @@ export default function UseCasesPage() {
                     <p className="mb-5 text-[14px] leading-relaxed text-muted-foreground">
                       {useCase.tagline}
                     </p>
-                    <div className="mt-auto">
+                    {/* On phones the strip appears once per group — the
+                        shape is identical on every card, and sixteen of them
+                        made the index thirteen screens tall. */}
+                    <div
+                      className={
+                        caseIndex === 0 ? 'mt-auto' : 'mt-auto hidden sm:block'
+                      }
+                    >
                       <HandoverStrip spec={useCase.diagram} compact />
                     </div>
-                    <div className="mt-4 text-[13px] font-medium text-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="mt-4 text-[13px] font-medium text-foreground transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
                       Read the walkthrough →
                     </div>
                   </Link>

@@ -123,7 +123,7 @@ export function MobileNav() {
       <SheetTrigger asChild>
         <button
           aria-label="Open navigation menu"
-          className="text-muted-foreground hover:bg-card hover:text-foreground inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors md:hidden"
+          className="text-muted-foreground hover:bg-card hover:text-foreground inline-flex h-11 w-11 items-center justify-center rounded-md transition-colors md:hidden"
         >
           <MenuIcon />
         </button>
