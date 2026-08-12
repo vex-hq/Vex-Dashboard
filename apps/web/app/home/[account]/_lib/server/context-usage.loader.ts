@@ -5,8 +5,9 @@ import { cache } from 'react';
 import { getAgentGuardPool } from '~/lib/agentguard/db';
 
 /**
- * Per-project usage over the last 30 days: measured capture/recall counts,
- * plus a labeled *estimate* of context tokens served.
+ * Per-project usage: measured capture/recall/storage accounting over the
+ * last 30 days (storage is a level, not a flow, so it is all-time), plus a
+ * labeled *estimate* of context tokens served.
  *
  * HONESTY NOTE — carry this near-verbatim to every surface that renders
  * `estContextTokens30d`: result ids are not logged (`022_brain_recall_events.py`),
@@ -16,22 +17,26 @@ import { getAgentGuardPool } from '~/lib/agentguard/db';
  *
  * - `memories30d` — count of `session_memories` captured in the window,
  *   measured exactly.
- * - `recalls30d` — `SUM(result_count)` from `brain_recall_events` in the
- *   window: the total number of memory results returned by recall calls,
- *   measured exactly (this is a count of results served, not of recall
- *   calls).
- * - `estContextTokens30d` — `recalls30d * meanContentLength / 4`, floored.
- *   `meanContentLength` is the org's mean `length(content)` across active
- *   memories (not project-scoped — brain_recall_events does not log which
- *   result ids were served, so a per-project content length is not
- *   knowable either). This is a rough token-per-character estimate, never
- *   a measured value.
+ * - `recalls30d` — `COUNT(*)` of `brain_recall_events` rows in the window:
+ *   the number of recall calls made, measured exactly. This is distinct
+ *   from `result_count`, which counts memory results returned per call
+ *   (one recall call can return many results) — `result_count` feeds only
+ *   `estContextTokens30d` below, never `recalls30d`.
+ * - `storageBytes` — `SUM(length(content))` over ACTIVE `session_memories`,
+ *   all-time (not windowed — a level, not a flow), measured exactly.
+ * - `estContextTokens30d` — `SUM(result_count) * meanContentLength / 4`,
+ *   floored. `meanContentLength` is the org's mean `length(content)` across
+ *   active memories (not project-scoped — `brain_recall_events` does not
+ *   log which result ids were served, so a per-project content length is
+ *   not knowable either). This is a rough token-per-character estimate,
+ *   never a measured value.
  */
 export interface ProjectUsage {
   projectId: string | null;
   projectName: string | null;
   memories30d: number;
   recalls30d: number;
+  storageBytes: number;
   estContextTokens30d: number; // ALWAYS presented as an estimate
 }
 
@@ -43,11 +48,17 @@ interface CaptureRow {
 
 interface RecallRow {
   project_id: string | null;
+  recall_count: string;
   result_sum: string;
 }
 
 interface MeanLenRow {
   mean_len: string | null;
+}
+
+interface StorageRow {
+  project_id: string | null;
+  storage_bytes: string;
 }
 
 function toNumber(value: string | null | undefined): number {
@@ -56,10 +67,10 @@ function toNumber(value: string | null | undefined): number {
 }
 
 /**
- * Per-project usage accounting for the last 30 days, merged from two
- * independent aggregates (captures, recalls) plus one org-wide mean content
- * length used to derive the labeled estimate. See the module docstring for
- * the honesty note on `estContextTokens30d`.
+ * Per-project usage accounting, merged from three independent aggregates
+ * (captures, recalls, storage) plus one org-wide mean content length used
+ * to derive the labeled estimate. See the module docstring for the honesty
+ * note on `estContextTokens30d` and the recalls-vs-results distinction.
  *
  * @param orgId - The caller's org. Tenancy boundary, as everywhere else in
  *   this directory — bound through the params array on every query, never
@@ -69,7 +80,7 @@ export const loadContextUsage = cache(
   async (orgId: string): Promise<ProjectUsage[]> => {
     const pool = getAgentGuardPool();
 
-    const [captures, recalls, meanLen] = await Promise.all([
+    const [captures, recalls, meanLen, storage] = await Promise.all([
       pool.query<CaptureRow>(
         `
         SELECT
@@ -89,6 +100,7 @@ export const loadContextUsage = cache(
         `
         SELECT
           project_id,
+          COUNT(*) AS recall_count,
           SUM(result_count) AS result_sum
         FROM brain_recall_events
         WHERE org_id = $1
@@ -106,33 +118,59 @@ export const loadContextUsage = cache(
         `,
         [orgId],
       ),
+      pool.query<StorageRow>(
+        `
+        SELECT
+          project_id,
+          SUM(length(content)) AS storage_bytes
+        FROM session_memories
+        WHERE org_id = $1
+          AND status = 'active'
+        GROUP BY project_id
+        `,
+        [orgId],
+      ),
     ]);
 
     const meanContentLength = toNumber(meanLen.rows[0]?.mean_len);
 
     const byProject = new Map<string | null, ProjectUsage>();
 
+    function upsert(
+      projectId: string | null,
+      patch: Partial<Omit<ProjectUsage, 'projectId'>>,
+    ): void {
+      const existing = byProject.get(projectId);
+      byProject.set(projectId, {
+        projectId,
+        projectName: existing?.projectName ?? null,
+        memories30d: existing?.memories30d ?? 0,
+        recalls30d: existing?.recalls30d ?? 0,
+        storageBytes: existing?.storageBytes ?? 0,
+        estContextTokens30d: existing?.estContextTokens30d ?? 0,
+        ...patch,
+      });
+    }
+
     for (const row of captures.rows) {
-      byProject.set(row.project_id, {
-        projectId: row.project_id,
+      upsert(row.project_id, {
         projectName: row.project_name,
         memories30d: toNumber(row.memories),
-        recalls30d: 0,
-        estContextTokens30d: 0,
       });
     }
 
     for (const row of recalls.rows) {
       const resultSum = toNumber(row.result_sum);
       const estimate = Math.floor((resultSum * meanContentLength) / 4);
-      const existing = byProject.get(row.project_id);
-
-      byProject.set(row.project_id, {
-        projectId: row.project_id,
-        projectName: existing?.projectName ?? null,
-        memories30d: existing?.memories30d ?? 0,
-        recalls30d: resultSum,
+      upsert(row.project_id, {
+        recalls30d: toNumber(row.recall_count),
         estContextTokens30d: estimate,
+      });
+    }
+
+    for (const row of storage.rows) {
+      upsert(row.project_id, {
+        storageBytes: toNumber(row.storage_bytes),
       });
     }
 
