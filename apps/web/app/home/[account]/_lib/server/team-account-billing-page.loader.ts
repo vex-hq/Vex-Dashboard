@@ -18,6 +18,7 @@ function teamAccountBillingPageLoader(accountId: string) {
   const subscription = api.getSubscription(accountId);
   const order = api.getOrder(accountId);
   const customerId = api.getCustomerId(accountId);
+  const membersCount = api.getMembersCount(accountId);
 
-  return Promise.all([subscription, order, customerId]);
+  return Promise.all([subscription, order, customerId, membersCount]);
 }

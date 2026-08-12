@@ -1,11 +1,4 @@
-import {
-  Activity,
-  BookOpen,
-  Brain,
-  FolderGit2,
-  Hexagon,
-  Sparkles,
-} from 'lucide-react';
+import { BookOpen, Brain, FolderGit2, Hexagon } from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -33,8 +26,12 @@ const iconClasses = 'w-4';
  * dropped because the page queried `executions`, which is empty for a
  * memory-only org — but `session_memories` holds 37k rows across 272 sessions.
  * The need was real, the data source was wrong. The page was repointed at
- * `session_memories` and the item is back. The old execution-session view was
- * not deleted; it lives at /home/[account]/execution-sessions.
+ * `session_memories` and the item came back — but as of the 2026-08-11
+ * context-workspace IA pass, Sessions and Agents are pruned from the sidebar
+ * again to match the target IA (Home · Projects · Memory · Docs). Both routes
+ * remain live at /home/[account]/sessions and /home/[account]/agents; only
+ * the nav entries are gone, same hidden-not-deleted treatment as everything
+ * below.
  *
  * IMPORTANT — nothing was deleted. Every route, loader and page is still in the
  * tree and still reachable by URL, so the org that does use the reliability
@@ -69,16 +66,6 @@ const getRoutes = (account: string) => [
         label: 'agentguard:nav.projects',
         path: createPath(pathsConfig.app.accountProjects, account),
         Icon: <FolderGit2 className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.sessions',
-        path: createPath(pathsConfig.app.accountSessions, account),
-        Icon: <Activity className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.agents',
-        path: createPath(pathsConfig.app.accountAgents, account),
-        Icon: <Sparkles className={iconClasses} />,
         end: true,
       },
     ],
@@ -95,6 +82,29 @@ const getRoutes = (account: string) => [
       },
     ],
   },
+
+  // ── Sessions / Agents — hidden, not removed ───────────────────────────────
+  // Both are real, populated pages (session_memories: 37k rows / 272 sessions).
+  // Dropped from the target IA (Home · Projects · Memory · Docs) by the
+  // 2026-08-11 context-workspace pass, not because the data is dead — Memory
+  // and Projects now carry that surface area. Routes remain live at
+  // /home/[account]/{sessions,agents}. To restore an item, uncomment it.
+  //
+  // {
+  //   label: 'agentguard:nav.workspace',
+  //   children: [
+  //     {
+  //       label: 'agentguard:nav.sessions',
+  //       path: createPath(pathsConfig.app.accountSessions, account),
+  //       Icon: <Activity className={iconClasses} />,
+  //     },
+  //     {
+  //       label: 'agentguard:nav.agents',
+  //       path: createPath(pathsConfig.app.accountAgents, account),
+  //       Icon: <Sparkles className={iconClasses} />,
+  //     },
+  //   ],
+  // },
 
   // ── Vex reliability console — hidden, not removed ──────────────────────────
   // Fed only via the Vex SDK; empty for every memory-only org.
