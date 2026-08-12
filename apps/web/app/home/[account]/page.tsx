@@ -7,6 +7,7 @@ import { parseTimeRange } from '~/lib/agentguard/time-range';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
+import { ConnectFirstAgent } from './_components/connect-first-agent';
 import { HomepageDashboard } from './_components/homepage-dashboard';
 import { TeamAccountLayoutPageHeader } from './_components/team-account-layout-page-header';
 import {
@@ -139,6 +140,17 @@ async function TeamAccountHomePage({
       />
 
       <PageBody>
+        {/* First-run: an org with zero memory writes in the volume window has
+            no working agent connection — either brand new or a setup that
+            never finished. Both want the same thing: the connect command,
+            here, with the key already in it. Disappears on the first write.
+            (A long-idle but genuinely connected org sees it too; for them it
+            reads as a reconnect helper, which is not wrong.) */}
+        {memoryVolume.every((point) => point.captured === 0) ? (
+          <div className="mb-6">
+            <ConnectFirstAgent accountSlug={account} />
+          </div>
+        ) : null}
         <HomepageDashboard
           kpis={kpis}
           agentHealth={agentHealth}
