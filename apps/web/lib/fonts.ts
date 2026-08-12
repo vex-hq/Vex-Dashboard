@@ -1,39 +1,33 @@
-import {
-  JetBrains_Mono,
-  Playfair_Display,
-  Space_Grotesk,
-} from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 
 import { cn } from '@kit/ui/utils';
 
 /**
  * @sans
- * @description Space Grotesk — product UI (Sentrial design system)
+ * @description Inter — product UI (Linear design language). Google Fonts'
+ * variable build is the free equivalent of Linear's self-hosted "Inter Variable".
  */
-const sans = Space_Grotesk({
+const sans = Inter({
   subsets: ['latin'],
   variable: '--font-sans-fallback',
   fallback: ['system-ui', 'Helvetica Neue', 'Helvetica', 'Arial'],
   preload: true,
-  weight: ['300', '400', '500', '600', '700'],
 });
 
 /**
  * @heading
- * @description Playfair Display — marketing/display headings (Sentrial design system)
+ * @description Inter — marketing/display headings (Linear design language)
  */
-const heading = Playfair_Display({
+const heading = Inter({
   subsets: ['latin'],
   variable: '--font-heading',
-  fallback: ['Georgia', 'serif'],
+  fallback: ['system-ui', 'Helvetica Neue', 'Helvetica', 'Arial'],
   preload: true,
-  weight: ['400', '500', '600', '700'],
-  style: ['normal', 'italic'],
 });
 
 /**
  * @mono
- * @description JetBrains Mono — code blocks (Sentrial design system)
+ * @description JetBrains Mono — code blocks
  */
 const mono = JetBrains_Mono({
   subsets: ['latin'],
