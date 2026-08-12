@@ -150,7 +150,7 @@ async function TeamAccountHomePage({
         description={<AppBreadcrumbs />}
       />
 
-      <PageBody>
+      <PageBody className="gap-8 pb-16">
         {/* First-run: an org that has NEVER captured a single memory, of any
             scope or status, has no working agent connection — either brand
             new or a setup that never finished. Both want the same thing: the
@@ -161,31 +161,31 @@ async function TeamAccountHomePage({
             check does not belong here: it falsely flagged active
             private-scope-only workspaces as disconnected in production). */}
         {hasAnyMemory === false ? (
-          <div className="mb-6">
-            <ConnectFirstAgent accountSlug={account} />
-          </div>
+          <ConnectFirstAgent accountSlug={account} />
         ) : null}
 
-        {/* Band 1 — the answer line: literally answers "what happened" in
-            large, primary-ink numbers before anything else on screen. */}
-        <div className="mb-6">
-          <ActivityAnswer summary={hubSummary} />
-        </div>
+        <ActivityAnswer
+          summary={hubSummary}
+          recalls={usage.reduce((sum, row) => sum + row.recalls30d, 0)}
+        />
 
-        {/* Band 2 — project tiles: replaces the old wide numeric usage
-            table with a scannable grid, each card its own 30-day
-            sparkline plus the honesty-preserved usage figures. */}
-        <div className="mb-6">
+        <section className="flex flex-col gap-3">
+          <h2 className="text-muted-foreground font-mono text-[length:var(--text-tiny)] tracking-[0.06em] uppercase">
+            <Trans i18nKey="agentguard:hub.projectsHeading">Projects</Trans>
+          </h2>
           <ProjectTiles
             sparks={hubSummary.projectSparks}
             usage={usage}
             accountSlug={account}
           />
-        </div>
+        </section>
 
-        {/* Band 3 — the stream as a timeline: day-grouped, ink hierarchy
-            carries which rows are deliberate writes vs. telemetry. */}
-        <ContextStream items={stream} projects={projects} agents={agents} />
+        <section className="flex flex-col gap-3">
+          <h2 className="text-muted-foreground font-mono text-[length:var(--text-tiny)] tracking-[0.06em] uppercase">
+            <Trans i18nKey="agentguard:hub.activityHeading">Now</Trans>
+          </h2>
+          <ContextStream items={stream} projects={projects} agents={agents} />
+        </section>
       </PageBody>
     </>
   );

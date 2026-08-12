@@ -23,15 +23,21 @@ export interface RawStreamSearchParams {
 const KNOWN_KINDS = new Set(['decision', 'plan', 'fact', 'note']);
 
 /**
+ * The Hub's resting view is the last 7 days. `?days=` omitted means 7.
+ * `?days=all` is the explicit all-time opt-in. A bad or tampered value
+ * (unknown `kind`, non-numeric days) degrades to the default rather than
+ * throwing, so a stale bookmark never breaks the page.
+ */
+export const HUB_DEFAULT_STREAM_DAYS = 7;
+export const HUB_ALL_TIME_DAYS_PARAM = 'all';
+
+/**
  * Parse the home page's `?project=&agent=&kind=&days=` search params into
  * {@link StreamFilters}, server-side.
  *
  * This is what makes a filtered context-stream view shareable as a URL: the
  * page re-derives the same filters from the query string on every request,
- * rather than trusting client-held state. A bad or tampered value (unknown
- * `kind`, non-numeric or non-positive `days`) degrades to "no filter" —
- * never throws — because a stale bookmark or a hand-edited URL should fall
- * back to the unfiltered stream, not break the page.
+ * rather than trusting client-held state.
  */
 export function parseStreamFilters(
   params: RawStreamSearchParams,
@@ -40,9 +46,15 @@ export function parseStreamFilters(
   const agentId = params.agent?.trim() || undefined;
   const kind =
     params.kind && KNOWN_KINDS.has(params.kind) ? params.kind : undefined;
-  const days = parsePositiveInteger(params.days);
 
-  return { projectId, agentId, kind, days };
+  return { projectId, agentId, kind, days: parseDays(params.days) };
+}
+
+function parseDays(raw: string | undefined): number | undefined {
+  if (raw === HUB_ALL_TIME_DAYS_PARAM) return undefined;
+  if (!raw) return HUB_DEFAULT_STREAM_DAYS;
+
+  return parsePositiveInteger(raw) ?? HUB_DEFAULT_STREAM_DAYS;
 }
 
 /** A positive integer, and nothing else — no decimals, no leading `-`, no `0`. */

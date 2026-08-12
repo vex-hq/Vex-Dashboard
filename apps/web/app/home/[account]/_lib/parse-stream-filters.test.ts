@@ -19,13 +19,17 @@ describe('parseStreamFilters', () => {
     });
   });
 
-  it('returns all-undefined for an empty search', () => {
+  it('defaults a missing days param to the last 7 days, not all time', () => {
     expect(parseStreamFilters({})).toEqual({
       projectId: undefined,
       agentId: undefined,
       kind: undefined,
-      days: undefined,
+      days: 7,
     });
+  });
+
+  it('treats days=all as an explicit all-time opt-in', () => {
+    expect(parseStreamFilters({ days: 'all' }).days).toBeUndefined();
   });
 
   it('falls back kind to undefined when it is not a known kind', () => {
@@ -45,20 +49,20 @@ describe('parseStreamFilters', () => {
     },
   );
 
-  it('falls back days to undefined when negative', () => {
-    expect(parseStreamFilters({ days: '-7' }).days).toBeUndefined();
+  it('falls back a negative days value to the 7-day default', () => {
+    expect(parseStreamFilters({ days: '-7' }).days).toBe(7);
   });
 
-  it('falls back days to undefined when zero', () => {
-    expect(parseStreamFilters({ days: '0' }).days).toBeUndefined();
+  it('falls back a zero days value to the 7-day default', () => {
+    expect(parseStreamFilters({ days: '0' }).days).toBe(7);
   });
 
-  it('falls back days to undefined when non-numeric', () => {
-    expect(parseStreamFilters({ days: 'thirty' }).days).toBeUndefined();
+  it('falls back a non-numeric days value to the 7-day default', () => {
+    expect(parseStreamFilters({ days: 'thirty' }).days).toBe(7);
   });
 
-  it('falls back days to undefined when a decimal', () => {
-    expect(parseStreamFilters({ days: '7.5' }).days).toBeUndefined();
+  it('falls back a decimal days value to the 7-day default', () => {
+    expect(parseStreamFilters({ days: '7.5' }).days).toBe(7);
   });
 
   it('accepts a positive integer days value', () => {

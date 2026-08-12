@@ -7,7 +7,6 @@ import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@kit/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
 import { Trans } from '@kit/ui/trans';
 import { cn } from '@kit/ui/utils';
 
@@ -132,12 +131,11 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Connect your first agent</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {!command ? (
+    <section className="border-border flex flex-col gap-4 border-y py-6">
+      <h2 className="text-foreground text-[length:var(--text-large)] font-[590]">
+        Connect your first agent
+      </h2>
+      {!command ? (
           <>
             <p className="text-muted-foreground text-sm leading-relaxed">
               One command connects Claude Code, Cursor, Codex or any MCP client
@@ -158,7 +156,7 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
             <div className="flex items-center justify-between gap-3">
               <p className="text-muted-foreground text-sm">
                 Paste this in your terminal. The key appears{' '}
-                <b>only this once</b> — it is stored hashed, so copy the command
+                <b>only this once</b>. It is stored hashed, so copy the command
                 before leaving this page.
               </p>
               <Button
@@ -182,7 +180,7 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
                 </span>
                 .
               </li>
-              <li>Refresh here — the first memory flips this card.</li>
+              <li>Refresh here. The first memory dismisses this panel.</li>
             </ol>
             <Button
               variant="outline"
@@ -232,7 +230,6 @@ export function ConnectFirstAgent({ accountSlug }: { accountSlug: string }) {
             ) : null}
           </>
         )}
-      </CardContent>
-    </Card>
+    </section>
   );
 }

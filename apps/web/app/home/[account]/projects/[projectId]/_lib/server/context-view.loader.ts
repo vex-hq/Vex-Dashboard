@@ -40,17 +40,26 @@ import { getAgentGuardPool } from '~/lib/agentguard/db';
  *     this loader to learn whether a project id exists in a different org.
  *
  * Once membership is established, every other query is scoped by
- * `org_id = $1 AND project_id = $2` and carries the same visibility arms as
- * `visibilityArms` below builds, copied verbatim from:
- *   - org arm + private arm (member only) -> `_lib/server/context-stream.loader.ts`
- *   - project arm -> same file's `EXISTS project_members` predicate for
- *     members, and `project-memory.loader.ts`'s `TRUE` for admins
- * Admins get no private arm at all — `project-memory.loader.ts`'s own
- * comment is explicit that admin access "grants nothing in
- * private-memory.loader — admins see no private scope, ever" and this loader
- * preserves that: a member sees org-scoped + their own private-scoped +
- * project-scoped items; an admin sees org-scoped + all project-scoped items,
- * never any private-scoped item, member or not.
+ * `org_id = $1 AND project_id = $2` and carries the visibility arms
+ * `visibilityArms` builds. Item visibility is the same ladder the Hub
+ * stream uses (`context-stream.loader.ts` / `hub-summary.loader.ts`):
+ *
+ *   - org arm — always
+ *   - own-private arm — always, keyed on the signed-in viewer, never on
+ *     admin-ness. Admin status must not hide the viewer's own private
+ *     rows, and must not reveal anyone else's. The engine auto-creates
+ *     projects on first write without enrolling a `project_members` row
+ *     and lands hook/curator captures at `scope='private'` with
+ *     `project_id` set (see `loadProjectPulse`'s 2026-08-12 incident
+ *     note). Dropping the private arm for admins emptied every such
+ *     project page while the Hub still counted those same rows.
+ *   - project arm — `EXISTS project_members` for members; unconditional
+ *     for admins (they may read every `scope='project'` row in the org)
+ *
+ * `ProjectAccess.admin` still carries no `userId` (that type is the
+ * project-listing gate). The viewer's id is a separate required argument
+ * so the private arm cannot be "simplified" away the way adopting
+ * `{ kind: 'admin' }` alone would.
  *
  * `status IN ('active', 'superseded') AND recall_hidden = FALSE` matches
  * `context-stream.loader.ts`'s filter exactly: this view is recall-shaped
@@ -102,6 +111,8 @@ export interface ContextViewHeader {
   members: number;
   agentsActive: string[];
   itemsThisWeek: number;
+  /** Visible items of any type, same filter as `recent`, no time window. */
+  itemsTotal: number;
 }
 
 export interface ContextView {
@@ -135,6 +146,7 @@ interface ChainQueryRow {
 interface HeaderQueryRow {
   members: string;
   items_this_week: string;
+  items_total: string;
   agents_active: string[] | null;
 }
 
@@ -170,38 +182,53 @@ function makeBinder(params: unknown[]): (value: unknown) => string {
 }
 
 /**
- * The visibility arms every scoped query below ORs together, branching on
- * `ProjectAccess` exactly as `project-memory.loader.ts`'s `visibilityClause`
- * does — see file header for the full rationale.
+ * The visibility arms every scoped query below ORs together. See the file
+ * header for why the private arm is keyed on `viewerUserId` for both
+ * access kinds — admin-ness widens only the project arm.
  *
- * Member: org arm + own-private arm + `EXISTS project_members` project arm,
- * copied verbatim from `context-stream.loader.ts` (org/private) and that
- * file's project arm (itself sourced from `project-memory.loader.ts`).
- *
- * Admin: org arm + unconditional project arm (`visibilityClause`'s `TRUE`
- * branch) — no private arm at all, ever.
- *
- * `params`/`p` are the caller's own binder — the member branch binds the
- * viewer's user id as a parameter; the admin branch binds nothing extra.
+ * `params`/`p` are the caller's own binder. Both branches bind the
+ * viewer's user id for the private arm; the member branch binds it again
+ * for the `EXISTS project_members` predicate (same value, second
+ * placeholder — never interpolated).
  */
 function visibilityArms(
   access: ProjectAccess,
   p: (value: unknown) => string,
+  viewerUserId: string,
 ): string[] {
+  const privateArm = `(m.scope = 'private' AND m.user_id = ${p(viewerUserId)})`;
+
   if (access.kind === 'admin') {
-    return [`(m.scope = 'org')`, `(m.scope = 'project')`];
+    return [`(m.scope = 'org')`, `(m.scope = 'project')`, privateArm];
   }
 
-  const viewerParam = p(access.userId);
+  const memberParam = p(access.userId);
 
   return [
     `(m.scope = 'org')`,
-    `(m.scope = 'private' AND m.user_id = ${viewerParam})`,
+    privateArm,
     `(m.scope = 'project' AND EXISTS (
       SELECT 1 FROM project_members pm
-      WHERE pm.project_id = m.project_id AND pm.user_id = ${viewerParam}
+      WHERE pm.project_id = m.project_id AND pm.user_id = ${memberParam}
     ))`,
   ];
+}
+
+function assertViewerUserId(
+  access: ProjectAccess,
+  viewerUserId: string,
+): string {
+  if (viewerUserId.trim().length === 0) {
+    throw new Error('context view: viewer user id is required.');
+  }
+
+  if (access.kind === 'member' && access.userId !== viewerUserId) {
+    throw new Error(
+      'context view: member access user id must match the viewer.',
+    );
+  }
+
+  return viewerUserId;
 }
 
 /**
@@ -260,6 +287,7 @@ async function loadSectionItems(
   orgId: string,
   projectId: string,
   access: ProjectAccess,
+  viewerUserId: string,
 ): Promise<ContextItem[]> {
   const pool = getAgentGuardPool();
   const params: unknown[] = [orgId, projectId];
@@ -267,7 +295,7 @@ async function loadSectionItems(
 
   const sectionTypesParam = p(SECTION_TYPES as unknown as string[]);
   const activeParam = p(MEMORY_STATUS_ACTIVE);
-  const arms = visibilityArms(access, p);
+  const arms = visibilityArms(access, p, viewerUserId);
 
   const { rows } = await pool.query<ContextViewQueryRow>(
     `
@@ -322,6 +350,7 @@ async function loadChains(
   orgId: string,
   projectId: string,
   access: ProjectAccess,
+  viewerUserId: string,
   activeIds: string[],
 ): Promise<Map<string, ChainLink[]>> {
   const chains = new Map<string, ChainLink[]>();
@@ -337,7 +366,7 @@ async function loadChains(
   const supersededParam = p(MEMORY_STATUS_SUPERSEDED);
   const activeIdsParam = p(activeIds);
   const depthLimitParam = p(CHAIN_DEPTH_LIMIT);
-  const arms = visibilityArms(access, p);
+  const arms = visibilityArms(access, p, viewerUserId);
   const armsSql = arms.join(' OR ');
 
   const { rows } = await pool.query<ChainQueryRow>(
@@ -402,13 +431,14 @@ async function loadRecent(
   orgId: string,
   projectId: string,
   access: ProjectAccess,
+  viewerUserId: string,
 ): Promise<ContextItem[]> {
   const pool = getAgentGuardPool();
   const params: unknown[] = [orgId, projectId];
   const p = makeBinder(params);
 
   const statusesParam = p(MEMORY_VISIBLE_STATUSES as unknown as string[]);
-  const arms = visibilityArms(access, p);
+  const arms = visibilityArms(access, p, viewerUserId);
   const limitParam = p(RECENT_LIMIT);
 
   const { rows } = await pool.query<ContextViewQueryRow>(
@@ -445,13 +475,14 @@ async function loadHeader(
   orgId: string,
   projectId: string,
   access: ProjectAccess,
+  viewerUserId: string,
 ): Promise<ContextViewHeader> {
   const pool = getAgentGuardPool();
   const params: unknown[] = [orgId, projectId];
   const p = makeBinder(params);
 
   const statusesParam = p(MEMORY_VISIBLE_STATUSES as unknown as string[]);
-  const arms = visibilityArms(access, p);
+  const arms = visibilityArms(access, p, viewerUserId);
   const windowParam = p(String(ACTIVITY_WINDOW_DAYS));
 
   const { rows } = await pool.query<HeaderQueryRow>(
@@ -463,6 +494,7 @@ async function loadHeader(
       COUNT(m.id) FILTER (
         WHERE m.created_at > now() - (${windowParam} || ' days')::interval
       ) AS items_this_week,
+      COUNT(m.id) AS items_total,
       array_agg(DISTINCT m.agent_id) FILTER (
         WHERE m.agent_id IS NOT NULL
           AND m.created_at > now() - (${windowParam} || ' days')::interval
@@ -482,6 +514,7 @@ async function loadHeader(
   return {
     members: parseInt(row?.members ?? '0', 10) || 0,
     itemsThisWeek: parseInt(row?.items_this_week ?? '0', 10) || 0,
+    itemsTotal: parseInt(row?.items_total ?? '0', 10) || 0,
     agentsActive: row?.agents_active ?? [],
   };
 }
@@ -524,7 +557,9 @@ export const loadContextView = cache(
     orgId: string,
     projectId: string,
     access: ProjectAccess,
+    viewerUserId: string,
   ): Promise<ContextView | null> => {
+    const viewer = assertViewerUserId(access, viewerUserId);
     const isMember = await probeMembership(orgId, projectId, access);
 
     if (!isMember) {
@@ -532,13 +567,19 @@ export const loadContextView = cache(
     }
 
     const [sectionRows, recent, header] = await Promise.all([
-      loadSectionItems(orgId, projectId, access),
-      loadRecent(orgId, projectId, access),
-      loadHeader(orgId, projectId, access),
+      loadSectionItems(orgId, projectId, access, viewer),
+      loadRecent(orgId, projectId, access, viewer),
+      loadHeader(orgId, projectId, access, viewer),
     ]);
 
     const activeIds = sectionRows.map((item) => item.id);
-    const chains = await loadChains(orgId, projectId, access, activeIds);
+    const chains = await loadChains(
+      orgId,
+      projectId,
+      access,
+      viewer,
+      activeIds,
+    );
 
     const { decisions, plans, constraints } = assembleSections(
       sectionRows,

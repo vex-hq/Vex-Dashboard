@@ -40,7 +40,7 @@ function view(overrides: Partial<ContextViewData> = {}): ContextViewData {
     plans: [],
     constraints: [],
     recent: [],
-    header: { members: 0, agentsActive: [], itemsThisWeek: 0 },
+    header: { members: 0, agentsActive: [], itemsThisWeek: 0, itemsTotal: 0 },
     ...overrides,
   };
 }
@@ -158,7 +158,12 @@ describe('<ProjectContextView />', () => {
       <ProjectContextView
         view={view({
           decisions: [viewItem({ id: 'd-1' })],
-          header: { members: 4, agentsActive: ['agent-a', 'agent-b'], itemsThisWeek: 7 },
+          header: {
+            members: 4,
+            agentsActive: ['agent-a', 'agent-b'],
+            itemsThisWeek: 7,
+            itemsTotal: 12,
+          },
         })}
       />,
     );

@@ -63,8 +63,10 @@ describe('<ContextStream />', () => {
   it('renders kind glyph, project and relative time on a row', () => {
     render(<ContextStream items={[item({})]} projects={[]} agents={[]} />);
 
-    expect(screen.getByText('decision')).toBeInTheDocument();
-    expect(screen.getByText('api-gateway')).toBeInTheDocument();
+    expect(screen.getByTestId('kind-glyph-decision')).toHaveTextContent(
+      'decision',
+    );
+    expect(screen.getByText(/api-gateway/)).toBeInTheDocument();
   });
 
   it('empty + filtered explains the filter instead of a bare blank', () => {

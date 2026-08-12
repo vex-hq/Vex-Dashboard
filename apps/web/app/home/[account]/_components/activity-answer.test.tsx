@@ -21,56 +21,36 @@ function summary(overrides: Partial<HubSummary>): HubSummary {
 }
 
 describe('<ActivityAnswer />', () => {
-  it('answers with decisions and plans, both counts and the project count large', () => {
+  it('shows written, recalled and live as three numbers', () => {
     render(
       <ActivityAnswer
-        summary={summary({
-          decisions7d: 14,
-          plans7d: 6,
-          projectsActive7d: 3,
-        })}
+        summary={summary({ facts7d: 200, notes7d: 5 })}
+        recalls={12}
       />,
     );
 
-    const line = screen.getByTestId('hub-answer-line');
-    expect(within(line).getByText('14')).toBeInTheDocument();
-    expect(within(line).getByText('6')).toBeInTheDocument();
-    expect(within(line).getByText('3')).toBeInTheDocument();
-    expect(within(line).getByText(/decisions/)).toBeInTheDocument();
-    expect(within(line).getByText(/plans/)).toBeInTheDocument();
+    expect(screen.getByTestId('hub-stat-written')).toHaveTextContent('205');
+    expect(screen.getByTestId('hub-stat-recalled')).toHaveTextContent('12');
+    expect(screen.getByTestId('hub-stat-live')).toHaveTextContent('0');
   });
 
-  // Mutation check: dropping the `projects > 0` guard (always showing the
-  // "across N projects" clause) would render "across 0 projects" here.
-  it('drops the projects clause when no project is active, rather than saying "0 projects"', () => {
-    render(
-      <ActivityAnswer
-        summary={summary({ decisions7d: 5, plans7d: 2, projectsActive7d: 0 })}
-      />,
+  it('marks recalled as a warning when the brain is write-only', () => {
+    render(<ActivityAnswer summary={summary({ facts7d: 205 })} recalls={0} />);
+
+    expect(screen.getByTestId('hub-stat-recalled').querySelector('dd')).toHaveClass(
+      'text-destructive',
     );
-
-    const line = screen.getByTestId('hub-answer-line');
-    expect(within(line).queryByText('0')).not.toBeInTheDocument();
-    expect(within(line).queryByText(/projects/)).not.toBeInTheDocument();
   });
 
-  it('reports facts honestly when there are no decisions or plans this week', () => {
-    render(<ActivityAnswer summary={summary({ facts7d: 31 })} />);
+  it('does not warn on zero recalled when nothing was written', () => {
+    render(<ActivityAnswer summary={summary({})} recalls={0} />);
 
-    const line = screen.getByTestId('hub-answer-line');
-    expect(within(line).getByText('31')).toBeInTheDocument();
-    expect(within(line).getByText(/facts/)).toBeInTheDocument();
-    expect(within(line).getByText(/no decisions yet/i)).toBeInTheDocument();
+    expect(
+      screen.getByTestId('hub-stat-recalled').querySelector('dd'),
+    ).not.toHaveClass('text-destructive');
   });
 
-  it('renders a neutral sentence when nothing happened this week', () => {
-    render(<ActivityAnswer summary={summary({})} />);
-
-    const line = screen.getByTestId('hub-answer-line');
-    expect(within(line).getByText(/no activity recorded this week/i)).toBeInTheDocument();
-  });
-
-  it('shows the last-activity relative time and active-agent count in the meta line', () => {
+  it('shows the last-activity relative time and named agents', () => {
     render(
       <ActivityAnswer
         summary={summary({
@@ -82,7 +62,11 @@ describe('<ActivityAnswer />', () => {
 
     const meta = screen.getByTestId('hub-answer-meta');
     expect(within(meta).getByText(/hour ago/i)).toBeInTheDocument();
-    expect(within(meta).getByText(/2 agents active/i)).toBeInTheDocument();
+    expect(screen.getByTestId('hub-agents-active')).toHaveAccessibleName(
+      /2 agents active/i,
+    );
+    expect(within(meta).getByText('agent-1')).toBeInTheDocument();
+    expect(within(meta).getByText('agent-2')).toBeInTheDocument();
   });
 
   it('shows a placeholder instead of a relative time when nothing has ever happened', () => {
@@ -93,7 +77,7 @@ describe('<ActivityAnswer />', () => {
     );
   });
 
-  it('renders the 30-day sparkline spanning the band', () => {
+  it('renders the week as a 7-day heat strip', () => {
     render(
       <ActivityAnswer
         summary={summary({
@@ -106,7 +90,7 @@ describe('<ActivityAnswer />', () => {
     );
 
     expect(
-      screen.getByRole('img', { name: /30-day activity/i }),
+      screen.getByRole('img', { name: /7-day activity/i }),
     ).toBeInTheDocument();
   });
 });

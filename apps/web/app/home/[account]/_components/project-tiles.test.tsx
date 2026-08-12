@@ -73,7 +73,6 @@ describe('<ProjectTiles />', () => {
 
     expect(within(screen.getByTestId('memories-30d-p-1')).getByText('12')).toBeInTheDocument();
     expect(within(screen.getByTestId('recalls-30d-p-1')).getByText('34')).toBeInTheDocument();
-    expect(within(screen.getByTestId('storage-p-1')).getByText('2.0 KB')).toBeInTheDocument();
   });
 
   it('renders zeroed stats, not "missing", for a project with no usage row', () => {
@@ -89,7 +88,7 @@ describe('<ProjectTiles />', () => {
     expect(within(screen.getByTestId('recalls-30d-p-9')).getByText('0')).toBeInTheDocument();
   });
 
-  it('always shows the word "estimated" next to the token figure — the honesty canary', () => {
+  it('does not put token estimates on the Hub pulse', () => {
     render(
       <ProjectTiles
         sparks={[spark({ projectId: 'p-1' })]}
@@ -98,25 +97,8 @@ describe('<ProjectTiles />', () => {
       />,
     );
 
-    const tokenFigure = screen.getByTestId('est-context-tokens-p-1');
-    expect(within(tokenFigure).getByText(/estimated/i)).toBeInTheDocument();
-    expect(within(tokenFigure).getByText('5,000')).toBeInTheDocument();
-  });
-
-  it('renders the exact honesty tooltip copy, always reachable without a click', () => {
-    render(
-      <ProjectTiles
-        sparks={[spark({ projectId: 'p-1' })]}
-        usage={[usage({ projectId: 'p-1' })]}
-        accountSlug="acme"
-      />,
-    );
-
-    expect(
-      screen.getByText(
-        "Klio doesn't see your agents' own token bills; this is recalls × results × average memory size.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/estimated/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('5,000')).not.toBeInTheDocument();
   });
 
   it('never labels the measured numbers as estimated', () => {
@@ -133,9 +115,6 @@ describe('<ProjectTiles />', () => {
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByTestId('recalls-30d-p-1')).queryByText(/estimated/i),
-    ).not.toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('storage-p-1')).queryByText(/estimated/i),
     ).not.toBeInTheDocument();
   });
 

@@ -78,7 +78,7 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
     loadProjectMembers(project.id),
     client.rpc('get_account_members', { account_slug: account }),
     loadMyProjectRole(project.id, viewer.userId),
-    loadContextView(orgId, project.id, access),
+    loadContextView(orgId, project.id, access, viewer.userId),
   ]);
 
   // `loadVisibleProject` already gated on the same `access`, so a null here
@@ -144,7 +144,11 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
                 />
                 <Meta
                   labelKey="agentguard:projects.colMemories"
-                  value={project.memory_count.toLocaleString()}
+                  // Visible to this viewer (org + own-private + project),
+                  // not `project.memory_count` which only counts
+                  // scope='project'. Auto-created repos land captures as
+                  // private-with-project_id, so that column reads 0 here.
+                  value={contextView.header.itemsTotal.toLocaleString()}
                 />
                 <Meta
                   labelKey="agentguard:projects.lastSeen"
