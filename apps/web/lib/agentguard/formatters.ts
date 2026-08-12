@@ -59,3 +59,51 @@ export function truncateId(id: string, length = 8): string {
   if (id.length <= length) return id;
   return `${id.slice(0, length)}…`;
 }
+
+/**
+ * Largest-to-smallest unit ladder for {@link formatRelativeTime}. Each
+ * threshold is the minimum age (in ms) at which that unit applies.
+ */
+const RELATIVE_TIME_UNITS: ReadonlyArray<{
+  unit: Intl.RelativeTimeFormatUnit;
+  ms: number;
+}> = [
+  { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+  { unit: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
+  { unit: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
+  { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+  { unit: 'hour', ms: 60 * 60 * 1000 },
+  { unit: 'minute', ms: 60 * 1000 },
+];
+
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat('en', {
+  numeric: 'auto',
+});
+
+/**
+ * Format an ISO timestamp as a relative time string ("3 hours ago", "just
+ * now"). Returns '—' for missing or unparseable input.
+ *
+ * `now` is injectable so callers (and their tests) can pin the reference
+ * instant instead of depending on wall-clock time.
+ */
+export function formatRelativeTime(
+  isoString: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!isoString) return '—';
+
+  const then = new Date(isoString);
+  if (Number.isNaN(then.getTime())) return '—';
+
+  const diffMs = then.getTime() - now.getTime();
+  const absMs = Math.abs(diffMs);
+
+  for (const { unit, ms } of RELATIVE_TIME_UNITS) {
+    if (absMs >= ms) {
+      return RELATIVE_TIME_FORMATTER.format(Math.round(diffMs / ms), unit);
+    }
+  }
+
+  return RELATIVE_TIME_FORMATTER.format(0, 'second');
+}
