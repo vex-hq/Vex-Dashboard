@@ -75,7 +75,14 @@ COPY tooling/typescript/package.json ./tooling/typescript/package.json
 # Copy the scripts tooling source so the preinstall hook succeeds
 COPY tooling/scripts/src ./tooling/scripts/src
 
-RUN pnpm install --frozen-lockfile
+# `--ignore-scripts`: dependency postinstall hooks download binaries from the
+# public internet on every build, which makes a production deploy only as
+# reliable as those hosts. On 2026-08-12 the `supabase` package's postinstall
+# got ECONNRESET fetching its CLI from GitHub releases and failed the whole
+# deploy, leaving app.klio.tech pinned to a build from twelve hours earlier.
+# None of those binaries (supabase CLI, sentry-cli) are used by `next build`
+# or by the runtime image — they are local developer tooling.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # ---- Stage 2: builder -----------------------------------------------------
 FROM base AS builder
