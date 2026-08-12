@@ -160,7 +160,7 @@ export const loadContextStream = cache(
   },
 );
 
-export interface ProjectPulseRow {
+export interface ProjectPulse {
   projectId: string;
   name: string;
   itemsThisWeek: number;
@@ -176,7 +176,7 @@ interface ProjectPulseQueryRow {
   agents_active: string[];
 }
 
-function toPulseRow(row: ProjectPulseQueryRow): ProjectPulseRow {
+function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
   return {
     projectId: row.project_id,
     name: row.name,
@@ -190,15 +190,29 @@ function toPulseRow(row: ProjectPulseQueryRow): ProjectPulseRow {
  * Per-project activity over the last 7 days, for the "what's moving" widget.
  *
  * Same three inherited visibility arms as {@link loadContextStream} — see
- * the file header. Membership is enforced in SQL via the same
- * `project_members` EXISTS check, never by fetching a wider set and
- * filtering in TypeScript.
+ * the file header — govern which MEMORIES feed the aggregate. But the
+ * `projects` FROM itself needs its own gate: without one, a project's id,
+ * display_name, itemsThisWeek and agentsActive would leak to any org member
+ * the moment that project has org-scoped memories tagged with its id, even
+ * if the viewer is not one of its members.
+ *
+ * The gate mirrors `loadVisibleProjects`' member branch
+ * (`memory/_lib/server/project-memory.loader.ts` — `EXISTS (SELECT 1 FROM
+ * project_members pm WHERE pm.project_id = p.id AND pm.user_id = …)`).
+ * That file's `visibilityClause` also has an admin branch (`TRUE`, org
+ * admins see every project); this function's simpler two-argument signature
+ * (`orgId, viewerUserId`) has no access-kind parameter to carry that
+ * distinction, so it does not support it — a caller needing the admin view
+ * must extend the signature deliberately, not fall through here by
+ * accident. A `null`/absent viewer therefore sees no projects (`FALSE`),
+ * the same fail-closed default `loadContextStream` uses for its private and
+ * project arms.
  */
 export const loadProjectPulse = cache(
   async (
     orgId: string,
     viewerUserId: string | null,
-  ): Promise<ProjectPulseRow[]> => {
+  ): Promise<ProjectPulse[]> => {
     const pool = getAgentGuardPool();
     const params: unknown[] = [orgId];
     const p = (value: unknown): string => {
@@ -207,6 +221,7 @@ export const loadProjectPulse = cache(
     };
 
     const arms: string[] = [`(m.scope = 'org')`];
+    let projectVisibility = 'FALSE';
     if (viewerUserId) {
       const viewer = p(viewerUserId);
       arms.push(`(m.scope = 'private' AND m.user_id = ${viewer})`);
@@ -214,6 +229,10 @@ export const loadProjectPulse = cache(
         SELECT 1 FROM project_members pm
         WHERE pm.project_id = m.project_id AND pm.user_id = ${viewer}
       ))`);
+      projectVisibility = `EXISTS (
+        SELECT 1 FROM project_members pm
+        WHERE pm.project_id = pr.id AND pm.user_id = ${viewer}
+      )`;
     }
 
     const { rows } = await pool.query<ProjectPulseQueryRow>(
@@ -235,6 +254,7 @@ export const loadProjectPulse = cache(
        AND m.created_at > now() - interval '7 days'
        AND (${arms.join(' OR ')})
       WHERE pr.org_id = $1
+        AND (${projectVisibility})
       GROUP BY pr.id, pr.display_name
       ORDER BY last_item_at DESC NULLS LAST
       `,

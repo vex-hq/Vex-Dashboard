@@ -62,8 +62,14 @@ describe('loadContextStream', () => {
     const { loadContextStream } = await import('./context-stream.loader');
     queueRows({ rows: [] });
     await loadContextStream('org-1', 'user-1', { kind: "x'; DROP TABLE" });
-    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
-    expect(sql).not.toContain('DROP');
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    // Assert on what the guard actually controls: an unwhitelisted kind must
+    // never reach the bound params, and no memory_type clause is emitted at
+    // all — not merely "the literal string DROP is absent", which passes
+    // trivially since every filter value is bound, never interpolated, so
+    // no filter value (malicious or not) can ever appear in the SQL text.
+    expect(params).not.toContain("x'; DROP TABLE");
+    expect(sql).not.toMatch(/memory_type =/);
   });
 });
 
@@ -155,5 +161,53 @@ describe('loadProjectPulse', () => {
     expect(sql).toMatch(/scope = 'org'/);
     expect(sql).not.toMatch(/scope = 'private'/);
     expect(sql).not.toMatch(/project_members/);
+  });
+
+  it('gates the projects FROM itself by membership, mirroring loadVisibleProjects (project-memory.loader.ts)', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({ rows: [] });
+    await loadProjectPulse('org-1', 'user-1');
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    // Distinct from the memory-arm EXISTS (which gates m.project_id) — this
+    // one gates pr.id, i.e. the project row's own existence/metadata, not
+    // just which memories are counted against it.
+    expect(sql).toMatch(
+      /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
+    );
+  });
+
+  it('a project the viewer is not a member of is excluded even though it has visible org-scoped memories', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    // Postgres applies the `pr.id` membership EXISTS (asserted in the
+    // previous test) before any row is produced, so a real query never
+    // returns an aggregate row for a non-member project — the mock is
+    // seeded with exactly that: only the member project's row, standing in
+    // for what the gated query would actually return.
+    queueRows({
+      rows: [
+        {
+          project_id: 'proj-member',
+          name: 'Member Project',
+          items_this_week: '3',
+          last_item_at: '2026-08-10T09:00:00Z',
+          agents_active: ['claude-code'],
+        },
+      ],
+    });
+
+    const pulse = await loadProjectPulse('org-1', 'user-1');
+
+    expect(pulse.map((row) => row.projectId)).toEqual(['proj-member']);
+    expect(pulse.some((row) => row.projectId === 'proj-non-member')).toBe(
+      false,
+    );
+  });
+
+  it('a null viewer sees no projects at all (fail closed, no membership to check)', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({ rows: [] });
+    await loadProjectPulse('org-1', null);
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/AND \(FALSE\)/);
   });
 });
