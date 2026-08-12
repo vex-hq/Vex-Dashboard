@@ -31,7 +31,7 @@ describe('loadContextStream', () => {
     const { loadContextStream } = await import('./context-stream.loader');
     queueRows({ rows: [] });
     await loadContextStream('org-1', 'user-1', { kind: 'decision', days: 7 });
-    const [sql, params] = queryMock.mock.calls[0];
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(params).toContain('org-1');
     expect(params).toContain('user-1');
     expect(sql).not.toContain('org-1'); // no string interpolation of tenancy
@@ -41,7 +41,7 @@ describe('loadContextStream', () => {
     const { loadContextStream } = await import('./context-stream.loader');
     queueRows({ rows: [] });
     await loadContextStream('org-1', 'user-1', {});
-    const [sql] = queryMock.mock.calls[0];
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
     // The three arms, per the silo loaders they are copied from:
     expect(sql).toMatch(/scope = 'org'/);
     expect(sql).toMatch(/scope = 'private'/);
@@ -52,7 +52,7 @@ describe('loadContextStream', () => {
     const { loadContextStream } = await import('./context-stream.loader');
     queueRows({ rows: [] });
     await loadContextStream('org-1', null, {});
-    const [sql] = queryMock.mock.calls[0];
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/scope = 'org'/);
     expect(sql).not.toMatch(/scope = 'private'/);
     expect(sql).not.toMatch(/project_members/);
@@ -62,16 +62,98 @@ describe('loadContextStream', () => {
     const { loadContextStream } = await import('./context-stream.loader');
     queueRows({ rows: [] });
     await loadContextStream('org-1', 'user-1', { kind: "x'; DROP TABLE" });
-    const [sql] = queryMock.mock.calls[0];
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).not.toContain('DROP');
   });
 });
 
 function row(over: Record<string, unknown>) {
   return {
-    id: 'm-1', memory_type: 'note', content: 'x', scope: 'org',
-    project_id: null, project_name: null, agent_id: 'claude-code',
-    user_id: null, created_at: '2026-08-11T00:00:00Z', superseded_by: null,
+    id: 'm-1',
+    memory_type: 'note',
+    content: 'x',
+    scope: 'org',
+    project_id: null,
+    project_name: null,
+    agent_id: 'claude-code',
+    user_id: null,
+    created_at: '2026-08-11T00:00:00Z',
+    superseded_by: null,
     ...over,
   };
 }
+
+describe('loadProjectPulse', () => {
+  it('maps grouped project rows into the pulse shape', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({
+      rows: [
+        {
+          project_id: 'proj-1',
+          name: 'Klio Engine',
+          items_this_week: '12',
+          last_item_at: '2026-08-10T09:00:00Z',
+          agents_active: ['claude-code', 'cursor'],
+        },
+        {
+          project_id: 'proj-2',
+          name: 'Landing Site',
+          items_this_week: '0',
+          last_item_at: null,
+          agents_active: [],
+        },
+      ],
+    });
+
+    const pulse = await loadProjectPulse('org-1', 'user-1');
+
+    expect(pulse).toEqual([
+      {
+        projectId: 'proj-1',
+        name: 'Klio Engine',
+        itemsThisWeek: 12,
+        lastItemAt: '2026-08-10T09:00:00Z',
+        agentsActive: ['claude-code', 'cursor'],
+      },
+      {
+        projectId: 'proj-2',
+        name: 'Landing Site',
+        itemsThisWeek: 0,
+        lastItemAt: null,
+        agentsActive: [],
+      },
+    ]);
+  });
+
+  it('passes org and viewer as bound params, groups by project', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({ rows: [] });
+    await loadProjectPulse('org-1', 'user-1');
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(params).toContain('org-1');
+    expect(params).toContain('user-1');
+    expect(sql).not.toContain('org-1');
+    expect(sql).toMatch(/GROUP BY/i);
+    expect(sql).toMatch(/array_agg\(DISTINCT m\.agent_id\)/);
+  });
+
+  it('carries all three ladder arms, same as the stream', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({ rows: [] });
+    await loadProjectPulse('org-1', 'user-1');
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/scope = 'org'/);
+    expect(sql).toMatch(/scope = 'private'/);
+    expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM project_members/);
+  });
+
+  it('a null viewer gets org scope only', async () => {
+    const { loadProjectPulse } = await import('./context-stream.loader');
+    queueRows({ rows: [] });
+    await loadProjectPulse('org-1', null);
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/scope = 'org'/);
+    expect(sql).not.toMatch(/scope = 'private'/);
+    expect(sql).not.toMatch(/project_members/);
+  });
+});

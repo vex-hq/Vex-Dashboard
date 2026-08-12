@@ -159,3 +159,93 @@ export const loadContextStream = cache(
     return rows.map(toItem);
   },
 );
+
+export interface ProjectPulseRow {
+  projectId: string;
+  name: string;
+  itemsThisWeek: number;
+  lastItemAt: string | null;
+  agentsActive: string[];
+}
+
+interface ProjectPulseQueryRow {
+  project_id: string;
+  name: string;
+  items_this_week: string;
+  last_item_at: string | null;
+  agents_active: string[];
+}
+
+function toPulseRow(row: ProjectPulseQueryRow): ProjectPulseRow {
+  return {
+    projectId: row.project_id,
+    name: row.name,
+    itemsThisWeek: parseInt(row.items_this_week, 10) || 0,
+    lastItemAt: row.last_item_at,
+    agentsActive: row.agents_active,
+  };
+}
+
+/**
+ * Per-project activity over the last 7 days, for the "what's moving" widget.
+ *
+ * Same three inherited visibility arms as {@link loadContextStream} — see
+ * the file header. Membership is enforced in SQL via the same
+ * `project_members` EXISTS check, never by fetching a wider set and
+ * filtering in TypeScript.
+ */
+export const loadProjectPulse = cache(
+  async (
+    orgId: string,
+    viewerUserId: string | null,
+  ): Promise<ProjectPulseRow[]> => {
+    const pool = getAgentGuardPool();
+    const params: unknown[] = [orgId];
+    const p = (value: unknown): string => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+
+    const arms: string[] = [`(m.scope = 'org')`];
+    if (viewerUserId) {
+      const viewer = p(viewerUserId);
+      arms.push(`(m.scope = 'private' AND m.user_id = ${viewer})`);
+      arms.push(`(m.scope = 'project' AND EXISTS (
+        SELECT 1 FROM project_members pm
+        WHERE pm.project_id = m.project_id AND pm.user_id = ${viewer}
+      ))`);
+    }
+
+    const { rows } = await pool.query<ProjectPulseQueryRow>(
+      `
+      SELECT
+        pr.id AS project_id,
+        pr.display_name AS name,
+        COUNT(m.id) AS items_this_week,
+        MAX(m.created_at)::text AS last_item_at,
+        array_agg(DISTINCT m.agent_id) FILTER (
+          WHERE m.agent_id IS NOT NULL
+        ) AS agents_active
+      FROM projects pr
+      LEFT JOIN session_memories m
+        ON m.project_id = pr.id
+       AND m.org_id = pr.org_id
+       AND m.status IN ('active', 'superseded')
+       AND m.recall_hidden = FALSE
+       AND m.created_at > now() - interval '7 days'
+       AND (${arms.join(' OR ')})
+      WHERE pr.org_id = $1
+      GROUP BY pr.id, pr.display_name
+      ORDER BY last_item_at DESC NULLS LAST
+      `,
+      params,
+    );
+
+    return rows.map((row) =>
+      toPulseRow({
+        ...row,
+        agents_active: row.agents_active ?? [],
+      }),
+    );
+  },
+);
