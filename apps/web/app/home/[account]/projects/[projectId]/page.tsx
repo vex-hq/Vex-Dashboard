@@ -5,12 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import { AppBreadcrumbs } from '@kit/ui/app-breadcrumbs';
 import { Button } from '@kit/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@kit/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
 import { PageBody } from '@kit/ui/page';
 import { Trans } from '@kit/ui/trans';
 
@@ -26,13 +21,15 @@ import {
   loadVisibleProject,
 } from '../../memory/_lib/server/project-memory.loader';
 import {
-  ProjectMembersCard,
   type ProjectMemberView,
+  ProjectMembersCard,
 } from '../_components/project-members-card';
 import {
   loadMyProjectRole,
   loadProjectMembers,
 } from '../_lib/server/projects.loader';
+import { ProjectContextView } from './_components/context-view';
+import { loadContextView } from './_lib/server/context-view.loader';
 
 interface ProjectDetailPageProps {
   params: Promise<{ account: string; projectId: string }>;
@@ -72,32 +69,26 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const project = await loadVisibleProject(orgId, projectId, access);
 
   if (!project) {
-    return (
-      <>
-        <TeamAccountLayoutPageHeader
-          account={account}
-          title={<Trans i18nKey={'agentguard:projects.detailTitle'} />}
-          description={<AppBreadcrumbs />}
-        />
-
-        <PageBody>
-          <BackLink account={account} />
-
-          <p className="text-muted-foreground text-sm">
-            <Trans i18nKey="agentguard:projects.notFound" />
-          </p>
-        </PageBody>
-      </>
-    );
+    return <ProjectNotFound account={account} />;
   }
 
   const client = getSupabaseServerClient();
 
-  const [members, orgMembersResult, myRole] = await Promise.all([
+  const [members, orgMembersResult, myRole, contextView] = await Promise.all([
     loadProjectMembers(project.id),
     client.rpc('get_account_members', { account_slug: account }),
     loadMyProjectRole(project.id, viewer.userId),
+    loadContextView(orgId, project.id, access),
   ]);
+
+  // `loadVisibleProject` already gated on the same `access`, so a null here
+  // should not happen in practice — but `loadContextView` runs its own
+  // independent membership probe (see that file's header), and this page
+  // mirrors its existing not-found behavior rather than inventing a new one
+  // if the two ever disagree.
+  if (!contextView) {
+    return <ProjectNotFound account={account} />;
+  }
 
   const orgMembers = (orgMembersResult.data ?? []).map((member) => ({
     user_id: member.user_id,
@@ -105,7 +96,9 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
     name: member.name,
   }));
 
-  const byUserId = new Map(orgMembers.map((member) => [member.user_id, member]));
+  const byUserId = new Map(
+    orgMembers.map((member) => [member.user_id, member]),
+  );
 
   const memberViews: ProjectMemberView[] = members.map((member) => ({
     user_id: member.user_id,
@@ -142,9 +135,7 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
               <dl className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <Meta
                   labelKey="agentguard:projects.colOrigin"
-                  value={
-                    project.git_remote ?? project.repo_root_path ?? '—'
-                  }
+                  value={project.git_remote ?? project.repo_root_path ?? '—'}
                   mono
                 />
                 <Meta
@@ -177,6 +168,8 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
             </CardContent>
           </Card>
 
+          <ProjectContextView view={contextView} />
+
           <ProjectMembersCard
             accountSlug={account}
             projectId={project.id}
@@ -185,6 +178,26 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
             canManage={canManage}
           />
         </div>
+      </PageBody>
+    </>
+  );
+}
+
+function ProjectNotFound({ account }: { account: string }) {
+  return (
+    <>
+      <TeamAccountLayoutPageHeader
+        account={account}
+        title={<Trans i18nKey={'agentguard:projects.detailTitle'} />}
+        description={<AppBreadcrumbs />}
+      />
+
+      <PageBody>
+        <BackLink account={account} />
+
+        <p className="text-muted-foreground text-sm">
+          <Trans i18nKey="agentguard:projects.notFound" />
+        </p>
       </PageBody>
     </>
   );
