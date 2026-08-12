@@ -55,8 +55,8 @@ const SCRIPT: Line[] = [
 ];
 
 const CONNECT_CMD = `claude mcp add --transport http klio https://mcp.klio.tech/mcp \\
-  --header "X-Vex-Key: YOUR_KEY" \\
-  --header "X-Vex-Agent: claude-code"`;
+  --header "X-Klio-Key: YOUR_KEY" \\
+  --header "X-Klio-Agent: claude-code"`;
 
 const LINE_MS = 620;
 const HOLD_MS = 4200;

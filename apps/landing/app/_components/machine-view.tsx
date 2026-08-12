@@ -32,11 +32,11 @@ const HOW: string[] = [
 
 const CONNECT: [string, string][] = [
   ['endpoint', 'https://mcp.klio.tech/mcp (Streamable HTTP MCP)'],
-  ['auth header', 'X-Vex-Key: <api key> (get one at https://app.klio.tech)'],
-  ['agent identity', 'X-Vex-Agent: <stable id> (optional; attributes writes)'],
+  ['auth header', 'X-Klio-Key: <api key> (get one at https://app.klio.tech; the legacy X-Vex-Key still works)'],
+  ['agent identity', 'X-Klio-Agent: <stable id> (optional; attributes writes)'],
   [
     'claude code',
-    'claude mcp add --transport http klio https://mcp.klio.tech/mcp --header "X-Vex-Key: YOUR_KEY" --header "X-Vex-Agent: claude-code"',
+    'claude mcp add --transport http klio https://mcp.klio.tech/mcp --header "X-Klio-Key: YOUR_KEY" --header "X-Klio-Agent: claude-code"',
   ],
   ['docs', 'https://docs.klio.tech/quickstart'],
 ];
