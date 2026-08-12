@@ -34,9 +34,9 @@ export function PlateSpecification() {
             >
               {pair.map((column) => (
                 <div key={column.heading}>
-                  <h4 className={column.refusal ? 'is-refusal' : undefined}>
+                  <h3 className={column.refusal ? 'is-refusal' : undefined}>
                     {column.heading}
-                  </h4>
+                  </h3>
                   <ul>
                     {column.items.map((item) => (
                       <li key={item}>{item}</li>

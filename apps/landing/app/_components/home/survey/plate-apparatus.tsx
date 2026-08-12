@@ -32,7 +32,7 @@ export function PlateApparatus() {
           {MOVEMENTS.map((movement) => (
             <li key={movement.title}>
               <div>
-                <h4>{movement.title}</h4>
+                <h3>{movement.title}</h3>
                 <p>{movement.text}</p>
               </div>
             </li>
