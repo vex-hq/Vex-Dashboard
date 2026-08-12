@@ -6,21 +6,19 @@ import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
+import { ActivityAnswer } from './_components/activity-answer';
 import { ConnectFirstAgent } from './_components/connect-first-agent';
 import { ContextStream } from './_components/context-stream';
-import { ProjectsRail } from './_components/projects-rail';
+import { ProjectTiles } from './_components/project-tiles';
 import { TeamAccountLayoutPageHeader } from './_components/team-account-layout-page-header';
-import { UsageStrip } from './_components/usage-strip';
 import {
   type RawStreamSearchParams,
   parseStreamFilters,
 } from './_lib/parse-stream-filters';
 import { loadAccountViewer } from './_lib/server/account-viewer';
-import {
-  loadContextStream,
-  loadProjectPulse,
-} from './_lib/server/context-stream.loader';
+import { loadContextStream } from './_lib/server/context-stream.loader';
 import { loadContextUsage } from './_lib/server/context-usage.loader';
+import { loadHubSummary } from './_lib/server/hub-summary.loader';
 import { loadHasAnyMemory } from './_lib/server/workspace-activity.loader';
 
 interface TeamAccountHomePageProps {
@@ -78,12 +76,24 @@ async function TeamAccountHomePage({
   ]);
   const viewerUserId = viewer.userId;
 
-  const [stream, projectPulse, usage, hasAnyMemory] = await Promise.all([
+  const [stream, hubSummary, usage, hasAnyMemory] = await Promise.all([
     orFallback('contextStream', [], () =>
       loadContextStream(orgId, viewerUserId, filters),
     ),
-    orFallback('projectPulse', [], () =>
-      loadProjectPulse(orgId, viewerUserId, viewer.isOrgAdmin),
+    orFallback(
+      'hubSummary',
+      {
+        decisions7d: 0,
+        plans7d: 0,
+        facts7d: 0,
+        notes7d: 0,
+        projectsActive7d: 0,
+        agentsActive7d: [],
+        lastActivityAt: null,
+        volume30d: [],
+        projectSparks: [],
+      },
+      () => loadHubSummary(orgId, viewerUserId, viewer.isOrgAdmin),
     ),
     orFallback('contextUsage', [], () => loadContextUsage(orgId)),
     // Fallback is `true` (assume connected), the INVERSE of every other
@@ -98,18 +108,32 @@ async function TeamAccountHomePage({
     orFallback('hasAnyMemory', true, () => loadHasAnyMemory(orgId)),
   ]);
 
-  const projects = projectPulse.map((pulse) => ({
-    id: pulse.projectId,
-    name: pulse.name,
-  }));
-
-  // Derived from the already-loaded (filtered) stream rather than a second,
-  // agent-filter-free query: cheaper (one fewer round trip against a
-  // pool that already had a cold-Neon-resume incident on this page), at the
-  // cost that selecting an agent narrows this list to just that agent until
-  // the filter is cleared. Acceptable — the dropdown still always contains
-  // whatever is currently on screen, and "all agents seen in the current
-  // view" degrades gracefully rather than silently, unlike a stale list.
+  // Both derived from the already-loaded (filtered) stream rather than
+  // second, filter-free queries: cheaper (fewer round trips against a pool
+  // that already had a cold-Neon-resume incident on this page), at the cost
+  // that selecting a project/agent narrows these lists to just that value
+  // until the filter is cleared. Acceptable — the dropdowns still always
+  // contain whatever is currently on screen, and "everything seen in the
+  // current view" degrades gracefully rather than silently, unlike a stale
+  // list. (Band 2's project tiles — driven by `hubSummary.projectSparks`,
+  // capped and gated independently by the loader — replaced the old
+  // project-pulse sidebar that used to source this list, so it is derived
+  // from the stream here instead of a second loader call.)
+  const projects = Array.from(
+    new Map(
+      stream
+        .filter(
+          (
+            item,
+          ): item is typeof item & { projectId: string; projectName: string } =>
+            item.projectId !== null && item.projectName !== null,
+        )
+        .map((item) => [
+          item.projectId,
+          { id: item.projectId, name: item.projectName },
+        ]),
+    ).values(),
+  );
   const agents = Array.from(
     new Set(
       stream
@@ -142,18 +166,26 @@ async function TeamAccountHomePage({
           </div>
         ) : null}
 
+        {/* Band 1 — the answer line: literally answers "what happened" in
+            large, primary-ink numbers before anything else on screen. */}
         <div className="mb-6">
-          <UsageStrip usage={usage} />
+          <ActivityAnswer summary={hubSummary} />
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <ContextStream items={stream} projects={projects} agents={agents} />
-          </div>
-          <div>
-            <ProjectsRail pulses={projectPulse} accountSlug={account} />
-          </div>
+        {/* Band 2 — project tiles: replaces the old wide numeric usage
+            table with a scannable grid, each card its own 30-day
+            sparkline plus the honesty-preserved usage figures. */}
+        <div className="mb-6">
+          <ProjectTiles
+            sparks={hubSummary.projectSparks}
+            usage={usage}
+            accountSlug={account}
+          />
         </div>
+
+        {/* Band 3 — the stream as a timeline: day-grouped, ink hierarchy
+            carries which rows are deliberate writes vs. telemetry. */}
+        <ContextStream items={stream} projects={projects} agents={agents} />
       </PageBody>
     </>
   );

@@ -131,4 +131,102 @@ describe('<ContextStream />', () => {
       within(row as HTMLElement).queryByRole('button', { name: /replaced/i }),
     ).not.toBeInTheDocument();
   });
+
+  it('groups rows under a "Today" day header for items created today', () => {
+    render(
+      <ContextStream
+        items={[item({ createdAt: new Date().toISOString() })]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    expect(screen.getByText('Today')).toBeInTheDocument();
+  });
+
+  it('groups rows under separate day headers when items span multiple days', () => {
+    render(
+      <ContextStream
+        items={[
+          item({ id: 'm-today', createdAt: new Date().toISOString() }),
+          item({
+            id: 'm-old',
+            createdAt: new Date(
+              Date.now() - 10 * 24 * 60 * 60 * 1000,
+            ).toISOString(),
+          }),
+        ]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    // Two distinct day headers, and "Today" is not the only one rendered.
+    const headings = screen.getAllByRole('heading', { level: 3 });
+    expect(headings.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Mutation check: swapping the muted-ink class for the primary-ink class
+  // (or vice versa) on either kind would collapse the whole point of the
+  // redesign — deliberate writes (decisions/plans) must read differently
+  // from telemetry (facts/notes) at a glance.
+  it('renders decisions in primary ink and facts in muted ink — the hierarchy is the point', () => {
+    render(
+      <ContextStream
+        items={[
+          item({
+            id: 'm-decision',
+            kind: 'decision',
+            content: 'decision text',
+          }),
+          item({ id: 'm-fact', kind: 'fact', content: 'fact text' }),
+        ]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    const decisionButton = screen.getByText('decision text');
+    const factButton = screen.getByText('fact text');
+
+    expect(decisionButton.className).toContain('text-foreground');
+    expect(decisionButton.className).not.toContain('text-muted-foreground');
+    expect(factButton.className).toContain('text-muted-foreground');
+  });
+
+  it('renders a kind glyph for every row', () => {
+    render(
+      <ContextStream
+        items={[item({ kind: 'plan' })]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    expect(screen.getByTestId('kind-glyph-plan')).toBeInTheDocument();
+  });
+
+  it('renders the toolbar without a "Clear" control when no filter is set', () => {
+    render(<ContextStream items={[item({})]} projects={[]} agents={[]} />);
+
+    expect(
+      screen.queryByRole('button', { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the "Clear" control only once a filter is set', () => {
+    setSearchParams('kind=decision');
+
+    render(<ContextStream items={[item({})]} projects={[]} agents={[]} />);
+
+    expect(
+      screen.getByRole('button', { name: /clear filters/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('collapses the old boxed "Filters" panel title — the toolbar has no heading', () => {
+    render(<ContextStream items={[item({})]} projects={[]} agents={[]} />);
+
+    expect(screen.queryByText('Filters')).not.toBeInTheDocument();
+  });
 });

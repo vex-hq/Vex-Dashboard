@@ -4,11 +4,18 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import {
+  CheckCircle2,
+  Circle,
+  FileText,
+  Gavel,
+  StickyNote,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@kit/ui/badge';
 import { Button } from '@kit/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@kit/ui/card';
+import { Card, CardContent } from '@kit/ui/card';
 import {
   Select,
   SelectContent,
@@ -21,6 +28,7 @@ import { cn } from '@kit/ui/utils';
 
 import { formatRelativeTime, truncateId } from '~/lib/agentguard/formatters';
 
+import { groupStreamByDay } from '../_lib/group-stream-by-day';
 import type { ContextItem } from '../_lib/server/context-stream.loader';
 
 /**
@@ -46,6 +54,37 @@ const DAY_FILTER_OPTIONS = [
 const FILTER_PARAM_KEYS = ['project', 'agent', 'kind', 'days'] as const;
 type FilterParamKey = (typeof FILTER_PARAM_KEYS)[number];
 
+/**
+ * Kind -> glyph. Purely decorative alongside the existing text badge — kind
+ * is carried by icon + badge, never by color (a four-hue kind palette was
+ * computed and failed CVD validation). `aria-hidden` on every glyph: the
+ * badge text is the accessible name for kind, the icon is a redundant
+ * visual accelerator.
+ */
+const KIND_ICONS: Record<ContextItem['kind'], typeof Gavel> = {
+  decision: Gavel,
+  plan: CheckCircle2,
+  fact: FileText,
+  note: StickyNote,
+  other: Circle,
+};
+
+/**
+ * Ink + size hierarchy: decisions and plans (deliberate writes) render in
+ * primary ink at text-regular; facts and notes (telemetry) recede into
+ * muted ink at text-small. This is the whole point of the redesign — it is
+ * what makes the screen answerable at a glance without reading every row.
+ */
+const KIND_EMPHASIS_CLASS: Record<ContextItem['kind'], string> = {
+  decision:
+    'text-foreground text-[length:var(--text-regular)] leading-[var(--text-regular--line-height)]',
+  plan: 'text-foreground text-[length:var(--text-regular)] leading-[var(--text-regular--line-height)]',
+  fact: 'text-muted-foreground text-[length:var(--text-small)] leading-[var(--text-small--line-height)]',
+  note: 'text-muted-foreground text-[length:var(--text-small)] leading-[var(--text-small--line-height)]',
+  other:
+    'text-muted-foreground text-[length:var(--text-small)] leading-[var(--text-small--line-height)]',
+};
+
 export interface ContextStreamProps {
   items: ContextItem[];
   projects: Array<{ id: string; name: string }>;
@@ -53,8 +92,9 @@ export interface ContextStreamProps {
 }
 
 /**
- * The home stream: a filterable list of context items across every scope the
- * viewer can read.
+ * The home stream: a filterable timeline of context items across every scope
+ * the viewer can read, grouped under day headers (Band 3 of the Hub
+ * redesign).
  *
  * Purely presentational — `items` is already the filtered, visibility-scoped
  * result of {@link loadContextStream}. Filters here only ever WRITE search
@@ -117,9 +157,11 @@ export function ContextStream({ items, projects, agents }: ContextStreamProps) {
     [items],
   );
 
+  const dayGroups = useMemo(() => groupStreamByDay(items), [items]);
+
   return (
     <div className="flex flex-col gap-4">
-      <FilterBar
+      <FilterToolbar
         projects={projects}
         agents={agents}
         currentProject={currentProject}
@@ -134,22 +176,28 @@ export function ContextStream({ items, projects, agents }: ContextStreamProps) {
       {items.length === 0 ? (
         <EmptyState activeFilterCount={activeFilterCount} />
       ) : (
-        <ul
-          className="flex flex-col divide-y"
-          data-testid="context-stream-rows"
-        >
-          {items.map((item) => (
-            <StreamRow
-              key={item.id}
-              item={item}
-              onJumpToItem={jumpToItem}
-              replacementIsRendered={
-                item.supersededBy !== null &&
-                renderedItemIds.has(item.supersededBy)
-              }
-            />
+        <div className="flex flex-col gap-1" data-testid="context-stream-rows">
+          {dayGroups.map((group) => (
+            <div key={group.key}>
+              <h3 className="text-muted-foreground px-1 pt-4 pb-1 text-[length:var(--text-tiny)] font-[590] tracking-wide uppercase first:pt-0">
+                {group.label}
+              </h3>
+              <ul className="flex flex-col divide-y">
+                {group.items.map((item) => (
+                  <StreamRow
+                    key={item.id}
+                    item={item}
+                    onJumpToItem={jumpToItem}
+                    replacementIsRendered={
+                      item.supersededBy !== null &&
+                      renderedItemIds.has(item.supersededBy)
+                    }
+                  />
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -159,7 +207,13 @@ export function ContextStream({ items, projects, agents }: ContextStreamProps) {
   }
 }
 
-function FilterBar({
+/**
+ * The old boxed "Filters" panel collapsed into a single unlabelled toolbar
+ * row: no Card header, no "Filters" title — the controls speak for
+ * themselves. "Clear" only appears once a filter is actually set, so the
+ * toolbar's resting state is as quiet as possible.
+ */
+function FilterToolbar({
   projects,
   agents,
   currentProject,
@@ -183,137 +237,111 @@ function FilterBar({
   const { t } = useTranslation('agentguard');
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">
-          <Trans i18nKey="agentguard:contextStream.filters">Filters</Trans>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-muted-foreground text-xs">
-            <Trans i18nKey="agentguard:contextStream.filterProject">
-              Project
-            </Trans>
-          </label>
-          <Select
-            value={currentProject || ALL_VALUE}
-            onValueChange={(value) =>
-              onFilterChange('project', value === ALL_VALUE ? '' : value)
-            }
-          >
-            <SelectTrigger className={cn('w-48', MIN_TAP_TARGET_CLASS)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>
-                {t('contextStream.allProjects', 'All projects')}
-              </SelectItem>
-              {projects.map((project) => (
-                <SelectItem key={project.id} value={project.id}>
-                  {project.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+    <div
+      data-testid="context-stream-toolbar"
+      className="flex flex-wrap items-center gap-2"
+    >
+      <Select
+        value={currentProject || ALL_VALUE}
+        onValueChange={(value) =>
+          onFilterChange('project', value === ALL_VALUE ? '' : value)
+        }
+      >
+        <SelectTrigger className={cn('w-40', MIN_TAP_TARGET_CLASS)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_VALUE}>
+            {t('contextStream.allProjects', 'All projects')}
+          </SelectItem>
+          {projects.map((project) => (
+            <SelectItem key={project.id} value={project.id}>
+              {project.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-muted-foreground text-xs">
-            <Trans i18nKey="agentguard:contextStream.filterAgent">Agent</Trans>
-          </label>
-          <Select
-            value={currentAgent || ALL_VALUE}
-            onValueChange={(value) =>
-              onFilterChange('agent', value === ALL_VALUE ? '' : value)
-            }
-          >
-            <SelectTrigger className={cn('w-40', MIN_TAP_TARGET_CLASS)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>
-                {t('contextStream.allAgents', 'All agents')}
-              </SelectItem>
-              {agents.map((agent) => (
-                <SelectItem key={agent} value={agent}>
-                  {agent}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <Select
+        value={currentAgent || ALL_VALUE}
+        onValueChange={(value) =>
+          onFilterChange('agent', value === ALL_VALUE ? '' : value)
+        }
+      >
+        <SelectTrigger className={cn('w-36', MIN_TAP_TARGET_CLASS)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_VALUE}>
+            {t('contextStream.allAgents', 'All agents')}
+          </SelectItem>
+          {agents.map((agent) => (
+            <SelectItem key={agent} value={agent}>
+              {agent}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-muted-foreground text-xs">
-            <Trans i18nKey="agentguard:contextStream.filterKind">Kind</Trans>
-          </label>
-          <Select
-            value={currentKind || ALL_VALUE}
-            onValueChange={(value) =>
-              onFilterChange('kind', value === ALL_VALUE ? '' : value)
-            }
-          >
-            <SelectTrigger className={cn('w-36', MIN_TAP_TARGET_CLASS)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>
-                {t('contextStream.allKinds', 'All kinds')}
-              </SelectItem>
-              {KIND_FILTER_OPTIONS.map((kind) => (
-                <SelectItem key={kind} value={kind}>
-                  {kind}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <Select
+        value={currentKind || ALL_VALUE}
+        onValueChange={(value) =>
+          onFilterChange('kind', value === ALL_VALUE ? '' : value)
+        }
+      >
+        <SelectTrigger className={cn('w-32', MIN_TAP_TARGET_CLASS)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_VALUE}>
+            {t('contextStream.allKinds', 'All kinds')}
+          </SelectItem>
+          {KIND_FILTER_OPTIONS.map((kind) => (
+            <SelectItem key={kind} value={kind}>
+              {kind}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            <Trans i18nKey="agentguard:contextStream.filterDays">Time</Trans>
-          </span>
-          <div className="flex gap-1" role="group">
-            <Button
-              type="button"
-              variant={currentDays === '' ? 'default' : 'outline'}
-              size="sm"
-              className={cn('px-3', MIN_TAP_TARGET_CLASS)}
-              onClick={() => onFilterChange('days', '')}
-            >
-              {t('contextStream.allTime', 'All time')}
-            </Button>
-            {DAY_FILTER_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                variant={currentDays === option.value ? 'default' : 'outline'}
-                size="sm"
-                className={cn('px-3', MIN_TAP_TARGET_CLASS)}
-                onClick={() => onFilterChange('days', option.value)}
-              >
-                {t(option.labelKey, option.fallback)}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {activeFilterCount > 0 ? (
+      <div className="flex gap-1" role="group">
+        <Button
+          type="button"
+          variant={currentDays === '' ? 'default' : 'outline'}
+          size="sm"
+          className={cn('px-3', MIN_TAP_TARGET_CLASS)}
+          onClick={() => onFilterChange('days', '')}
+        >
+          {t('contextStream.allTime', 'All time')}
+        </Button>
+        {DAY_FILTER_OPTIONS.map((option) => (
           <Button
+            key={option.value}
             type="button"
-            variant="ghost"
+            variant={currentDays === option.value ? 'default' : 'outline'}
             size="sm"
             className={cn('px-3', MIN_TAP_TARGET_CLASS)}
-            onClick={onClear}
+            onClick={() => onFilterChange('days', option.value)}
           >
-            <Trans i18nKey="agentguard:contextStream.clearFilters">
-              Clear filters
-            </Trans>
+            {t(option.labelKey, option.fallback)}
           </Button>
-        ) : null}
-      </CardContent>
-    </Card>
+        ))}
+      </div>
+
+      {activeFilterCount > 0 ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn('px-3', MIN_TAP_TARGET_CLASS)}
+          onClick={onClear}
+        >
+          <Trans i18nKey="agentguard:contextStream.clearFilters">
+            Clear filters
+          </Trans>
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -351,70 +379,87 @@ function StreamRow({
   const [expanded, setExpanded] = useState(false);
   const replacementId = item.supersededBy;
   const superseded = replacementId !== null;
+  const Icon = KIND_ICONS[item.kind];
+
+  const metaParts = [item.agentId, formatRelativeTime(item.createdAt)].filter(
+    (part): part is string => Boolean(part),
+  );
 
   return (
     <li
       id={`context-stream-item-${item.id}`}
       data-superseded={superseded ? '' : undefined}
-      className="flex flex-col gap-1 py-3"
+      className="flex gap-3 py-3"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge
-          variant="outline"
-          className="font-mono text-xs whitespace-nowrap"
-        >
-          {item.kind}
-        </Badge>
+      <span
+        aria-hidden="true"
+        data-testid={`kind-glyph-${item.kind}`}
+        className="border-border bg-muted/40 text-muted-foreground mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border"
+      >
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
+      </span>
 
-        {item.projectName ? (
-          <Badge variant="secondary" className="text-xs whitespace-nowrap">
-            {item.projectName}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <Badge
+            variant="outline"
+            className="font-mono text-xs whitespace-nowrap"
+          >
+            {item.kind}
           </Badge>
-        ) : null}
 
-        {item.agentId ? (
-          <span className="text-muted-foreground text-xs">
-            {item.agentId}
-            {item.userId ? ` · ${truncateId(item.userId)}` : ''}
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+            className={cn(
+              'text-left',
+              MIN_TAP_TARGET_CLASS,
+              KIND_EMPHASIS_CLASS[item.kind],
+              superseded && 'text-muted-foreground line-through opacity-60',
+              expanded ? '' : 'line-clamp-1',
+            )}
+          >
+            {item.content}
+          </button>
+        </div>
+
+        <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[length:var(--text-tiny)]">
+          {item.projectName ? (
+            <Badge
+              variant="secondary"
+              className="text-[length:var(--text-tiny)] font-normal whitespace-nowrap"
+            >
+              {item.projectName}
+            </Badge>
+          ) : null}
+
+          {metaParts.length > 0 ? (
+            <span>
+              {metaParts.join(' · ')}
+              {item.userId ? ` · ${truncateId(item.userId)}` : ''}
+            </span>
+          ) : null}
+        </div>
+
+        {replacementId && replacementIsRendered ? (
+          <button
+            type="button"
+            onClick={() => onJumpToItem(replacementId)}
+            className={cn(
+              'text-primary w-fit text-left text-xs hover:underline',
+              MIN_TAP_TARGET_CLASS,
+              'flex items-center',
+            )}
+          >
+            {t('contextStream.replaced', 'replaced →')}
+          </button>
+        ) : replacementId ? (
+          <span className="text-muted-foreground w-fit text-left text-xs">
+            {t('contextStream.replaced', 'replaced →')}
           </span>
         ) : null}
-
-        <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
-          {formatRelativeTime(item.createdAt)}
-        </span>
       </div>
-
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-        className={cn(
-          'text-foreground text-left text-sm',
-          MIN_TAP_TARGET_CLASS,
-          superseded && 'text-muted-foreground line-through opacity-60',
-          expanded ? '' : 'line-clamp-1',
-        )}
-      >
-        {item.content}
-      </button>
-
-      {replacementId && replacementIsRendered ? (
-        <button
-          type="button"
-          onClick={() => onJumpToItem(replacementId)}
-          className={cn(
-            'text-primary w-fit text-left text-xs hover:underline',
-            MIN_TAP_TARGET_CLASS,
-            'flex items-center',
-          )}
-        >
-          {t('contextStream.replaced', 'replaced →')}
-        </button>
-      ) : replacementId ? (
-        <span className="text-muted-foreground w-fit text-left text-xs">
-          {t('contextStream.replaced', 'replaced →')}
-        </span>
-      ) : null}
     </li>
   );
 }
