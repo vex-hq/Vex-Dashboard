@@ -35,7 +35,7 @@ describe('billing page guard (source scan)', () => {
       });
 
       it('does not import a checkout form component', () => {
-        expect(source).not.toMatch(/CheckoutForm/);
+        expect(source).not.toMatch(/import.*CheckoutForm/);
       });
 
       it('does not import billing.config (the Vex tier/price source)', () => {
@@ -51,4 +51,41 @@ describe('billing page guard (source scan)', () => {
       });
     });
   }
+
+  /**
+   * `app/home/[account]/billing/return/page.tsx` is a third render path:
+   * Stripe's checkout-return redirect target. It used to render a live
+   * embedded Stripe Checkout form (real prices/products) whenever the
+   * `session_id` in the URL pointed at a still-open session, and it's
+   * directly navigable by URL with any `session_id` — no in-app link
+   * points at it, but nothing stops a request from reaching it. The
+   * `(user)` variant re-exports this same component, so covering this one
+   * file covers both routes.
+   */
+  describe('checkout-return page ([account]/billing/return)', () => {
+    const source = readFileSync(
+      path.join(webRoot, 'app/home/[account]/billing/return/page.tsx'),
+      'utf-8',
+    );
+
+    it('does not import EmbeddedCheckoutForm', () => {
+      expect(source).not.toMatch(/import.*EmbeddedCheckoutForm/);
+    });
+
+    it('does not import billing.config (the Vex tier/price source)', () => {
+      expect(source).not.toMatch(/config\/billing\.config/);
+    });
+
+    it('redirects instead of rendering when the checkout session is still open', () => {
+      // The `checkoutToken` branch is the one that used to render a live
+      // embedded checkout. It must redirect, not return JSX.
+      const checkoutTokenBranch = source.match(
+        /if \(checkoutToken\) \{([\s\S]*?)\n {2}\}/,
+      )?.[1];
+
+      expect(checkoutTokenBranch).toBeDefined();
+      expect(checkoutTokenBranch).toMatch(/redirect\(/);
+      expect(checkoutTokenBranch).not.toMatch(/return\s*\(/);
+    });
+  });
 });

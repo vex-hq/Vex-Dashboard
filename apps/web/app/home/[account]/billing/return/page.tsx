@@ -4,11 +4,8 @@ import { getBillingGatewayProvider } from '@kit/billing-gateway';
 import { BillingSessionStatus } from '@kit/billing-gateway/components';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
-import billingConfig from '~/config/billing.config';
 import { withI18n } from '~/lib/i18n/with-i18n';
 import { requireUserInServerComponent } from '~/lib/server/require-user-in-server-component';
-
-import { EmbeddedCheckoutForm } from '../_components/embedded-checkout-form';
 
 interface SessionPageProps {
   searchParams: Promise<{
@@ -16,6 +13,28 @@ interface SessionPageProps {
   }>;
 }
 
+/**
+ * Billing guard: no Klio user may ever be shown a Vex price.
+ *
+ * This route is a leftover checkout-return landing page: Stripe redirects
+ * here after a checkout session, and it used to render either a success
+ * screen or — if the session was still open — a live embedded Stripe
+ * Checkout form (`EmbeddedCheckoutForm`), which renders real Stripe
+ * prices/products. Neither of the two billing pages initiates checkout
+ * anymore, but this route is still directly navigable by URL with any
+ * `session_id`, so the open-session branch is neutralized: instead of
+ * rendering checkout, it redirects to the guarded billing page, exactly like
+ * the missing-`session_id` case already does below.
+ *
+ * The completed-session branch (`BillingSessionStatus`) is left rendering:
+ * it's a post-purchase confirmation with no price/product content (email +
+ * a "back to billing" link), not a checkout surface, so it doesn't violate
+ * the guard.
+ *
+ * `EmbeddedCheckoutForm` and `billing.config.ts` are intentionally not
+ * imported here anymore — same "guard is at the render layer, not deletion"
+ * treatment as the two billing pages.
+ */
 async function ReturnCheckoutSessionPage({ searchParams }: SessionPageProps) {
   const sessionId = (await searchParams).session_id;
 
@@ -26,12 +45,7 @@ async function ReturnCheckoutSessionPage({ searchParams }: SessionPageProps) {
   const { customerEmail, checkoutToken } = await loadCheckoutSession(sessionId);
 
   if (checkoutToken) {
-    return (
-      <EmbeddedCheckoutForm
-        checkoutToken={checkoutToken}
-        provider={billingConfig.provider}
-      />
-    );
+    redirect('../');
   }
 
   return (

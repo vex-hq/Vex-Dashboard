@@ -35,7 +35,9 @@ export interface BillingPlanSummaryCardProps {
  * `billing.config.ts` still describes — that config stays in the tree
  * because the checkout server actions built on it are untouched, but nothing
  * that reads it renders on these pages anymore. This card is the entire
- * billing surface a Klio user sees until Klio's own billing ships.
+ * billing surface a Klio user sees until Klio's own billing ships — there is
+ * no other billing content on either page, so its copy must not describe
+ * anything else on the page (e.g. a "console below" that doesn't exist).
  */
 export function BillingPlanSummaryCard({
   planLabel,
@@ -53,7 +55,7 @@ export function BillingPlanSummaryCard({
         <CardDescription>
           {t(
             'planSummary.description',
-            'Klio billing is separate from the legacy console below.',
+            "A summary of your account's current plan while Klio's own billing is being built.",
           )}
         </CardDescription>
       </CardHeader>
