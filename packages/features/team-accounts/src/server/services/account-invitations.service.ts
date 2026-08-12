@@ -258,7 +258,9 @@ class AccountInvitationsService {
     }
 
     // if the invitation email does not match the user email, throw an error
-    if (invitation.data?.email !== params.userEmail) {
+    if (
+      invitation.data?.email?.toLowerCase() !== params.userEmail.toLowerCase()
+    ) {
       logger.error({
         ...ctx,
         error: 'Invitation email does not match user email',

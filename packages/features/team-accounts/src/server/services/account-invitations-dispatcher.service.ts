@@ -10,7 +10,24 @@ type Invitation = Tables<'invitations'>;
 const invitePath = '/join';
 const authTokenCallbackPath = '/auth/confirm';
 
-const siteURL = process.env.NEXT_PUBLIC_SITE_URL;
+const siteURL = resolvePublicAppUrl();
+
+function resolvePublicAppUrl(): string {
+  const explicit = process.env.KLIO_PUBLIC_APP_URL;
+  const configured = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+
+  if (explicit) {
+    return explicit;
+  }
+
+  // Local dashboard against production data must not stamp localhost
+  // into invite emails — recipients cannot open those links.
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(configured)) {
+    return 'https://app.klio.tech';
+  }
+
+  return configured;
+}
 const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME ?? '';
 const emailSender = process.env.EMAIL_SENDER;
 

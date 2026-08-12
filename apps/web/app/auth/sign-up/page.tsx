@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { SignUpMethodsContainer } from '@kit/auth/sign-up';
+import { getSafeRedirectPath } from '@kit/shared/utils';
 import { Trans } from '@kit/ui/trans';
 
 import authConfig from '~/config/auth.config';
@@ -16,12 +17,28 @@ export const generateMetadata = async () => {
   };
 };
 
-const paths = {
-  callback: pathsConfig.auth.callback,
-  appHome: pathsConfig.app.home,
-};
+interface SignUpPageProps {
+  searchParams: Promise<{
+    next?: string;
+    invite_token?: string;
+  }>;
+}
 
-async function SignUpPage() {
+async function SignUpPage({ searchParams }: SignUpPageProps) {
+  const { next, invite_token } = await searchParams;
+
+  const inviteReturn = invite_token
+    ? `${pathsConfig.app.joinTeam}?invite_token=${invite_token}`
+    : null;
+
+  const paths = {
+    callback: pathsConfig.auth.callback,
+    appHome: getSafeRedirectPath(
+      inviteReturn ?? next,
+      pathsConfig.app.home,
+    ),
+  };
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-2">
@@ -47,7 +64,11 @@ async function SignUpPage() {
           defaults={'Already have an account?'}
         />{' '}
         <Link
-          href={pathsConfig.auth.signIn}
+          href={
+            invite_token
+              ? `${pathsConfig.auth.signIn}?invite_token=${invite_token}&next=${encodeURIComponent(`${pathsConfig.app.joinTeam}?invite_token=${invite_token}`)}`
+              : pathsConfig.auth.signIn
+          }
           className="text-foreground font-medium underline underline-offset-4 hover:no-underline"
           prefetch={true}
         >

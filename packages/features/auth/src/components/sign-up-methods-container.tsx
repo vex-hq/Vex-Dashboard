@@ -113,10 +113,19 @@ function getCallbackUrl(props: {
 
   const searchParams = new URLSearchParams(window.location.search);
   const next = searchParams.get('next');
+  const inviteToken = searchParams.get('invite_token');
+  const inviteNext = inviteToken
+    ? `/join?invite_token=${inviteToken}`
+    : null;
+  const resolvedNext =
+    next && isSafeRedirectPath(next)
+      ? next
+      : inviteNext && isSafeRedirectPath(inviteNext)
+        ? inviteNext
+        : null;
 
-  // Only pass through the next param if it's a safe internal path
-  if (next && isSafeRedirectPath(next)) {
-    url.searchParams.set('next', next);
+  if (resolvedNext) {
+    url.searchParams.set('next', resolvedNext);
   }
 
   return url.href;

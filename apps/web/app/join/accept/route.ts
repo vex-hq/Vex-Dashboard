@@ -4,6 +4,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 
 import { getLogger } from '@kit/shared/logger';
 import { getSupabaseServerAdminClient } from '@kit/supabase/server-admin-client';
+import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
 import pathsConfig from '~/config/paths.config';
 import { Database } from '~/lib/database.types';
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
   if (!inviteToken) {
     logger.warn(ctx, 'Missing invite_token parameter');
 
-    return redirectToError('Invalid invitation link');
+    return redirectToError(request, 'Invalid invitation link');
   }
 
   try {
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
         'Invitation not found or expired',
       );
 
-      return redirectToError('Invitation not found or expired');
+      return redirectToError(request, 'Invitation not found or expired');
     }
 
     logger.info(
@@ -66,13 +67,32 @@ export async function GET(request: NextRequest) {
         invitationId: invitation.id,
         email: invitation.email,
       },
-      'Valid invitation found. Generating auth link...',
+      'Valid invitation found',
     );
+
+    // Already signed in as the invited person — skip generateLink.
+    // generateLink+verifyOtp on top of an existing session is what left
+    // invitees on /join as the wrong user, which the join page then
+    // reported as "Invite not found or expired".
+    const sessionClient = getSupabaseServerClient();
+    const { data: sessionData } = await sessionClient.auth.getUser();
+    const sessionEmail = sessionData.user?.email?.toLowerCase() ?? null;
+
+    if (sessionEmail && sessionEmail === invitation.email.toLowerCase()) {
+      const joinUrl = joinPageUrl(request, inviteToken);
+
+      logger.info(
+        { ...ctx, email: invitation.email },
+        'Session already matches invitee. Skipping auth-link generation.',
+      );
+
+      return NextResponse.redirect(joinUrl);
+    }
 
     // Determine email link type based on user existence
     // 'invite' for new users (creates account + authenticates)
     // 'magiclink' for existing users (authenticates only)
-    const emailLinkType = await determineEmailLinkType(
+    let emailLinkType = await determineEmailLinkType(
       adminClient,
       invitation.email,
     );
@@ -86,11 +106,28 @@ export async function GET(request: NextRequest) {
       'Determined email link type for invitation',
     );
 
-    // Generate fresh Supabase auth link
-    const generateLinkResponse = await adminClient.auth.admin.generateLink({
+    // Generate fresh Supabase auth link. `invite` fails when the email
+    // already exists in Auth but not in `accounts` — fall back to magiclink.
+    let generateLinkResponse = await adminClient.auth.admin.generateLink({
       email: invitation.email,
       type: emailLinkType,
     });
+
+    if (generateLinkResponse.error && emailLinkType === 'invite') {
+      logger.warn(
+        {
+          ...ctx,
+          error: generateLinkResponse.error,
+        },
+        'invite generateLink failed; retrying as magiclink',
+      );
+
+      emailLinkType = 'magiclink';
+      generateLinkResponse = await adminClient.auth.admin.generateLink({
+        email: invitation.email,
+        type: emailLinkType,
+      });
+    }
 
     if (generateLinkResponse.error) {
       logger.error(
@@ -106,15 +143,20 @@ export async function GET(request: NextRequest) {
 
     // Extract token from generated link
     const verifyLink = generateLinkResponse.data.properties?.action_link;
-    const token = new URL(verifyLink).searchParams.get('token');
+    const verifyUrl = new URL(verifyLink);
+    const token =
+      verifyUrl.searchParams.get('token') ??
+      verifyUrl.searchParams.get('token_hash');
 
     if (!token) {
       logger.error(ctx, 'Token not found in generated link');
       throw new Error('Token in verify link from Supabase Auth was not found');
     }
 
-    // Build redirect URL to auth confirmation with fresh token
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    // Build redirect URL to auth confirmation with fresh token.
+    // Prefer the request origin so a production invite opened on
+    // app.klio.tech does not bounce through a stale SITE_URL.
+    const siteUrl = publicSiteUrl(request);
     const authCallbackUrl = new URL('/auth/confirm', siteUrl);
 
     // Add auth parameters
@@ -122,8 +164,7 @@ export async function GET(request: NextRequest) {
     authCallbackUrl.searchParams.set('type', emailLinkType);
 
     // Add next parameter to redirect to join page after auth
-    const joinUrl = new URL(pathsConfig.app.joinTeam, siteUrl);
-    joinUrl.searchParams.set('invite_token', inviteToken);
+    const joinUrl = joinPageUrl(request, inviteToken);
 
     // Mark if this is a new user so /join page can redirect to /identities
     if (emailLinkType === 'invite') {
@@ -152,7 +193,10 @@ export async function GET(request: NextRequest) {
       'Failed to process invitation acceptance',
     );
 
-    return redirectToError('An error occurred processing your invitation');
+    return redirectToError(
+      request,
+      'An error occurred processing your invitation',
+    );
   }
 }
 
@@ -180,12 +224,52 @@ async function determineEmailLinkType(
 }
 
 /**
+ * Public origin for redirects and auth callbacks.
+ *
+ * Invite emails are generated with NEXT_PUBLIC_SITE_URL. Local dev that
+ * talks to production Supabase would otherwise stamp localhost into
+ * recipient mail. Prefer an explicit public URL, then the incoming
+ * request origin when it is not loopback, then SITE_URL.
+ */
+function publicSiteUrl(request: NextRequest): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+  const explicit = process.env.KLIO_PUBLIC_APP_URL ?? '';
+
+  if (explicit) {
+    return explicit;
+  }
+
+  if (configured && !isLoopback(configured)) {
+    return configured;
+  }
+
+  const origin = request.nextUrl.origin;
+
+  if (!isLoopback(origin)) {
+    return origin;
+  }
+
+  return configured || 'https://app.klio.tech';
+}
+
+function isLoopback(url: string): boolean {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(url);
+}
+
+function joinPageUrl(request: NextRequest, inviteToken: string): URL {
+  const joinUrl = new URL(pathsConfig.app.joinTeam, publicSiteUrl(request));
+
+  joinUrl.searchParams.set('invite_token', inviteToken);
+
+  return joinUrl;
+}
+
+/**
  * @name redirectToError
  * @description Redirects to join page with error message
  */
-function redirectToError(message: string): NextResponse {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const errorUrl = new URL(pathsConfig.app.joinTeam, siteUrl);
+function redirectToError(request: NextRequest, message: string): NextResponse {
+  const errorUrl = new URL(pathsConfig.app.joinTeam, publicSiteUrl(request));
 
   errorUrl.searchParams.set('error', message);
 

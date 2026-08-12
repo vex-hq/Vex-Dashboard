@@ -8,7 +8,10 @@ import { MultiFactorAuthError, requireUser } from '@kit/supabase/require-user';
 import { getSupabaseServerAdminClient } from '@kit/supabase/server-admin-client';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 import { createTeamAccountsApi } from '@kit/team-accounts/api';
-import { AcceptInvitationContainer } from '@kit/team-accounts/components';
+import {
+  AcceptInvitationContainer,
+  SignOutInvitationButton,
+} from '@kit/team-accounts/components';
 import { Button } from '@kit/ui/button';
 import { Heading } from '@kit/ui/heading';
 import { Trans } from '@kit/ui/trans';
@@ -25,6 +28,7 @@ interface JoinTeamAccountPageProps {
     type?: 'invite' | 'magic-link';
     email?: string;
     is_new_user?: string;
+    error?: string;
   }>;
 }
 
@@ -40,8 +44,18 @@ async function JoinTeamAccountPage(props: JoinTeamAccountPageProps) {
   const searchParams = await props.searchParams;
   const token = searchParams.invite_token;
 
-  // no token, redirect to 404
+  // /join/accept sends people here with ?error= when the token is missing
+  // or the invite row is gone. Render the same expired state instead of a
+  // bare 404 so the copy matches what they were told in the email.
   if (!token) {
+    if (searchParams.error) {
+      return (
+        <AuthLayoutShell Logo={AppLogo}>
+          <InviteNotFoundOrExpired />
+        </AuthLayoutShell>
+      );
+    }
+
     notFound();
   }
 
@@ -63,14 +77,16 @@ async function JoinTeamAccountPage(props: JoinTeamAccountPageProps) {
       // redirect them to the MFA verification page
       redirect(verifyMfaUrl);
     } else {
+      // Send them to sign-in (existing users already have personal
+      // accounts) with next= so they return here after auth. Sign-up
+      // is one click away and now also honors `next`.
+      const joinNext = `${pathsConfig.app.joinTeam}?invite_token=${token}`;
       const urlParams = new URLSearchParams({
+        next: joinNext,
         invite_token: token,
       });
 
-      const nextUrl = `${pathsConfig.auth.signUp}?${urlParams.toString()}`;
-
-      // redirect to the sign up page with the invite token
-      redirect(nextUrl);
+      redirect(`${pathsConfig.auth.signIn}?${urlParams.toString()}`);
     }
   }
 
@@ -89,14 +105,19 @@ async function JoinTeamAccountPage(props: JoinTeamAccountPageProps) {
     );
   }
 
-  // the invitation is not found or expired or the email is not the same as the user's email (case insensitive)
   const isInvitationValid =
     invitation.email.toLowerCase() === auth.data.email.toLowerCase();
 
   if (!isInvitationValid) {
+    const signOutNext = `${pathsConfig.app.joinTeam}?invite_token=${token}`;
+
     return (
       <AuthLayoutShell Logo={AppLogo}>
-        <InviteNotFoundOrExpired />
+        <InviteWrongAccount
+          invitedEmail={invitation.email}
+          signedInEmail={auth.data.email ?? ''}
+          signOutNext={signOutNext}
+        />
       </AuthLayoutShell>
     );
   }
@@ -197,6 +218,33 @@ function InviteNotFoundOrExpired() {
           <Trans i18nKey={'teams:backToHome'} />
         </Link>
       </Button>
+    </div>
+  );
+}
+
+function InviteWrongAccount({
+  invitedEmail,
+  signedInEmail,
+  signOutNext,
+}: {
+  invitedEmail: string;
+  signedInEmail: string;
+  signOutNext: string;
+}) {
+  return (
+    <div className={'flex flex-col space-y-4'}>
+      <Heading level={6}>
+        <Trans i18nKey={'teams:inviteWrongAccount'} />
+      </Heading>
+
+      <p className={'text-muted-foreground text-sm'}>
+        <Trans
+          i18nKey={'teams:inviteWrongAccountDescription'}
+          values={{ invitedEmail, signedInEmail }}
+        />
+      </p>
+
+      <SignOutInvitationButton nextPath={signOutNext} />
     </div>
   );
 }
