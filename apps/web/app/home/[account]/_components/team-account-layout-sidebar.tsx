@@ -10,10 +10,11 @@ import {
 
 import { ProfileAccountDropdownContainer } from '~/components//personal-account-dropdown-container';
 import { FeaturebaseMessenger } from '~/components/featurebase-messenger';
-import { LiveSupportButton } from '~/components/live-support-button';
+// import { LiveSupportButton } from '~/components/live-support-button';
 import featureFlagsConfig from '~/config/feature-flags.config';
 import pathsConfig from '~/config/paths.config';
 import { getTeamAccountSidebarConfig } from '~/config/team-account-navigation.config';
+
 import { TeamAccountAccountsSelector } from '../_components/team-account-accounts-selector';
 import { TeamAccountLayoutSidebarNavigation } from './team-account-layout-sidebar-navigation';
 
@@ -127,7 +128,8 @@ function SidebarContainer(props: {
             </span>
           </a>
 
-          <LiveSupportButton />
+          {/* Live Support — hidden, not removed. Uncomment to restore. */}
+          {/* <LiveSupportButton /> */}
 
           <a
             href="https://vex.featurebase.app"

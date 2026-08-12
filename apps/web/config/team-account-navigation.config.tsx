@@ -1,4 +1,4 @@
-import { BookOpen, Brain, FolderGit2, Hexagon } from 'lucide-react';
+import { Brain, FolderGit2, Hexagon } from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -70,18 +70,23 @@ const getRoutes = (account: string) => [
       },
     ],
   },
-  {
-    label: 'agentguard:nav.gettingStarted',
-    children: [
-      {
-        // Surfaced because a new user needs the connection instructions after
-        // onboarding, and this page already carries them.
-        label: 'agentguard:nav.documentation',
-        path: createPath(pathsConfig.app.accountDocs, account),
-        Icon: <BookOpen className={iconClasses} />,
-      },
-    ],
-  },
+  // ── Getting Started / Documentation — hidden, not removed ─────────────────
+  // A whole labelled nav group for one link that the sidebar footer already
+  // carries as "Docs". The connection instructions it was surfaced for now
+  // live on the home screen itself (the connect-first-agent card), so this
+  // was the third route to the same place. Route remains live at
+  // /home/[account]/docs. To restore, uncomment.
+  //
+  // {
+  //   label: 'agentguard:nav.gettingStarted',
+  //   children: [
+  //     {
+  //       label: 'agentguard:nav.documentation',
+  //       path: createPath(pathsConfig.app.accountDocs, account),
+  //       Icon: <BookOpen className={iconClasses} />,
+  //     },
+  //   ],
+  // },
 
   // ── Sessions / Agents — hidden, not removed ───────────────────────────────
   // Both are real, populated pages (session_memories: 37k rows / 272 sessions).

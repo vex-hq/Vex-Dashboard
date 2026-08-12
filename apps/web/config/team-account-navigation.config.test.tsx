@@ -43,9 +43,21 @@ describe('getTeamAccountSidebarConfig', () => {
     expect(workspaceLabels).toContain('agentguard:nav.projects');
   });
 
-  it('still includes the dashboard and documentation entries', () => {
+  it('still includes the dashboard entry', () => {
     expect(allLabels()).toContain('common:routes.dashboard');
-    expect(allLabels()).toContain('agentguard:nav.documentation');
+  });
+
+  // The sidebar footer already links to the docs, and the connect-first-agent
+  // card carries the setup instructions this entry existed for — so a whole
+  // labelled nav group for one duplicate link came out.
+  it('does not include a documentation nav entry', () => {
+    expect(allLabels()).not.toContain('agentguard:nav.documentation');
+  });
+
+  it('does not include an empty getting-started group', () => {
+    expect(
+      config.routes.map((group) => 'label' in group && group.label),
+    ).not.toContain('agentguard:nav.gettingStarted');
   });
 
   it('builds each visible path with the given account slug', () => {
