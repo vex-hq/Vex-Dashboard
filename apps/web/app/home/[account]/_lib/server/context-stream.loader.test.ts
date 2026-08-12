@@ -176,32 +176,16 @@ describe('loadProjectPulse', () => {
     );
   });
 
-  it('a project the viewer is not a member of is excluded even though it has visible org-scoped memories', async () => {
-    const { loadProjectPulse } = await import('./context-stream.loader');
-    // Postgres applies the `pr.id` membership EXISTS (asserted in the
-    // previous test) before any row is produced, so a real query never
-    // returns an aggregate row for a non-member project — the mock is
-    // seeded with exactly that: only the member project's row, standing in
-    // for what the gated query would actually return.
-    queueRows({
-      rows: [
-        {
-          project_id: 'proj-member',
-          name: 'Member Project',
-          items_this_week: '3',
-          last_item_at: '2026-08-10T09:00:00Z',
-          agents_active: ['claude-code'],
-        },
-      ],
-    });
-
-    const pulse = await loadProjectPulse('org-1', 'user-1');
-
-    expect(pulse.map((row) => row.projectId)).toEqual(['proj-member']);
-    expect(pulse.some((row) => row.projectId === 'proj-non-member')).toBe(
-      false,
-    );
-  });
+  // A seed-based exclusion test ("queue a member row and a non-member row,
+  // assert only the member row survives") cannot work against the mocked
+  // pool: `pool.query` is a `vi.fn()` that returns exactly what `queueRows`
+  // seeds it with, regardless of the SQL text, so such a test would pass
+  // even with the membership gate deleted entirely — it was removed for
+  // being decorative (verified: it still passed with the gate stripped out
+  // in review). The membership gate's load-bearing coverage is the
+  // SQL-shape test above ("gates the projects FROM itself by membership"),
+  // which fails when the gate is removed (verified by mutation, fix
+  // round 1).
 
   it('a null viewer sees no projects at all (fail closed, no membership to check)', async () => {
     const { loadProjectPulse } = await import('./context-stream.loader');
