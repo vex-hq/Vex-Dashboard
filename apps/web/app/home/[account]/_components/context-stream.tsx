@@ -105,6 +105,18 @@ export function ContextStream({ items, projects, agents }: ContextStreamProps) {
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, []);
 
+  /**
+   * The set of ids currently rendered in `items`. Used to decide whether a
+   * superseded row's "replaced →" pointer can actually jump anywhere: the
+   * loader (Task 1, frozen) has no `itemId` filter, so a replacement outside
+   * the current filtered/paged view simply isn't in `items`. Derived once
+   * per `items` change — never mutates `items` itself.
+   */
+  const renderedItemIds = useMemo(
+    () => new Set(items.map((item) => item.id)),
+    [items],
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <FilterBar
@@ -127,7 +139,15 @@ export function ContextStream({ items, projects, agents }: ContextStreamProps) {
           data-testid="context-stream-rows"
         >
           {items.map((item) => (
-            <StreamRow key={item.id} item={item} onJumpToItem={jumpToItem} />
+            <StreamRow
+              key={item.id}
+              item={item}
+              onJumpToItem={jumpToItem}
+              replacementIsRendered={
+                item.supersededBy !== null &&
+                renderedItemIds.has(item.supersededBy)
+              }
+            />
           ))}
         </ul>
       )}
@@ -321,9 +341,11 @@ function EmptyState({ activeFilterCount }: { activeFilterCount: number }) {
 function StreamRow({
   item,
   onJumpToItem,
+  replacementIsRendered,
 }: {
   item: ContextItem;
   onJumpToItem: (id: string) => void;
+  replacementIsRendered: boolean;
 }) {
   const { t } = useTranslation('agentguard');
   const [expanded, setExpanded] = useState(false);
@@ -376,7 +398,7 @@ function StreamRow({
         {item.content}
       </button>
 
-      {replacementId ? (
+      {replacementId && replacementIsRendered ? (
         <button
           type="button"
           onClick={() => onJumpToItem(replacementId)}
@@ -388,6 +410,10 @@ function StreamRow({
         >
           {t('contextStream.replaced', 'replaced →')}
         </button>
+      ) : replacementId ? (
+        <span className="text-muted-foreground w-fit text-left text-xs">
+          {t('contextStream.replaced', 'replaced →')}
+        </span>
       ) : null}
     </li>
   );

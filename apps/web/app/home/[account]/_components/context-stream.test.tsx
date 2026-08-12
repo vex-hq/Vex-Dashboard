@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ContextItem } from '../_lib/server/context-stream.loader';
@@ -82,5 +82,53 @@ describe('<ContextStream />', () => {
     render(<ContextStream items={[]} projects={[]} agents={[]} />);
 
     expect(screen.queryByText(/no items match/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the replaced pointer as a clickable control when the replacement is rendered', () => {
+    render(
+      <ContextStream
+        items={[
+          item({
+            id: 'm-1',
+            content: 'old decision text',
+            supersededBy: 'm-9',
+          }),
+          item({ id: 'm-9', content: 'new decision text', supersededBy: null }),
+        ]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    const row = screen.getByText('old decision text').closest('li');
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByRole('button', { name: /replaced/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the replaced pointer as inert text when the replacement is not in the rendered items', () => {
+    render(
+      <ContextStream
+        items={[
+          item({
+            id: 'm-1',
+            content: 'old decision text',
+            supersededBy: 'm-9',
+          }),
+        ]}
+        projects={[]}
+        agents={[]}
+      />,
+    );
+
+    const row = screen.getByText('old decision text').closest('li');
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByText(/replaced/i),
+    ).toBeInTheDocument();
+    expect(
+      within(row as HTMLElement).queryByRole('button', { name: /replaced/i }),
+    ).not.toBeInTheDocument();
   });
 });
