@@ -200,18 +200,38 @@ function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
  * (`memory/_lib/server/project-memory.loader.ts` — `EXISTS (SELECT 1 FROM
  * project_members pm WHERE pm.project_id = p.id AND pm.user_id = …)`).
  * That file's `visibilityClause` also has an admin branch (`TRUE`, org
- * admins see every project); this function's simpler two-argument signature
- * (`orgId, viewerUserId`) has no access-kind parameter to carry that
- * distinction, so it does not support it — a caller needing the admin view
- * must extend the signature deliberately, not fall through here by
- * accident. A `null`/absent viewer therefore sees no projects (`FALSE`),
- * the same fail-closed default `loadContextStream` uses for its private and
- * project arms.
+ * admins see every project); this function now carries the same admin
+ * branch via its third argument. A `null`/absent viewer with `isOrgAdmin`
+ * false sees no projects (`FALSE`), the same fail-closed default
+ * `loadContextStream` uses for its private and project arms.
+ *
+ * PRODUCTION INCIDENT (2026-08-12): the `project_members` table held exactly
+ * one row across the entire database — the engine auto-creates projects on
+ * write without enrolling the writer as a member — so the membership gate,
+ * though correct as a leak-prevention control, could never match. Every
+ * project rail, including the org owner's, rendered "no project activity".
+ * The membership gate itself stays: it stops a non-member's project names
+ * leaking through this aggregate. `isOrgAdmin` is the escape hatch, mirroring
+ * `ProjectAccess`'s admin branch on the project detail page.
+ *
+ * DELIBERATE DIFFERENCE FROM `ProjectAccess`: that type's admin branch
+ * (`{ kind: 'admin' }`) carries no userId at all. Adopting that shape here
+ * would silently drop the admin's OWN private items from their OWN pulse
+ * counts, because the private-scope arm below is keyed on `viewerUserId`.
+ * So here, admin widens ONLY `projectVisibility` (which projects are
+ * listed); the `arms` array — which items are counted per project — is left
+ * completely untouched and still keys off `viewerUserId` exactly as before.
+ * An admin gains no access to other users' private memories: their pulse
+ * counts are computed from items they could already see (org-scope plus
+ * their own private/project-member items), same as anyone else. Do not
+ * "simplify" this by switching to `ProjectAccess` — that would be a silent
+ * regression for admins viewing their own pulse.
  */
 export const loadProjectPulse = cache(
   async (
     orgId: string,
     viewerUserId: string | null,
+    isOrgAdmin = false,
   ): Promise<ProjectPulse[]> => {
     const pool = getAgentGuardPool();
     const params: unknown[] = [orgId];
@@ -233,6 +253,13 @@ export const loadProjectPulse = cache(
         SELECT 1 FROM project_members pm
         WHERE pm.project_id = pr.id AND pm.user_id = ${viewer}
       )`;
+    }
+
+    // ONLY the project-listing predicate widens for admins. The item `arms`
+    // above are untouched — see the DELIBERATE DIFFERENCE note in the
+    // function docstring.
+    if (isOrgAdmin) {
+      projectVisibility = 'TRUE';
     }
 
     const { rows } = await pool.query<ProjectPulseQueryRow>(

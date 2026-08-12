@@ -194,4 +194,67 @@ describe('loadProjectPulse', () => {
     const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/AND \(FALSE\)/);
   });
+
+  describe('isOrgAdmin', () => {
+    it('non-admin call (2-arg, or explicit false) is byte-identical to the pre-fix SQL', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1');
+      const [sqlDefault] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      queryMock.mockReset();
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', false);
+      const [sqlExplicit] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sqlExplicit).toBe(sqlDefault);
+      // The membership-gated project-listing predicate from before this fix.
+      expect(sqlDefault).toMatch(
+        /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
+      );
+      expect(sqlDefault).not.toMatch(/AND \(TRUE\)/);
+    });
+
+    it('admin: project-listing gate is TRUE and carries no project_members EXISTS for pr.id', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', true);
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).toMatch(/AND \(TRUE\)/);
+      expect(sql).not.toMatch(
+        /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
+      );
+    });
+
+    it('admin: item-visibility arms are unchanged — still carry both the user-bound private arm and the project-membership arm', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', true);
+      const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      // Proves item visibility (which memories get counted) is untouched by
+      // the admin flag: the private arm is still keyed to this viewer's own
+      // user id, and the project-membership arm (for m.project_id) is still
+      // present, even though the project-LISTING gate above is now TRUE.
+      expect(sql).toMatch(/scope = 'org'/);
+      expect(sql).toMatch(/m\.scope = 'private' AND m\.user_id = /);
+      expect(sql).toMatch(
+        /m\.scope = 'project' AND EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = m\.project_id AND pm\.user_id = /,
+      );
+      expect(params).toContain('user-1');
+    });
+
+    it('admin with null viewer: project listing is TRUE but item arms still fail closed to org-scope only', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', null, true);
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).toMatch(/AND \(TRUE\)/);
+      expect(sql).toMatch(/scope = 'org'/);
+      expect(sql).not.toMatch(/scope = 'private'/);
+      expect(sql).not.toMatch(/m\.scope = 'project' AND EXISTS/);
+    });
+  });
 });

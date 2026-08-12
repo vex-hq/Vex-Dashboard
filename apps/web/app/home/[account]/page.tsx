@@ -21,15 +21,12 @@ import {
   loadProjectPulse,
 } from './_lib/server/context-stream.loader';
 import { loadContextUsage } from './_lib/server/context-usage.loader';
-import { loadMemoryVolume } from './memory/_lib/server/memory.loader';
+import { loadHasAnyMemory } from './_lib/server/workspace-activity.loader';
 
 interface TeamAccountHomePageProps {
   params: Promise<{ account: string }>;
   searchParams: Promise<RawStreamSearchParams>;
 }
-
-/** Matches the Memory page's volume window so both read the same series. */
-const MEMORY_VOLUME_DAYS = 30;
 
 /**
  * Run one dashboard loader, degrading to `fallback` if it fails.
@@ -81,19 +78,24 @@ async function TeamAccountHomePage({
   ]);
   const viewerUserId = viewer.userId;
 
-  const [stream, projectPulse, usage, memoryVolume] = await Promise.all([
+  const [stream, projectPulse, usage, hasAnyMemory] = await Promise.all([
     orFallback('contextStream', [], () =>
       loadContextStream(orgId, viewerUserId, filters),
     ),
-    orFallback('projectPulse', [], () => loadProjectPulse(orgId, viewerUserId)),
-    orFallback('contextUsage', [], () => loadContextUsage(orgId)),
-    // Memory reuses the Memory page's own loader (no duplicated SQL). It is
-    // not scoped by the stream filters: the volume window is fixed at 30
-    // days, exactly as the Memory page renders it — this is only used below
-    // to decide whether the connect-first-agent card should show.
-    orFallback('memoryVolume', [], () =>
-      loadMemoryVolume(orgId, MEMORY_VOLUME_DAYS),
+    orFallback('projectPulse', [], () =>
+      loadProjectPulse(orgId, viewerUserId, viewer.isOrgAdmin),
     ),
+    orFallback('contextUsage', [], () => loadContextUsage(orgId)),
+    // Fallback is `true` (assume connected), the INVERSE of every other
+    // loader's fallback on this page. This is deliberate: the second
+    // production fault here was that a FAILED probe used to fall back to
+    // `[]`, and `[].every(...)` is vacuously true, so a query failure and a
+    // genuinely empty workspace were indistinguishable and both nagged the
+    // user with the connect card. Assuming "connected" on failure means a
+    // transient DB error never shows the card to an active user — the worst
+    // case is a truly new workspace briefly not seeing the card, which is
+    // far cheaper than nagging someone mid-incident.
+    orFallback('hasAnyMemory', true, () => loadHasAnyMemory(orgId)),
   ]);
 
   const projects = projectPulse.map((pulse) => ({
@@ -125,13 +127,16 @@ async function TeamAccountHomePage({
       />
 
       <PageBody>
-        {/* First-run: an org with zero memory writes in the volume window has
-            no working agent connection — either brand new or a setup that
-            never finished. Both want the same thing: the connect command,
-            here, with the key already in it. Disappears on the first write.
-            (A long-idle but genuinely connected org sees it too; for them it
-            reads as a reconnect helper, which is not wrong.) */}
-        {memoryVolume.every((point) => point.captured === 0) ? (
+        {/* First-run: an org that has NEVER captured a single memory, of any
+            scope or status, has no working agent connection — either brand
+            new or a setup that never finished. Both want the same thing: the
+            connect command, here, with the key already in it. Disappears the
+            moment the workspace captures its first memory, forever after
+            (this is an existence probe, not a recency window — see
+            loadHasAnyMemory's docstring for why a 30-day/org-scope volume
+            check does not belong here: it falsely flagged active
+            private-scope-only workspaces as disconnected in production). */}
+        {hasAnyMemory === false ? (
           <div className="mb-6">
             <ConnectFirstAgent accountSlug={account} />
           </div>
