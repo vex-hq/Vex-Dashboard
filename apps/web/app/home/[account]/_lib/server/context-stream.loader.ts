@@ -226,7 +226,24 @@ function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
  * their own private/project-member items), same as anyone else. Do not
  * "simplify" this by switching to `ProjectAccess` — that would be a silent
  * regression for admins viewing their own pulse.
+ *
+ * ACTIVITY REQUIREMENT (admin path only): the widened admin listing above
+ * (`projectVisibility = 'TRUE'`) surfaces every project in the org, most of
+ * which have no activity in the 7-day window this widget covers. The panel
+ * is titled "What's moving" with an empty state of "No project activity in
+ * the last 7 days" — so for the admin path we additionally require at least
+ * one counted item (`HAVING COUNT(m.id) > 0`) to keep the listing honest
+ * with its own copy. This is NOT applied to the membership path: a member
+ * seeing their own project sitting quiet this week is meaningful signal
+ * ("your project, nothing this week"), and the rail is specified as the
+ * projects the viewer belongs to, activity or not.
+ *
+ * `PROJECT_RAIL_LIMIT` caps both paths — this is a sidebar rail, not a
+ * directory — relying on the existing `ORDER BY last_item_at DESC NULLS
+ * LAST` to keep the most recently active projects above the cut.
  */
+const PROJECT_RAIL_LIMIT = 8;
+
 export const loadProjectPulse = cache(
   async (
     orgId: string,
@@ -262,6 +279,16 @@ export const loadProjectPulse = cache(
       projectVisibility = 'TRUE';
     }
 
+    // Admin path only — see ACTIVITY REQUIREMENT in the function docstring.
+    // The membership path must never carry this: a quiet member project is
+    // still meaningful and must still render.
+    const having: string[] = [];
+    if (isOrgAdmin) {
+      having.push('COUNT(m.id) > 0');
+    }
+
+    const limitParam = p(PROJECT_RAIL_LIMIT);
+
     const { rows } = await pool.query<ProjectPulseQueryRow>(
       `
       SELECT
@@ -283,7 +310,9 @@ export const loadProjectPulse = cache(
       WHERE pr.org_id = $1
         AND (${projectVisibility})
       GROUP BY pr.id, pr.display_name
+      ${having.length ? `HAVING ${having.join(' AND ')}` : ''}
       ORDER BY last_item_at DESC NULLS LAST
+      LIMIT ${limitParam}
       `,
       params,
     );

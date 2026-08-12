@@ -196,7 +196,7 @@ describe('loadProjectPulse', () => {
   });
 
   describe('isOrgAdmin', () => {
-    it('non-admin call (2-arg, or explicit false) is byte-identical to the pre-fix SQL', async () => {
+    it('non-admin call (2-arg, or explicit false) produces identical SQL either way, with no activity HAVING clause', async () => {
       const { loadProjectPulse } = await import('./context-stream.loader');
       queueRows({ rows: [] });
       await loadProjectPulse('org-1', 'user-1');
@@ -213,6 +213,9 @@ describe('loadProjectPulse', () => {
         /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
       );
       expect(sqlDefault).not.toMatch(/AND \(TRUE\)/);
+      // The membership path must NOT gain the admin-only activity floor: a
+      // member's own quiet project is still meaningful and must render.
+      expect(sqlDefault).not.toMatch(/HAVING/i);
     });
 
     it('admin: project-listing gate is TRUE and carries no project_members EXISTS for pr.id', async () => {
@@ -225,6 +228,31 @@ describe('loadProjectPulse', () => {
       expect(sql).not.toMatch(
         /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
       );
+    });
+
+    it('admin: carries a HAVING clause requiring at least one counted item, so a project with zero visible items in the window is excluded', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', true);
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).toMatch(/HAVING[\s\S]*COUNT\(m\.id\)\s*>\s*0/i);
+      // The HAVING clause must come after GROUP BY, before ORDER BY.
+      const groupByIdx = sql.search(/GROUP BY/i);
+      const havingIdx = sql.search(/HAVING/i);
+      const orderByIdx = sql.search(/ORDER BY/i);
+      expect(groupByIdx).toBeGreaterThan(-1);
+      expect(havingIdx).toBeGreaterThan(groupByIdx);
+      expect(orderByIdx).toBeGreaterThan(havingIdx);
+    });
+
+    it('membership path never carries a HAVING clause, even with a viewer set', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', false);
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).not.toMatch(/HAVING/i);
     });
 
     it('admin: item-visibility arms are unchanged — still carry both the user-bound private arm and the project-membership arm', async () => {
@@ -255,6 +283,37 @@ describe('loadProjectPulse', () => {
       expect(sql).toMatch(/scope = 'org'/);
       expect(sql).not.toMatch(/scope = 'private'/);
       expect(sql).not.toMatch(/m\.scope = 'project' AND EXISTS/);
+    });
+  });
+
+  describe('rail LIMIT', () => {
+    it('membership path binds a LIMIT of 8 as a query parameter', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', false);
+      const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).toMatch(/LIMIT \$\d+/);
+      expect(params).toContain(8);
+    });
+
+    it('admin path binds the same LIMIT of 8 as a query parameter', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', true);
+      const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).toMatch(/LIMIT \$\d+/);
+      expect(params).toContain(8);
+    });
+
+    it('LIMIT is not string-interpolated: the literal "8" never appears bare in the SQL text', async () => {
+      const { loadProjectPulse } = await import('./context-stream.loader');
+      queueRows({ rows: [] });
+      await loadProjectPulse('org-1', 'user-1', true);
+      const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+
+      expect(sql).not.toMatch(/LIMIT 8\b/);
     });
   });
 });
