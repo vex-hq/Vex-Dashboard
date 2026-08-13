@@ -95,9 +95,10 @@ export function PlateSchedule() {
       </div>
 
       <p className="k-marg" style={{ marginTop: '26px', maxWidth: '68ch' }}>
-        Connected agents, memories and retention are unlimited on every tier —
-        you pay for people, not volume. Self-hosting the open-source engine on
-        your own hardware is <b>free</b> — the source is at{' '}
+        Connected agents and memories are unlimited on every tier — you pay
+        for people, not volume. Retention is 30 days on Free and forever on
+        Team. Self-hosting the open-source engine on your own hardware is{' '}
+        <b>free</b> — the source is at{' '}
         <a href={GITHUB_REPO_URL} style={{ color: 'inherit' }}>
           github.com/klio-tech/klio
         </a>

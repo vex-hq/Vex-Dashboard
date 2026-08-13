@@ -39,6 +39,35 @@
  * market rate to read. Replace this with a real number after customer discovery.
  *
  * Data shape is `readonly` end-to-end; use `[...PLANS]` for a mutable copy.
+ *
+ * ## 2026-08-13 revision — retention and projects become real levers
+ *
+ * `services/shared/shared/plan_limits.py` (the engine) previously enforced
+ * `-1` (forever) retention for every plan while this file said the same
+ * thing, so the two agreed — but the engine's own docstring records an
+ * EARLIER drift where the site promised "unlimited memories, retention
+ * forever" while the code actually enforced 1,000/month and a one-day
+ * window: people who signed up on the published terms lost their history
+ * after a day. That is the failure mode this file exists to prevent, and it
+ * is exactly the kind of change being made now — so the two numbers below
+ * are copied verbatim from the approved spec, not re-derived:
+ *
+ *   - Free retention: forever → **30 days**. 46% of all memories in
+ *     production are already older than 30 days, so this binds immediately
+ *     for real accounts (existing orgs are grandfathered via
+ *     `plan_overrides`, not retroactively deleted).
+ *   - Free projects: **3**, newly published. The heaviest real account has
+ *     102 projects; three is generous for evaluating and confining for real
+ *     use.
+ *   - Team rate limit: 5,000 RPM (engine) → **1,000 RPM**, matching what
+ *     this file already claimed. The engine was the one out of sync here.
+ *   - The intelligence layer (knowledge graph, hybrid lexical search, the
+ *     curator, compression) moves from "given to every Cloud user" to
+ *     **Team-only**. It is the actual COGS and the value story for paying;
+ *     Free stores and retrieves, Team reasons over it.
+ *
+ * `apps/landing/__tests__/lib/pricing-spec-contract.test.ts` pins these
+ * numbers so this file cannot silently drift from the spec a third time.
  */
 
 export const LAST_UPDATED = '2026-07-31' as const;
@@ -81,10 +110,11 @@ export const PLANS: ReadonlyArray<Plan> = [
       { label: 'People sharing a brain', value: 'Just you' },
       { label: 'Connected agents', value: 'Unlimited' },
       { label: 'Memories', value: 'Unlimited' },
-      { label: 'Memory retention', value: 'Forever' },
+      { label: 'Memory retention', value: '30 days' },
+      { label: 'Projects', value: '3' },
       { label: 'Sync', value: 'Across your own devices' },
       { label: 'Artifacts', value: '100 MB' },
-      { label: 'Graph, hybrid search, curator', value: 'Cloud only' },
+      { label: 'Graph, hybrid search, curator', value: 'Team only' },
       { label: 'Self-hosting', value: 'Core engine, AGPL-3.0' },
       { label: 'Rate limit', value: '100 RPM' },
       { label: 'Support', value: 'Community + Discord' },
@@ -106,9 +136,13 @@ export const PLANS: ReadonlyArray<Plan> = [
       { label: 'Connected agents', value: 'Unlimited' },
       { label: 'Memories', value: 'Unlimited' },
       { label: 'Memory retention', value: 'Forever' },
+      { label: 'Projects', value: 'Unlimited' },
       { label: 'Sync', value: 'Real-time, across the team' },
       { label: 'Artifacts', value: '5 GB pool' },
-      { label: 'Graph, hybrid search, curator', value: 'Cloud only' },
+      {
+        label: 'Graph, hybrid search, curator',
+        value: 'Included — Team only',
+      },
       { label: 'Self-hosting', value: 'Core engine, AGPL-3.0' },
       { label: 'Rate limit', value: '1,000 RPM' },
       { label: 'Support', value: 'Priority' },
