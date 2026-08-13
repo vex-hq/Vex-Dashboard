@@ -92,17 +92,22 @@ or replace trigger prevent_account_owner_membership_delete_check before delete o
 execute function kit.prevent_account_owner_membership_delete ();
 
 -- Function "kit.prevent_memberships_update"
--- Trigger to prevent updates to account memberships with the exception of the account_role
+-- Trigger to keep membership identity immutable. Role, Klio onboarding,
+-- and the automatic timestamp/tracking columns may change.
 create
 or replace function kit.prevent_memberships_update () returns trigger
 set
   search_path = '' as $$
 begin
-    if new.account_role <> old.account_role then
-        return new;
+    if new.user_id is distinct from old.user_id
+       or new.account_id is distinct from old.account_id
+       or new.created_at is distinct from old.created_at
+       or new.created_by is distinct from old.created_by
+    then
+        raise exception 'Only the account_role and klio_onboarded_at can be updated';
     end if;
 
-    raise exception 'Only the account_role can be updated';
+    return new;
 
 end; $$ language plpgsql;
 
