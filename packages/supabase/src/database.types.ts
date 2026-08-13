@@ -97,6 +97,7 @@ export type Database = {
           account_role: string
           created_at: string
           created_by: string | null
+          klio_onboarded_at: string | null
           updated_at: string
           updated_by: string | null
           user_id: string
@@ -106,6 +107,7 @@ export type Database = {
           account_role: string
           created_at?: string
           created_by?: string | null
+          klio_onboarded_at?: string | null
           updated_at?: string
           updated_by?: string | null
           user_id: string
@@ -115,6 +117,7 @@ export type Database = {
           account_role?: string
           created_at?: string
           created_by?: string | null
+          klio_onboarded_at?: string | null
           updated_at?: string
           updated_by?: string | null
           user_id?: string
@@ -749,6 +752,10 @@ export type Database = {
       can_action_account_member: {
         Args: { target_team_account_id: string; target_user_id: string }
         Returns: boolean
+      }
+      mark_membership_klio_onboarded: {
+        Args: { target_account_id: string }
+        Returns: undefined
       }
       create_invitation: {
         Args: { account_id: string; email: string; role: string }

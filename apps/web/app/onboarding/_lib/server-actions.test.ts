@@ -58,8 +58,17 @@ vi.mock('~/lib/agentguard/onboarding.loader', () => ({
   completeOnboarding: (...args: unknown[]) => mockCompleteOnboarding(...args),
 }));
 
+const mockMarkMemberOnboarded = vi.fn(async (_slug: string) => undefined);
+
+vi.mock('~/lib/agentguard/member-onboarding.loader', () => ({
+  markMemberOnboarded: (slug: string) => mockMarkMemberOnboarded(slug),
+}));
+
 const mockCreateKey = vi.fn();
-const mockListKeys = vi.fn(async () => []);
+const mockListKeys = vi.fn(
+  async (): Promise<Array<{ id: string; name: string; revoked: boolean }>> =>
+    [],
+);
 const mockRevokeKey = vi.fn();
 
 vi.mock('~/lib/agentguard/api-keys', () => ({
@@ -226,6 +235,7 @@ describe('onboarding progress actions — authorisation', () => {
     ).resolves.toEqual({ success: true, href: `/home/${MEMBER_SLUG}` });
 
     expect(mockCompleteOnboarding).toHaveBeenCalledWith(MEMBER_SLUG);
+    expect(mockMarkMemberOnboarded).toHaveBeenCalledWith(MEMBER_SLUG);
   });
 
   it('lands on the project when the newest visible write has one', async () => {
@@ -242,5 +252,54 @@ describe('onboarding progress actions — authorisation', () => {
       success: true,
       href: `/home/${MEMBER_SLUG}/projects/proj-9?item=mem-1`,
     });
+  });
+});
+
+describe('createJoinKeyAction / completeJoinOnboardingAction', () => {
+  it('does not revoke the creator Onboarding Key', async () => {
+    mockListKeys.mockResolvedValueOnce([
+      { id: 'creator-key', name: 'Onboarding Key', revoked: false },
+      { id: 'other-join', name: 'Join · someone-else', revoked: false },
+    ]);
+
+    const { createJoinKeyAction } = await import('./server-actions');
+
+    await createJoinKeyAction({ accountSlug: MEMBER_SLUG });
+
+    expect(mockRevokeKey).not.toHaveBeenCalledWith(FAKE_ORG_ID, 'creator-key');
+    expect(mockRevokeKey).not.toHaveBeenCalledWith(FAKE_ORG_ID, 'other-join');
+    expect(mockCreateKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: `Join · ${FAKE_USER_ID}`,
+        createdBy: FAKE_USER_ID,
+      }),
+    );
+  });
+
+  it('revokes only this user previous join key', async () => {
+    mockListKeys.mockResolvedValueOnce([
+      {
+        id: 'mine',
+        name: `Join · ${FAKE_USER_ID}`,
+        revoked: false,
+      },
+    ]);
+
+    const { createJoinKeyAction } = await import('./server-actions');
+
+    await createJoinKeyAction({ accountSlug: MEMBER_SLUG });
+
+    expect(mockRevokeKey).toHaveBeenCalledWith(FAKE_ORG_ID, 'mine');
+  });
+
+  it('completeJoinOnboardingAction marks the member and not the workspace', async () => {
+    const { completeJoinOnboardingAction } = await import('./server-actions');
+
+    await expect(
+      completeJoinOnboardingAction({ accountSlug: MEMBER_SLUG }),
+    ).resolves.toEqual({ success: true, href: `/home/${MEMBER_SLUG}` });
+
+    expect(mockMarkMemberOnboarded).toHaveBeenCalledWith(MEMBER_SLUG);
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
   });
 });

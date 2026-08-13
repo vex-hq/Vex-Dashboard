@@ -3,6 +3,7 @@ import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { ConnectFirstAgent } from './_components/connect-first-agent';
+import { ConnectYourAgent } from './_components/connect-your-agent';
 import { HubProjects } from './_components/hub-projects';
 import { LinearPanel } from './_components/linear-panel';
 import { buildHubProjectRows } from './_lib/hub-projects-model';
@@ -10,7 +11,10 @@ import { loadAccountViewer } from './_lib/server/account-viewer';
 import { loadProjectPulse } from './_lib/server/context-stream.loader';
 import { loadContextUsage } from './_lib/server/context-usage.loader';
 import { loadHubSummary } from './_lib/server/hub-summary.loader';
-import { loadHasAnyMemory } from './_lib/server/workspace-activity.loader';
+import {
+  loadHasAnyMemory,
+  loadViewerHasWritten,
+} from './_lib/server/workspace-activity.loader';
 
 interface TeamAccountHomePageProps {
   params: Promise<{ account: string }>;
@@ -61,35 +65,41 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
   ]);
   const viewerUserId = viewer.userId;
 
-  const [hubSummary, usage, pulses, hasAnyMemory] = await Promise.all([
-    orFallback(
-      'hubSummary',
-      {
-        decisions7d: 0,
-        plans7d: 0,
-        facts7d: 0,
-        notes7d: 0,
-        projectsActive7d: 0,
-        agentsActive7d: [],
-        lastActivityAt: null,
-        volume30d: [],
-        projectSparks: [],
-      },
-      () => loadHubSummary(orgId, viewerUserId),
-    ),
-    orFallback('contextUsage', [], () => loadContextUsage(orgId)),
-    orFallback('projectPulse', [], () => loadProjectPulse(orgId, viewerUserId)),
-    // Fallback is `true` (assume connected), the INVERSE of every other
-    // loader's fallback on this page. This is deliberate: the second
-    // production fault here was that a FAILED probe used to fall back to
-    // `[]`, and `[].every(...)` is vacuously true, so a query failure and a
-    // genuinely empty workspace were indistinguishable and both nagged the
-    // user with the connect card. Assuming "connected" on failure means a
-    // transient DB error never shows the card to an active user — the worst
-    // case is a truly new workspace briefly not seeing the card, which is
-    // far cheaper than nagging someone mid-incident.
-    orFallback('hasAnyMemory', true, () => loadHasAnyMemory(orgId)),
-  ]);
+  const [hubSummary, usage, pulses, hasAnyMemory, viewerHasWritten] =
+    await Promise.all([
+      orFallback(
+        'hubSummary',
+        {
+          decisions7d: 0,
+          plans7d: 0,
+          facts7d: 0,
+          notes7d: 0,
+          projectsActive7d: 0,
+          agentsActive7d: [],
+          lastActivityAt: null,
+          volume30d: [],
+          projectSparks: [],
+        },
+        () => loadHubSummary(orgId, viewerUserId),
+      ),
+      orFallback('contextUsage', [], () => loadContextUsage(orgId)),
+      orFallback('projectPulse', [], () =>
+        loadProjectPulse(orgId, viewerUserId),
+      ),
+      // Fallback is `true` (assume connected), the INVERSE of every other
+      // loader's fallback on this page. This is deliberate: the second
+      // production fault here was that a FAILED probe used to fall back to
+      // `[]`, and `[].every(...)` is vacuously true, so a query failure and a
+      // genuinely empty workspace were indistinguishable and both nagged the
+      // user with the connect card. Assuming "connected" on failure means a
+      // transient DB error never shows the card to an active user — the worst
+      // case is a truly new workspace briefly not seeing the card, which is
+      // far cheaper than nagging someone mid-incident.
+      orFallback('hasAnyMemory', true, () => loadHasAnyMemory(orgId)),
+      orFallback('viewerHasWritten', true, () =>
+        loadViewerHasWritten(orgId, viewerUserId),
+      ),
+    ]);
 
   // Usage is org-wide. Pulse and sparks are visibility-gated. Only count
   // usage for projects the viewer can already see.
@@ -111,6 +121,10 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
       {hasAnyMemory === false ? (
         <div className="px-4 pt-4">
           <ConnectFirstAgent accountSlug={account} />
+        </div>
+      ) : viewerHasWritten === false ? (
+        <div className="px-4 pt-4">
+          <ConnectYourAgent accountSlug={account} />
         </div>
       ) : null}
       <HubProjects rows={projectRows} accountSlug={account} />
