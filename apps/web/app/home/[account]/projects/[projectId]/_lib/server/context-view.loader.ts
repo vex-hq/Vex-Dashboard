@@ -3,7 +3,6 @@ import 'server-only';
 import { cache } from 'react';
 
 import type { ContextItem } from '~/home/[account]/_lib/server/context-stream.loader';
-import type { ProjectAccess } from '~/home/[account]/memory/_lib/server/project-memory.loader';
 import { getAgentGuardPool } from '~/lib/agentguard/db';
 
 /**
@@ -17,27 +16,17 @@ import { getAgentGuardPool } from '~/lib/agentguard/db';
  * runs — the caller's page 404s. There is no code path that fetches rows
  * more broadly and then filters them by membership in TypeScript.
  *
- * Access is `ProjectAccess`, reused from
- * `memory/_lib/server/project-memory.loader.ts` rather than redeclared — the
- * same "same ladder the Memory page already implements" the spec calls for,
- * and the same type `projects/[projectId]/page.tsx` already builds today
- * (`viewer.isOrgAdmin ? { kind: 'admin' } : { kind: 'member', userId }`). Two
- * branches, mirroring `visibilityClause` in that file:
- *
- *   - `{ kind: 'member', userId }` — the probe checks
- *     `project_members.project_id = … AND project_members.user_id = …`, the
- *     same predicate `visibilityClause`'s member branch wraps in
- *     `EXISTS (…)`; run bare here since the probe itself IS the query rather
- *     than a subquery inside a larger one. `project_members` carries no
- *     `org_id` column, so the probe joins `projects` to bind the org
- *     boundary that `project_members` alone cannot express — without it, a
- *     project id that happens to exist in another org would falsely read as
- *     "member".
- *   - `{ kind: 'admin' }` — mirrors `visibilityClause`'s admin branch
- *     (`TRUE`: an org admin sees every project in their org, membership row
- *     or not). The probe still confirms the project exists IN THIS ORG
- *     (`projects.id = … AND projects.org_id = …`) so an admin cannot use
- *     this loader to learn whether a project id exists in a different org.
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): the probe checks
+ * `project_members.project_id = … AND project_members.user_id = …`, joined
+ * to `projects` to bind the org boundary that `project_members` alone
+ * cannot express (it carries no `org_id` column) — without that join, a
+ * project id that happens to exist in another org would falsely read as
+ * "member". This loader used to also accept a `ProjectAccess` union with an
+ * `{ kind: 'admin' }` branch that skipped the membership row entirely
+ * (`projects.id = … AND projects.org_id = …` only). That branch is gone: an
+ * org admin who is not a project member now gets the same `null` — and the
+ * same 404 — as anyone else. See `project-memory.loader.ts`'s file header
+ * for the full rationale.
  *
  * Once membership is established, every other query is scoped by
  * `org_id = $1 AND project_id = $2` and carries the visibility arms
@@ -45,21 +34,13 @@ import { getAgentGuardPool } from '~/lib/agentguard/db';
  * stream uses (`context-stream.loader.ts` / `hub-summary.loader.ts`):
  *
  *   - org arm — always
- *   - own-private arm — always, keyed on the signed-in viewer, never on
- *     admin-ness. Admin status must not hide the viewer's own private
- *     rows, and must not reveal anyone else's. The engine auto-creates
- *     projects on first write without enrolling a `project_members` row
- *     and lands hook/curator captures at `scope='private'` with
- *     `project_id` set (see `loadProjectPulse`'s 2026-08-12 incident
- *     note). Dropping the private arm for admins emptied every such
- *     project page while the Hub still counted those same rows.
- *   - project arm — `EXISTS project_members` for members; unconditional
- *     for admins (they may read every `scope='project'` row in the org)
- *
- * `ProjectAccess.admin` still carries no `userId` (that type is the
- * project-listing gate). The viewer's id is a separate required argument
- * so the private arm cannot be "simplified" away the way adopting
- * `{ kind: 'admin' }` alone would.
+ *   - own-private arm — always, keyed on the signed-in viewer. The engine
+ *     auto-creates projects on first write without enrolling a
+ *     `project_members` row and lands hook/curator captures at
+ *     `scope='private'` with `project_id` set (see `loadProjectPulse`'s
+ *     2026-08-12 incident note) — this arm is what keeps those visible to
+ *     their own author.
+ *   - project arm — `EXISTS project_members`, always
  *
  * `status IN ('active', 'superseded') AND recall_hidden = FALSE` matches
  * `context-stream.loader.ts`'s filter exactly: this view is recall-shaped
@@ -182,27 +163,19 @@ function makeBinder(params: unknown[]): (value: unknown) => string {
 }
 
 /**
- * The visibility arms every scoped query below ORs together. See the file
- * header for why the private arm is keyed on `viewerUserId` for both
- * access kinds — admin-ness widens only the project arm.
+ * The visibility arms every scoped query below ORs together.
  *
- * `params`/`p` are the caller's own binder. Both branches bind the
- * viewer's user id for the private arm; the member branch binds it again
- * for the `EXISTS project_members` predicate (same value, second
- * placeholder — never interpolated).
+ * `params`/`p` are the caller's own binder. The private arm binds the
+ * viewer's user id; the project arm binds it again for the
+ * `EXISTS project_members` predicate (same value, second placeholder —
+ * never interpolated).
  */
 function visibilityArms(
-  access: ProjectAccess,
   p: (value: unknown) => string,
   viewerUserId: string,
 ): string[] {
   const privateArm = `(m.scope = 'private' AND m.user_id = ${p(viewerUserId)})`;
-
-  if (access.kind === 'admin') {
-    return [`(m.scope = 'org')`, `(m.scope = 'project')`, privateArm];
-  }
-
-  const memberParam = p(access.userId);
+  const memberParam = p(viewerUserId);
 
   return [
     `(m.scope = 'org')`,
@@ -214,57 +187,27 @@ function visibilityArms(
   ];
 }
 
-function assertViewerUserId(
-  access: ProjectAccess,
-  viewerUserId: string,
-): string {
+function assertViewerUserId(viewerUserId: string): string {
   if (viewerUserId.trim().length === 0) {
     throw new Error('context view: viewer user id is required.');
-  }
-
-  if (access.kind === 'member' && access.userId !== viewerUserId) {
-    throw new Error(
-      'context view: member access user id must match the viewer.',
-    );
   }
 
   return viewerUserId;
 }
 
 /**
- * Whether `access` may see `projectId` within `orgId`.
+ * Whether `viewerUserId` is a member of `projectId` within `orgId`.
  *
  * This IS the membership boundary for the whole view — see file header. A
  * `false` result must short-circuit every caller before any memory content is
- * queried. Branches on `access.kind` in a single explicit TS conditional,
- * mirroring how `project-memory.loader.ts`'s `visibilityClause` branches on
- * the same union — the decision is `TRUE`-vs-`EXISTS` in SQL either way, the
- * branch only picks which SQL to send.
+ * queried. No admin branch: membership is the only path in.
  */
 async function probeMembership(
   orgId: string,
   projectId: string,
-  access: ProjectAccess,
+  viewerUserId: string,
 ): Promise<boolean> {
   const pool = getAgentGuardPool();
-
-  if (access.kind === 'admin') {
-    // Admin branch mirrors `visibilityClause`'s `TRUE` arm: no membership
-    // row required. Still confirms the project belongs to THIS org, since
-    // `projects.org_id` is the only place that boundary can be checked here.
-    const { rows } = await pool.query<{ one: number }>(
-      `
-      SELECT 1 AS one
-      FROM projects p
-      WHERE p.id = $1
-        AND p.org_id = $2
-      LIMIT 1
-      `,
-      [projectId, orgId],
-    );
-
-    return rows.length > 0;
-  }
 
   const { rows } = await pool.query<{ one: number }>(
     `
@@ -276,7 +219,7 @@ async function probeMembership(
       AND p.org_id = $3
     LIMIT 1
     `,
-    [projectId, access.userId, orgId],
+    [projectId, viewerUserId, orgId],
   );
 
   return rows.length > 0;
@@ -286,7 +229,6 @@ async function probeMembership(
 async function loadSectionItems(
   orgId: string,
   projectId: string,
-  access: ProjectAccess,
   viewerUserId: string,
 ): Promise<ContextItem[]> {
   const pool = getAgentGuardPool();
@@ -295,7 +237,7 @@ async function loadSectionItems(
 
   const sectionTypesParam = p(SECTION_TYPES as unknown as string[]);
   const activeParam = p(MEMORY_STATUS_ACTIVE);
-  const arms = visibilityArms(access, p, viewerUserId);
+  const arms = visibilityArms(p, viewerUserId);
 
   const { rows } = await pool.query<ContextViewQueryRow>(
     `
@@ -349,7 +291,6 @@ async function loadSectionItems(
 async function loadChains(
   orgId: string,
   projectId: string,
-  access: ProjectAccess,
   viewerUserId: string,
   activeIds: string[],
 ): Promise<Map<string, ChainLink[]>> {
@@ -366,7 +307,7 @@ async function loadChains(
   const supersededParam = p(MEMORY_STATUS_SUPERSEDED);
   const activeIdsParam = p(activeIds);
   const depthLimitParam = p(CHAIN_DEPTH_LIMIT);
-  const arms = visibilityArms(access, p, viewerUserId);
+  const arms = visibilityArms(p, viewerUserId);
   const armsSql = arms.join(' OR ');
 
   const { rows } = await pool.query<ChainQueryRow>(
@@ -430,7 +371,6 @@ async function loadChains(
 async function loadRecent(
   orgId: string,
   projectId: string,
-  access: ProjectAccess,
   viewerUserId: string,
 ): Promise<ContextItem[]> {
   const pool = getAgentGuardPool();
@@ -438,7 +378,7 @@ async function loadRecent(
   const p = makeBinder(params);
 
   const statusesParam = p(MEMORY_VISIBLE_STATUSES as unknown as string[]);
-  const arms = visibilityArms(access, p, viewerUserId);
+  const arms = visibilityArms(p, viewerUserId);
   const limitParam = p(RECENT_LIMIT);
 
   const { rows } = await pool.query<ContextViewQueryRow>(
@@ -474,7 +414,6 @@ async function loadRecent(
 async function loadHeader(
   orgId: string,
   projectId: string,
-  access: ProjectAccess,
   viewerUserId: string,
 ): Promise<ContextViewHeader> {
   const pool = getAgentGuardPool();
@@ -482,7 +421,7 @@ async function loadHeader(
   const p = makeBinder(params);
 
   const statusesParam = p(MEMORY_VISIBLE_STATUSES as unknown as string[]);
-  const arms = visibilityArms(access, p, viewerUserId);
+  const arms = visibilityArms(p, viewerUserId);
   const windowParam = p(String(ACTIVITY_WINDOW_DAYS));
 
   const { rows } = await pool.query<HeaderQueryRow>(
@@ -549,37 +488,30 @@ function assembleSections(
 }
 
 /**
- * The full project context view, or `null` when `access` may not see
+ * The full project context view, or `null` when `viewerUserId` may not see
  * `projectId` — see file header for the membership contract.
  */
 export const loadContextView = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
     viewerUserId: string,
   ): Promise<ContextView | null> => {
-    const viewer = assertViewerUserId(access, viewerUserId);
-    const isMember = await probeMembership(orgId, projectId, access);
+    const viewer = assertViewerUserId(viewerUserId);
+    const isMember = await probeMembership(orgId, projectId, viewer);
 
     if (!isMember) {
       return null;
     }
 
     const [sectionRows, recent, header] = await Promise.all([
-      loadSectionItems(orgId, projectId, access, viewer),
-      loadRecent(orgId, projectId, access, viewer),
-      loadHeader(orgId, projectId, access, viewer),
+      loadSectionItems(orgId, projectId, viewer),
+      loadRecent(orgId, projectId, viewer),
+      loadHeader(orgId, projectId, viewer),
     ]);
 
     const activeIds = sectionRows.map((item) => item.id);
-    const chains = await loadChains(
-      orgId,
-      projectId,
-      access,
-      viewer,
-      activeIds,
-    );
+    const chains = await loadChains(orgId, projectId, viewer, activeIds);
 
     const { decisions, plans, constraints } = assembleSections(
       sectionRows,

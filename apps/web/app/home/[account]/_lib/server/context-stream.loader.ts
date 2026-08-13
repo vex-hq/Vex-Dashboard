@@ -196,49 +196,24 @@ function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
  * the moment that project has org-scoped memories tagged with its id, even
  * if the viewer is not one of its members.
  *
- * The gate mirrors `loadVisibleProjects`' member branch
+ * The gate mirrors `loadVisibleProjects`
  * (`memory/_lib/server/project-memory.loader.ts` — `EXISTS (SELECT 1 FROM
  * project_members pm WHERE pm.project_id = p.id AND pm.user_id = …)`).
- * That file's `visibilityClause` also has an admin branch (`TRUE`, org
- * admins see every project); this function now carries the same admin
- * branch via its third argument. A `null`/absent viewer with `isOrgAdmin`
- * false sees no projects (`FALSE`), the same fail-closed default
- * `loadContextStream` uses for its private and project arms.
+ * A `null`/absent viewer sees no projects (`FALSE`), the same fail-closed
+ * default `loadContextStream` uses for its private and project arms.
  *
- * PRODUCTION INCIDENT (2026-08-12): the `project_members` table held exactly
- * one row across the entire database — the engine auto-creates projects on
- * write without enrolling the writer as a member — so the membership gate,
- * though correct as a leak-prevention control, could never match. Every
- * project rail, including the org owner's, rendered "no project activity".
- * The membership gate itself stays: it stops a non-member's project names
- * leaking through this aggregate. `isOrgAdmin` is the escape hatch, mirroring
- * `ProjectAccess`'s admin branch on the project detail page.
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate for project visibility, full stop — no org-admin widening,
+ * here or anywhere else. A project is visible only to its members. This
+ * function previously carried an `isOrgAdmin` escape hatch to work around a
+ * production incident where `project_members` held almost no rows (the
+ * engine auto-created projects without enrolling the writer as a member).
+ * Migration 039 backfilled an owner for every existing project, so the
+ * membership gate is safe on its own: everyone still sees what they created.
+ * The admin parameter is gone, not defaulted off — there is no path in this
+ * function that widens project listing beyond `project_members`.
  *
- * DELIBERATE DIFFERENCE FROM `ProjectAccess`: that type's admin branch
- * (`{ kind: 'admin' }`) carries no userId at all. Adopting that shape here
- * would silently drop the admin's OWN private items from their OWN pulse
- * counts, because the private-scope arm below is keyed on `viewerUserId`.
- * So here, admin widens ONLY `projectVisibility` (which projects are
- * listed); the `arms` array — which items are counted per project — is left
- * completely untouched and still keys off `viewerUserId` exactly as before.
- * An admin gains no access to other users' private memories: their pulse
- * counts are computed from items they could already see (org-scope plus
- * their own private/project-member items), same as anyone else. Do not
- * "simplify" this by switching to `ProjectAccess` — that would be a silent
- * regression for admins viewing their own pulse.
- *
- * ACTIVITY REQUIREMENT (admin path only): the widened admin listing above
- * (`projectVisibility = 'TRUE'`) surfaces every project in the org, most of
- * which have no activity in the 7-day window this widget covers. The panel
- * is titled "What's moving" with an empty state of "No project activity in
- * the last 7 days" — so for the admin path we additionally require at least
- * one counted item (`HAVING COUNT(m.id) > 0`) to keep the listing honest
- * with its own copy. This is NOT applied to the membership path: a member
- * seeing their own project sitting quiet this week is meaningful signal
- * ("your project, nothing this week"), and the rail is specified as the
- * projects the viewer belongs to, activity or not.
- *
- * `PROJECT_RAIL_LIMIT` caps both paths — this is a sidebar rail, not a
+ * `PROJECT_RAIL_LIMIT` caps the rail — this is a sidebar rail, not a
  * directory — relying on the existing `ORDER BY last_item_at DESC NULLS
  * LAST` to keep the most recently active projects above the cut.
  */
@@ -248,7 +223,6 @@ export const loadProjectPulse = cache(
   async (
     orgId: string,
     viewerUserId: string | null,
-    isOrgAdmin = false,
   ): Promise<ProjectPulse[]> => {
     const pool = getAgentGuardPool();
     const params: unknown[] = [orgId];
@@ -270,21 +244,6 @@ export const loadProjectPulse = cache(
         SELECT 1 FROM project_members pm
         WHERE pm.project_id = pr.id AND pm.user_id = ${viewer}
       )`;
-    }
-
-    // ONLY the project-listing predicate widens for admins. The item `arms`
-    // above are untouched — see the DELIBERATE DIFFERENCE note in the
-    // function docstring.
-    if (isOrgAdmin) {
-      projectVisibility = 'TRUE';
-    }
-
-    // Admin path only — see ACTIVITY REQUIREMENT in the function docstring.
-    // The membership path must never carry this: a quiet member project is
-    // still meaningful and must still render.
-    const having: string[] = [];
-    if (isOrgAdmin) {
-      having.push('COUNT(m.id) > 0');
     }
 
     const limitParam = p(PROJECT_RAIL_LIMIT);
@@ -310,7 +269,6 @@ export const loadProjectPulse = cache(
       WHERE pr.org_id = $1
         AND (${projectVisibility})
       GROUP BY pr.id, pr.display_name
-      ${having.length ? `HAVING ${having.join(' AND ')}` : ''}
       ORDER BY last_item_at DESC NULLS LAST
       LIMIT ${limitParam}
       `,

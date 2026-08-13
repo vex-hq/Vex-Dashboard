@@ -15,6 +15,9 @@ import {
 import { requireAccountMembership } from '~/lib/agentguard/require-account-membership';
 import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 
+import { activationHref } from './activation-landing';
+import { loadLatestVisibleWrite } from './server/activation-landing.loader';
+
 const CreateOnboardingKeySchema = z.object({
   accountSlug: z.string().min(1),
 });
@@ -115,7 +118,17 @@ export const completeOnboardingAction = enhanceAction(
 
     await completeOnboarding(data.accountSlug);
 
-    return { success: true };
+    const hub = `/home/${data.accountSlug}`;
+
+    try {
+      const orgId = await resolveOrgId(data.accountSlug);
+      const write = await loadLatestVisibleWrite(orgId, user.id);
+
+      return { success: true, href: activationHref(data.accountSlug, write) };
+    } catch {
+      // Completing onboarding must not fail because the landing probe did.
+      return { success: true, href: hub };
+    }
   },
   {
     schema: CompleteOnboardingSchema,

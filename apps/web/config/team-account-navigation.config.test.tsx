@@ -7,9 +7,9 @@ import { getTeamAccountSidebarConfig } from './team-account-navigation.config';
  * IA pass dropped the Sessions and Agents entries from the Workspace group
  * (their routes stay live at /home/[account]/{sessions,agents} — see the
  * "hidden, not removed" comment block in the config itself). This test
- * guards the nav *shape*, not the routes: it fails if either label ever
- * comes back into the active `getRoutes` array, and it fails if Memory or
- * Projects (which are supposed to still be there) ever go missing.
+ * guards the nav *shape*, not the routes: it fails if Sessions/Agents/Memory
+ * or Projects come back into the active `getRoutes` array, and it fails if
+ * Inbox or Private (which are supposed to still be there) ever go missing.
  */
 describe('getTeamAccountSidebarConfig', () => {
   const config = getTeamAccountSidebarConfig('acme');
@@ -28,7 +28,7 @@ describe('getTeamAccountSidebarConfig', () => {
     expect(allLabels()).not.toContain('agentguard:nav.agents');
   });
 
-  it('still includes memory and projects in the workspace group', () => {
+  it('keeps inbox and private in the workspace group', () => {
     const workspaceGroup = config.routes.find(
       (group) => group.label === 'agentguard:nav.workspace',
     );
@@ -39,8 +39,10 @@ describe('getTeamAccountSidebarConfig', () => {
       (child) => child.label,
     );
 
-    expect(workspaceLabels).toContain('agentguard:nav.memory');
-    expect(workspaceLabels).toContain('agentguard:nav.projects');
+    expect(workspaceLabels).toContain('agentguard:nav.inbox');
+    expect(workspaceLabels).toContain('agentguard:nav.private');
+    expect(workspaceLabels).not.toContain('agentguard:nav.memory');
+    expect(workspaceLabels).not.toContain('agentguard:nav.projects');
   });
 
   it('still includes the dashboard entry', () => {
@@ -65,10 +67,14 @@ describe('getTeamAccountSidebarConfig', () => {
       (group) => group.label === 'agentguard:nav.workspace',
     );
 
-    const memoryEntry = workspaceGroup?.children?.find(
-      (child) => child.label === 'agentguard:nav.memory',
+    const inboxEntry = workspaceGroup?.children?.find(
+      (child) => child.label === 'agentguard:nav.inbox',
+    );
+    const privateEntry = workspaceGroup?.children?.find(
+      (child) => child.label === 'agentguard:nav.private',
     );
 
-    expect(memoryEntry?.path).toBe('/home/acme/memory');
+    expect(inboxEntry?.path).toBe('/home/acme/inbox');
+    expect(privateEntry?.path).toBe('/home/acme/private');
   });
 });

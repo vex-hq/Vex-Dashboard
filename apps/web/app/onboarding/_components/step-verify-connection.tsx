@@ -89,8 +89,8 @@ export function StepVerifyConnection({
     setCompleting(true);
 
     try {
-      await completeOnboardingAction({ accountSlug });
-      router.push(`/home/${accountSlug}`);
+      const result = await completeOnboardingAction({ accountSlug });
+      router.push(result.href ?? `/home/${accountSlug}`);
     } catch {
       setCompleting(false);
     }

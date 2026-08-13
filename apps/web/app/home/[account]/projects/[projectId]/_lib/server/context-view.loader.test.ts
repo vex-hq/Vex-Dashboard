@@ -70,17 +70,7 @@ describe('loadContextView', () => {
   it('returns null for a non-member (membership in SQL, not TS)', async () => {
     const { loadContextView } = await import('./context-view.loader');
     queueRows({ rows: [] }); // membership probe returns nothing
-    expect(
-      await loadContextView(
-        'org-1',
-        'p1',
-        {
-          kind: 'member',
-          userId: 'intruder',
-        },
-        'intruder',
-      ),
-    ).toBeNull();
+    expect(await loadContextView('org-1', 'p1', 'intruder')).toBeNull();
     // No further query should have been issued past the probe.
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
@@ -112,15 +102,7 @@ describe('loadContextView', () => {
       }, // chain, newest predecessor first
     );
 
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      {
-        kind: 'member',
-        userId: 'user-1',
-      },
-      'user-1',
-    );
+    const view = await loadContextView('org-1', 'p1', 'user-1');
 
     expect(view).not.toBeNull();
     expect(view!.decisions).toHaveLength(1);
@@ -144,15 +126,7 @@ describe('loadContextView', () => {
       { rows: [] }, // chain (no predecessors for any active id)
     );
 
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      {
-        kind: 'member',
-        userId: 'user-1',
-      },
-      'user-1',
-    );
+    const view = await loadContextView('org-1', 'p1', 'user-1');
 
     expect(view).not.toBeNull();
     expect(view!.decisions.map((i) => i.id)).toEqual(['d1']);
@@ -170,12 +144,7 @@ describe('loadContextView', () => {
   it('membership probe binds org_id via a projects JOIN (project_members has no org_id column)', async () => {
     const { loadContextView } = await import('./context-view.loader');
     queueRows({ rows: [] });
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/FROM project_members pm/);
     expect(sql).toMatch(/JOIN projects p ON p\.id = pm\.project_id/);
@@ -195,12 +164,7 @@ describe('loadContextView', () => {
       // no chain query: activeIds is empty, loadChains short-circuits
     );
 
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
 
     const [sql, params] = queryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(/scope = 'org'/);
@@ -222,12 +186,7 @@ describe('loadContextView', () => {
       { rows: [EMPTY_HEADER_ROW] },
     );
 
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
 
     const [sql] = queryMock.mock.calls[2] as [string, unknown[]];
     expect(sql).toMatch(/scope = 'org'/);
@@ -244,12 +203,7 @@ describe('loadContextView', () => {
       { rows: [EMPTY_HEADER_ROW] },
     );
 
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
 
     // probe + sections + recent + header = 4 calls, no 5th chain query.
     expect(queryMock).toHaveBeenCalledTimes(4);
@@ -281,15 +235,7 @@ describe('loadContextView', () => {
       { rows: [] },
     );
 
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      {
-        kind: 'member',
-        userId: 'user-1',
-      },
-      'user-1',
-    );
+    const view = await loadContextView('org-1', 'p1', 'user-1');
 
     // Every row the mocked SQL returned is assembled, regardless of its
     // scope/user_id — assembly keys only on memory_type, never re-derives
@@ -318,15 +264,7 @@ describe('loadContextView', () => {
       },
     );
 
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      {
-        kind: 'member',
-        userId: 'user-1',
-      },
-      'user-1',
-    );
+    const view = await loadContextView('org-1', 'p1', 'user-1');
 
     expect(view!.header).toEqual({
       members: 4,
@@ -336,104 +274,34 @@ describe('loadContextView', () => {
     });
   });
 
-  // --- Fix round 1, Finding 1: org-admin access -----------------------
+  // --- 2026-08-12 ruling: membership is the only gate, no admin bypass ---
+  //
+  // The loader used to accept a `ProjectAccess` union whose `{ kind: 'admin'
+  // }` branch skipped the `project_members` lookup entirely (see git
+  // history for the removed `probeMembership` admin arm and the removed
+  // `{ kind: 'admin' }` visibility arms). These tests replace that
+  // "admin still gets in" coverage with "admin gets the same null as
+  // anyone else" — inverted, not deleted, per the ruling that a project is
+  // visible only to its members, full stop.
 
-  it('returns null for a non-member, non-admin (unchanged by the admin fix)', async () => {
+  it('a non-member gets null regardless of org-admin status — there is no admin parameter left to grant it', async () => {
     const { loadContextView } = await import('./context-view.loader');
-    queueRows({ rows: [] });
-    expect(
-      await loadContextView(
-        'org-1',
-        'p1',
-        {
-          kind: 'member',
-          userId: 'intruder',
-        },
-        'intruder',
-      ),
-    ).toBeNull();
+    queueRows({ rows: [] }); // membership probe finds no row for this user
+    expect(await loadContextView('org-1', 'p1', 'admin-1')).toBeNull();
+    // Only the membership probe ran — no admin fallback query exists to fire.
     expect(queryMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('an org admin who is not a project member still gets the view (TS-routing test, valid under the mock)', async () => {
-    const { loadContextView } = await import('./context-view.loader');
-    queueRows(
-      { rows: [{ one: 1 }] }, // admin probe: project exists in this org
-      { rows: [] }, // sections
-      { rows: [] }, // recent
-      { rows: [EMPTY_HEADER_ROW] }, // header
-    );
-
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'admin' },
-      'admin-1',
-    );
-
-    expect(view).not.toBeNull();
-  });
-
-  it('admin probe checks the project exists in this org, no project_members lookup', async () => {
-    const { loadContextView } = await import('./context-view.loader');
-    queueRows({ rows: [] });
-
-    await loadContextView('org-1', 'p1', { kind: 'admin' }, 'admin-1');
-
-    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
-    expect(sql).toMatch(/FROM projects p/);
-    expect(sql).toMatch(/p\.id = \$1/);
-    expect(sql).toMatch(/p\.org_id = \$2/);
-    expect(sql).not.toMatch(/project_members/);
-    expect(params).toEqual(['p1', 'org-1']);
-  });
-
-  it('admin visibility arms: org + unconditional project + own-private, never anyone else', async () => {
-    const { loadContextView } = await import('./context-view.loader');
-    queueRows(
-      { rows: [{ one: 1 }] }, // admin probe
-      { rows: [] }, // sections
-      { rows: [] }, // recent
-      { rows: [EMPTY_HEADER_ROW] }, // header
-    );
-
-    await loadContextView('org-1', 'p1', { kind: 'admin' }, 'admin-1');
-
-    const [sectionsSql, sectionsParams] = queryMock.mock.calls[1] as [
-      string,
-      unknown[],
-    ];
-    expect(sectionsSql).toMatch(/scope = 'org'/);
-    expect(sectionsSql).toMatch(/\(m\.scope = 'project'\)/);
-    expect(sectionsSql).toMatch(/scope = 'private' AND m\.user_id = /);
-    expect(sectionsSql).not.toMatch(/project_members/);
-    expect(sectionsParams).toContain('admin-1');
   });
 
   it('rejects a blank viewer user id before any query', async () => {
     const { loadContextView } = await import('./context-view.loader');
 
-    await expect(
-      loadContextView('org-1', 'p1', { kind: 'admin' }, '  '),
-    ).rejects.toThrow(/viewer user id is required/);
+    await expect(loadContextView('org-1', 'p1', '  ')).rejects.toThrow(
+      /viewer user id is required/,
+    );
     expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it('rejects a member access whose user id is not the viewer', async () => {
-    const { loadContextView } = await import('./context-view.loader');
-
-    await expect(
-      loadContextView(
-        'org-1',
-        'p1',
-        { kind: 'member', userId: 'user-1' },
-        'someone-else',
-      ),
-    ).rejects.toThrow(/must match the viewer/);
-    expect(queryMock).not.toHaveBeenCalled();
-  });
-
-  it('member visibility arms are unchanged: still org + own-private + EXISTS project arm', async () => {
+  it('visibility arms are unchanged: still org + own-private + EXISTS project arm, no unconditional project arm', async () => {
     const { loadContextView } = await import('./context-view.loader');
     queueRows(
       { rows: [{ one: 1 }] },
@@ -442,17 +310,15 @@ describe('loadContextView', () => {
       { rows: [EMPTY_HEADER_ROW] },
     );
 
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
 
     const [sectionsSql] = queryMock.mock.calls[1] as [string, unknown[]];
     expect(sectionsSql).toMatch(/scope = 'org'/);
     expect(sectionsSql).toMatch(/scope = 'private' AND m\.user_id = /);
     expect(sectionsSql).toMatch(/EXISTS \(\s*SELECT 1 FROM project_members/);
+    // The old admin branch emitted a bare `(m.scope = 'project')` arm with
+    // no EXISTS at all — that shape must never appear again.
+    expect(sectionsSql).not.toMatch(/\(m\.scope = 'project'\)/);
   });
 
   // --- Fix round 1, Finding 2: recursive CTE cycle guard ----------------
@@ -467,12 +333,7 @@ describe('loadContextView', () => {
       { rows: [] }, // chain
     );
 
-    await loadContextView(
-      'org-1',
-      'p1',
-      { kind: 'member', userId: 'user-1' },
-      'user-1',
-    );
+    await loadContextView('org-1', 'p1', 'user-1');
 
     const [chainSql] = queryMock.mock.calls[4] as [string, unknown[]];
     expect(chainSql).toMatch(/ARRAY\[m\.id\] AS path/);
@@ -504,15 +365,7 @@ describe('loadContextView', () => {
       },
     );
 
-    const view = await loadContextView(
-      'org-1',
-      'p1',
-      {
-        kind: 'member',
-        userId: 'user-1',
-      },
-      'user-1',
-    );
+    const view = await loadContextView('org-1', 'p1', 'user-1');
 
     expect(view!.decisions[0]!.replaced).toEqual([
       { id: 'm2', content: 'v2', createdAt: '2026-08-05T00:00:00Z' },

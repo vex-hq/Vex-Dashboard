@@ -95,6 +95,8 @@ CREATE TABLE session_memories (
   space_id uuid,
   project_id uuid,
   metadata jsonb,
+  recall_hidden boolean NOT NULL DEFAULT false,
+  superseded_by uuid,
   created_at timestamptz DEFAULT now()
 );
 `;
@@ -187,6 +189,22 @@ beforeAll(async () => {
     userId: ALICE,
     scope: 'private',
     content: 'ALICE_SECRET therapy appointment on Thursday',
+  });
+
+  // Private capture tagged to alice-project — the live auto-create shape.
+  // Alice must see it on the Projects tab; Bob and a different admin must not.
+  seeded.alicePrivateOnProject = await seedMemory({
+    userId: ALICE,
+    scope: 'private',
+    projectId: PROJECT_ALICE,
+    content: 'ALICE_PROJECT_SECRET hook capture on this repo',
+  });
+
+  seeded.adminPrivateOnOrphan = await seedMemory({
+    userId: ADMIN,
+    scope: 'private',
+    projectId: PROJECT_ORPHAN,
+    content: 'ADMIN_ORPHAN_SECRET my capture on the orphan repo',
   });
 
   seeded.alicePrivateInferred = await seedMemory({
@@ -298,7 +316,7 @@ describe('Mine tab — scope=private is readable only by its owner', () => {
     // Proves the suite is testing a live query: if the loader returned nothing
     // to everybody, every negative test above would still pass.
     expect(contents(result.rows).join(' ')).toContain('ALICE_SECRET');
-    expect(result.rows).toHaveLength(3);
+    expect(result.rows).toHaveLength(4);
     expect(contents(result.rows).join(' ')).not.toContain('BOB_SECRET');
   });
 
@@ -309,7 +327,11 @@ describe('Mine tab — scope=private is readable only by its owner', () => {
     // called. There is no admin parameter to widen it, by design.
     const result = await loadMyPrivateMemories(ORG, ADMIN);
 
-    expect(contents(result.rows)).toEqual(['ADMIN_SECRET my own private note']);
+    expect(contents(result.rows).join(' ')).toContain(
+      'ADMIN_SECRET my own private note',
+    );
+    expect(contents(result.rows).join(' ')).toContain('ADMIN_ORPHAN_SECRET');
+    expect(result.rows).toHaveLength(2);
     expect(contents(result.rows).join(' ')).not.toContain('ALICE_SECRET');
     expect(contents(result.rows).join(' ')).not.toContain('BOB_SECRET');
   });
@@ -353,7 +375,7 @@ describe('Mine tab — scope=private is readable only by its owner', () => {
     const alice = await loadMyPrivateSummary(ORG, ALICE);
     const bob = await loadMyPrivateSummary(ORG, BOB);
 
-    expect(alice.total).toBe(3);
+    expect(alice.total).toBe(4);
     expect(alice.inferred).toBe(1);
     expect(alice.artifacts).toBe(1);
     expect(bob.total).toBe(1);
@@ -409,14 +431,11 @@ describe('Team tab — scope=org only', () => {
   });
 });
 
-describe('Projects tab — scope=project is gated by project_members', () => {
+describe('Projects tab — scope=project is gated by project_members, no admin bypass (2026-08-12 ruling)', () => {
   it('returns nothing to a non-member asking for a project’s memories', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: BOB,
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ALICE, BOB);
 
     expect(result.rows).toHaveLength(0);
   });
@@ -424,71 +443,62 @@ describe('Projects tab — scope=project is gated by project_members', () => {
   it('POSITIVE CONTROL: returns them to a member', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ALICE, ALICE);
 
     expect(contents(result.rows).join(' ')).toContain('PROJECT_FACT');
   });
 
-  it('lets an org admin read a project they are not a member of', async () => {
+  it('does NOT let an org admin read a project’s scoped memories when they are not a member (inverted 2026-08-12: membership is the only gate)', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ORPHAN, {
-      kind: 'admin',
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ORPHAN, ADMIN);
 
-    expect(contents(result.rows).join(' ')).toContain('ORPHAN_FACT');
+    // The project-scoped fact is gone: ADMIN holds no project_members row
+    // for the orphan project, so the membership arm never matches.
+    expect(contents(result.rows).join(' ')).not.toContain('ORPHAN_FACT');
+    // ADMIN's own private capture tagged to this project still comes back —
+    // that arm is gated by ownership (`user_id = viewer`), never by
+    // membership, and is unrelated to admin status. See the file header's
+    // note on the engine auto-creating projects without enrolling the
+    // writer as a member.
+    expect(contents(result.rows).join(' ')).toContain('ADMIN_ORPHAN_SECRET');
+    expect(result.rows).toHaveLength(1);
   });
 
-  it('lists only the caller’s projects for a member, and all of them for an admin', async () => {
+  it('lists only the caller’s projects — an org admin with no membership row anywhere sees an empty list, same as any other non-member (inverted)', async () => {
     const { loadVisibleProjects } = await import('./project-memory.loader');
 
-    const asAlice = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: ALICE,
-    });
-    const asBob = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: BOB,
-    });
-    const asAdmin = await loadVisibleProjects(ORG, { kind: 'admin' });
+    const asAlice = await loadVisibleProjects(ORG, ALICE);
+    const asBob = await loadVisibleProjects(ORG, BOB);
+    const asAdmin = await loadVisibleProjects(ORG, ADMIN);
 
     expect(asAlice.map((project) => project.display_name)).toEqual([
       'alice-project',
     ]);
     expect(asBob).toHaveLength(0);
-    expect(asAdmin.map((project) => project.display_name).sort()).toEqual([
-      'alice-project',
-      'orphan-project',
-    ]);
+    // ADMIN has no project_members row on either seeded project — not even
+    // orphan-project, where they merely have a PRIVATE capture tagged. The
+    // listing gate is membership on the project row itself, not "has any
+    // content here" — so the project does not appear at all.
+    expect(asAdmin).toHaveLength(0);
   });
 
-  it('counts only project-scoped rows, not org rows that carry a project id', async () => {
+  it('counts project-scoped rows plus the viewer’s own private tags, never org rows', async () => {
     const { loadVisibleProjects } = await import('./project-memory.loader');
 
-    const [project] = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const [asAlice] = await loadVisibleProjects(ORG, ALICE);
 
-    // alice-project holds two project-scoped rows plus one LEGACY org row.
-    expect(project?.memory_count).toBe(2);
-    expect(project?.member_count).toBe(1);
+    // alice-project: two project-scoped rows + Alice's tagged private.
+    // The LEGACY org row stays on the Team tab.
+    expect(asAlice?.memory_count).toBe(3);
+    expect(asAlice?.member_count).toBe(1);
   });
 
   it('gates project artifacts by the same membership predicate', async () => {
     const { loadProjectArtifacts } = await import('./project-memory.loader');
 
-    const asBob = await loadProjectArtifacts(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: BOB,
-    });
-    const asAlice = await loadProjectArtifacts(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const asBob = await loadProjectArtifacts(ORG, PROJECT_ALICE, BOB);
+    const asAlice = await loadProjectArtifacts(ORG, PROJECT_ALICE, ALICE);
 
     expect(asBob).toHaveLength(0);
     expect(asAlice.map((artifact) => artifact.title)).toEqual([
@@ -496,23 +506,43 @@ describe('Projects tab — scope=project is gated by project_members', () => {
     ]);
   });
 
-  it('rejects member access with a blank user id', async () => {
+  it('rejects a blank viewer user id', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    await expect(
-      loadProjectMemories(ORG, PROJECT_ALICE, { kind: 'member', userId: '' }),
-    ).rejects.toThrow(/non-blank user id/);
+    await expect(loadProjectMemories(ORG, PROJECT_ALICE, '')).rejects.toThrow(
+      /viewer user id is required/,
+    );
+  });
+
+  it('returns the viewer’s own private rows tagged to the project; a non-member org admin with no such tag on THIS project sees nothing (inverted)', async () => {
+    const { loadProjectMemories } = await import('./project-memory.loader');
+
+    const asAlice = await loadProjectMemories(ORG, PROJECT_ALICE, ALICE);
+    const asBob = await loadProjectMemories(ORG, PROJECT_ALICE, BOB);
+    const asAdmin = await loadProjectMemories(ORG, PROJECT_ALICE, ADMIN);
+
+    expect(contents(asAlice.rows).join(' ')).toContain('ALICE_PROJECT_SECRET');
+    expect(contents(asAlice.rows).join(' ')).not.toContain(
+      'ALICE_SECRET therapy',
+    );
+    expect(contents(asBob.rows).join(' ')).not.toContain(
+      'ALICE_PROJECT_SECRET',
+    );
+    // ADMIN is not a member of alice-project and has no private capture
+    // tagged to it (their only private tag is on the orphan project), so
+    // they get nothing at all — no project-scoped fact, no admin fallback.
+    expect(contents(asAdmin.rows).join(' ')).not.toContain('PROJECT_FACT');
+    expect(asAdmin.rows).toHaveLength(0);
   });
 });
 
-describe('Memory detail — the drill-in obeys the same ladder', () => {
+describe('Memory detail — the drill-in obeys the same ladder, no admin bypass (2026-08-12 ruling)', () => {
   it('will not open Alice’s private memory for Bob', async () => {
     const { loadMemoryDetailForViewer } =
       await import('./memory-detail.loader');
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(row).toBeNull();
@@ -526,7 +556,6 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
     // is not power over a person's private scope.
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: ADMIN,
-      isOrgAdmin: true,
     });
 
     expect(row).toBeNull();
@@ -538,35 +567,33 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: ALICE,
-      isOrgAdmin: false,
     });
 
     expect(row?.content).toContain('ALICE_SECRET');
     expect(row?.provenance).toBe('EXTRACTED');
   });
 
-  it('will not open a project memory for a non-member, but will for a member and an admin', async () => {
+  it('will not open a project memory for a non-member — including an org admin with no membership row (inverted 2026-08-12: no `isOrgAdmin` field left to grant it) — but will for a member', async () => {
     const { loadMemoryDetailForViewer } =
       await import('./memory-detail.loader');
 
     const asBob = await loadMemoryDetailForViewer(ORG, seeded.projectMemory!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
     const asAlice = await loadMemoryDetailForViewer(
       ORG,
       seeded.projectMemory!,
-      { userId: ALICE, isOrgAdmin: false },
+      { userId: ALICE },
     );
     const asAdmin = await loadMemoryDetailForViewer(
       ORG,
       seeded.projectMemory!,
-      { userId: ADMIN, isOrgAdmin: true },
+      { userId: ADMIN },
     );
 
     expect(asBob).toBeNull();
     expect(asAlice?.content).toContain('PROJECT_FACT');
-    expect(asAdmin?.content).toContain('PROJECT_FACT');
+    expect(asAdmin).toBeNull();
   });
 
   it('opens an org memory for anyone in the org, including an unattributed session', async () => {
@@ -575,7 +602,6 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.orgMemory!, {
       userId: null,
-      isOrgAdmin: false,
     });
 
     expect(row?.content).toContain('ORG_FACT');
@@ -592,7 +618,11 @@ describe('invariant: only the private loader may read scope=private', () => {
         (file) =>
           file !== 'private-memory.loader.ts' &&
           file !== 'memory-detail.loader.ts' &&
-          file !== 'memory-visibility.types.ts',
+          file !== 'memory-visibility.types.ts' &&
+          // Own-private-with-this-project_id is the live auto-create
+          // shape. The arm is keyed on viewerUserId; the suite above
+          // proves it does not leak another person's private rows.
+          file !== 'project-memory.loader.ts',
       )
       .filter((file) => {
         const source = readFileSync(path.join(dir, file), 'utf8')
@@ -611,5 +641,74 @@ describe('invariant: only the private loader may read scope=private', () => {
     // read private rows. That is the change this feature exists to prevent —
     // review the diff before touching this test.
     expect(offenders).toEqual([]);
+  });
+});
+
+function privatePaneText(view: {
+  decisions: Array<{ content: string }>;
+  plans: Array<{ content: string }>;
+  constraints: Array<{ content: string }>;
+  recent: Array<{ content: string }>;
+}): string {
+  return [...view.decisions, ...view.plans, ...view.constraints, ...view.recent]
+    .map((item) => item.content)
+    .join(' ');
+}
+
+describe('Private pane — unscoped personal context only', () => {
+  it('does not return Alice’s unscoped private to Bob', async () => {
+    const { loadPrivateContextView } =
+      await import('../../../private/_lib/server/private-context.loader');
+
+    const bob = await loadPrivateContextView(ORG, BOB);
+    const text = privatePaneText(bob);
+
+    expect(text).not.toContain('ALICE_SECRET');
+    expect(text).toContain('BOB_SECRET salary negotiation notes');
+  });
+
+  it('POSITIVE CONTROL: Alice sees her unscoped private, not project-tagged private', async () => {
+    const { loadPrivateContextView } =
+      await import('../../../private/_lib/server/private-context.loader');
+
+    const alice = await loadPrivateContextView(ORG, ALICE);
+    const text = privatePaneText(alice);
+
+    expect(text).toContain('ALICE_SECRET therapy appointment');
+    expect(text).toContain('ALICE_SECRET prefers to work late');
+    expect(text).not.toContain('ALICE_PROJECT_SECRET');
+    expect(text).not.toContain('BOB_SECRET');
+    expect(text).not.toContain('PROJECT_FACT');
+    expect(text).not.toContain('ORG_FACT');
+    expect(text).not.toContain('LEGACY_FACT');
+    expect(text).not.toContain('OTHER_ORG_SECRET');
+  });
+
+  it('gives an org admin only their own unscoped private', async () => {
+    const { loadPrivateContextView } =
+      await import('../../../private/_lib/server/private-context.loader');
+
+    const admin = await loadPrivateContextView(ORG, ADMIN);
+    const text = privatePaneText(admin);
+
+    expect(text).toContain('ADMIN_SECRET my own private note');
+    expect(text).not.toContain('ADMIN_ORPHAN_SECRET');
+    expect(text).not.toContain('ALICE_SECRET');
+    expect(text).not.toContain('BOB_SECRET');
+  });
+
+  it('lists only the owner’s unscoped private artifacts', async () => {
+    const { loadPrivateContextArtifacts } =
+      await import('../../../private/_lib/server/private-context.loader');
+
+    const bob = await loadPrivateContextArtifacts(ORG, BOB);
+    const alice = await loadPrivateContextArtifacts(ORG, ALICE);
+    const admin = await loadPrivateContextArtifacts(ORG, ADMIN);
+
+    expect(bob).toHaveLength(0);
+    expect(admin).toHaveLength(0);
+    expect(alice.map((artifact) => artifact.title)).toEqual([
+      'alice-private-artifact',
+    ]);
   });
 });

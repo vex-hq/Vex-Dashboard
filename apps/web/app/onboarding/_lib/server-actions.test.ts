@@ -74,6 +74,21 @@ vi.mock('~/lib/agentguard/resolve-org-id', () => ({
   resolveOrgId: () => mockResolveOrgId(),
 }));
 
+const mockLoadLatestVisibleWrite = vi.fn(
+  async (
+    _orgId: string,
+    _userId: string,
+  ): Promise<{ id: string; projectId: string | null } | null> => null,
+);
+
+vi.mock('./server/activation-landing.loader', () => ({
+  loadLatestVisibleWrite: (
+    orgId: string,
+    userId: string,
+  ): Promise<{ id: string; projectId: string | null } | null> =>
+    mockLoadLatestVisibleWrite(orgId, userId),
+}));
+
 // ---------------------------------------------------------------------------
 // Mock: @kit/next/actions (enhanceAction)
 //
@@ -208,8 +223,24 @@ describe('onboarding progress actions — authorisation', () => {
 
     await expect(
       completeOnboardingAction({ accountSlug: MEMBER_SLUG }),
-    ).resolves.toEqual({ success: true });
+    ).resolves.toEqual({ success: true, href: `/home/${MEMBER_SLUG}` });
 
     expect(mockCompleteOnboarding).toHaveBeenCalledWith(MEMBER_SLUG);
+  });
+
+  it('lands on the project when the newest visible write has one', async () => {
+    mockLoadLatestVisibleWrite.mockResolvedValueOnce({
+      id: 'mem-1',
+      projectId: 'proj-9',
+    });
+
+    const { completeOnboardingAction } = await import('./server-actions');
+
+    await expect(
+      completeOnboardingAction({ accountSlug: MEMBER_SLUG }),
+    ).resolves.toEqual({
+      success: true,
+      href: `/home/${MEMBER_SLUG}/projects/proj-9?item=mem-1`,
+    });
   });
 });
