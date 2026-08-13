@@ -34,17 +34,17 @@ const faqs = [
   {
     question: 'What am I actually paying for?',
     answer:
-      'People. Klio is free and unlimited for one person — unlimited memories, unlimited retention, all your agents, synced across your own devices. You pay when a second person joins, because that is when their agents start sharing one brain with yours.',
+      'People. Klio is free for one person — unlimited memories, all your agents, synced across your own devices. You pay when a second person joins, because that is when their agents start sharing one brain with yours.',
   },
   {
     question: 'Are memories or recalls metered?',
     answer:
-      'No. Memories, recalls, retention and connected agents are unlimited on every plan. Most memories are captured automatically by hooks rather than deliberate tool calls, so metering them would charge you for volume you neither choose nor can predict. A per-minute rate limit guards against abuse instead.',
+      'No. Memories, recalls and connected agents are unlimited on every plan. Most memories are captured automatically by hooks rather than deliberate tool calls, so metering them would charge you for volume you neither choose nor can predict. A per-minute rate limit guards against abuse instead.',
   },
   {
     question: 'Is anything deleted after a while?',
     answer:
-      'No. Memory retention is forever on every plan, including Free. A memory layer that forgets on a timer is not a memory layer.',
+      'On Team, no — memory retention is forever. On Free, memories older than 30 days are cleared out; upgrade to Team before the 30-day mark if you need to keep them past that. A memory layer that forgets on a timer by surprise is not a memory layer, so this is published up front, not discovered on day 31.',
   },
   {
     question: 'Can I self-host instead?',
@@ -54,7 +54,7 @@ const faqs = [
   {
     question: 'What does Klio Cloud have that self-hosting does not?',
     answer:
-      'The parts built on top of the store. Cloud runs the knowledge graph that links memories to the entities they are about, hybrid recall that matches exact identifiers as well as meaning, artifacts, compression, and the curator pass that judges when a new fact contradicts an older one and retires it. Self-hosting is the memory engine; Cloud is the memory engine plus everything that reasons over it. All of it is on the Free plan, so you do not need to pay to compare them.',
+      'The parts built on top of the store. Cloud runs the knowledge graph that links memories to the entities they are about, hybrid recall that matches exact identifiers as well as meaning, compression, and the curator pass that judges when a new fact contradicts an older one and retires it. Self-hosting is the memory engine; Cloud is the memory engine plus everything that reasons over it. The intelligence layer ships on Team; Free stores and retrieves so you can evaluate the core engine before paying for anything.',
   },
   {
     question: 'Then why would I self-host?',

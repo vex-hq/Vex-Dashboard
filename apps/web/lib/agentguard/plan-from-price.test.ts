@@ -9,24 +9,38 @@ import {
   statusGrantsPlan,
 } from './plan-from-price';
 
-// Real known Stripe price ids from billing.config (monthly line items).
-// These are public, non-sensitive Stripe price identifiers (not secrets);
-// the allowlist pragmas suppress detect-secrets' high-entropy false positives.
-const STARTER_MONTHLY = 'price_1T3eAO2R0WSf5z7SEQKjage3'; // pragma: allowlist secret
-const PRO_MONTHLY = 'price_1T3eAI2R0WSf5z7Svg2YEAoU'; // pragma: allowlist secret
-const TEAM_MONTHLY = 'price_1T3eA72R0WSf5z7SZuQmJTnk'; // pragma: allowlist secret
+// Real known Stripe price ids from billing.config (monthly/yearly line
+// items). TEAM_MONTHLY / TEAM_YEARLY are the 2026-08-13 Klio per-seat
+// live ids from the Klio Stripe account, mirrored from billing.config.ts;
+// see the header comment in `billing.config.ts` for why. These are public,
+// non-sensitive identifiers (not secrets); the allowlist pragmas suppress
+// detect-secrets' high-entropy false positives.
+const TEAM_MONTHLY = 'price_1U447h0Zh9jGFkLDlVHfozmx'; // pragma: allowlist secret
+const TEAM_YEARLY = 'price_1U448X0Zh9jGFkLDWa5X17aL'; // pragma: allowlist secret
+
+// The old Vex "starter"/"pro" prices are commented out of billing.config as
+// of 2026-08-13 (hidden-not-deleted, see that file's header comment). They
+// must now resolve to 'free' like any other unrecognized price id — this is
+// the regression guard for "commenting out a product silently changes what
+// its price ids resolve to.
+const FORMER_STARTER_MONTHLY = 'price_1T3eAO2R0WSf5z7SEQKjage3'; // pragma: allowlist secret
+const FORMER_PRO_MONTHLY = 'price_1T3eAI2R0WSf5z7Svg2YEAoU'; // pragma: allowlist secret
 
 describe('planFromPriceId', () => {
-  it('maps a known starter price id to "starter"', () => {
-    expect(planFromPriceId(STARTER_MONTHLY)).toBe('starter');
-  });
-
-  it('maps a known pro price id to "pro"', () => {
-    expect(planFromPriceId(PRO_MONTHLY)).toBe('pro');
-  });
-
-  it('maps a known team price id to "team"', () => {
+  it('maps the Klio team-monthly price id to "team"', () => {
     expect(planFromPriceId(TEAM_MONTHLY)).toBe('team');
+  });
+
+  it('maps the Klio team-yearly price id to "team"', () => {
+    expect(planFromPriceId(TEAM_YEARLY)).toBe('team');
+  });
+
+  it('returns "free" for the commented-out former Vex starter price id', () => {
+    expect(planFromPriceId(FORMER_STARTER_MONTHLY)).toBe('free');
+  });
+
+  it('returns "free" for the commented-out former Vex pro price id', () => {
+    expect(planFromPriceId(FORMER_PRO_MONTHLY)).toBe('free');
   });
 
   it('returns "free" for an unknown price id', () => {
@@ -69,29 +83,29 @@ describe('statusGrantsPlan', () => {
 });
 
 describe('resolvePlanFromSubscription', () => {
-  it('resolves an active subscription with a pro line item to "pro"', () => {
+  it('resolves an active subscription with a team line item to "team"', () => {
     expect(
       resolvePlanFromSubscription({
         status: 'active',
-        line_items: [{ variant_id: PRO_MONTHLY }],
+        line_items: [{ variant_id: TEAM_MONTHLY }],
       }),
-    ).toBe('pro');
+    ).toBe('team');
   });
 
-  it('resolves a trialing subscription with a starter line item to "starter"', () => {
+  it('resolves a trialing subscription with a team-yearly line item to "team"', () => {
     expect(
       resolvePlanFromSubscription({
         status: 'trialing',
-        line_items: [{ variant_id: STARTER_MONTHLY }],
+        line_items: [{ variant_id: TEAM_YEARLY }],
       }),
-    ).toBe('starter');
+    ).toBe('team');
   });
 
   it('returns "free" when the status does not grant a plan', () => {
     expect(
       resolvePlanFromSubscription({
         status: 'canceled',
-        line_items: [{ variant_id: PRO_MONTHLY }],
+        line_items: [{ variant_id: TEAM_MONTHLY }],
       }),
     ).toBe('free');
   });
@@ -124,12 +138,12 @@ describe('resolvePlanFromSubscription', () => {
   });
 
   it('picks the HIGHEST tier when multiple line items map to plans', () => {
-    // Order must not matter: team outranks starter and pro either way.
+    // Order must not matter: team outranks free either way.
     expect(
       resolvePlanFromSubscription({
         status: 'active',
         line_items: [
-          { variant_id: STARTER_MONTHLY },
+          { variant_id: 'klio-free-plan' },
           { variant_id: TEAM_MONTHLY },
         ],
       }),
@@ -138,7 +152,10 @@ describe('resolvePlanFromSubscription', () => {
     expect(
       resolvePlanFromSubscription({
         status: 'active',
-        line_items: [{ variant_id: TEAM_MONTHLY }, { variant_id: PRO_MONTHLY }],
+        line_items: [
+          { variant_id: TEAM_MONTHLY },
+          { variant_id: 'klio-free-plan' },
+        ],
       }),
     ).toBe('team');
   });
@@ -156,7 +173,7 @@ describe('resolvePlanFromSubscription', () => {
     expect(
       resolvePlanFromSubscription({
         status: null,
-        line_items: [{ variant_id: PRO_MONTHLY }],
+        line_items: [{ variant_id: TEAM_MONTHLY }],
       }),
     ).toBe('free');
   });
@@ -171,5 +188,12 @@ describe('billing.config ↔ VexPlan consistency', () => {
     for (const product of billingConfig.products) {
       expect(VEX_PLAN_VALUES).toContain(product.id);
     }
+  });
+
+  it('only exposes free and team products (Vex tiers are commented out)', () => {
+    expect(billingConfig.products.map((p) => p.id).sort()).toEqual([
+      'free',
+      'team',
+    ]);
   });
 });
