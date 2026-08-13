@@ -69,7 +69,7 @@ describe('loadHubSummary — SQL shape', () => {
     await loadHubSummary('org-1', null);
 
     for (const call of queryMock.mock.calls) {
-      const [sql, params] = call as [string, unknown[]];
+      const [sql] = call as [string, unknown[]];
       expect(sql).toMatch(/scope = 'org'/);
       expect(sql).not.toMatch(/scope = 'private'/);
       expect(sql).not.toContain('user-1');
