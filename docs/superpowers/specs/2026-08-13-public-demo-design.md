@@ -91,10 +91,26 @@ browser ──► /api/demo/chat (Next route handler, server-only)
 
 **Why `agent_id` and not a new concept:** `scope='agent'` already exists and is
 tested (`services/shared/shared/memory.py:1084`) — rows are visible only to the
-agent that wrote them. A visitor's writes are therefore isolated by the
-production code path, not by demo-specific logic. Recall returns the shared
-demo project plus that visitor's own rows. **No engine change is required**,
-which keeps this inside the 2026-08-07 engine freeze.
+agent that wrote them, and `memory.py:1327` refuses a cross-agent read outright.
+A visitor's writes are therefore isolated by the production code path, not by
+demo-specific logic. **No engine change is required**, which keeps this inside
+the 2026-08-07 engine freeze.
+
+> **The demo API key must be provisioned with no `created_by` user.**
+> Discovered while planning, 2026-08-13. `_hook_write_scope`
+> (`capture.py:253`) discards the caller's declared scope whenever the request
+> is attributable to a person: `if user_id: return "private", user_id`. Only an
+> *unattributable* caller keeps `declared_scope`. Every normally-provisioned key
+> carries a `created_by`, so a normal demo key would make every visitor's write
+> land at `scope='private'` under one shared owner — and the next visitor's
+> recall, resolving that same user, would read it back. **That is a
+> cross-visitor leak.** The implementation plan gates on a live canary check
+> before any further work.
+>
+> Two consequences: scope is a **top-level** request field (`metadata` is only
+> persisted, never interpreted), and reading both the shared corpus and the
+> visitor's own writes takes **two** recalls — `scope='org'` and
+> `scope='agent'` — because neither includes the other.
 
 ## Security
 
