@@ -98,7 +98,9 @@ async function seedArtifact(
       options.org ?? ORG,
       title,
       inline,
-      inline === null ? `s3://klio-artifacts/${options.org ?? ORG}/${id}/v1` : null,
+      inline === null
+        ? `s3://klio-artifacts/${options.org ?? ORG}/${id}/v1`
+        : null,
       options.status ?? 'active',
     ],
   );
@@ -204,7 +206,8 @@ async function download(
   memoryId: string,
   viewer: { userId: string | null; isOrgAdmin: boolean },
 ) {
-  const { loadDownloadableArtifact } = await import('./artifact-download.loader');
+  const { loadDownloadableArtifact } =
+    await import('./artifact-download.loader');
 
   return loadDownloadableArtifact(orgId, memoryId, viewer);
 }
@@ -256,7 +259,7 @@ describe('a private artifact is downloadable only by its owner', () => {
   });
 });
 
-describe('a project artifact is downloadable only by members (and org admins)', () => {
+describe('a project artifact is downloadable only by its members', () => {
   it('refuses a non-member', async () => {
     const result = await download(ORG, cards.project!, {
       userId: BOB,
@@ -268,21 +271,30 @@ describe('a project artifact is downloadable only by members (and org admins)', 
     expect(result).toBeNull();
   });
 
-  it('POSITIVE CONTROL: gives it to a member, and to an org admin', async () => {
-    const asAlice = await download(ORG, cards.project!, {
-      userId: ALICE,
-      isOrgAdmin: false,
-    });
-    const asAdmin = await download(ORG, cards.project!, {
+  it('refuses an org admin who is not a member of the project', async () => {
+    const result = await download(ORG, cards.project!, {
       userId: ADMIN,
       isOrgAdmin: true,
     });
 
+    // The 2026-08-12 ruling: membership in `project_members` is the ONLY gate
+    // for a project, with no org-admin bypass anywhere in the engine or the
+    // dashboard. This test previously asserted the opposite — it was written
+    // when admin widening still applied here, and was left behind when the
+    // bypass was removed, so `main` shipped red until this was corrected.
+    expect(result).toBeNull();
+  });
+
+  it('POSITIVE CONTROL: gives it to a member', async () => {
+    const asAlice = await download(ORG, cards.project!, {
+      userId: ALICE,
+      isOrgAdmin: false,
+    });
+
     // Proves the membership predicate is being evaluated rather than the
-    // project simply being unreadable — and that admin widening applies here,
-    // where the design says it should, unlike in private scope.
+    // project simply being unreadable for everyone — without which the two
+    // refusals above would pass vacuously.
     expect(asAlice?.title).toBe('project-architecture');
-    expect(asAdmin?.title).toBe('project-architecture');
   });
 });
 

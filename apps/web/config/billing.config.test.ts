@@ -69,8 +69,8 @@ describe('billing.config', () => {
       const monthly = team.plans.find((p) => p.id === 'team-monthly')!;
       const yearly = team.plans.find((p) => p.id === 'team-yearly')!;
 
-      expect(monthly.lineItems[0]!.id).toBe('price_REPLACE_ME_TEAM_MONTHLY');
-      expect(yearly.lineItems[0]!.id).toBe('price_REPLACE_ME_TEAM_YEARLY');
+      expect(monthly.lineItems[0]!.id).toBe('price_1U447h0Zh9jGFkLDlVHfozmx'); // pragma: allowlist secret
+      expect(yearly.lineItems[0]!.id).toBe('price_1U448X0Zh9jGFkLDWa5X17aL'); // pragma: allowlist secret
     });
   });
 

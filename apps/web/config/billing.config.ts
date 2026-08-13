@@ -1,13 +1,21 @@
 /**
  * Klio per-seat billing config — 2026-08-13.
  *
- * ⚠️ STRIPE PRICE IDS ARE PLACEHOLDERS. Abhishek is creating the two live
- * prices in Stripe (see `2026-08-13-klio-pricing-spec.md`, section 3 — this
- * requires live-account access this agent does not have). Checkout WILL FAIL
- * until both of these are swapped for real `price_...` ids:
+ * Live Stripe price ids, created 2026-08-13 on product `prod_V4CWX3bALwggox`
+ * ("Klio Team") in the **Klio / MoonForge, Inc.** Stripe account:
  *
- *   - `price_REPLACE_ME_TEAM_MONTHLY`
- *   - `price_REPLACE_ME_TEAM_YEARLY`
+ *   - `price_1U447h0Zh9jGFkLDlVHfozmx` — $20 / seat / month
+ *   - `price_1U448X0Zh9jGFkLDWa5X17aL` — $200 / seat / year
+ *
+ * ⚠️ These live in a DIFFERENT Stripe account from the one this app was
+ * previously configured against (`acct_1T3dsn…`, "Vex"), which is where the
+ * commented-out Vex prices below belong. Checkout resolves these ids only once
+ * `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` and
+ * `STRIPE_WEBHOOK_SECRET` on Railway point at the Klio account. Until then
+ * Stripe answers "No such price" — the ids are correct, the credentials are not.
+ *
+ * Prices are per-unit; Makerkit passes the seat count as the quantity, so a
+ * 5-seat team is billed 5 × $20. Do not pre-multiply.
  *
  * The Free plan intentionally has no Stripe price — see the `free` product
  * below for why it still needs a $0 line item.
@@ -81,8 +89,7 @@ export default createBillingSchema({
           interval: 'month',
           lineItems: [
             {
-              // pragma: allowlist secret — placeholder, not a real Stripe id.
-              id: 'price_REPLACE_ME_TEAM_MONTHLY',
+              id: 'price_1U447h0Zh9jGFkLDlVHfozmx', // pragma: allowlist secret
               name: 'Team',
               cost: 20,
               type: 'per_seat',
@@ -97,8 +104,7 @@ export default createBillingSchema({
           interval: 'year',
           lineItems: [
             {
-              // pragma: allowlist secret — placeholder, not a real Stripe id.
-              id: 'price_REPLACE_ME_TEAM_YEARLY',
+              id: 'price_1U448X0Zh9jGFkLDWa5X17aL', // pragma: allowlist secret
               name: 'Team',
               cost: 200,
               type: 'per_seat',

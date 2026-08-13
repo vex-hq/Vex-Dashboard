@@ -11,12 +11,12 @@ import {
 
 // Real known Stripe price ids from billing.config (monthly/yearly line
 // items). TEAM_MONTHLY / TEAM_YEARLY are the 2026-08-13 Klio per-seat
-// placeholders (`price_REPLACE_ME_TEAM_*`) — they are not real Stripe ids,
+// live ids from the Klio Stripe account, mirrored from billing.config.ts;
 // see the header comment in `billing.config.ts` for why. These are public,
 // non-sensitive identifiers (not secrets); the allowlist pragmas suppress
 // detect-secrets' high-entropy false positives.
-const TEAM_MONTHLY = 'price_REPLACE_ME_TEAM_MONTHLY'; // pragma: allowlist secret
-const TEAM_YEARLY = 'price_REPLACE_ME_TEAM_YEARLY'; // pragma: allowlist secret
+const TEAM_MONTHLY = 'price_1U447h0Zh9jGFkLDlVHfozmx'; // pragma: allowlist secret
+const TEAM_YEARLY = 'price_1U448X0Zh9jGFkLDWa5X17aL'; // pragma: allowlist secret
 
 // The old Vex "starter"/"pro" prices are commented out of billing.config as
 // of 2026-08-13 (hidden-not-deleted, see that file's header comment). They
