@@ -72,6 +72,18 @@ describe('<HubProjects />', () => {
     expect(screen.getAllByText('0%').length).toBeGreaterThan(0);
     expect(screen.getAllByTitle('Abhishek Thakur').length).toBe(2);
     expect(screen.getAllByText('AT').length).toBe(2);
+    expect(screen.getByRole('button', { name: 'Filter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Display' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'More' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('leaves Lead blank when the creator is unknown', () => {
+    render(<HubProjects rows={[row({ lead: null })]} accountSlug="acme" />);
+
+    expect(screen.queryByTitle('Abhishek Thakur')).not.toBeInTheDocument();
+    expect(screen.getAllByText('---')).toHaveLength(1);
   });
 
   it('writes a Health facet into the URL', () => {
