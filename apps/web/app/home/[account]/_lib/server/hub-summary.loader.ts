@@ -67,6 +67,7 @@ export interface ProjectSpark {
   projectId: string;
   name: string;
   series: DayPoint[];
+  createdBy: string | null;
 }
 
 export interface HubSummary {
@@ -102,6 +103,7 @@ interface ProjectSparkRow {
   total: string;
   day: string;
   count: string;
+  created_by: string | null;
 }
 
 function pushParam(params: unknown[], value: unknown): string {
@@ -192,12 +194,15 @@ function toRollup(row: HubRollupRow | undefined): {
  */
 function buildProjectSparks(rows: ProjectSparkRow[]): ProjectSpark[] {
   const order: string[] = [];
-  const byProject = new Map<string, { name: string; rows: DailyCountRow[] }>();
+  const byProject = new Map<
+    string,
+    { name: string; createdBy: string | null; rows: DailyCountRow[] }
+  >();
 
   for (const row of rows) {
     let entry = byProject.get(row.project_id);
     if (!entry) {
-      entry = { name: row.name, rows: [] };
+      entry = { name: row.name, createdBy: row.created_by ?? null, rows: [] };
       byProject.set(row.project_id, entry);
       order.push(row.project_id);
     }
@@ -209,6 +214,7 @@ function buildProjectSparks(rows: ProjectSparkRow[]): ProjectSpark[] {
     return {
       projectId,
       name: entry.name,
+      createdBy: entry.createdBy,
       series: gapFillSeries(HUB_VOLUME_WINDOW_DAYS, entry.rows),
     };
   });
@@ -297,6 +303,7 @@ export const loadHubSummary = cache(
         SELECT
           pr.id AS project_id,
           pr.display_name AS name,
+          pr.created_by AS created_by,
           COUNT(m.id) AS total
         FROM projects pr
         LEFT JOIN session_memories m
@@ -307,7 +314,7 @@ export const loadHubSummary = cache(
          AND (${sparkItemArms.join(' OR ')})
         WHERE pr.org_id = $1
           AND (${projectVisibility})
-        GROUP BY pr.id, pr.display_name
+        GROUP BY pr.id, pr.display_name, pr.created_by
         HAVING COUNT(m.id) > 0
         ORDER BY total DESC
         LIMIT ${sparkLimitParam}
@@ -315,6 +322,7 @@ export const loadHubSummary = cache(
       SELECT
         pt.project_id,
         pt.name,
+        pt.created_by,
         pt.total::text AS total,
         to_char(date_trunc('day', m.created_at), 'YYYY-MM-DD') AS day,
         COUNT(m.id) AS count
@@ -325,7 +333,7 @@ export const loadHubSummary = cache(
        AND ${BASE_VISIBILITY_PREDICATE}
        AND ${sparkWindow}
        AND (${sparkItemArms.join(' OR ')})
-      GROUP BY pt.project_id, pt.name, pt.total, day
+      GROUP BY pt.project_id, pt.name, pt.created_by, pt.total, day
       ORDER BY pt.total DESC, pt.project_id, day ASC
     `;
 

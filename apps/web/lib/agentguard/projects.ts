@@ -23,6 +23,7 @@ export interface ProjectRow {
   display_name: string;
   git_remote: string | null;
   repo_root_path: string | null;
+  created_by: string | null;
   created_at: string;
   last_seen_at: string | null;
 }
@@ -47,7 +48,8 @@ export interface CreateProjectParams {
  *
  * Note the engine ALSO auto-creates projects on write (`ensure_project`) —
  * that is how 100+ of them exist. Explicit creation is for naming and
- * organising ahead of use, and for getting an owner attached.
+ * organising ahead of use, and for getting an owner attached
+ * (`created_by` plus an admin membership row).
  */
 export async function createProject(
   params: CreateProjectParams,
@@ -59,11 +61,17 @@ export async function createProject(
     await client.query('BEGIN');
 
     const inserted = await client.query<ProjectRow>(
-      `INSERT INTO projects (id, org_id, display_name, git_remote, repo_root_path)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4)
-       RETURNING id, org_id, display_name, git_remote, repo_root_path,
+      `INSERT INTO projects (id, org_id, display_name, git_remote, repo_root_path, created_by)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+       RETURNING id, org_id, display_name, git_remote, repo_root_path, created_by,
                  created_at::text AS created_at, last_seen_at::text AS last_seen_at`,
-      [params.orgId, params.displayName, params.gitRemote, params.repoRootPath],
+      [
+        params.orgId,
+        params.displayName,
+        params.gitRemote,
+        params.repoRootPath,
+        params.createdByUserId,
+      ],
     );
 
     const project = inserted.rows[0]!;

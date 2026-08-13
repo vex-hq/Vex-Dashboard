@@ -12,6 +12,7 @@ function pulse(overrides: Partial<ProjectPulse>): ProjectPulse {
     itemsThisWeek: 0,
     lastItemAt: null,
     agentsActive: [],
+    createdBy: null,
     ...overrides,
   };
 }

@@ -4,6 +4,7 @@ import {
   buildHubProjectRows,
   filterHubProjectRows,
   healthFacetCounts,
+  leadFacetCounts,
   parseHealthFilter,
   projectHealth,
   statusPercent,
@@ -33,6 +34,7 @@ function pulse(overrides: Partial<ProjectPulse>): ProjectPulse {
     itemsThisWeek: 4,
     lastItemAt: NOW.toISOString(),
     agentsActive: ['curator'],
+    createdBy: 'user-abhishek',
     ...overrides,
   };
 }
@@ -42,9 +44,16 @@ function spark(overrides: Partial<ProjectSpark>): ProjectSpark {
     projectId: 'hirly',
     name: 'hirly',
     series: [{ day: '2026-08-12', count: 4 }],
+    createdBy: 'user-abhishek',
     ...overrides,
   };
 }
+
+const ABHISHEK = {
+  userId: 'user-abhishek',
+  name: 'Abhishek Thakur',
+  pictureUrl: null,
+};
 
 describe('parseHealthFilter / projectHealth / statusPercent', () => {
   it('defaults unknown health filters to all', () => {
@@ -75,6 +84,7 @@ describe('buildHubProjectRows', () => {
       [pulse({})],
       [spark({})],
       NOW,
+      new Map([[ABHISHEK.userId, ABHISHEK]]),
     );
 
     expect(row).toMatchObject({
@@ -82,11 +92,35 @@ describe('buildHubProjectRows', () => {
       name: 'hirly',
       notes: 186,
       recalled: 0,
-      leadAgent: 'curator',
+      lead: ABHISHEK,
       health: 'on-track',
       notRecalled: true,
       statusPercent: 0,
     });
+  });
+
+  it('does not use the active agent as lead', () => {
+    const [row] = buildHubProjectRows(
+      [usage({})],
+      [pulse({ agentsActive: ['claude-code'], createdBy: 'user-abhishek' })],
+      [],
+      NOW,
+      new Map([[ABHISHEK.userId, ABHISHEK]]),
+    );
+
+    expect(row?.lead).toEqual(ABHISHEK);
+  });
+
+  it('leaves lead empty when the creator is not a workspace member we can name', () => {
+    const [row] = buildHubProjectRows(
+      [usage({})],
+      [pulse({ createdBy: 'user-gone' })],
+      [],
+      NOW,
+      new Map(),
+    );
+
+    expect(row?.lead).toBeNull();
   });
 
   it('sorts by last activity, newest first', () => {
@@ -163,5 +197,31 @@ describe('filterHubProjectRows / healthFacetCounts', () => {
     expect(
       filterHubProjectRows(rows, 'not-recalled').map((row) => row.id),
     ).toEqual(['hirly', 'relio']);
+  });
+});
+
+describe('leadFacetCounts', () => {
+  it('groups projects by the creating person, not the agent', () => {
+    const people = new Map([[ABHISHEK.userId, ABHISHEK]]);
+    const rows = buildHubProjectRows(
+      [
+        usage({ projectId: 'hirly' }),
+        usage({ projectId: 'relio', projectName: 'relio' }),
+      ],
+      [
+        pulse({ projectId: 'hirly', agentsActive: ['claude-code'] }),
+        pulse({
+          projectId: 'relio',
+          name: 'relio',
+          agentsActive: ['cursor'],
+          createdBy: 'user-abhishek',
+        }),
+      ],
+      [],
+      NOW,
+      people,
+    );
+
+    expect(leadFacetCounts(rows)).toEqual([{ lead: ABHISHEK, count: 2 }]);
   });
 });

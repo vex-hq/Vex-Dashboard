@@ -15,6 +15,7 @@ import {
   loadHasAnyMemory,
   loadViewerHasWritten,
 } from './_lib/server/workspace-activity.loader';
+import { loadWorkspacePeople } from './_lib/server/workspace-people.loader';
 
 interface TeamAccountHomePageProps {
   params: Promise<{ account: string }>;
@@ -65,7 +66,7 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
   ]);
   const viewerUserId = viewer.userId;
 
-  const [hubSummary, usage, pulses, hasAnyMemory, viewerHasWritten] =
+  const [hubSummary, usage, pulses, hasAnyMemory, viewerHasWritten, people] =
     await Promise.all([
       orFallback(
         'hubSummary',
@@ -99,6 +100,9 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
       orFallback('viewerHasWritten', true, () =>
         loadViewerHasWritten(orgId, viewerUserId),
       ),
+      orFallback('workspacePeople', new Map(), () =>
+        loadWorkspacePeople(account),
+      ),
     ]);
 
   // Usage is org-wide. Pulse and sparks are visibility-gated. Only count
@@ -114,6 +118,8 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
     visibleUsage,
     pulses,
     hubSummary.projectSparks,
+    new Date(),
+    people,
   );
 
   return (

@@ -63,6 +63,7 @@ CREATE TABLE projects (
   display_name varchar NOT NULL,
   git_remote text,
   repo_root_path text,
+  created_by varchar,
   created_at timestamptz DEFAULT now(),
   last_seen_at timestamptz
 );
@@ -228,6 +229,7 @@ describe('grants are recorded durably, not only in the log', () => {
       createdByEmail: 'alice@oppla.ai',
     });
 
+    expect(project.created_by).toBe(ALICE);
     expect(await auditRows()).toEqual([
       {
         org_id: ORG,

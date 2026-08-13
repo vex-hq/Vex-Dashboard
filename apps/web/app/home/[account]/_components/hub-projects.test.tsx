@@ -21,7 +21,11 @@ function row(overrides: Partial<HubProjectRow>): HubProjectRow {
     notes: 186,
     recalled: 0,
     lastActivityAt: '2026-08-12T18:00:00.000Z',
-    leadAgent: 'curator',
+    lead: {
+      userId: 'user-abhishek',
+      name: 'Abhishek Thakur',
+      pictureUrl: null,
+    },
     series: [],
     health: 'on-track',
     notRecalled: true,
@@ -66,6 +70,8 @@ describe('<HubProjects />', () => {
     expect(screen.getAllByText('On track').length).toBeGreaterThan(0);
     expect(screen.getByText('186')).toBeInTheDocument();
     expect(screen.getAllByText('0%').length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle('Abhishek Thakur').length).toBe(2);
+    expect(screen.getAllByText('AT').length).toBe(2);
   });
 
   it('writes a Health facet into the URL', () => {

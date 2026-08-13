@@ -14,6 +14,7 @@ function spark(overrides: Partial<ProjectSpark>): ProjectSpark {
       { day: '2026-08-01', count: 2 },
       { day: '2026-08-02', count: 4 },
     ],
+    createdBy: null,
     ...overrides,
   };
 }

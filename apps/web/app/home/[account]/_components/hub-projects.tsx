@@ -13,11 +13,12 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { Avatar, AvatarFallback, AvatarImage } from '@kit/ui/avatar';
 import { cn } from '@kit/ui/utils';
 
-import { displayAgent } from '../_lib/display-agent';
 import {
   type HealthFilter,
+  type HubProjectLead,
   type HubProjectRow,
   filterHubProjectRows,
   healthFacetCounts,
@@ -249,11 +250,7 @@ function ProjectRow({
       </td>
       <td className="px-2">---</td>
       <td className="px-2">
-        {row.leadAgent ? (
-          <LeadAvatar agent={row.leadAgent} />
-        ) : (
-          <span>---</span>
-        )}
+        {row.lead ? <LeadAvatar lead={row.lead} /> : <span>---</span>}
       </td>
       <td className="px-2" />
       <td className="px-2 text-right tabular-nums">{row.notes}</td>
@@ -325,17 +322,20 @@ function MiniSpark({ series }: { series: HubProjectRow['series'] }) {
   );
 }
 
-function LeadAvatar({ agent }: { agent: string }) {
-  const label = displayAgent(agent);
-  const initials = initialsFor(label);
-  const color = AVATARS[hash(label) % AVATARS.length] ?? AVATARS[0]!;
+function LeadAvatar({ lead }: { lead: HubProjectLead }) {
+  const initials = initialsFor(lead.name);
+  const color = AVATARS[hash(lead.userId) % AVATARS.length] ?? AVATARS[0]!;
   return (
-    <span
-      title={label}
-      className="inline-flex size-[22px] items-center justify-center rounded-full text-[10px] font-[590] text-white"
-      style={{ background: color }}
-    >
-      {initials}
+    <span title={lead.name} className="inline-flex">
+      <Avatar className="size-[22px]">
+        <AvatarImage src={lead.pictureUrl ?? undefined} alt="" />
+        <AvatarFallback
+          className="text-[10px] font-[590] text-white"
+          style={{ background: color }}
+        >
+          {initials}
+        </AvatarFallback>
+      </Avatar>
     </span>
   );
 }
@@ -464,17 +464,17 @@ function InsightsRail({
           </p>
         ) : (
           <ul className="flex flex-col">
-            {leads.map((lead) => (
+            {leads.map(({ lead, count }) => (
               <li
-                key={lead.agent}
+                key={lead.userId}
                 className="flex items-center justify-between px-1 py-1.5 text-[13px]"
                 style={{ color: L.ink }}
               >
                 <span className="inline-flex items-center gap-2">
-                  <LeadAvatar agent={lead.agent} />
-                  {displayAgent(lead.agent)}
+                  <LeadAvatar lead={lead} />
+                  {lead.name}
                 </span>
-                <span style={{ color: L.muted }}>{lead.count}</span>
+                <span style={{ color: L.muted }}>{count}</span>
               </li>
             ))}
           </ul>

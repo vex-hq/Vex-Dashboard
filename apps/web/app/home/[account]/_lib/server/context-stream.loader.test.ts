@@ -100,6 +100,7 @@ describe('loadProjectPulse', () => {
           items_this_week: '12',
           last_item_at: '2026-08-10T09:00:00Z',
           agents_active: ['claude-code', 'cursor'],
+          created_by: 'user-alice',
         },
         {
           project_id: 'proj-2',
@@ -107,6 +108,7 @@ describe('loadProjectPulse', () => {
           items_this_week: '0',
           last_item_at: null,
           agents_active: [],
+          created_by: null,
         },
       ],
     });
@@ -120,6 +122,7 @@ describe('loadProjectPulse', () => {
         itemsThisWeek: 12,
         lastItemAt: '2026-08-10T09:00:00Z',
         agentsActive: ['claude-code', 'cursor'],
+        createdBy: 'user-alice',
       },
       {
         projectId: 'proj-2',
@@ -127,6 +130,7 @@ describe('loadProjectPulse', () => {
         itemsThisWeek: 0,
         lastItemAt: null,
         agentsActive: [],
+        createdBy: null,
       },
     ]);
   });
@@ -141,6 +145,7 @@ describe('loadProjectPulse', () => {
     expect(sql).not.toContain('org-1');
     expect(sql).toMatch(/GROUP BY/i);
     expect(sql).toMatch(/array_agg\(DISTINCT m\.agent_id\)/);
+    expect(sql).toMatch(/pr\.created_by AS created_by/);
   });
 
   it('carries all three ladder arms, same as the stream', async () => {
