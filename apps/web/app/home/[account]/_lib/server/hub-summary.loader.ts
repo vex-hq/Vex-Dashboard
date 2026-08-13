@@ -30,11 +30,15 @@ import { getAgentGuardPool } from '~/lib/agentguard/db';
  * same way `loadProjectPulse` (`context-stream.loader.ts`) gates it — without
  * that second gate, a project's id/display_name/series would leak to any org
  * member the moment that project has org-scoped memories tagged with its id,
- * even if the viewer is not a member. `isOrgAdmin` widens ONLY that
- * project-listing gate (mirroring `loadProjectPulse`'s admin branch); the
- * item-visibility arms that decide which memories get counted are left
- * completely untouched, so an admin gains no access to other users' private
- * memories through this loader.
+ * even if the viewer is not a member.
+ *
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate for project visibility. This loader previously took an
+ * `isOrgAdmin` flag that widened the `projectSparks` listing gate to `TRUE`
+ * for org admins; that branch is gone, not defaulted off — see
+ * `context-stream.loader.ts`'s `loadProjectPulse` for the full rationale
+ * (migration 039 backfilled an owner for every project, so the membership
+ * gate alone is safe).
  *
  * `lastActivityAt` is deliberately NOT bounded by either the 7-day or 30-day
  * window — it answers "when did the viewer's visible brain last change at
@@ -188,10 +192,7 @@ function toRollup(row: HubRollupRow | undefined): {
  */
 function buildProjectSparks(rows: ProjectSparkRow[]): ProjectSpark[] {
   const order: string[] = [];
-  const byProject = new Map<
-    string,
-    { name: string; rows: DailyCountRow[] }
-  >();
+  const byProject = new Map<string, { name: string; rows: DailyCountRow[] }>();
 
   for (const row of rows) {
     let entry = byProject.get(row.project_id);
@@ -219,16 +220,9 @@ function buildProjectSparks(rows: ProjectSparkRow[]): ProjectSpark[] {
  * @param viewerUserId - The signed-in caller's user id, or `null` for an
  *   unattributed request. A `null` viewer sees only `org`-scoped rows and no
  *   projects at all — see the file header.
- * @param isOrgAdmin - Widens ONLY the `projectSparks` project-listing gate to
- *   see every project in the org, mirroring `loadProjectPulse`'s admin
- *   branch. Item visibility (which memories count) is untouched by this flag.
  */
 export const loadHubSummary = cache(
-  async (
-    orgId: string,
-    viewerUserId: string | null,
-    isOrgAdmin = false,
-  ): Promise<HubSummary> => {
+  async (orgId: string, viewerUserId: string | null): Promise<HubSummary> => {
     const pool = getAgentGuardPool();
 
     // --- Rollup: kind counts, active projects, active agents, last activity
@@ -237,10 +231,7 @@ export const loadHubSummary = cache(
       rollupParams,
       viewerUserId,
     );
-    const rollupWindowParam = pushParam(
-      rollupParams,
-      HUB_ACTIVITY_WINDOW_DAYS,
-    );
+    const rollupWindowParam = pushParam(rollupParams, HUB_ACTIVITY_WINDOW_DAYS);
     const rollupWindow = `m.created_at >= now() - (${rollupWindowParam} || ' days')::interval`;
 
     const rollupSql = `
@@ -295,9 +286,6 @@ export const loadHubSummary = cache(
         SELECT 1 FROM project_members pm
         WHERE pm.project_id = pr.id AND pm.user_id = ${sparkViewerParam}
       )`;
-    }
-    if (isOrgAdmin) {
-      projectVisibility = 'TRUE';
     }
 
     const sparkWindowParam = pushParam(sparkParams, HUB_VOLUME_WINDOW_DAYS);

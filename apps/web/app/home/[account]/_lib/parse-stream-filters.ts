@@ -11,6 +11,8 @@ export interface RawStreamSearchParams {
   agent?: string;
   kind?: string;
   days?: string;
+  view?: string;
+  item?: string;
 }
 
 /**

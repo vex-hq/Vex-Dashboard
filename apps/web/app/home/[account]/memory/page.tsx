@@ -13,7 +13,6 @@ import { MemoryTabs, parseMemoryTab } from './_components/memory-tabs';
 import { MineTab } from './_components/mine-tab';
 import { ProjectsTab } from './_components/projects-tab';
 import { TeamTab } from './_components/team-tab';
-import type { ProjectAccess } from './_lib/server/project-memory.loader';
 
 interface MemoryPageProps {
   params: Promise<{ account: string }>;
@@ -67,12 +66,6 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
   const query =
     filters.q?.trim().slice(0, MEMORY_SEARCH_MAX_LENGTH) || undefined;
 
-  // Org admins see every project; everyone else sees the projects they are a
-  // member of. Neither branch grants anything in the private scope.
-  const projectAccess: ProjectAccess = viewer.isOrgAdmin
-    ? { kind: 'admin' }
-    : { kind: 'member', userId: viewer.userId };
-
   return (
     <>
       <TeamAccountLayoutPageHeader
@@ -97,7 +90,7 @@ async function MemoryPage({ params, searchParams }: MemoryPageProps) {
           {tab === 'projects' ? (
             <ProjectsTab
               orgId={orgId}
-              access={projectAccess}
+              viewerUserId={viewer.userId}
               accountSlug={account}
               selectedProjectId={filters.project}
               page={page}

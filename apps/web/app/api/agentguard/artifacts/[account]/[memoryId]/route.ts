@@ -31,7 +31,7 @@ import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
  *     org A could name org B's slug.
  *  2. `loadDownloadableArtifact` runs the visibility ladder over the card:
  *     private → owner only (org admins included, no override); project →
- *     members or an org admin; everything else → the org.
+ *     members only, no admin override; everything else → the org.
  *
  * EVERY REFUSAL IS A 404 with one message. "Not yours", "no such card", "not
  * an artifact" and "retracted" are indistinguishable from outside, so this
@@ -116,7 +116,6 @@ export async function GET(
 
   const artifact = await loadDownloadableArtifact(orgId, memoryId, {
     userId: viewer.userId,
-    isOrgAdmin: viewer.isOrgAdmin,
   });
 
   if (!artifact) {

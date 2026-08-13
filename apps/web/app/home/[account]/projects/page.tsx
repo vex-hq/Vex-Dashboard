@@ -26,10 +26,7 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { TeamAccountLayoutPageHeader } from '../_components/team-account-layout-page-header';
 import { loadAccountViewer } from '../_lib/server/account-viewer';
-import {
-  type ProjectAccess,
-  loadVisibleProjects,
-} from '../memory/_lib/server/project-memory.loader';
+import { loadVisibleProjects } from '../memory/_lib/server/project-memory.loader';
 import { CreateProjectDialog } from './_components/create-project-dialog';
 
 interface ProjectsPageProps {
@@ -45,10 +42,9 @@ export const generateMetadata = async () => {
 /**
  * `/home/[account]/projects` — the projects the caller may open.
  *
- * Members see the projects they hold a `project_members` row for; org admins
- * see every project in the org. Both come from `loadVisibleProjects`, whose
- * SQL differs per branch — the admin case is a different predicate, not a
- * post-filter.
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): everyone, org admins
+ * included, sees only the projects they hold a `project_members` row for.
+ * `loadVisibleProjects` no longer has an admin predicate to switch to.
  */
 async function ProjectsPage({ params }: ProjectsPageProps) {
   const { account } = await params;
@@ -58,11 +54,7 @@ async function ProjectsPage({ params }: ProjectsPageProps) {
     loadAccountViewer(account),
   ]);
 
-  const access: ProjectAccess = viewer.isOrgAdmin
-    ? { kind: 'admin' }
-    : { kind: 'member', userId: viewer.userId };
-
-  const projects = await loadVisibleProjects(orgId, access);
+  const projects = await loadVisibleProjects(orgId, viewer.userId);
 
   return (
     <>
@@ -76,13 +68,7 @@ async function ProjectsPage({ params }: ProjectsPageProps) {
         <div className="animate-in fade-in flex flex-col gap-4 pb-36 duration-500">
           <div className="flex items-center justify-between">
             <p className="text-muted-foreground text-sm">
-              <Trans
-                i18nKey={
-                  viewer.isOrgAdmin
-                    ? 'agentguard:projects.pageDescriptionAdmin'
-                    : 'agentguard:projects.pageDescription'
-                }
-              />
+              <Trans i18nKey="agentguard:projects.pageDescription" />
             </p>
 
             <CreateProjectDialog accountSlug={account} />

@@ -1,4 +1,4 @@
-import { Brain, FolderGit2, Hexagon } from 'lucide-react';
+import { Hexagon, Inbox, Lock } from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -28,7 +28,7 @@ const iconClasses = 'w-4';
  * The need was real, the data source was wrong. The page was repointed at
  * `session_memories` and the item came back — but as of the 2026-08-11
  * context-workspace IA pass, Sessions and Agents are pruned from the sidebar
- * again to match the target IA (Home · Projects · Memory · Docs). Both routes
+ * again to match the target IA (Hub · Inbox · Private). Both routes
  * remain live at /home/[account]/sessions and /home/[account]/agents; only
  * the nav entries are gone, same hidden-not-deleted treatment as everything
  * below.
@@ -58,16 +58,19 @@ const getRoutes = (account: string) => [
     label: 'agentguard:nav.workspace',
     children: [
       {
-        label: 'agentguard:nav.memory',
-        path: createPath(pathsConfig.app.accountMemory, account),
-        Icon: <Brain className={iconClasses} />,
-      },
-      {
-        label: 'agentguard:nav.projects',
-        path: createPath(pathsConfig.app.accountProjects, account),
-        Icon: <FolderGit2 className={iconClasses} />,
+        label: 'agentguard:nav.inbox',
+        path: createPath(pathsConfig.app.accountInbox, account),
+        Icon: <Inbox className={iconClasses} />,
         end: true,
       },
+      {
+        label: 'agentguard:nav.private',
+        path: createPath(pathsConfig.app.accountPrivate, account),
+        Icon: <Lock className={iconClasses} />,
+        end: true,
+      },
+      // Memory and Projects stay live at /home/[account]/{memory,projects}.
+      // They left the sidebar so the pane is one product: Hub · Inbox · Private.
     ],
   },
   // ── Getting Started / Documentation — hidden, not removed ─────────────────

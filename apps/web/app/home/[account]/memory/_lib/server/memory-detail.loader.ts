@@ -19,10 +19,20 @@ import type { MemoryProvenance } from './memory-visibility.types';
  * The ladder, enforced entirely in SQL:
  *
  *   private  → only the owner (`user_id = :me`). Admins included: no override.
- *   project  → project members, or any org admin.
+ *   project  → project members only. No admin override — see
+ *              MEMBERSHIP-ONLY, NO ADMIN BYPASS below.
  *   anything → everyone in the org (org / session / the deprecated agent scope,
  *              which stays readable per the design's "stop writing, keep
  *              reading" rule).
+ *
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate for `scope = 'project'` rows. This loader used to take an
+ * `isOrgAdmin` flag on `MemoryViewer` that widened the project branch to
+ * `TRUE` for org admins — that field and the branch it fed are gone, not
+ * defaulted off. An org admin who is not a member of a memory's project now
+ * gets `null` for it, same as anyone else. See
+ * `memory/_lib/server/project-memory.loader.ts`'s file header for the full
+ * rationale.
  *
  * `viewer` is a required argument with no default. There is no
  * `loadMemoryDetail(orgId, id)` overload to fall back to, so a new call site
@@ -31,11 +41,6 @@ import type { MemoryProvenance } from './memory-visibility.types';
 export interface MemoryViewer {
   /** The SIGNED-IN user's id. Never taken from the URL or a form field. */
   readonly userId: string | null;
-  /**
-   * Whether the viewer administers the ORG. Widens project scope only —
-   * it is deliberately not consulted for `private`.
-   */
-  readonly isOrgAdmin: boolean;
 }
 
 export interface MemoryDetailRow {
@@ -91,7 +96,7 @@ export const loadMemoryDetailForViewer = cache(
         AND m.id = $2
         AND CASE m.scope
           WHEN 'private' THEN m.user_id IS NOT NULL AND m.user_id = $3
-          WHEN 'project' THEN $4::boolean OR EXISTS (
+          WHEN 'project' THEN EXISTS (
             SELECT 1 FROM project_members pm
             WHERE pm.project_id = m.project_id
               AND pm.user_id = $3
@@ -99,7 +104,7 @@ export const loadMemoryDetailForViewer = cache(
           ELSE TRUE
         END
       `,
-      [orgId, id, viewer.userId, viewer.isOrgAdmin],
+      [orgId, id, viewer.userId],
     );
 
     return result.rows[0] ?? null;

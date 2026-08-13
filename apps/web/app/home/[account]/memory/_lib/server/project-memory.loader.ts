@@ -16,76 +16,68 @@ import {
 } from './memory-visibility.types';
 
 /**
- * The **Projects** tab — memories a project's members share with each other.
+ * The **Projects** tab — memories filed on one project that this viewer
+ * may read.
  *
- * Every query hard-codes `scope = 'project'`. Two things must not be conflated
- * here, and the user-silo design is emphatic about it:
+ * Two scopes land here, and they must not be conflated:
  *
- *   - `project_id` as a COLUMN exists on ~32.5k rows whose scope is `org`.
- *     There it is a relevance filter, not a boundary, and those rows stay
- *     readable by the whole org.
  *   - `scope = 'project'` IS a boundary: readable only by that project's
- *     members (plus org admins).
+ *     members — no admin bypass. Membership is enforced in SQL via
+ *     `EXISTS (SELECT 1 FROM project_members …)` — never by fetching a
+ *     wider set and filtering in TypeScript.
+ *   - `scope = 'private' AND user_id = <viewer>` with this `project_id`
+ *     is the viewer's own capture tagged to the repo. The engine
+ *     auto-creates projects on first write without enrolling a
+ *     `project_members` row and lands hook/curator captures at private
+ *     (see `loadContextView` / `loadProjectPulse`). Dropping that arm
+ *     emptied every such project on this tab while the Hub still
+ *     counted the writes.
  *
- * **The predicate is always `scope`, never the presence of `project_id`.**
- * Filtering on `project_id IS NOT NULL` would wrongly hide 32.5k org rows;
- * treating `project_id` as implying open access would leak project-scoped
- * ones.
+ * `project_id` as a COLUMN also exists on org-scoped rows. Those stay
+ * on the Team tab — this loader never reads `scope = 'org'`. Treating
+ * `project_id IS NOT NULL` as open access would leak project-scoped
+ * rows; treating it as a Team filter would hide them from the org.
  *
- * Membership is enforced in SQL via `EXISTS (SELECT 1 FROM project_members …)`
- * — never by fetching a wider set and filtering in TypeScript.
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate for project visibility, full stop. This loader used to take
+ * a `ProjectAccess` discriminated union with an `{ kind: 'admin' }` branch
+ * that resolved the membership check to `TRUE`, letting an org admin read
+ * (and see the existence of) any project regardless of membership. That
+ * branch is gone, not defaulted off: there is no parameter left anywhere in
+ * this file that can widen visibility past `project_members`. An org admin
+ * who wants into a project now has to be granted membership like anyone
+ * else. Migration 039 backfilled an owner for every existing project, so
+ * this is safe: everyone still sees what they created.
  */
 const PROJECT_SCOPE = 'project';
+const PRIVATE_SCOPE = 'private';
 
-/**
- * Who is asking.
- *
- * A required, explicit discriminated union rather than an optional
- * `isAdmin?: boolean`. There is no default to get wrong: a caller must state
- * which branch it wants, and the member branch cannot be constructed without a
- * user id.
- *
- * `admin` means an ORG admin, who by design sees every project's memories
- * including projects they are not a member of. It grants nothing in
- * `private-memory.loader` — admins see no private scope, ever.
- */
-export type ProjectAccess =
-  | { readonly kind: 'member'; readonly userId: string }
-  | { readonly kind: 'admin' };
-
-function assertAccess(access: ProjectAccess): ProjectAccess {
-  if (access.kind === 'member' && access.userId.trim().length === 0) {
-    throw new Error(
-      'project loader: member access requires a non-blank user id.',
-    );
+function assertViewerUserId(viewerUserId: string): string {
+  if (viewerUserId.trim().length === 0) {
+    throw new Error('project loader: viewer user id is required.');
   }
 
-  return access;
+  return viewerUserId;
 }
 
 /**
- * Build the visibility clause plus its bound parameters.
+ * Build the membership visibility clause plus its bound parameter.
  *
- * Both branches are constant SQL text chosen by a discriminated union — no
- * caller-supplied string ever reaches the SQL, and the member branch always
- * binds the user id as a parameter.
+ * Always an `EXISTS` against `project_members`, bound to the viewer's own
+ * user id — never a caller-supplied string, never an unconditional `TRUE`.
  */
 function visibilityClause(
-  access: ProjectAccess,
+  viewerUserId: string,
   projectIdColumn: string,
   nextParamIndex: number,
 ): { sql: string; params: string[] } {
-  if (access.kind === 'admin') {
-    return { sql: 'TRUE', params: [] };
-  }
-
   return {
     sql: `EXISTS (
       SELECT 1 FROM project_members pm
       WHERE pm.project_id = ${projectIdColumn}
         AND pm.user_id = $${nextParamIndex}
     )`,
-    params: [access.userId],
+    params: [viewerUserId],
   };
 }
 
@@ -100,20 +92,20 @@ export interface ProjectSummaryRow {
 }
 
 /**
- * Projects the caller may open: their own when they are a member, all of the
- * org's when they are an admin.
+ * Projects the caller may open: only the ones they hold a `project_members`
+ * row for. No admin-wide listing — see the file header.
  *
- * `memory_count` counts `scope = 'project'` rows only — the rows the project
- * boundary actually governs. Org-scoped rows that merely carry this
- * `project_id` are counted on the Team tab, where they are readable.
+ * `memory_count` is what this viewer can actually read on the project:
+ * `scope = 'project'` rows they are entitled to, plus their own private
+ * rows tagged with this `project_id`. Org-scoped rows that merely carry
+ * the id stay on the Team tab.
  */
 export const loadVisibleProjects = cache(
-  async (
-    orgId: string,
-    access: ProjectAccess,
-  ): Promise<ProjectSummaryRow[]> => {
+  async (orgId: string, viewerUserId: string): Promise<ProjectSummaryRow[]> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(assertAccess(access), 'p.id', 4);
+    // $1 org, $2 project-scope, $3 status, $4 private-scope, $5 viewer.
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'p.id', 6);
 
     const result = await pool.query<
       Omit<ProjectSummaryRow, 'member_count' | 'memory_count'> & {
@@ -136,15 +128,25 @@ export const loadVisibleProjects = cache(
           FROM session_memories m
           WHERE m.project_id = p.id
             AND m.org_id = p.org_id
-            AND m.scope = $2
             AND m.status = $3
+            AND (
+              m.scope = $2
+              OR (m.scope = $4 AND m.user_id = $5)
+            )
         ) AS memory_count
       FROM projects p
       WHERE p.org_id = $1
         AND ${visibility.sql}
       ORDER BY p.last_seen_at DESC NULLS LAST, p.display_name ASC
       `,
-      [orgId, PROJECT_SCOPE, MEMORY_STATUS_ACTIVE, ...visibility.params],
+      [
+        orgId,
+        PROJECT_SCOPE,
+        MEMORY_STATUS_ACTIVE,
+        PRIVATE_SCOPE,
+        viewer,
+        ...visibility.params,
+      ],
     );
 
     return result.rows.map((row) => ({
@@ -170,9 +172,9 @@ export const loadVisibleProject = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
   ): Promise<ProjectSummaryRow | null> => {
-    const projects = await loadVisibleProjects(orgId, access);
+    const projects = await loadVisibleProjects(orgId, viewerUserId);
 
     return projects.find((project) => project.id === projectId) ?? null;
   },
@@ -182,22 +184,25 @@ interface ProjectMemoryQueryRow extends MemoryListRow {
   total_count: string;
 }
 
-/** Paginated `scope = 'project'` memories for one project, newest first. */
+/**
+ * Paginated memories for one project this viewer may read: `scope =
+ * 'project'` rows they are entitled to, plus their own private rows
+ * tagged with this `project_id`. Newest first.
+ */
 export const loadProjectMemories = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
     page = 1,
   ): Promise<MemoryListResult> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(
-      assertAccess(access),
-      'm.project_id',
-      5,
-    );
+    // $1 org, $2 project id, $3 status, $4 project-scope, $5 private-scope,
+    // $6 viewer. Membership bind starts at $7.
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'm.project_id', 7);
     const { offset } = pageWindow(page);
-    const limitIndex = 5 + visibility.params.length;
+    const limitIndex = 7 + visibility.params.length;
 
     const result = await pool.query<ProjectMemoryQueryRow>(
       `
@@ -217,17 +222,21 @@ export const loadProjectMemories = cache(
       LEFT JOIN spaces s ON s.id = m.space_id AND s.org_id = m.org_id
       WHERE m.org_id = $1
         AND m.project_id = $2
-        AND m.scope = $3
-        AND m.status = $4
-        AND ${visibility.sql}
+        AND m.status = $3
+        AND (
+          (m.scope = $4 AND ${visibility.sql})
+          OR (m.scope = $5 AND m.user_id = $6)
+        )
       ORDER BY m.created_at DESC
       LIMIT $${limitIndex} OFFSET $${limitIndex + 1}
       `,
       [
         orgId,
         projectId,
-        PROJECT_SCOPE,
         MEMORY_STATUS_ACTIVE,
+        PROJECT_SCOPE,
+        PRIVATE_SCOPE,
+        viewer,
         ...visibility.params,
         MEMORY_PAGE_SIZE,
         offset,
@@ -252,21 +261,22 @@ export const loadProjectMemories = cache(
   },
 );
 
-/** Artifacts filed under one project, gated by the same membership predicate. */
+/**
+ * Artifacts filed under one project, gated by the same item ladder as
+ * {@link loadProjectMemories}: project-scoped rows the viewer may read,
+ * plus their own private artifact rows tagged with this project.
+ */
 export const loadProjectArtifacts = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
     limit = 24,
   ): Promise<ArtifactCardRow[]> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(
-      assertAccess(access),
-      'm.project_id',
-      5,
-    );
-    const limitIndex = 5 + visibility.params.length;
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'm.project_id', 7);
+    const limitIndex = 7 + visibility.params.length;
 
     const result = await pool.query<
       Omit<ArtifactCardRow, 'size_bytes'> & { size_bytes: string | null }
@@ -287,19 +297,23 @@ export const loadProjectArtifacts = cache(
        AND a.org_id = m.org_id
       WHERE m.org_id = $1
         AND m.project_id = $2
-        AND m.scope = $3
-        AND m.status = $4
+        AND m.status = $3
         AND m.memory_type = 'artifact'
         AND a.status = 'active'
-        AND ${visibility.sql}
+        AND (
+          (m.scope = $4 AND ${visibility.sql})
+          OR (m.scope = $5 AND m.user_id = $6)
+        )
       ORDER BY m.created_at DESC
       LIMIT $${limitIndex}
       `,
       [
         orgId,
         projectId,
-        PROJECT_SCOPE,
         MEMORY_STATUS_ACTIVE,
+        PROJECT_SCOPE,
+        PRIVATE_SCOPE,
+        viewer,
         ...visibility.params,
         limit,
       ],

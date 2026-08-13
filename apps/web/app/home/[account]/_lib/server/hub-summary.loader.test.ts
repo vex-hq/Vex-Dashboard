@@ -102,21 +102,19 @@ describe('loadHubSummary — SQL shape', () => {
     );
   });
 
-  it('isOrgAdmin widens only the project-listing gate to TRUE, item arms untouched', async () => {
+  it('no admin bypass (2026-08-12 ruling): the project-listing gate is always the membership EXISTS, never an unconditional TRUE', async () => {
     const { loadHubSummary } = await import('./hub-summary.loader');
     queueRows(emptyRollup(), emptyRollup(), emptyRollup());
-    await loadHubSummary('org-1', 'user-1', true);
+    await loadHubSummary('org-1', 'user-1');
 
     const [sparkSql, sparkParams] = queryMock.mock.calls[2] as [
       string,
       unknown[],
     ];
-    expect(sparkSql).toMatch(/AND \(TRUE\)/);
-    expect(sparkSql).not.toMatch(
+    expect(sparkSql).toMatch(
       /EXISTS \(\s*SELECT 1 FROM project_members\s+pm\s+WHERE pm\.project_id = pr\.id/,
     );
-    // Item-level arms (which memories count toward each project) still key
-    // off the viewer, unaffected by the admin flag.
+    expect(sparkSql).not.toMatch(/AND \(TRUE\)/);
     expect(sparkSql).toMatch(/m\.scope = 'private' AND m\.user_id = /);
     expect(sparkParams).toContain('user-1');
   });
@@ -239,7 +237,11 @@ describe('loadHubSummary — TS assembly', () => {
     const { loadHubSummary } = await import('./hub-summary.loader');
     const today = new Date().toISOString().slice(0, 10);
 
-    queueRows(emptyRollup(), { rows: [{ day: today, count: '5' }] }, emptyRollup());
+    queueRows(
+      emptyRollup(),
+      { rows: [{ day: today, count: '5' }] },
+      emptyRollup(),
+    );
 
     const summary = await loadHubSummary('org-1', 'user-1');
 
