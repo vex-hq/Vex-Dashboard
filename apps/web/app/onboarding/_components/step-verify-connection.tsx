@@ -24,12 +24,16 @@ interface StepVerifyConnectionProps {
   accountSlug: string;
   onNext: () => void;
   onBack: () => void;
+  finish?: (accountSlug: string) => Promise<{ href?: string }>;
+  skipTestId?: string;
 }
 
 export function StepVerifyConnection({
   accountSlug,
   onNext,
   onBack,
+  finish,
+  skipTestId,
 }: StepVerifyConnectionProps) {
   const { t } = useTranslation('agentguard');
   const router = useRouter();
@@ -89,7 +93,9 @@ export function StepVerifyConnection({
     setCompleting(true);
 
     try {
-      const result = await completeOnboardingAction({ accountSlug });
+      const result = finish
+        ? await finish(accountSlug)
+        : await completeOnboardingAction({ accountSlug });
       router.push(result.href ?? `/home/${accountSlug}`);
     } catch {
       setCompleting(false);
@@ -207,6 +213,7 @@ export function StepVerifyConnection({
           variant={connected ? 'default' : 'outline'}
           className="rounded-lg px-8"
           size="lg"
+          data-testid={skipTestId}
         >
           {completing ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

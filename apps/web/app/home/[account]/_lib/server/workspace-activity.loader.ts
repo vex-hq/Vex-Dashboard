@@ -53,3 +53,32 @@ export const loadHasAnyMemory = cache(
     return rows.length > 0;
   },
 );
+
+/**
+ * Has this signed-in viewer ever written a memory in this org.
+ *
+ * Used to show "connect your agent" to an invitee after the workspace
+ * already has other people's writes. Fail closed on a blank user id.
+ */
+export const loadViewerHasWritten = cache(
+  async (orgId: string, userId: string): Promise<boolean> => {
+    if (typeof userId !== 'string' || userId.trim().length === 0) {
+      throw new Error('loadViewerHasWritten: a non-blank user id is required.');
+    }
+
+    const pool = getAgentGuardPool();
+
+    const { rows } = await pool.query(
+      `
+      SELECT 1
+      FROM session_memories
+      WHERE org_id = $1
+        AND user_id = $2
+      LIMIT 1
+      `,
+      [orgId, userId],
+    );
+
+    return rows.length > 0;
+  },
+);

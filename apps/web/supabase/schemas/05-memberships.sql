@@ -15,6 +15,7 @@ create table if not exists
     updated_at timestamptz default current_timestamp not null,
     created_by uuid references auth.users,
     updated_by uuid references auth.users,
+    klio_onboarded_at timestamptz,
     primary key (user_id, account_id)
   );
 
@@ -23,6 +24,9 @@ comment on table public.accounts_memberships is 'The memberships for an account'
 comment on column public.accounts_memberships.account_id is 'The account the membership is for';
 
 comment on column public.accounts_memberships.account_role is 'The role for the membership';
+
+comment on column public.accounts_memberships.klio_onboarded_at is
+  'When this member finished or skipped Klio connect onboarding. Null means they have not seen the join connect flow.';
 
 -- Revoke all on accounts_memberships table from authenticated and service_role
 revoke all on public.accounts_memberships
@@ -307,6 +311,38 @@ select
     or public.has_role_on_account (id)
     or public.is_account_team_member (id)
   );
+
+-- A member may mark only their own row as Klio-onboarded. They cannot
+-- change account_role through this function.
+create or replace function public.mark_membership_klio_onboarded (
+  target_account_id uuid
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  updated integer;
+begin
+  update public.accounts_memberships
+  set klio_onboarded_at = coalesce(klio_onboarded_at, now())
+  where account_id = target_account_id
+    and user_id = auth.uid ();
+
+  get diagnostics updated = row_count;
+
+  if updated = 0 then
+    raise exception 'Not a member of this account';
+  end if;
+end;
+$$;
+
+revoke all on function public.mark_membership_klio_onboarded (uuid)
+from
+  public;
+
+grant
+execute on function public.mark_membership_klio_onboarded (uuid) to authenticated;
 
 -- DELETE(accounts_memberships):
 -- Users with the required role can remove members from an account or remove their own

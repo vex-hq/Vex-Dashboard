@@ -154,11 +154,9 @@ async function JoinTeamAccountPage(props: JoinTeamAccountPageProps) {
   // we redirect them to the sign in page with the invite token
   const signOutNext = `${pathsConfig.auth.signIn}?invite_token=${token}`;
 
-  // once the user accepts the invitation, we redirect them to the account home page
-  const accountHome = pathsConfig.app.accountHome.replace(
-    '[account]',
-    invitation.account.slug,
-  );
+  // After they accept, they connect their own agent. Do not dump them on
+  // Hub: the workspace is already onboarded, so they would skip connect.
+  const joinOnboarding = `/onboarding/join?account=${invitation.account.slug}`;
 
   // Determine if we should show the account setup step (Step 2)
   // Decision logic:
@@ -179,8 +177,8 @@ async function JoinTeamAccountPage(props: JoinTeamAccountPageProps) {
   // - If shouldSetupAccount: redirect to /identities with next param (Step 2)
   // - Otherwise: redirect directly to team home (skip Step 2)
   const nextPath = shouldSetupAccount
-    ? `/identities?next=${encodeURIComponent(accountHome)}`
-    : accountHome;
+    ? `/identities?next=${encodeURIComponent(joinOnboarding)}`
+    : joinOnboarding;
 
   const email = auth.data.email ?? '';
 

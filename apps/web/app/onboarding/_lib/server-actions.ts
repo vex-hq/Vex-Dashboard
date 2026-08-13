@@ -7,6 +7,7 @@ import { requireUser } from '@kit/supabase/require-user';
 import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
 import { createKey, listKeys, revokeKey } from '~/lib/agentguard/api-keys';
+import { markMemberOnboarded } from '~/lib/agentguard/member-onboarding.loader';
 import { FINAL_ONBOARDING_STEP } from '~/lib/agentguard/onboarding.constants';
 import {
   completeOnboarding,
@@ -14,6 +15,7 @@ import {
 } from '~/lib/agentguard/onboarding.loader';
 import { requireAccountMembership } from '~/lib/agentguard/require-account-membership';
 import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
+import { joinKeyName } from '~/lib/agentguard/workspace-entry-path';
 
 import { activationHref } from './activation-landing';
 import { loadLatestVisibleWrite } from './server/activation-landing.loader';
@@ -117,6 +119,7 @@ export const completeOnboardingAction = enhanceAction(
     await requireAccountMembership(data.accountSlug);
 
     await completeOnboarding(data.accountSlug);
+    await markMemberOnboarded(data.accountSlug);
 
     const hub = `/home/${data.accountSlug}`;
 
@@ -127,6 +130,79 @@ export const completeOnboardingAction = enhanceAction(
       return { success: true, href: activationHref(data.accountSlug, write) };
     } catch {
       // Completing onboarding must not fail because the landing probe did.
+      return { success: true, href: hub };
+    }
+  },
+  {
+    schema: CompleteOnboardingSchema,
+  },
+);
+
+/**
+ * Mint a key for THIS member joining an existing workspace.
+ *
+ * Never revokes the creator's "Onboarding Key" or anyone else's key.
+ * If this user remints, only their previous `Join · {userId}` key is
+ * revoked.
+ */
+export const createJoinKeyAction = enhanceAction(
+  async (data) => {
+    const client = getSupabaseServerClient();
+    const { data: user } = await requireUser(client);
+
+    if (!user) {
+      throw new Error('Authentication required');
+    }
+
+    const orgId = await resolveOrgId(data.accountSlug);
+    const name = joinKeyName(user.id);
+    const existingKeys = await listKeys(orgId);
+
+    for (const key of existingKeys) {
+      if (key.name === name && !key.revoked) {
+        await revokeKey(orgId, key.id);
+      }
+    }
+
+    const result = await createKey({
+      orgId,
+      name,
+      scopes: ['ingest', 'verify', 'memory'],
+      rateLimitRpm: 60,
+      expiresAt: null,
+      createdBy: user.id,
+    });
+
+    return { key: result.key, entry: result.entry };
+  },
+  {
+    schema: CreateOnboardingKeySchema,
+  },
+);
+
+/**
+ * Invitee finished or skipped connect. Marks only their membership.
+ */
+export const completeJoinOnboardingAction = enhanceAction(
+  async (data) => {
+    const client = getSupabaseServerClient();
+    const { data: user } = await requireUser(client);
+
+    if (!user) {
+      throw new Error('Authentication required');
+    }
+
+    await requireAccountMembership(data.accountSlug);
+    await markMemberOnboarded(data.accountSlug);
+
+    const hub = `/home/${data.accountSlug}`;
+
+    try {
+      const orgId = await resolveOrgId(data.accountSlug);
+      const write = await loadLatestVisibleWrite(orgId, user.id);
+
+      return { success: true, href: activationHref(data.accountSlug, write) };
+    } catch {
       return { success: true, href: hub };
     }
   },

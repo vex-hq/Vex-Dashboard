@@ -166,7 +166,18 @@ export class InvitationsPageObject {
       }
     }
 
-    // wait for redirect to account home
+    // Invitees land on join connect onboarding. Skip so existing tests
+    // still reach the workspace they just joined.
+    await this.page.waitForURL(
+      new RegExp('/(home/[a-z0-9-]+|onboarding/join)'),
+    );
+
+    const joinSkip = this.page.getByTestId('join-onboarding-skip');
+
+    if (await joinSkip.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await joinSkip.click();
+    }
+
     await this.page.waitForURL(new RegExp('/home/[a-z0-9-]+'));
   }
 

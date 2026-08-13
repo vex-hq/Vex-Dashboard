@@ -63,3 +63,26 @@ describe('loadHasAnyMemory', () => {
     await expect(loadHasAnyMemory('org-1')).resolves.toBe(false);
   });
 });
+
+describe('loadViewerHasWritten', () => {
+  it('binds org and viewer, never interpolated', async () => {
+    const { loadViewerHasWritten } =
+      await import('./workspace-activity.loader');
+    queueRows({ rows: [] });
+    await loadViewerHasWritten('org-1', 'user-1');
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(params).toEqual(['org-1', 'user-1']);
+    expect(sql).not.toContain('org-1');
+    expect(sql).not.toContain('user-1');
+    expect(sql).toMatch(/user_id = \$2/);
+  });
+
+  it('throws on a blank user id', async () => {
+    const { loadViewerHasWritten } =
+      await import('./workspace-activity.loader');
+    await expect(loadViewerHasWritten('org-1', '')).rejects.toThrow(
+      /non-blank user id/,
+    );
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});

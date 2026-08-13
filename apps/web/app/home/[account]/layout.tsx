@@ -11,7 +11,7 @@ import { SidebarProvider } from '@kit/ui/shadcn-sidebar';
 
 import { AppLogo } from '~/components/app-logo';
 import { getTeamAccountSidebarConfig } from '~/config/team-account-navigation.config';
-import { loadOnboardingState } from '~/lib/agentguard/onboarding.loader';
+import { loadWorkspaceEntryRedirect } from '~/lib/agentguard/member-onboarding.loader';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { PersistLastAccount } from './_components/persist-last-account';
@@ -28,10 +28,10 @@ type TeamWorkspaceLayoutProps = React.PropsWithChildren<{
 function TeamWorkspaceLayout({ children, params }: TeamWorkspaceLayoutProps) {
   const account = use(params).account;
 
-  const onboarding = use(checkOnboarding(account));
+  const entry = use(checkWorkspaceEntry(account));
 
-  if (!onboarding.completed) {
-    redirect(`/onboarding?account=${account}`);
+  if (entry) {
+    redirect(entry);
   }
 
   const state = use(getLayoutState(account));
@@ -53,8 +53,8 @@ function TeamWorkspaceLayout({ children, params }: TeamWorkspaceLayoutProps) {
   );
 }
 
-async function checkOnboarding(account: string) {
-  return loadOnboardingState(account);
+async function checkWorkspaceEntry(account: string) {
+  return loadWorkspaceEntryRedirect(account);
 }
 
 async function SidebarLayout({
