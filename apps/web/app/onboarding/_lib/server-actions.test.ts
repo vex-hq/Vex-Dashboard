@@ -74,11 +74,19 @@ vi.mock('~/lib/agentguard/resolve-org-id', () => ({
   resolveOrgId: () => mockResolveOrgId(),
 }));
 
-const mockLoadLatestVisibleWrite = vi.fn(async () => null);
+const mockLoadLatestVisibleWrite = vi.fn(
+  async (
+    _orgId: string,
+    _userId: string,
+  ): Promise<{ id: string; projectId: string | null } | null> => null,
+);
 
 vi.mock('./server/activation-landing.loader', () => ({
-  loadLatestVisibleWrite: (...args: unknown[]) =>
-    mockLoadLatestVisibleWrite(...args),
+  loadLatestVisibleWrite: (
+    orgId: string,
+    userId: string,
+  ): Promise<{ id: string; projectId: string | null } | null> =>
+    mockLoadLatestVisibleWrite(orgId, userId),
 }));
 
 // ---------------------------------------------------------------------------
