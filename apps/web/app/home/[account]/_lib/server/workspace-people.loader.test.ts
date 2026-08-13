@@ -43,11 +43,13 @@ describe('loadWorkspacePeople', () => {
     expect(people.get('user-abhishek')).toEqual({
       userId: 'user-abhishek',
       name: 'Abhishek Thakur',
+      email: 'abhishek@klio.tech',
       pictureUrl: 'https://example.com/a.png',
     });
     expect(people.get('user-other')).toEqual({
       userId: 'user-other',
       name: 'other@klio.tech',
+      email: 'other@klio.tech',
       pictureUrl: null,
     });
   });

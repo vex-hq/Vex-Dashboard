@@ -25,6 +25,10 @@ import {
   pickProjectIssue,
 } from '../_lib/project-issues-model';
 import type { ContextView } from '../_lib/server/context-view.loader';
+import {
+  type ProjectAccess,
+  ProjectAccessDialog,
+} from './project-access-dialog';
 
 const L = {
   muted: '#6b6f76',
@@ -53,6 +57,7 @@ export interface ProjectIssuesProps {
   backLabel?: string;
   memoriesHref?: string;
   memoriesLabel?: string;
+  access?: ProjectAccess;
 }
 
 export function ProjectIssues({
@@ -66,6 +71,7 @@ export function ProjectIssues({
   backLabel,
   memoriesHref,
   memoriesLabel,
+  access,
 }: ProjectIssuesProps) {
   const { t } = useTranslation('agentguard');
   const router = useRouter();
@@ -157,9 +163,18 @@ export function ProjectIssues({
             {projectName}
           </h1>
         </div>
-        <span className="shrink-0 text-[12px]" style={{ color: L.muted }}>
-          {visibleCount}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          {projectId && access?.canManage ? (
+            <ProjectAccessDialog
+              accountSlug={accountSlug}
+              projectId={projectId}
+              access={access}
+            />
+          ) : null}
+          <span className="text-[12px]" style={{ color: L.muted }}>
+            {visibleCount}
+          </span>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-1 px-3 pb-2">

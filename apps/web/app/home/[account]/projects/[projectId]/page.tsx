@@ -7,10 +7,16 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 import { LinearPanel } from '../../_components/linear-panel';
 import { loadAccountViewer } from '../../_lib/server/account-viewer';
 import { loadContextUsage } from '../../_lib/server/context-usage.loader';
+import { loadWorkspacePeople } from '../../_lib/server/workspace-people.loader';
 import {
   loadProjectArtifacts,
   loadVisibleProject,
 } from '../../memory/_lib/server/project-memory.loader';
+import {
+  loadMyProjectRole,
+  loadProjectMembers,
+} from '../_lib/server/projects.loader';
+import type { ProjectAccess } from './_components/project-access-dialog';
 import { ProjectIssues } from './_components/project-issues';
 import { toProjectArtifacts } from './_lib/project-issues-model';
 import { loadContextView } from './_lib/server/context-view.loader';
@@ -53,11 +59,20 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
     return <ProjectNotFound />;
   }
 
-  const [contextView, usage, artifactRows] = await Promise.all([
-    loadContextView(orgId, project.id, viewer.userId),
-    loadContextUsage(orgId),
-    loadProjectArtifacts(orgId, project.id, viewer.userId, ARTIFACT_LIST_LIMIT),
-  ]);
+  const [contextView, usage, artifactRows, memberRows, myRole, people] =
+    await Promise.all([
+      loadContextView(orgId, project.id, viewer.userId),
+      loadContextUsage(orgId),
+      loadProjectArtifacts(
+        orgId,
+        project.id,
+        viewer.userId,
+        ARTIFACT_LIST_LIMIT,
+      ),
+      loadProjectMembers(project.id),
+      loadMyProjectRole(project.id, viewer.userId),
+      loadWorkspacePeople(account),
+    ]);
 
   // `loadVisibleProject` already gated on the same `access`, so a null here
   // should not happen in practice — but `loadContextView` runs its own
@@ -71,6 +86,26 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const recalled30d =
     usage.find((row) => row.projectId === project.id)?.recalls30d ?? 0;
 
+  const access: ProjectAccess = {
+    canManage: myRole === 'admin' || viewer.isOrgAdmin,
+    members: memberRows.map((row) => {
+      const person = people.get(row.user_id);
+      const role = row.role === 'admin' ? 'admin' : 'member';
+
+      return {
+        userId: row.user_id,
+        role,
+        name: person?.name || person?.email || row.user_id,
+        email: person?.email || null,
+      };
+    }),
+    candidates: [...people.values()].map((person) => ({
+      userId: person.userId,
+      name: person.name,
+      email: person.email,
+    })),
+  };
+
   return (
     <LinearPanel>
       <ProjectIssues
@@ -80,6 +115,7 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
         accountSlug={account}
         projectId={project.id}
         recalled30d={recalled30d}
+        access={access}
       />
     </LinearPanel>
   );

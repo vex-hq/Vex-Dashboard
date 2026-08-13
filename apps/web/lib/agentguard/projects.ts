@@ -17,6 +17,13 @@ import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
 
 export type ProjectMemberRole = 'member' | 'admin';
 
+export class LastProjectAdminError extends Error {
+  constructor() {
+    super('Cannot remove the last admin of this project');
+    this.name = 'LastProjectAdminError';
+  }
+}
+
 export interface ProjectRow {
   id: string;
   org_id: string;
@@ -187,6 +194,11 @@ export async function grantProjectMember(params: {
  * revoke writes carries the role the member actually HELD — captured by the
  * same statement that removes it, which is the only moment it is still known.
  * Reading it beforehand would be a second query with a race in between.
+ *
+ * The last project admin cannot be removed. After membership-only listing,
+ * a project with no admin is unmanageable: nobody who can still see it can
+ * grant anyone back in. The membership rows are locked first so two concurrent
+ * last-admin revokes cannot both succeed.
  */
 export async function revokeProjectMember(params: {
   orgId: string;
@@ -200,6 +212,30 @@ export async function revokeProjectMember(params: {
 
   try {
     await client.query('BEGIN');
+
+    const locked = await client.query<{ user_id: string; role: string }>(
+      `SELECT pm.user_id, pm.role
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       WHERE pm.project_id = $1
+         AND p.org_id = $2
+       FOR UPDATE`,
+      [params.projectId, params.orgId],
+    );
+
+    const target = locked.rows.find((row) => row.user_id === params.userId);
+
+    if (!target) {
+      await client.query('COMMIT');
+      return false;
+    }
+
+    const adminCount = locked.rows.filter((row) => row.role === 'admin').length;
+
+    if (target.role === 'admin' && adminCount <= 1) {
+      await client.query('ROLLBACK');
+      throw new LastProjectAdminError();
+    }
 
     const result = await client.query<{ role: string }>(
       `DELETE FROM project_members pm

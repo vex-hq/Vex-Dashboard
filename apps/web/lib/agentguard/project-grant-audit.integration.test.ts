@@ -253,6 +253,15 @@ describe('revokes are recorded too — an untraced revoke is an invisible access
     await grantProjectMember({
       orgId: ORG,
       projectId: PROJECT,
+      userId: ALICE,
+      userEmail: 'alice@oppla.ai',
+      role: 'admin',
+      grantedByUserId: ALICE,
+    });
+
+    await grantProjectMember({
+      orgId: ORG,
+      projectId: PROJECT,
       userId: BOB,
       userEmail: 'bob@oppla.ai',
       role: 'admin',
@@ -268,12 +277,12 @@ describe('revokes are recorded too — an untraced revoke is an invisible access
     });
 
     expect(revoked).toBe(true);
-    expect(await memberRoles()).toEqual([]);
+    expect(await memberRoles()).toEqual([{ user_id: ALICE, role: 'admin' }]);
 
     const rows = await auditRows();
 
-    expect(rows).toHaveLength(2);
-    expect(rows[1]).toEqual({
+    expect(rows).toHaveLength(3);
+    expect(rows[2]).toEqual({
       org_id: ORG,
       project_id: PROJECT,
       granted_to: BOB,
@@ -313,6 +322,33 @@ describe('revokes are recorded too — an untraced revoke is an invisible access
     // Without `action` these two rows would be byte-identical, and the
     // reconstructed history would show Bob being granted access twice.
     expect(rows.map((row) => row.action)).toEqual(['grant', 'revoke']);
+  });
+
+  it('refuses to remove the last project admin', async () => {
+    const { grantProjectMember, revokeProjectMember, LastProjectAdminError } =
+      await import('./projects');
+
+    await grantProjectMember({
+      orgId: ORG,
+      projectId: PROJECT,
+      userId: ALICE,
+      userEmail: 'alice@oppla.ai',
+      role: 'admin',
+      grantedByUserId: ALICE,
+    });
+
+    await expect(
+      revokeProjectMember({
+        orgId: ORG,
+        projectId: PROJECT,
+        userId: ALICE,
+        userEmail: 'alice@oppla.ai',
+        revokedByUserId: ALICE,
+      }),
+    ).rejects.toBeInstanceOf(LastProjectAdminError);
+
+    expect(await memberRoles()).toEqual([{ user_id: ALICE, role: 'admin' }]);
+    expect(await auditRows()).toHaveLength(1);
   });
 
   it('writes nothing when there was no membership to revoke', async () => {

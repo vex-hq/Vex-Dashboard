@@ -181,4 +181,40 @@ describe('<ProjectIssues />', () => {
       screen.getByRole('link', { name: /view private memories/i }),
     ).toHaveAttribute('href', '/home/acme/memory?tab=mine');
   });
+
+  it('shows project settings only when the viewer can manage access', () => {
+    const { rerender } = render(
+      <ProjectIssues
+        view={view()}
+        projectName="hirly"
+        accountSlug="acme"
+        projectId="hirly"
+        recalled30d={1}
+        access={{
+          canManage: true,
+          members: [],
+          candidates: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('project-settings')).toBeInTheDocument();
+
+    rerender(
+      <ProjectIssues
+        view={view()}
+        projectName="hirly"
+        accountSlug="acme"
+        projectId="hirly"
+        recalled30d={1}
+        access={{
+          canManage: false,
+          members: [],
+          candidates: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('project-settings')).not.toBeInTheDocument();
+  });
 });
