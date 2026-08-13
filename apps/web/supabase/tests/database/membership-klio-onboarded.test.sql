@@ -40,5 +40,41 @@ select throws_ok(
   'A caller with no membership cannot mark a random account'
 );
 
+-- The field-guard still blocks identity rewrites. Use service_role so we
+-- hit the trigger, not RLS.
+set local role service_role;
+
+select lives_ok(
+  $$
+    update public.accounts_memberships
+    set account_role = 'member'
+    where user_id = tests.get_supabase_uid('member')
+      and account_id = makerkit.get_account_id_by_slug('makerkit')
+  $$,
+  'Role updates still pass the membership field guard'
+);
+
+select throws_ok(
+  $$
+    update public.accounts_memberships
+    set user_id = tests.get_supabase_uid('primary_owner')
+    where user_id = tests.get_supabase_uid('member')
+      and account_id = makerkit.get_account_id_by_slug('makerkit')
+  $$,
+  'Only the account_role and klio_onboarded_at can be updated',
+  'Membership identity cannot be rewritten'
+);
+
+select throws_ok(
+  $$
+    update public.accounts_memberships
+    set created_at = now()
+    where user_id = tests.get_supabase_uid('member')
+      and account_id = makerkit.get_account_id_by_slug('makerkit')
+  $$,
+  'Only the account_role and klio_onboarded_at can be updated',
+  'Membership created_at cannot be rewritten'
+);
+
 select * from finish();
 rollback;
