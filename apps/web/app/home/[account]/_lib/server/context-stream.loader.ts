@@ -166,6 +166,8 @@ export interface ProjectPulse {
   itemsThisWeek: number;
   lastItemAt: string | null;
   agentsActive: string[];
+  /** Human who caused the project row to exist. Null when nobody can be attributed. */
+  createdBy: string | null;
 }
 
 interface ProjectPulseQueryRow {
@@ -174,6 +176,7 @@ interface ProjectPulseQueryRow {
   items_this_week: string;
   last_item_at: string | null;
   agents_active: string[];
+  created_by: string | null;
 }
 
 function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
@@ -183,6 +186,7 @@ function toPulseRow(row: ProjectPulseQueryRow): ProjectPulse {
     itemsThisWeek: parseInt(row.items_this_week, 10) || 0,
     lastItemAt: row.last_item_at,
     agentsActive: row.agents_active,
+    createdBy: row.created_by,
   };
 }
 
@@ -253,6 +257,7 @@ export const loadProjectPulse = cache(
       SELECT
         pr.id AS project_id,
         pr.display_name AS name,
+        pr.created_by AS created_by,
         COUNT(m.id) AS items_this_week,
         MAX(m.created_at)::text AS last_item_at,
         array_agg(DISTINCT m.agent_id) FILTER (
@@ -268,7 +273,7 @@ export const loadProjectPulse = cache(
        AND (${arms.join(' OR ')})
       WHERE pr.org_id = $1
         AND (${projectVisibility})
-      GROUP BY pr.id, pr.display_name
+      GROUP BY pr.id, pr.display_name, pr.created_by
       ORDER BY last_item_at DESC NULLS LAST
       LIMIT ${limitParam}
       `,

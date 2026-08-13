@@ -24,13 +24,20 @@ export type HealthFilter = (typeof HEALTH_FILTERS)[number];
 
 export type ProjectHealth = 'on-track' | 'no-updates';
 
+/** The human who created the project. Lead is a person, never an agent. */
+export interface HubProjectLead {
+  userId: string;
+  name: string;
+  pictureUrl: string | null;
+}
+
 export interface HubProjectRow {
   id: string;
   name: string;
   notes: number;
   recalled: number;
   lastActivityAt: string | null;
-  leadAgent: string | null;
+  lead: HubProjectLead | null;
   series: readonly DayPoint[];
   health: ProjectHealth;
   notRecalled: boolean;
@@ -64,6 +71,7 @@ export function buildHubProjectRows(
   pulses: readonly ProjectPulse[],
   sparks: readonly ProjectSpark[],
   now: Date = new Date(),
+  people: ReadonlyMap<string, HubProjectLead> = new Map(),
 ): HubProjectRow[] {
   const usageById = new Map(
     usage
@@ -93,7 +101,8 @@ export function buildHubProjectRows(
     const notes = used?.memories30d ?? 0;
     const recalled = used?.recalls30d ?? 0;
     const lastActivityAt = pulse?.lastItemAt ?? lastSparkDay(spark?.series);
-    const leadAgent = pulse?.agentsActive[0] ?? null;
+    const createdBy = pulse?.createdBy ?? spark?.createdBy ?? null;
+    const lead = createdBy ? (people.get(createdBy) ?? null) : null;
 
     rows.push({
       id,
@@ -101,7 +110,7 @@ export function buildHubProjectRows(
       notes,
       recalled,
       lastActivityAt,
-      leadAgent,
+      lead,
       series: spark?.series ?? [],
       health: projectHealth(lastActivityAt, now),
       notRecalled: notes > 0 && recalled === 0,
@@ -147,18 +156,21 @@ export function healthFacetCounts(rows: readonly HubProjectRow[]): {
 
 export function leadFacetCounts(
   rows: readonly HubProjectRow[],
-): Array<{ agent: string; count: number }> {
-  const counts = new Map<string, number>();
+): Array<{ lead: HubProjectLead; count: number }> {
+  const counts = new Map<string, { lead: HubProjectLead; count: number }>();
   for (const row of rows) {
-    if (!row.leadAgent) continue;
-    counts.set(row.leadAgent, (counts.get(row.leadAgent) ?? 0) + 1);
+    if (!row.lead) continue;
+    const existing = counts.get(row.lead.userId);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      counts.set(row.lead.userId, { lead: row.lead, count: 1 });
+    }
   }
-  return [...counts.entries()]
-    .map(([agent, count]) => ({ agent, count }))
-    .sort(
-      (left, right) =>
-        right.count - left.count || left.agent.localeCompare(right.agent),
-    );
+  return [...counts.values()].sort(
+    (left, right) =>
+      right.count - left.count || left.lead.name.localeCompare(right.lead.name),
+  );
 }
 
 function lastSparkDay(series: readonly DayPoint[] | undefined): string | null {

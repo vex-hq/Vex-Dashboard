@@ -2,6 +2,10 @@ import 'server-only';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
 import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
+import {
+  type ProjectMemberRole,
+  normalizeProjectRole,
+} from '~/lib/agentguard/project-roles';
 
 /**
  * Project writes against the engine database.
@@ -15,7 +19,14 @@ import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
  * matches nothing.
  */
 
-export type ProjectMemberRole = 'member' | 'admin';
+export type { ProjectMemberRole };
+
+export class LastProjectAdminError extends Error {
+  constructor() {
+    super('Cannot remove the last admin of this project');
+    this.name = 'LastProjectAdminError';
+  }
+}
 
 export interface ProjectRow {
   id: string;
@@ -23,6 +34,7 @@ export interface ProjectRow {
   display_name: string;
   git_remote: string | null;
   repo_root_path: string | null;
+  created_by: string | null;
   created_at: string;
   last_seen_at: string | null;
 }
@@ -47,7 +59,8 @@ export interface CreateProjectParams {
  *
  * Note the engine ALSO auto-creates projects on write (`ensure_project`) —
  * that is how 100+ of them exist. Explicit creation is for naming and
- * organising ahead of use, and for getting an owner attached.
+ * organising ahead of use, and for getting an owner attached
+ * (`created_by` plus an admin membership row).
  */
 export async function createProject(
   params: CreateProjectParams,
@@ -59,11 +72,17 @@ export async function createProject(
     await client.query('BEGIN');
 
     const inserted = await client.query<ProjectRow>(
-      `INSERT INTO projects (id, org_id, display_name, git_remote, repo_root_path)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4)
-       RETURNING id, org_id, display_name, git_remote, repo_root_path,
+      `INSERT INTO projects (id, org_id, display_name, git_remote, repo_root_path, created_by)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+       RETURNING id, org_id, display_name, git_remote, repo_root_path, created_by,
                  created_at::text AS created_at, last_seen_at::text AS last_seen_at`,
-      [params.orgId, params.displayName, params.gitRemote, params.repoRootPath],
+      [
+        params.orgId,
+        params.displayName,
+        params.gitRemote,
+        params.repoRootPath,
+        params.createdByUserId,
+      ],
     );
 
     const project = inserted.rows[0]!;
@@ -116,9 +135,14 @@ export async function grantProjectMember(params: {
   projectId: string;
   userId: string;
   userEmail: string | null;
-  role: ProjectMemberRole;
+  role: ProjectMemberRole | 'member';
   grantedByUserId: string | null;
 }): Promise<boolean> {
+  const role = normalizeProjectRole(params.role);
+  if (!role) {
+    throw new Error(`unsupported project role: ${params.role}`);
+  }
+
   const pool = getAgentGuardPool();
   const client = await pool.connect();
 
@@ -136,7 +160,7 @@ export async function grantProjectMember(params: {
         params.projectId,
         params.orgId,
         params.userId,
-        params.role,
+        role,
         params.grantedByUserId,
       ],
     );
@@ -150,7 +174,7 @@ export async function grantProjectMember(params: {
         grantedTo: params.userId,
         grantedToEmail: params.userEmail,
         grantedBy: params.grantedByUserId,
-        role: params.role,
+        role,
         action: 'grant',
       });
     }
@@ -179,6 +203,11 @@ export async function grantProjectMember(params: {
  * revoke writes carries the role the member actually HELD — captured by the
  * same statement that removes it, which is the only moment it is still known.
  * Reading it beforehand would be a second query with a race in between.
+ *
+ * The last project admin cannot be removed. After membership-only listing,
+ * a project with no admin is unmanageable: nobody who can still see it can
+ * grant anyone back in. The membership rows are locked first so two concurrent
+ * last-admin revokes cannot both succeed.
  */
 export async function revokeProjectMember(params: {
   orgId: string;
@@ -192,6 +221,30 @@ export async function revokeProjectMember(params: {
 
   try {
     await client.query('BEGIN');
+
+    const locked = await client.query<{ user_id: string; role: string }>(
+      `SELECT pm.user_id, pm.role
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       WHERE pm.project_id = $1
+         AND p.org_id = $2
+       FOR UPDATE`,
+      [params.projectId, params.orgId],
+    );
+
+    const target = locked.rows.find((row) => row.user_id === params.userId);
+
+    if (!target) {
+      await client.query('COMMIT');
+      return false;
+    }
+
+    const adminCount = locked.rows.filter((row) => row.role === 'admin').length;
+
+    if (target.role === 'admin' && adminCount <= 1) {
+      await client.query('ROLLBACK');
+      throw new LastProjectAdminError();
+    }
 
     const result = await client.query<{ role: string }>(
       `DELETE FROM project_members pm

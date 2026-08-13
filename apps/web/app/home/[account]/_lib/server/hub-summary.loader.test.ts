@@ -267,6 +267,7 @@ describe('loadHubSummary — TS assembly', () => {
         {
           project_id: 'proj-1',
           name: 'Klio Engine',
+          created_by: 'user-alice',
           total: '12',
           day: today,
           count: '12',
@@ -274,6 +275,7 @@ describe('loadHubSummary — TS assembly', () => {
         {
           project_id: 'proj-2',
           name: 'Landing Site',
+          created_by: 'user-bob',
           total: '3',
           day: today,
           count: '3',
@@ -287,10 +289,12 @@ describe('loadHubSummary — TS assembly', () => {
     expect(summary.projectSparks[0]).toMatchObject({
       projectId: 'proj-1',
       name: 'Klio Engine',
+      createdBy: 'user-alice',
     });
     expect(summary.projectSparks[1]).toMatchObject({
       projectId: 'proj-2',
       name: 'Landing Site',
+      createdBy: 'user-bob',
     });
     expect(summary.projectSparks[0]?.series).toHaveLength(30);
     expect(summary.projectSparks[0]?.series.at(-1)).toEqual({

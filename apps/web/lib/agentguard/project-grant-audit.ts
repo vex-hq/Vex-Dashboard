@@ -62,7 +62,7 @@ export interface ProjectGrantAuditEntry {
    * For a grant, the role being given. For a revoke, the role the member
    * actually HELD when it was taken away — which is real information ("lost
    * admin" and "lost member" are different events) and satisfies the column's
-   * `CHECK (role IN ('member','admin'))` without weakening it.
+   * `CHECK (role IN ('read','write','manage','admin'))` without weakening it.
    */
   readonly role: string;
   readonly action: ProjectGrantAction;
