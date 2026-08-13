@@ -172,21 +172,76 @@ it wrongly when it is missing.
 decisions contradicted silently.
 
 ## Competitive Landscape
-**The analogy that frames us:** Linear vs Jira/ClickUp. Same shelf existed;
-the refined experience won the modern segment. Klio does this to context
-management: the category exists as scattered practice, and we win it with the
-experience.
+### The Linear analogy is retired (2026-08-13)
 
-**Approved pitch wording (2026-08-11):**
-> Project management before Linear looked like context management does today —
-> real need, miserable tooling. Jira proved the category; Linear proved the
-> experience wins it. Klio is that move for your team's context.
+It read: *"Project management before Linear looked like context management does
+today — real need, miserable tooling. Jira proved the category; Linear proved
+the experience wins it. Klio is that move for your team's context."*
 
-Usage: the pair carries the argument — Jira/ClickUp are the "before", Linear
-is the "after", Klio claims the Linear seat. Decks and conversations can be
-spicy; the website lets the contrast speak without disparaging Jira (half our
-buyers run it). Keep this analogy about the EXPERIENCE bet only — the
-future-proofing pillar is a separate argument and stays separate.
+Three reasons it no longer holds:
+
+1. **Linear had an incumbent; we don't.** Every Linear prospect already had
+   Jira, already paid for it, and already hated it — category, budget and pain
+   all pre-existed, so Linear only had to win on experience. Nobody switches
+   *from* a context manager. There is no line item to redirect. That is
+   category creation, which is a slower and more expensive game than the
+   analogy implies, and the 2026-08-12 BattleTime call is what it feels like.
+2. **The shelf is not empty.** The old wording said the category "exists as
+   scattered practice." As of 2026-08-13 it exists as products — Sentra and
+   memory.store are selling it now. This is an early race, not a refinement
+   play.
+3. **It aims investment at the wrong thing — the real damage.** Linear won on
+   experience, so the analogy says "make it beautiful." Our researched
+   differentiator is not experience, it is **where the memory comes from**.
+   Steering by this analogy would have us polishing UI, or worse, chasing
+   Sentra's 200+ connectors, while the one thing we own goes uninvested.
+
+### What replaces it
+
+No analogy. A position:
+
+> **Klio is an early entrant in a real, now-contested category. No single
+> attribute is unmatched; the combination is — for now.** Agent-native capture,
+> shared across a team of humans, sold to that team directly, at $20/seat.
+
+**Be precise about the write path — it does not differentiate us from
+everyone.** Mem0 also captures from agents during work; that is exactly what
+`mem0.add()` is. The distinction is two-sided and must be stated per competitor:
+
+- **vs Sentra / memory.store (same buyer, team memory):** they are
+  connector-first, syncing Slack, Gmail, Notion and Drive — artifacts humans
+  already produced. Here the agent-native write path is a real difference.
+- **vs Mem0 / Zep / Letta / Supermemory (agent-native too):** the write path is
+  *not* a difference. What differs is who it serves. They sell an API to a
+  developer embedding memory in *their own product*, about *that product's end
+  users* — Mem0's scopes are user / session / agent. Klio is bought by a working
+  team, and the memory is about *the team's work*, shared between colleagues.
+
+**Say this plainly and do not overreach:** every attribute we have is matched by
+someone. Supersession by Zep and Sentra, open source by Cognee, team scope by
+Sentra and memory.store, agent capture by Mem0. A combination is a position, not
+a moat, and positions erode. Treat the current lead as time to earn a real one,
+not as one we already hold.
+
+**Races we explicitly decline to run:**
+
+- **Connector count.** Sentra has 200+. We will not catch that and should not
+  try; connectors are their moat by construction, and matching them would make
+  us a worse version of them.
+- **Graph sophistication.** Zep and Sentra are both bi-temporal. Ours is
+  adequate; parity here buys nothing a buyer can feel.
+- **Being the most open.** Cognee has 30k stars and a head start on the
+  open-source position.
+
+**What we invest in instead:** capture quality and coverage on the agent write
+path — more of what matters recorded, with less effort, from more agents. That
+is the axis where being first and being agent-native compounds.
+
+**What survives from the old frame:** the human-surface investment
+(project context view, belief timeline, onboarding flow) is still worth doing —
+but as *proof* that the captured context is real and trustworthy, not as an
+experience bet against an incumbent. Note we have **not** verified how good the
+competitors' human surfaces are; do not claim theirs is weak without looking.
 ### Researched landscape (2026-08-13, primary sources)
 
 Every row below was read off the vendor's own site, not a listicle. The
@@ -263,10 +318,15 @@ connector sync; Mem0's open-source licence terms.
 Ordered by how well the 2026-08-13 competitive research supports each. Lead with
 the top one; the lower ones are contested and must not carry a pitch alone.
 
-- **The write path — agents write during the work.** Every direct competitor is
-  connector-first, syncing artifacts humans already produced in Slack, Gmail,
-  Notion or Drive. Klio's memory is produced by the agent as the work happens.
-  Different data source, not a different feature. **This is the lead.**
+- **Agent-native capture, shared across a team of humans. This is the lead —
+  but it is the pair that matters, not either half.** Against Sentra and
+  memory.store, the difference is agent-native: they are connector-first,
+  syncing what humans already wrote in Slack, Gmail, Notion and Drive. Against
+  Mem0, Zep and Letta, agent capture is *not* a difference — `mem0.add()` is the
+  same act — and the difference is instead that their memory is about an app's
+  end users, sold to the developer embedding it, while ours is about a team's
+  work, sold to the team. Never claim the write path alone; it is only half an
+  argument and the wrong half depending on who you are talking to.
 - **Cross-vendor by construction** (MCP-native; no lock-in incentive we could
   even act on).
 - **One boundary that holds**: org isolation, project scoping, private scope
