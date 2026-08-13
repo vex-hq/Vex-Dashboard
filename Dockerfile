@@ -100,6 +100,7 @@ COPY . .
 ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_PUBLIC_KEY
+ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 # Skip HTTPS-only validation during build (overridden at runtime)
 ENV NEXT_PUBLIC_CI=true
 ENV NEXT_PUBLIC_PRODUCT_NAME=Klio
@@ -115,9 +116,16 @@ ENV NEXT_PUBLIC_ENABLE_TEAM_ACCOUNTS_CREATION=true
 # NEXT_PUBLIC_AUTH_MAGIC_LINK), not hardcoded — production runs magic-link only.
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Billing / Stripe – not required for self-hosting
+# Billing / Stripe
 ENV NEXT_PUBLIC_BILLING_PROVIDER=stripe
-ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=placeholder
+# NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is deliberately NOT set here. It used to be
+# `ENV ...=placeholder`, which silently broke checkout in production: the server
+# created a valid Stripe session and returned a real `cs_live_...` token, then
+# Stripe.js in the browser rejected it because the client bundle had the literal
+# string "placeholder" baked in as the publishable key. NEXT_PUBLIC_* values are
+# inlined at BUILD time, so setting the real key in Railway's runtime env could
+# never fix it. It is an ARG above and injected in the build step below, exactly
+# like the Supabase public vars.
 
 # Email / Mailer – required at build time for server-side module evaluation
 ENV EMAIL_SENDER=noreply@localhost
@@ -134,6 +142,7 @@ ARG SUPABASE_DB_WEBHOOK_SECRET=placeholder-webhook-secret
 RUN NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://localhost:3000}" \
     NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:8443}" \
     NEXT_PUBLIC_SUPABASE_PUBLIC_KEY="${NEXT_PUBLIC_SUPABASE_PUBLIC_KEY:-placeholder}" \
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-placeholder}" \
     pnpm --filter web build
 
 # ---- Stage 3: runner -------------------------------------------------------
