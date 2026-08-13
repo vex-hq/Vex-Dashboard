@@ -98,7 +98,9 @@ async function seedArtifact(
       options.org ?? ORG,
       title,
       inline,
-      inline === null ? `s3://klio-artifacts/${options.org ?? ORG}/${id}/v1` : null,
+      inline === null
+        ? `s3://klio-artifacts/${options.org ?? ORG}/${id}/v1`
+        : null,
       options.status ?? 'active',
     ],
   );
@@ -202,9 +204,10 @@ afterAll(async () => {
 async function download(
   orgId: string,
   memoryId: string,
-  viewer: { userId: string | null; isOrgAdmin: boolean },
+  viewer: { userId: string | null },
 ) {
-  const { loadDownloadableArtifact } = await import('./artifact-download.loader');
+  const { loadDownloadableArtifact } =
+    await import('./artifact-download.loader');
 
   return loadDownloadableArtifact(orgId, memoryId, viewer);
 }
@@ -213,7 +216,6 @@ describe('a private artifact is downloadable only by its owner', () => {
   it('refuses a teammate', async () => {
     const result = await download(ORG, cards.alicePrivate!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     // Proves: knowing the card id is not enough. Bob is a legitimate member of
@@ -224,7 +226,6 @@ describe('a private artifact is downloadable only by its owner', () => {
   it('refuses an ORG ADMIN', async () => {
     const result = await download(ORG, cards.alicePrivate!, {
       userId: ADMIN,
-      isOrgAdmin: true,
     });
 
     // Proves: the design's hardest promise holds on the download path too.
@@ -236,7 +237,6 @@ describe('a private artifact is downloadable only by its owner', () => {
   it('refuses an unattributed session', async () => {
     const result = await download(ORG, cards.alicePrivate!, {
       userId: null,
-      isOrgAdmin: false,
     });
 
     // Proves: a null user id does not degrade into "match anything".
@@ -246,7 +246,6 @@ describe('a private artifact is downloadable only by its owner', () => {
   it('POSITIVE CONTROL: gives it to Alice', async () => {
     const result = await download(ORG, cards.alicePrivate!, {
       userId: ALICE,
-      isOrgAdmin: false,
     });
 
     // Proves the three refusals above mean something: the same call with the
@@ -256,11 +255,10 @@ describe('a private artifact is downloadable only by its owner', () => {
   });
 });
 
-describe('a project artifact is downloadable only by members (and org admins)', () => {
+describe('a project artifact is downloadable only by members, no admin bypass (inverted 2026-08-12 ruling)', () => {
   it('refuses a non-member', async () => {
     const result = await download(ORG, cards.project!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     // Proves: `scope = 'project'` is a boundary, not a label. Bob can see the
@@ -268,21 +266,22 @@ describe('a project artifact is downloadable only by members (and org admins)', 
     expect(result).toBeNull();
   });
 
-  it('POSITIVE CONTROL: gives it to a member, and to an org admin', async () => {
+  it('refuses an org admin who is not a member (inverted: `isOrgAdmin` no longer exists on the viewer shape, so there is no field left to widen this)', async () => {
+    const result = await download(ORG, cards.project!, {
+      userId: ADMIN,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('POSITIVE CONTROL: gives it to a member', async () => {
     const asAlice = await download(ORG, cards.project!, {
       userId: ALICE,
-      isOrgAdmin: false,
-    });
-    const asAdmin = await download(ORG, cards.project!, {
-      userId: ADMIN,
-      isOrgAdmin: true,
     });
 
     // Proves the membership predicate is being evaluated rather than the
-    // project simply being unreadable — and that admin widening applies here,
-    // where the design says it should, unlike in private scope.
+    // project simply being unreadable.
     expect(asAlice?.title).toBe('project-architecture');
-    expect(asAdmin?.title).toBe('project-architecture');
   });
 });
 
@@ -290,7 +289,6 @@ describe('the org boundary holds', () => {
   it('refuses another tenant’s artifact card', async () => {
     const result = await download(ORG, cards.otherOrg!, {
       userId: ALICE,
-      isOrgAdmin: true,
     });
 
     // Proves: org isolation is not weakened by the new path. Even an admin,
@@ -301,7 +299,6 @@ describe('the org boundary holds', () => {
   it('POSITIVE CONTROL: the owning tenant can', async () => {
     const result = await download(OTHER_ORG, cards.otherOrg!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(result?.title).toBe('other-tenant-secret');
@@ -312,7 +309,6 @@ describe('everything else refuses identically', () => {
   it('returns null for an org memory that is not an artifact card', async () => {
     const result = await download(ORG, cards.notAnArtifact!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(result).toBeNull();
@@ -321,7 +317,6 @@ describe('everything else refuses identically', () => {
   it('returns null for a retracted artifact the card still points at', async () => {
     const result = await download(ORG, cards.retracted!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(result).toBeNull();
@@ -332,7 +327,6 @@ describe('everything else refuses identically', () => {
     // early keeps a probe from telling the caller anything by its error.
     const result = await download(ORG, 'not-a-uuid', {
       userId: ALICE,
-      isOrgAdmin: false,
     });
 
     expect(result).toBeNull();
@@ -341,7 +335,6 @@ describe('everything else refuses identically', () => {
   it('POSITIVE CONTROL: an org artifact is downloadable by anyone in the org', async () => {
     const result = await download(ORG, cards.org!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(result?.title).toBe('org-runbook');
@@ -352,11 +345,9 @@ describe('inline artifacts', () => {
   it('carries the inline text instead of a storage uri, under the same gate', async () => {
     const asBob = await download(ORG, cards.inline!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
     const asAlice = await download(ORG, cards.inline!, {
       userId: ALICE,
-      isOrgAdmin: false,
     });
 
     // Small text artifacts never reached object storage. They are served

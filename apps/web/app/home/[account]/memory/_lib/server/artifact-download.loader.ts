@@ -22,7 +22,7 @@ import {
  * whole ladder in one SQL statement:
  *
  *   private  → only the owner. Org admins included: no override, ever.
- *   project  → project members, or an org admin.
+ *   project  → project members only. No admin override, ever.
  *   anything → everyone in the org.
  *
  * That is deliberate reuse rather than a fourth copy of the predicate. A

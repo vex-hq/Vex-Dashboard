@@ -93,7 +93,7 @@ async function TeamAccountHomePage({
         volume30d: [],
         projectSparks: [],
       },
-      () => loadHubSummary(orgId, viewerUserId, viewer.isOrgAdmin),
+      () => loadHubSummary(orgId, viewerUserId),
     ),
     orFallback('contextUsage', [], () => loadContextUsage(orgId)),
     // Fallback is `true` (assume connected), the INVERSE of every other

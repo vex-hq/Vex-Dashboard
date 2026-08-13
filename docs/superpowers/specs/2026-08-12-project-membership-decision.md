@@ -1,7 +1,7 @@
 # Project membership — decision required
 
 **Date:** 2026-08-12
-**Status:** Open. Needs a ruling from Abhishek before the engine work is scheduled.
+**Status:** Decided. Ruled by Abhishek on 2026-08-12; engine migration 039 shipped and backfilled the same day; the dashboard now follows the engine (see Decision below).
 **Found by:** live diagnosis of app.klio.tech after connecting a new repo.
 
 ---
@@ -68,9 +68,16 @@ nothing.
 not an implementation detail, because it determines who can see a project's name
 and activity at all.
 
-## Options
+## Options considered
 
-**A. Enrol the writer at creation time (engine change).**
+The options below were the live menu at decision time. The ruling landed
+closest to **A** (enrol the writer at creation) plus a backfill for existing
+data, but goes further than any option here: it is **private by default** —
+membership isn't just "how you get listed", it's the *only* way to know a
+project exists at all, with no admin-visibility carve-out. Kept below as
+record, each marked with how it fared against the ruling.
+
+**A. Enrol the writer at creation time (engine change). — Adopted, as the go-forward half of the ruling.**
 When `brain.py` upserts a project, also grant the writing principal as its
 first member. Correct and intuitive, and the only option that later supports
 inviting a teammate who has not written anything yet — which is the actual
@@ -79,49 +86,73 @@ works when a *user* principal exists. OAuth (Bearer) writes resolve to a user;
 API-key writes resolve to an org and an agent, and may have no user to enrol —
 so key-only workspaces would still produce memberless projects.
 
-**B. Derive membership from authorship.**
+**B. Derive membership from authorship. — Rejected.**
 You are a member of a project if you have written to it. No migration, no engine
 change, and it is retroactively true for every project that exists today. It
 also matches how the product is actually used right now: one person, many
 agents, many repos. The cost is that it is a change to the visibility ladder —
 "participation implies membership" — and it cannot express an invitation, so it
-solves the rail but not onboarding.
+solves the rail but not onboarding. Superseded by A + migration 039's explicit
+backfill, which gets the same retroactive correctness without redefining
+membership as an implicit, unauditable side effect of writing.
 
-**C. A then B as a backfill.**
-Enrol going forward, and backfill existing projects from authorship. Correct end
-state, most work, and the backfill needs B's heuristic anyway.
+**C. A then B as a backfill. — Rejected as stated, but the ruling is its spirit.**
+Enrol going forward, and backfill existing projects from authorship. This is
+essentially what shipped — migration 039 backfilled an owner for all 134
+production projects — except the backfill grants an explicit `project_members`
+row (auditable, revocable) rather than leaning on B's implicit
+authorship-equals-membership predicate.
 
-**D. Accept that projects are not an isolation boundary.**
+**D. Accept that projects are not an isolation boundary. — Rejected, explicitly and hard.**
 The published security model already says the org is the boundary nothing
 crosses and that subdivisions below it are for relevance, not isolation
 (`AGENTS.md`, accuracy rule 5). If that is the real contract, then gating
 project *names* behind membership is stricter than what we document, and the
 usage strip — which lists all org projects to all members — is the widget that
 matches the docs. Item-level visibility would stay exactly as it is; only the
-project listing opens up.
-
-## Recommendation
-
-**B now, A when the engine unfreezes**, and treat D as the question to settle
-first, because it decides whether B is a loosening or simply the documented
-behaviour. B makes the rail correct for real users today without touching the
-engine; A is what makes invitations — and therefore the onboarding demo —
-possible later. C is A plus a backfill that B's predicate gives you for free.
-
-If D is ruled true, B costs nothing in policy terms and becomes the obvious
-interim answer.
+project listing opens up. **The ruling goes the opposite direction**: a project
+is private by default, and membership is the only way to know it exists —
+"everything ... other than them no one else be able to interact with the
+project nor can see if this exists" (Abhishek, verbatim). The usage strip
+remains a *recorded, separate* product decision to stay org-level (it discloses
+per-project counts and storage but not project content or existence beyond
+what the strip already shows) — it is not evidence for D, it's an exception
+that was already deliberately scoped.
 
 ## What ships regardless
 
-The dashboard now grants org admins the same project-listing bypass the project
+~~The dashboard now grants org admins the same project-listing bypass the project
 detail page has always had (`fix/home-connection-signals`). That fixes the rail
 for owners and admins today. It does **not** fix it for a non-admin teammate,
-who will keep seeing an empty rail until this decision lands.
+who will keep seeing an empty rail until this decision lands.~~
+
+Superseded by the Decision below: the org-admin bypass described above (added
+the same morning this doc was opened) was removed again once the ruling
+landed. It no longer ships.
 
 ## Decision
 
-> _To be filled in by Abhishek._
+**Ruled 2026-08-12, by Abhishek:**
 
-**Ruling:**
+- **Private by default.** `project_members` is the only gate for a project's
+  visibility — existence, name, and content alike. There is no org-admin
+  override anywhere in the stack. Quoting the ruling verbatim: "private by
+  default — everything ... other than them no one else be able to interact
+  with the project nor can see if this exists."
+- **The project's creator is seated as its first admin member** at creation
+  time (the engine-side realization of Option A above), so the common case —
+  "I made this, I can still see it" — costs nothing and needs no invitation
+  step.
+- **Migration 039 shipped and backfilled** an owner for all 134 production
+  projects that predated this change, so turning off the admin bypass does not
+  strand anyone: everyone still sees what they created, the same day the
+  membership-only gate went live.
+- **The dashboard now follows the engine.** Every admin-visibility bypass the
+  dashboard had grown for project listing, project pulse, the Hub's project
+  sparks, the project context view, and project-scoped artifact downloads was
+  removed in the same change that recorded this ruling (`fix/project-admin-bypass`).
+  An org admin who is not a member of a project now sees nothing for it —
+  no listing, no pulse, no context view, no download — which is the intended
+  behavior, not a regression to paper over.
 
-**Date:**
+**Date:** 2026-08-12

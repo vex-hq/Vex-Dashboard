@@ -13,7 +13,6 @@ import { Trans } from '@kit/ui/trans';
 import { cn } from '@kit/ui/utils';
 
 import {
-  type ProjectAccess,
   loadProjectArtifacts,
   loadProjectMemories,
   loadVisibleProjects,
@@ -23,33 +22,34 @@ import { MemoryBrowser } from './memory-browser';
 
 /**
  * The **Projects** tab: a picker over the projects the caller may open,
- * then that project's `scope = 'project'` memories and artifacts.
+ * then the memories and artifacts on that project this viewer may read
+ * (`scope = 'project'` they are entitled to, plus their own private rows
+ * tagged with the project id).
  *
- * `access` decides the picker AND the memory query. A member sees only
- * projects they hold a `project_members` row for; an org admin sees every
- * project in the org, including ones they are not a member of. Both facts are
- * enforced in SQL — the admin branch is a different SQL predicate, not a
- * TypeScript short-circuit over a wider result set.
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): the picker shows
+ * only projects `viewerUserId` holds a `project_members` row for — org
+ * admins included. There is no wider listing to fall back to.
  *
  * The picked project id arrives from the query string, which is
- * client-controlled, so it is never trusted: `loadProjectMemories` re-applies
- * the membership predicate to whatever id it is given. Picking an id you are
- * not entitled to returns nothing rather than someone else's rows.
+ * client-controlled, so it is never trusted: `loadProjectMemories`
+ * re-applies membership (and the own-private arm keyed on
+ * `viewerUserId`) to whatever id it is given. Picking an id you are not
+ * entitled to returns nothing rather than someone else's rows.
  */
 export async function ProjectsTab({
   orgId,
-  access,
+  viewerUserId,
   accountSlug,
   selectedProjectId,
   page,
 }: {
   orgId: string;
-  access: ProjectAccess;
+  viewerUserId: string;
   accountSlug: string;
   selectedProjectId?: string;
   page: number;
 }) {
-  const projects = await loadVisibleProjects(orgId, access);
+  const projects = await loadVisibleProjects(orgId, viewerUserId);
 
   const selected =
     projects.find((project) => project.id === selectedProjectId) ??
@@ -64,13 +64,7 @@ export async function ProjectsTab({
             <Trans i18nKey="agentguard:memory.noProjectsTitle" />
           </CardTitle>
           <CardDescription>
-            <Trans
-              i18nKey={
-                access.kind === 'admin'
-                  ? 'agentguard:memory.noProjectsAdminDescription'
-                  : 'agentguard:memory.noProjectsDescription'
-              }
-            />
+            <Trans i18nKey="agentguard:memory.noProjectsDescription" />
           </CardDescription>
         </CardHeader>
       </Card>
@@ -78,8 +72,8 @@ export async function ProjectsTab({
   }
 
   const [memories, artifacts] = await Promise.all([
-    loadProjectMemories(orgId, selected.id, access, page),
-    loadProjectArtifacts(orgId, selected.id, access),
+    loadProjectMemories(orgId, selected.id, viewerUserId, page),
+    loadProjectArtifacts(orgId, selected.id, viewerUserId),
   ]);
 
   return (

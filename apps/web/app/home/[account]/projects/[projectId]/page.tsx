@@ -16,10 +16,7 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { TeamAccountLayoutPageHeader } from '../../_components/team-account-layout-page-header';
 import { loadAccountViewer } from '../../_lib/server/account-viewer';
-import {
-  type ProjectAccess,
-  loadVisibleProject,
-} from '../../memory/_lib/server/project-memory.loader';
+import { loadVisibleProject } from '../../memory/_lib/server/project-memory.loader';
 import {
   type ProjectMemberView,
   ProjectMembersCard,
@@ -53,6 +50,11 @@ export const generateMetadata = async () => {
  * a project member whose org membership has since been removed still shows,
  * with their raw user id, rather than silently disappearing from the list an
  * admin needs in order to revoke them.
+ *
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate. An org admin who is not a member of this project gets the
+ * same `ProjectNotFound` as anyone else — there is no `ProjectAccess.admin`
+ * branch left to widen it.
  */
 async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const { account, projectId } = await params;
@@ -62,11 +64,7 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
     loadAccountViewer(account),
   ]);
 
-  const access: ProjectAccess = viewer.isOrgAdmin
-    ? { kind: 'admin' }
-    : { kind: 'member', userId: viewer.userId };
-
-  const project = await loadVisibleProject(orgId, projectId, access);
+  const project = await loadVisibleProject(orgId, projectId, viewer.userId);
 
   if (!project) {
     return <ProjectNotFound account={account} />;
@@ -78,7 +76,7 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
     loadProjectMembers(project.id),
     client.rpc('get_account_members', { account_slug: account }),
     loadMyProjectRole(project.id, viewer.userId),
-    loadContextView(orgId, project.id, access, viewer.userId),
+    loadContextView(orgId, project.id, viewer.userId),
   ]);
 
   // `loadVisibleProject` already gated on the same `access`, so a null here

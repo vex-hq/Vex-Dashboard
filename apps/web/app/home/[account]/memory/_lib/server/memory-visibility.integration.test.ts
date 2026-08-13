@@ -409,14 +409,11 @@ describe('Team tab — scope=org only', () => {
   });
 });
 
-describe('Projects tab — scope=project is gated by project_members', () => {
+describe('Projects tab — scope=project is gated by project_members, no admin bypass (2026-08-12 ruling)', () => {
   it('returns nothing to a non-member asking for a project’s memories', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: BOB,
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ALICE, BOB);
 
     expect(result.rows).toHaveLength(0);
   });
@@ -424,54 +421,41 @@ describe('Projects tab — scope=project is gated by project_members', () => {
   it('POSITIVE CONTROL: returns them to a member', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ALICE, ALICE);
 
     expect(contents(result.rows).join(' ')).toContain('PROJECT_FACT');
   });
 
-  it('lets an org admin read a project they are not a member of', async () => {
+  it('does NOT let an org admin read a project they are not a member of (inverted 2026-08-12: membership is the only gate)', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    const result = await loadProjectMemories(ORG, PROJECT_ORPHAN, {
-      kind: 'admin',
-    });
+    const result = await loadProjectMemories(ORG, PROJECT_ORPHAN, ADMIN);
 
-    expect(contents(result.rows).join(' ')).toContain('ORPHAN_FACT');
+    expect(contents(result.rows).join(' ')).not.toContain('ORPHAN_FACT');
+    expect(result.rows).toHaveLength(0);
   });
 
-  it('lists only the caller’s projects for a member, and all of them for an admin', async () => {
+  it('lists only the caller’s projects — an org admin with no membership row anywhere sees an empty list, same as any other non-member (inverted)', async () => {
     const { loadVisibleProjects } = await import('./project-memory.loader');
 
-    const asAlice = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: ALICE,
-    });
-    const asBob = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: BOB,
-    });
-    const asAdmin = await loadVisibleProjects(ORG, { kind: 'admin' });
+    const asAlice = await loadVisibleProjects(ORG, ALICE);
+    const asBob = await loadVisibleProjects(ORG, BOB);
+    const asAdmin = await loadVisibleProjects(ORG, ADMIN);
 
     expect(asAlice.map((project) => project.display_name)).toEqual([
       'alice-project',
     ]);
     expect(asBob).toHaveLength(0);
-    expect(asAdmin.map((project) => project.display_name).sort()).toEqual([
-      'alice-project',
-      'orphan-project',
-    ]);
+    // ADMIN holds no project_members row on either seeded project. The
+    // old admin branch (`{ kind: 'admin' }` -> `TRUE`) is gone, so the
+    // listing gate is membership on the project row itself — nothing shows.
+    expect(asAdmin).toHaveLength(0);
   });
 
   it('counts only project-scoped rows, not org rows that carry a project id', async () => {
     const { loadVisibleProjects } = await import('./project-memory.loader');
 
-    const [project] = await loadVisibleProjects(ORG, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const [project] = await loadVisibleProjects(ORG, ALICE);
 
     // alice-project holds two project-scoped rows plus one LEGACY org row.
     expect(project?.memory_count).toBe(2);
@@ -481,14 +465,8 @@ describe('Projects tab — scope=project is gated by project_members', () => {
   it('gates project artifacts by the same membership predicate', async () => {
     const { loadProjectArtifacts } = await import('./project-memory.loader');
 
-    const asBob = await loadProjectArtifacts(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: BOB,
-    });
-    const asAlice = await loadProjectArtifacts(ORG, PROJECT_ALICE, {
-      kind: 'member',
-      userId: ALICE,
-    });
+    const asBob = await loadProjectArtifacts(ORG, PROJECT_ALICE, BOB);
+    const asAlice = await loadProjectArtifacts(ORG, PROJECT_ALICE, ALICE);
 
     expect(asBob).toHaveLength(0);
     expect(asAlice.map((artifact) => artifact.title)).toEqual([
@@ -496,23 +474,22 @@ describe('Projects tab — scope=project is gated by project_members', () => {
     ]);
   });
 
-  it('rejects member access with a blank user id', async () => {
+  it('rejects a blank viewer user id', async () => {
     const { loadProjectMemories } = await import('./project-memory.loader');
 
-    await expect(
-      loadProjectMemories(ORG, PROJECT_ALICE, { kind: 'member', userId: '' }),
-    ).rejects.toThrow(/non-blank user id/);
+    await expect(loadProjectMemories(ORG, PROJECT_ALICE, '')).rejects.toThrow(
+      /viewer user id is required/,
+    );
   });
 });
 
-describe('Memory detail — the drill-in obeys the same ladder', () => {
+describe('Memory detail — the drill-in obeys the same ladder, no admin bypass (2026-08-12 ruling)', () => {
   it('will not open Alice’s private memory for Bob', async () => {
     const { loadMemoryDetailForViewer } =
       await import('./memory-detail.loader');
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
 
     expect(row).toBeNull();
@@ -526,7 +503,6 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
     // is not power over a person's private scope.
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: ADMIN,
-      isOrgAdmin: true,
     });
 
     expect(row).toBeNull();
@@ -538,35 +514,33 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.alicePrivate!, {
       userId: ALICE,
-      isOrgAdmin: false,
     });
 
     expect(row?.content).toContain('ALICE_SECRET');
     expect(row?.provenance).toBe('EXTRACTED');
   });
 
-  it('will not open a project memory for a non-member, but will for a member and an admin', async () => {
+  it('will not open a project memory for a non-member — including an org admin with no membership row (inverted 2026-08-12: no `isOrgAdmin` field left to grant it) — but will for a member', async () => {
     const { loadMemoryDetailForViewer } =
       await import('./memory-detail.loader');
 
     const asBob = await loadMemoryDetailForViewer(ORG, seeded.projectMemory!, {
       userId: BOB,
-      isOrgAdmin: false,
     });
     const asAlice = await loadMemoryDetailForViewer(
       ORG,
       seeded.projectMemory!,
-      { userId: ALICE, isOrgAdmin: false },
+      { userId: ALICE },
     );
     const asAdmin = await loadMemoryDetailForViewer(
       ORG,
       seeded.projectMemory!,
-      { userId: ADMIN, isOrgAdmin: true },
+      { userId: ADMIN },
     );
 
     expect(asBob).toBeNull();
     expect(asAlice?.content).toContain('PROJECT_FACT');
-    expect(asAdmin?.content).toContain('PROJECT_FACT');
+    expect(asAdmin).toBeNull();
   });
 
   it('opens an org memory for anyone in the org, including an unattributed session', async () => {
@@ -575,7 +549,6 @@ describe('Memory detail — the drill-in obeys the same ladder', () => {
 
     const row = await loadMemoryDetailForViewer(ORG, seeded.orgMemory!, {
       userId: null,
-      isOrgAdmin: false,
     });
 
     expect(row?.content).toContain('ORG_FACT');

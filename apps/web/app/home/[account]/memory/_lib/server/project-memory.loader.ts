@@ -25,7 +25,7 @@ import {
  *     There it is a relevance filter, not a boundary, and those rows stay
  *     readable by the whole org.
  *   - `scope = 'project'` IS a boundary: readable only by that project's
- *     members (plus org admins).
+ *     members — no admin bypass.
  *
  * **The predicate is always `scope`, never the presence of `project_id`.**
  * Filtering on `project_id IS NOT NULL` would wrongly hide 32.5k org rows;
@@ -34,58 +34,46 @@ import {
  *
  * Membership is enforced in SQL via `EXISTS (SELECT 1 FROM project_members …)`
  * — never by fetching a wider set and filtering in TypeScript.
+ *
+ * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): `project_members` is
+ * the only gate for project visibility, full stop. This loader used to take
+ * a `ProjectAccess` discriminated union with an `{ kind: 'admin' }` branch
+ * that resolved the membership check to `TRUE`, letting an org admin read
+ * (and see the existence of) any project regardless of membership. That
+ * branch is gone, not defaulted off: there is no parameter left anywhere in
+ * this file that can widen visibility past `project_members`. An org admin
+ * who wants into a project now has to be granted membership like anyone
+ * else. Migration 039 backfilled an owner for every existing project, so
+ * this is safe: everyone still sees what they created.
  */
 const PROJECT_SCOPE = 'project';
 
-/**
- * Who is asking.
- *
- * A required, explicit discriminated union rather than an optional
- * `isAdmin?: boolean`. There is no default to get wrong: a caller must state
- * which branch it wants, and the member branch cannot be constructed without a
- * user id.
- *
- * `admin` means an ORG admin, who by design sees every project's memories
- * including projects they are not a member of. It grants nothing in
- * `private-memory.loader` — admins see no private scope, ever.
- */
-export type ProjectAccess =
-  | { readonly kind: 'member'; readonly userId: string }
-  | { readonly kind: 'admin' };
-
-function assertAccess(access: ProjectAccess): ProjectAccess {
-  if (access.kind === 'member' && access.userId.trim().length === 0) {
-    throw new Error(
-      'project loader: member access requires a non-blank user id.',
-    );
+function assertViewerUserId(viewerUserId: string): string {
+  if (viewerUserId.trim().length === 0) {
+    throw new Error('project loader: viewer user id is required.');
   }
 
-  return access;
+  return viewerUserId;
 }
 
 /**
- * Build the visibility clause plus its bound parameters.
+ * Build the membership visibility clause plus its bound parameter.
  *
- * Both branches are constant SQL text chosen by a discriminated union — no
- * caller-supplied string ever reaches the SQL, and the member branch always
- * binds the user id as a parameter.
+ * Always an `EXISTS` against `project_members`, bound to the viewer's own
+ * user id — never a caller-supplied string, never an unconditional `TRUE`.
  */
 function visibilityClause(
-  access: ProjectAccess,
+  viewerUserId: string,
   projectIdColumn: string,
   nextParamIndex: number,
 ): { sql: string; params: string[] } {
-  if (access.kind === 'admin') {
-    return { sql: 'TRUE', params: [] };
-  }
-
   return {
     sql: `EXISTS (
       SELECT 1 FROM project_members pm
       WHERE pm.project_id = ${projectIdColumn}
         AND pm.user_id = $${nextParamIndex}
     )`,
-    params: [access.userId],
+    params: [viewerUserId],
   };
 }
 
@@ -100,20 +88,18 @@ export interface ProjectSummaryRow {
 }
 
 /**
- * Projects the caller may open: their own when they are a member, all of the
- * org's when they are an admin.
+ * Projects the caller may open: only the ones they hold a `project_members`
+ * row for. No admin-wide listing — see the file header.
  *
  * `memory_count` counts `scope = 'project'` rows only — the rows the project
  * boundary actually governs. Org-scoped rows that merely carry this
  * `project_id` are counted on the Team tab, where they are readable.
  */
 export const loadVisibleProjects = cache(
-  async (
-    orgId: string,
-    access: ProjectAccess,
-  ): Promise<ProjectSummaryRow[]> => {
+  async (orgId: string, viewerUserId: string): Promise<ProjectSummaryRow[]> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(assertAccess(access), 'p.id', 4);
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'p.id', 4);
 
     const result = await pool.query<
       Omit<ProjectSummaryRow, 'member_count' | 'memory_count'> & {
@@ -170,9 +156,9 @@ export const loadVisibleProject = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
   ): Promise<ProjectSummaryRow | null> => {
-    const projects = await loadVisibleProjects(orgId, access);
+    const projects = await loadVisibleProjects(orgId, viewerUserId);
 
     return projects.find((project) => project.id === projectId) ?? null;
   },
@@ -187,15 +173,12 @@ export const loadProjectMemories = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
     page = 1,
   ): Promise<MemoryListResult> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(
-      assertAccess(access),
-      'm.project_id',
-      5,
-    );
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'm.project_id', 5);
     const { offset } = pageWindow(page);
     const limitIndex = 5 + visibility.params.length;
 
@@ -257,15 +240,12 @@ export const loadProjectArtifacts = cache(
   async (
     orgId: string,
     projectId: string,
-    access: ProjectAccess,
+    viewerUserId: string,
     limit = 24,
   ): Promise<ArtifactCardRow[]> => {
     const pool = getAgentGuardPool();
-    const visibility = visibilityClause(
-      assertAccess(access),
-      'm.project_id',
-      5,
-    );
+    const viewer = assertViewerUserId(viewerUserId);
+    const visibility = visibilityClause(viewer, 'm.project_id', 5);
     const limitIndex = 5 + visibility.params.length;
 
     const result = await pool.query<
