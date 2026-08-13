@@ -1,16 +1,27 @@
+import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
+
+import { resolveProductPlan } from '@kit/billing-gateway';
+import {
+  BillingPortalCard,
+  CurrentLifetimeOrderCard,
+  CurrentSubscriptionCard,
+} from '@kit/billing-gateway/components';
+import { Alert, AlertDescription, AlertTitle } from '@kit/ui/alert';
 import { AppBreadcrumbs } from '@kit/ui/app-breadcrumbs';
+import { If } from '@kit/ui/if';
 import { PageBody } from '@kit/ui/page';
 import { Trans } from '@kit/ui/trans';
 
+import billingConfig from '~/config/billing.config';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
 // local imports
-import { BillingPlanSummaryCard } from '../../_components/billing-plan-summary-card';
-import { derivePlanLabel } from '../../_lib/billing-plan-label';
 import { TeamAccountLayoutPageHeader } from '../_components/team-account-layout-page-header';
 import { loadTeamAccountBillingPage } from '../_lib/server/team-account-billing-page.loader';
 import { loadTeamWorkspace } from '../_lib/server/team-account-workspace.loader';
+import { TeamAccountCheckoutForm } from './_components/team-account-checkout-form';
+import { createBillingPortalSession } from './_lib/server/server-actions';
 
 interface TeamAccountBillingPageProps {
   params: Promise<{ account: string }>;
@@ -25,29 +36,31 @@ export const generateMetadata = async () => {
   };
 };
 
-/**
- * Billing guard: no Klio user may ever be shown a Vex price.
- *
- * `billing.config.ts` still describes the retired Vex Starter/Pro/Team tiers
- * and their monthly prices, and the checkout server actions built on it
- * (`./_lib/server/server-actions.ts`) are deliberately left untouched — they
- * just aren't reachable from this page anymore. This page renders only a
- * plan-summary card; the Stripe checkout form, current-subscription card and
- * billing-portal form that used to live here are gone from the render tree
- * (their components/actions still exist in the codebase, unreferenced).
- */
 async function TeamAccountBillingPage({ params }: TeamAccountBillingPageProps) {
   const account = (await params).account;
   const workspace = await loadTeamWorkspace(account);
   const accountId = workspace.account.id;
 
-  const [subscription, order, , membersCount] =
+  const [subscription, order, customerId] =
     await loadTeamAccountBillingPage(accountId);
 
-  const planLabel = derivePlanLabel({
-    subscriptionStatus: subscription?.status ?? null,
-    hasOrder: Boolean(order),
-  });
+  const variantId = subscription?.items[0]?.variant_id;
+  const orderVariantId = order?.items[0]?.variant_id;
+
+  const subscriptionProductPlan = variantId
+    ? await resolveProductPlan(billingConfig, variantId, subscription.currency)
+    : undefined;
+
+  const orderProductPlan = orderVariantId
+    ? await resolveProductPlan(billingConfig, orderVariantId, order.currency)
+    : undefined;
+
+  const hasBillingData = subscription || order;
+
+  const canManageBilling =
+    workspace.account.permissions.includes('billing.manage');
+
+  const shouldShowBillingPortal = canManageBilling && customerId;
 
   return (
     <>
@@ -59,10 +72,47 @@ async function TeamAccountBillingPage({ params }: TeamAccountBillingPageProps) {
 
       <PageBody>
         <div className="animate-in fade-in flex flex-col space-y-6 pb-36 duration-500">
-          <BillingPlanSummaryCard
-            planLabel={planLabel}
-            seatCount={membersCount ?? undefined}
-          />
+          <If condition={!hasBillingData}>
+            <If
+              condition={canManageBilling}
+              fallback={<CannotManageBillingAlert />}
+            >
+              <TeamAccountCheckoutForm
+                customerId={customerId}
+                accountId={accountId}
+              />
+            </If>
+          </If>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <If condition={subscription}>
+              {(subscription) => {
+                return (
+                  <CurrentSubscriptionCard
+                    subscription={subscription}
+                    product={subscriptionProductPlan!.product}
+                    plan={subscriptionProductPlan!.plan}
+                  />
+                );
+              }}
+            </If>
+
+            <If condition={order}>
+              {(order) => {
+                return (
+                  <CurrentLifetimeOrderCard
+                    order={order}
+                    product={orderProductPlan!.product}
+                    plan={orderProductPlan!.plan}
+                  />
+                );
+              }}
+            </If>
+
+            {shouldShowBillingPortal ? (
+              <BillingPortalForm accountId={accountId} account={account} />
+            ) : null}
+          </div>
         </div>
       </PageBody>
     </>
@@ -70,3 +120,36 @@ async function TeamAccountBillingPage({ params }: TeamAccountBillingPageProps) {
 }
 
 export default withI18n(TeamAccountBillingPage);
+
+function CannotManageBillingAlert() {
+  return (
+    <Alert variant={'warning'}>
+      <ExclamationTriangleIcon className={'h-4'} />
+
+      <AlertTitle>
+        <Trans i18nKey={'billing:cannotManageBillingAlertTitle'} />
+      </AlertTitle>
+
+      <AlertDescription>
+        <Trans i18nKey={'billing:cannotManageBillingAlertDescription'} />
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function BillingPortalForm({
+  accountId,
+  account,
+}: {
+  accountId: string;
+  account: string;
+}) {
+  return (
+    <form action={createBillingPortalSession}>
+      <input type="hidden" name={'accountId'} value={accountId} />
+      <input type="hidden" name={'slug'} value={account} />
+
+      <BillingPortalCard />
+    </form>
+  );
+}
