@@ -124,10 +124,13 @@ Cursor, Codex — any MCP client) to one shared, project-scoped context store. I
 captures what happens, keeps beliefs current by superseding what changed rather
 than deleting it, and serves context back through MCP to agents and — the 2026
 H2 focus — visually to people.
-**Product category:** Context management platform for AI-agent teams. We name
-the category rather than shelving with memory tools (mem0 / Zep /
-Supermemory): they sell recall quality to a single agent; we sell the managed
-context experience for a team.
+**Product category:** Context management platform for AI-agent teams.
+*Corrected 2026-08-13:* this line previously read "they sell recall quality to a
+single agent; we sell the managed context experience for a team." That is no
+longer true — Sentra and memory.store both sell team-scoped memory. The
+distinction that survives is **where the memory comes from**: they sync it out
+of human tools, we capture it from agents as they work. See Competitive
+Landscape.
 **Product type:** Open-core developer infrastructure. AGPL core engine +
 hosted Klio Cloud (graph, hybrid recall, artifacts, compression,
 reconciliation).
@@ -184,21 +187,98 @@ is the "after", Klio claims the Linear seat. Decks and conversations can be
 spicy; the website lets the contrast speak without disparaging Jira (half our
 buyers run it). Keep this analogy about the EXPERIENCE bet only — the
 future-proofing pillar is a separate argument and stays separate.
-**Direct:** mem0, Zep, Supermemory — recall for one agent; fall short on team
-scoping, supersession, and any human-facing surface.
+### Researched landscape (2026-08-13, primary sources)
+
+Every row below was read off the vendor's own site, not a listicle. The
+previous version of this section — "mem0, Zep, Supermemory: recall for one
+agent; fall short on team scoping, supersession, and any human-facing surface"
+— was **wrong on all three counts** and is corrected here.
+
+| | Headline (verbatim) | Pricing | Shape |
+| --- | --- | --- | --- |
+| **Sentra** | "The Company Brain for your teams and agents" | not published | connector-sync, bi-temporal graph |
+| **memory.store** | "One shared memory for your teammates, and agents" | **$150/user/mo**; free for individuals | connector-sync |
+| **Mem0** | — | $0 / $19 / $249 / custom | **usage-based**, unlimited end users |
+| **Zep** | "Agent memory, at enterprise scale." | not published | developer SDK (Python/TS/Go) |
+| **Cognee** | "Open Source Memory Platform for Agents" | $0 (1M tokens) / $2.50 per 1M tokens | **token-based**, 30k GitHub stars |
+| **Supermemory** | "The memory layer for AI agents…" | $0 / $19 / $100 / $399 | **usage-based**, teammate caps (2, then 10) |
+
+**Direct — same job, same buyer:**
+- **Sentra** (sentra.app) is the closest competitor that exists. Bi-temporal
+  facts (valid-from and valid-until, invalidated not deleted, provenance
+  first-class), MCP and REST, cloud / isolated VPC / air-gapped on-prem, 200+
+  integrations, sold to engineering *and* sales, finance, ops, legal, exec.
+- **memory.store** — team memory, MCP, Gmail/Slack/Granola/Fathom/Linear, but
+  at $150/user/mo against our $20, with no self-host offered.
+
+**Adjacent — infrastructure sold to builders, not to teams:** Mem0, Zep, Letta,
+Supermemory. They sell an API to developers embedding memory in *their* product.
+Different buyer, different sale, different pricing axis. More likely something
+we sit on than something we lose to.
+
 **Secondary:** Notion/Confluence + "keep the docs updated" — dead on arrival
 with agents; nobody updates them and agents can't read intent from them.
-**Indirect:** vendor-native memory (Cursor rules, Claude memory) — per-tool
-silos; the exact fragmentation we exist to end. Also our biggest commoditisation
-risk: the passive layer WILL be cloned by vendors. The defensible layer is
-cross-vendor scope + supersession + the human surface.
+
+**Indirect:** vendor-native memory (Cursor rules, Claude memory, Anthropic
+Memory, OpenAI memory) — per-tool silos; the exact fragmentation we exist to
+end. Free, zero-install, already inside the tool, and still our biggest
+commoditisation risk.
+
+### Three claims this research kills
+
+1. **"Nobody manages change / supersession is ours."** False twice. Zep
+   invalidates outdated facts and can answer what was true on any past date.
+   Sentra is bi-temporal with first-class provenance. Supersession is **table
+   stakes**, not a differentiator. Do not build a pitch on it.
+2. **"Open core is ours."** Cognee is open source with 30k GitHub stars, an MCP
+   server and a graph. Sentra ships air-gapped on-prem; Supermemory self-hosts
+   at $399. Contested.
+3. **"They're single-agent, we're the team one."** Sentra and memory.store are
+   explicitly team-scoped. That sentence is no longer true of the field.
+
+### What actually survives
+
+**The write path — and it is the only differentiator the evidence supports.**
+Sentra, memory.store and Supermemory are all *connector-first*: they sync
+Slack, Gmail, Notion and Drive, aggregating artifacts humans already produced
+somewhere else. Klio's primary write path is the **coding agent, during the
+work** (`services/mcp-server/app/capture.py`; the proactive-write instruction
+at `mcp_app.py:141`).
+
+They capture what people **said**. Klio captures what agents **did**. That is a
+different data source, not a different feature — which is why it is defensible
+and why it is also the answer to the GitHub objection above. One argument, two
+jobs.
+
+Second, weaker but real: **$20/seat against memory.store's $150** — and per-seat
+pricing is itself rare, since Mem0, Cognee and Supermemory all price on usage or
+tokens.
+
+**Not verified — do not assert:** Zep's and Sentra's pricing (neither
+publishes); whether Sentra's capture includes agents writing during work or only
+connector sync; Mem0's open-source licence terms.
 
 ## Differentiation
+
+Ordered by how well the 2026-08-13 competitive research supports each. Lead with
+the top one; the lower ones are contested and must not carry a pitch alone.
+
+- **The write path — agents write during the work.** Every direct competitor is
+  connector-first, syncing artifacts humans already produced in Slack, Gmail,
+  Notion or Drive. Klio's memory is produced by the agent as the work happens.
+  Different data source, not a different feature. **This is the lead.**
 - **Cross-vendor by construction** (MCP-native; no lock-in incentive we could
   even act on).
-- **Beliefs are managed, not just stored**: supersede/retire with the record
-  intact; the curator judges direct contradictions. Anyone can keep text;
-  almost nobody retires it.
+- **One boundary that holds**: org isolation, project scoping, private scope
+  with no admin override, members-only projects.
+- **Price shape**: $20/seat against memory.store's $150/user — and per-seat is
+  itself unusual in a field pricing on tokens and API calls.
+- ~~**Beliefs are managed, not just stored**~~ — *demoted 2026-08-13.* Still
+  true of the product (supersede/retire with the record intact; the curator
+  judges direct contradictions) but no longer differentiating: Zep invalidates
+  outdated facts with historical query, and Sentra is bi-temporal with
+  first-class provenance. The old line "anyone can keep text; almost nobody
+  retires it" is false. Keep the capability, drop the claim.
 - **One boundary that holds**: org isolation, project scoping, private scope
   with no admin override.
 - **(Roadmap) The human surface**: context you can see, browse and trust —
@@ -216,7 +296,8 @@ cross-vendor scope + supersession + the human surface.
 | **"We're not spending much on tokens."** | Agree and drop it immediately. It is not our argument, and pressing it after the buyer has said cost isn't a pain reads as not listening. Cost reduction is a consequence we mention after value is established, never a lead. |
 | **"How do we stop someone wrecking the knowledge base?"** | Roles — read / write / manage / admin — plus private, project and org scope. **Do not say branches, PRs or merges.** Klio has none of these; a technical buyer will check and find nothing. Show the members UI instead. |
 | **"Isn't this what Cursor rules / Claude memory already do?"** | Per-tool silos — the exact fragmentation we exist to end. If they use two agents (Claude Code *and* Codex is common), ask what those two share today. The honest answer is usually "a Claude.md, I guess." |
-| **"Can we just self-host / is this lock-in?"** | Engine is AGPL and public; MCP-native by construction. The accumulated knowledge is portable across any model or vendor — the inverse of vendor-native memory. |
+| **"Can we just self-host / is this lock-in?"** | Engine is AGPL and public; MCP-native by construction. The accumulated knowledge is portable across any model or vendor — the inverse of vendor-native memory. Note Cognee is also open source and Sentra ships air-gapped on-prem, so do not present this as unique. |
+| **"How is this different from Sentra / memory.store?"** | Where the memory comes from. They sync Slack, Gmail, Notion and Drive — what people already wrote down somewhere else. Klio is written by your agents while they work, so it captures the reasoning that never got written down anywhere. Then: price — $20/seat against memory.store's $150/user. Do **not** answer with supersession or open source; both are contested. |
 
 ## Anti-persona
 
@@ -278,6 +359,15 @@ embedding details. True, useful, never the headline.
 **Words to use:** workplace, context, handover, supersede/retire, onboarded.
 **Words to avoid:** "brain" (public copy), "token reduction" as a lead,
 "never hallucinates", hype adjectives (per docs AGENTS.md).
+
+**On "brain" — the ban stays, and now for a stronger reason (2026-08-13).**
+It is the most effective word we have in conversation; people understand "one
+brain your agents share" instantly, and it keeps surfacing under pressure. But
+**Sentra's headline is "The Company Brain for your teams and agents"** and
+memory.store's is "One shared memory for your teammates, and agents." Both
+phrasings we gravitate toward are now a competitor's masthead. Using either
+makes us read as the copy, regardless of who built first. Use it in a room if it
+unlocks understanding; never in published copy or a headline.
 **Where the old lead survives and must be fixed:** the OSS README (3 token
 mentions), any deck slide leading with cost; sweep them to the new hierarchy.
 
