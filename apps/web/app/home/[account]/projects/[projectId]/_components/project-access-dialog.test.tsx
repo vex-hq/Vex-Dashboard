@@ -23,6 +23,7 @@ vi.mock('../../_lib/server/projects-actions', () => ({
 function access(overrides: Partial<ProjectAccess> = {}): ProjectAccess {
   return {
     canManage: true,
+    viewerRole: 'admin',
     members: [
       {
         userId: 'user-abhishek',
@@ -103,7 +104,7 @@ describe('<ProjectAccessDialog />', () => {
         accountSlug: 'acme',
         projectId: '11111111-1111-1111-1111-111111111111',
         userId: 'user-teammate',
-        role: 'member',
+        role: 'write',
       });
     });
   });

@@ -192,6 +192,7 @@ describe('<ProjectIssues />', () => {
         recalled30d={1}
         access={{
           canManage: true,
+          viewerRole: 'admin',
           members: [],
           candidates: [],
         }}
@@ -209,6 +210,7 @@ describe('<ProjectIssues />', () => {
         recalled30d={1}
         access={{
           canManage: false,
+          viewerRole: 'read',
           members: [],
           candidates: [],
         }}

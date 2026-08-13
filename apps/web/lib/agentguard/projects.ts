@@ -2,6 +2,10 @@ import 'server-only';
 
 import { getAgentGuardPool } from '~/lib/agentguard/db';
 import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
+import {
+  type ProjectMemberRole,
+  normalizeProjectRole,
+} from '~/lib/agentguard/project-roles';
 
 /**
  * Project writes against the engine database.
@@ -15,7 +19,7 @@ import { recordProjectGrantAudit } from '~/lib/agentguard/project-grant-audit';
  * matches nothing.
  */
 
-export type ProjectMemberRole = 'member' | 'admin';
+export type { ProjectMemberRole };
 
 export class LastProjectAdminError extends Error {
   constructor() {
@@ -131,9 +135,14 @@ export async function grantProjectMember(params: {
   projectId: string;
   userId: string;
   userEmail: string | null;
-  role: ProjectMemberRole;
+  role: ProjectMemberRole | 'member';
   grantedByUserId: string | null;
 }): Promise<boolean> {
+  const role = normalizeProjectRole(params.role);
+  if (!role) {
+    throw new Error(`unsupported project role: ${params.role}`);
+  }
+
   const pool = getAgentGuardPool();
   const client = await pool.connect();
 
@@ -151,7 +160,7 @@ export async function grantProjectMember(params: {
         params.projectId,
         params.orgId,
         params.userId,
-        params.role,
+        role,
         params.grantedByUserId,
       ],
     );
@@ -165,7 +174,7 @@ export async function grantProjectMember(params: {
         grantedTo: params.userId,
         grantedToEmail: params.userEmail,
         grantedBy: params.grantedByUserId,
-        role: params.role,
+        role,
         action: 'grant',
       });
     }

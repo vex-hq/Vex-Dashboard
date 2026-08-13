@@ -71,7 +71,7 @@ CREATE TABLE projects (
 CREATE TABLE project_members (
   project_id uuid NOT NULL,
   user_id varchar NOT NULL,
-  role varchar NOT NULL DEFAULT 'member',
+  role varchar NOT NULL DEFAULT 'write',
   granted_by varchar,
   granted_at timestamptz DEFAULT now(),
   PRIMARY KEY (project_id, user_id)
@@ -85,7 +85,7 @@ CREATE TABLE project_grant_audit (
   granted_to_email varchar,
   granted_by varchar,
   role varchar NOT NULL
-    CONSTRAINT ck_project_grant_audit_role CHECK (role IN ('member','admin')),
+    CONSTRAINT ck_project_grant_audit_role CHECK (role IN ('read','write','manage','admin')),
   surface varchar NOT NULL,
   action varchar NOT NULL DEFAULT 'grant'
     CONSTRAINT ck_project_grant_audit_action CHECK (action IN ('grant','revoke')),
@@ -168,7 +168,7 @@ describe('grants are recorded durably, not only in the log', () => {
         granted_to: BOB,
         granted_to_email: 'bob@oppla.ai',
         granted_by: ALICE,
-        role: 'member',
+        role: 'write',
         surface: 'dashboard',
         action: 'grant',
       },
@@ -193,7 +193,7 @@ describe('grants are recorded durably, not only in the log', () => {
     // of Bob having once been a plain member.
     const rows = await auditRows();
 
-    expect(rows.map((row) => row.role)).toEqual(['member', 'admin']);
+    expect(rows.map((row) => row.role)).toEqual(['write', 'admin']);
     expect(await memberRoles()).toEqual([{ user_id: BOB, role: 'admin' }]);
   });
 
@@ -434,7 +434,7 @@ describe('the audit row and the membership change share one transaction', () => 
 
       // The membership survives. An access change that cannot be recorded is
       // an access change the dashboard does not make.
-      expect(await memberRoles()).toEqual([{ user_id: BOB, role: 'member' }]);
+      expect(await memberRoles()).toEqual([{ user_id: BOB, role: 'write' }]);
     } finally {
       await db.exec(
         `ALTER TABLE project_grant_audit DROP CONSTRAINT tmp_reject_everything`,

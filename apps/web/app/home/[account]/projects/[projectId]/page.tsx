@@ -1,5 +1,9 @@
 import { Trans } from '@kit/ui/trans';
 
+import {
+  isProjectManager,
+  normalizeProjectRole,
+} from '~/lib/agentguard/project-roles';
 import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
@@ -86,11 +90,16 @@ async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const recalled30d =
     usage.find((row) => row.projectId === project.id)?.recalls30d ?? 0;
 
+  const viewerRole = viewer.isOrgAdmin
+    ? 'admin'
+    : normalizeProjectRole(myRole ?? '');
+
   const access: ProjectAccess = {
-    canManage: myRole === 'admin' || viewer.isOrgAdmin,
+    canManage: Boolean(viewerRole && isProjectManager(viewerRole)),
+    viewerRole,
     members: memberRows.map((row) => {
       const person = people.get(row.user_id);
-      const role = row.role === 'admin' ? 'admin' : 'member';
+      const role = normalizeProjectRole(row.role) ?? 'read';
 
       return {
         userId: row.user_id,

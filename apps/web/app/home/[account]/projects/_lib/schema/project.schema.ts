@@ -33,7 +33,7 @@ export const AddProjectMemberSchema = z.object({
   projectId: UUID,
   /** The org member being granted access. Must already be in the org. */
   userId: UUID,
-  role: z.enum(['member', 'admin']).default('member'),
+  role: z.enum(['read', 'write', 'manage', 'admin', 'member']).default('write'),
 });
 
 export const RemoveProjectMemberSchema = z.object({

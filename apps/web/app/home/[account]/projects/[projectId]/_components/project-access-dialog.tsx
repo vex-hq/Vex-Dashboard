@@ -26,13 +26,20 @@ import {
 import { Trans } from '@kit/ui/trans';
 
 import {
+  PROJECT_ROLE_LABEL,
+  type ProjectMemberRole,
+  canTouchProjectMember,
+  grantableProjectRoles,
+} from '~/lib/agentguard/project-roles';
+
+import {
   addProjectMemberAction,
   removeProjectMemberAction,
 } from '../../_lib/server/projects-actions';
 
 export interface ProjectAccessMember {
   userId: string;
-  role: 'member' | 'admin';
+  role: ProjectMemberRole;
   name: string;
   email: string | null;
 }
@@ -45,6 +52,7 @@ export interface ProjectAccessCandidate {
 
 export interface ProjectAccess {
   canManage: boolean;
+  viewerRole: ProjectMemberRole | null;
   members: ProjectAccessMember[];
   candidates: ProjectAccessCandidate[];
 }
@@ -91,6 +99,7 @@ export function ProjectAccessDialog({
           <ProjectAccessForm
             accountSlug={accountSlug}
             projectId={projectId}
+            viewerRole={access.viewerRole}
             members={access.members}
             candidates={access.candidates}
           />
@@ -103,18 +112,23 @@ export function ProjectAccessDialog({
 function ProjectAccessForm({
   accountSlug,
   projectId,
+  viewerRole,
   members,
   candidates,
 }: {
   accountSlug: string;
   projectId: string;
+  viewerRole: ProjectMemberRole | null;
   members: ProjectAccessMember[];
   candidates: ProjectAccessCandidate[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [role, setRole] = useState<'member' | 'admin'>('member');
+  const grantable = grantableProjectRoles(viewerRole);
+  const [role, setRole] = useState<ProjectMemberRole>(
+    grantable.includes('write') ? 'write' : (grantable[0] ?? 'write'),
+  );
   const [error, setError] = useState<string | null>(null);
 
   const addable = useMemo(() => {
@@ -123,6 +137,29 @@ function ProjectAccessForm({
   }, [candidates, members]);
 
   const adminCount = members.filter((member) => member.role === 'admin').length;
+
+  function handleChangeRole(userId: string, nextRole: ProjectMemberRole) {
+    setError(null);
+
+    startTransition(async () => {
+      try {
+        await addProjectMemberAction({
+          accountSlug,
+          projectId,
+          userId,
+          role: nextRole,
+        });
+        router.refresh();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : '';
+        setError(
+          message.includes('last admin')
+            ? 'projects.lastAdmin'
+            : 'projects.addMemberFailed',
+        );
+      }
+    });
+  }
 
   function handleAdd() {
     if (!selectedUserId) return;
@@ -170,8 +207,8 @@ function ProjectAccessForm({
         </DialogTitle>
         <DialogDescription>
           <Trans i18nKey="agentguard:projects.settingsDescription">
-            Only these people can open this project. Grant access to someone
-            already in the workspace.
+            Everyone here can open the project. Read cannot add memories. Write
+            can. Manage can grant Read and Write. Admin can grant any role.
           </Trans>
         </DialogDescription>
       </DialogHeader>
@@ -224,7 +261,7 @@ function ProjectAccessForm({
             </label>
             <Select
               value={role}
-              onValueChange={(value) => setRole(value as 'member' | 'admin')}
+              onValueChange={(value) => setRole(value as ProjectMemberRole)}
             >
               <SelectTrigger
                 id="grant-role"
@@ -234,8 +271,11 @@ function ProjectAccessForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="member">Can view</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
+                {grantable.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {PROJECT_ROLE_LABEL[option]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -264,6 +304,11 @@ function ProjectAccessForm({
           <ul className="divide-border divide-y rounded-md border">
             {members.map((member) => {
               const lastAdmin = member.role === 'admin' && adminCount === 1;
+              const canEdit = canTouchProjectMember(viewerRole, member.role);
+              const memberGrantable = grantableProjectRoles(viewerRole).filter(
+                (option) =>
+                  option !== 'admin' || !lastAdmin || member.role === 'admin',
+              );
 
               return (
                 <li
@@ -281,15 +326,42 @@ function ProjectAccessForm({
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <span className="text-muted-foreground text-xs">
-                      {member.role === 'admin' ? 'Admin' : 'Can view'}
-                    </span>
+                    {canEdit ? (
+                      <Select
+                        value={member.role}
+                        disabled={pending}
+                        onValueChange={(value) =>
+                          handleChangeRole(
+                            member.userId,
+                            value as ProjectMemberRole,
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-8 w-28"
+                          data-testid={`project-role-${member.userId}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {memberGrantable.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {PROJECT_ROLE_LABEL[option]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">
+                        {PROJECT_ROLE_LABEL[member.role]}
+                      </span>
+                    )}
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       data-testid={`project-revoke-${member.userId}`}
-                      disabled={pending || lastAdmin}
+                      disabled={pending || lastAdmin || !canEdit}
                       title={
                         lastAdmin
                           ? 'A project needs at least one admin'

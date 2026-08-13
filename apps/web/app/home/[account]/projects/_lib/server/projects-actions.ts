@@ -8,6 +8,13 @@ import { getSupabaseServerClient } from '@kit/supabase/server-client';
 
 import { loadAccountViewer } from '~/home/[account]/_lib/server/account-viewer';
 import {
+  canAssignProjectRole,
+  canTouchProjectMember,
+  isProjectManager,
+  normalizeProjectRole,
+} from '~/lib/agentguard/project-roles';
+import {
+  LastProjectAdminError,
   createProject,
   grantProjectMember,
   revokeProjectMember,
@@ -19,7 +26,7 @@ import {
   CreateProjectSchema,
   RemoveProjectMemberSchema,
 } from '../schema/project.schema';
-import { loadMyProjectRole } from './projects.loader';
+import { loadMyProjectRole, loadProjectMembers } from './projects.loader';
 
 /**
  * Project write actions.
@@ -56,30 +63,32 @@ class ProjectPermissionError extends Error {
 }
 
 /**
- * Assert the caller administers `projectId`, returning the org id.
+ * Assert the caller may change this project's member list.
  *
- * Org admins qualify by role. Everyone else must hold an `admin` membership
- * row on that specific project.
+ * Org admins act as project Admin. Everyone else needs Manage or Admin
+ * on the project itself.
  */
-async function requireProjectAdmin(accountSlug: string, projectId: string) {
+async function requireProjectManager(accountSlug: string, projectId: string) {
   const [orgId, viewer] = await Promise.all([
     resolveOrgId(accountSlug),
     loadAccountViewer(accountSlug),
   ]);
 
   if (viewer.isOrgAdmin) {
-    return { orgId, viewer };
+    return { orgId, viewer, actorRole: 'admin' as const };
   }
 
-  const role = await loadMyProjectRole(projectId, viewer.userId);
+  const role = normalizeProjectRole(
+    (await loadMyProjectRole(projectId, viewer.userId)) ?? '',
+  );
 
-  if (role !== 'admin') {
+  if (!role || !isProjectManager(role)) {
     throw new ProjectPermissionError(
-      'Forbidden: you do not administer this project',
+      'Forbidden: you do not manage this project',
     );
   }
 
-  return { orgId, viewer };
+  return { orgId, viewer, actorRole: role };
 }
 
 /**
@@ -173,10 +182,37 @@ export const createProjectAction = enhanceAction(
 
 export const addProjectMemberAction = enhanceAction(
   async (data) => {
-    const { orgId, viewer } = await requireProjectAdmin(
+    const { orgId, viewer, actorRole } = await requireProjectManager(
       data.accountSlug,
       data.projectId,
     );
+
+    const newRole = normalizeProjectRole(data.role);
+    if (!newRole) {
+      throw new ProjectPermissionError('Invalid role');
+    }
+
+    const existing = normalizeProjectRole(
+      (await loadMyProjectRole(data.projectId, data.userId)) ?? '',
+    );
+
+    if (existing && !canTouchProjectMember(actorRole, existing)) {
+      throw new ProjectPermissionError(
+        'Forbidden: you cannot change that member',
+      );
+    }
+
+    if (!canAssignProjectRole(actorRole, newRole)) {
+      throw new ProjectPermissionError('Forbidden: you cannot grant that role');
+    }
+
+    if (existing === 'admin' && newRole !== 'admin') {
+      const members = await loadProjectMembers(data.projectId);
+      const admins = members.filter((row) => row.role === 'admin').length;
+      if (admins <= 1) {
+        throw new LastProjectAdminError();
+      }
+    }
 
     const member = await requireOrgMember(data.accountSlug, data.userId);
 
@@ -185,7 +221,7 @@ export const addProjectMemberAction = enhanceAction(
       projectId: data.projectId,
       userId: data.userId,
       userEmail: member.email ?? null,
-      role: data.role,
+      role: newRole,
       grantedByUserId: viewer.userId,
     });
 
@@ -217,10 +253,20 @@ export const addProjectMemberAction = enhanceAction(
 
 export const removeProjectMemberAction = enhanceAction(
   async (data) => {
-    const { orgId, viewer } = await requireProjectAdmin(
+    const { orgId, viewer, actorRole } = await requireProjectManager(
       data.accountSlug,
       data.projectId,
     );
+
+    const existing = normalizeProjectRole(
+      (await loadMyProjectRole(data.projectId, data.userId)) ?? '',
+    );
+
+    if (existing && !canTouchProjectMember(actorRole, existing)) {
+      throw new ProjectPermissionError(
+        'Forbidden: you cannot change that member',
+      );
+    }
 
     const revoked = await revokeProjectMember({
       orgId,
