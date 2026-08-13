@@ -52,11 +52,6 @@ const getRoutes = (account: string) => [
         Icon: <Hexagon className={iconClasses} />,
         end: true,
       },
-    ],
-  },
-  {
-    label: 'agentguard:nav.workspace',
-    children: [
       {
         label: 'agentguard:nav.inbox',
         path: createPath(pathsConfig.app.accountInbox, account),
