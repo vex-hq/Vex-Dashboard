@@ -19,6 +19,70 @@ beautiful experience. The hierarchy: **context management (the WHAT) ← shared
 memory (the HOW) → instant onboarding (the PROOF).** Trust pillar unchanged:
 open-core, MCP-native, org-boundary isolation.
 
+## Category: coordination, not memory (decided 2026-08-13)
+
+**Klio is the coordination layer for multi-agent work — for agents and humans
+on the same context.** It is not a memory product. Memory is the substrate;
+coordination is the job.
+
+Why this and not "memory": the memory category is commoditising fast and every
+attribute is matched (see Competitive Landscape). Coordination is a
+**distributed-systems** problem — locking, consistency, conflict resolution,
+propagation. The memory vendors are solving a *retrieval* problem, which is an
+ML problem. Different discipline, different hires, and it does not commoditise
+when the next model ships.
+
+**Framing that lands:** agents today are engineers with no standup, no ticket
+board and no Slack. Enterprises run ~12 agents on average and roughly half
+operate alone. Klio is where they coordinate.
+
+### Coordination primitives — four shipped, four missing
+
+| Have | Missing |
+| --- | --- |
+| Shared context | **Claims / leases** — "I'm refactoring auth", so two agents don't do the same work twice |
+| Scoped visibility (private / project / org) | **Concurrency control** — two agents writing contradicting beliefs at once |
+| Provenance (who or what asserted this) | **Handoff** — next agent resumes with state instead of re-deriving |
+| Supersession | **Approval gates** — human in the loop before a high-blast-radius org-wide write |
+
+The four we have were built because coordination was the real problem; the
+memory framing came later and undersold them.
+
+**Claims are where the semantic advantage shows.** Exact-key locking is useless
+when "auth refactor" and "fixing login token expiry" are the same work under two
+names. We have embeddings, so we can detect *semantic* collision — "agent B
+claimed something 0.89 similar, 20 minutes ago." A conventional lock manager
+cannot do that; the memory vendors are not thinking about locking at all.
+
+### Enforcement: deterministic local, probabilistic cloud
+
+This distinction is load-bearing and must be stated accurately — do not
+overclaim it.
+
+- **Local agents (Claude Code, Cursor, Codex, self-built): deterministic.** The
+  harness runs our code, the model is not consulted. `SessionStart` injects
+  before the agent thinks; `UserPromptSubmit` refreshes every turn;
+  **`PreToolUse` can outright block** an edit to a file another agent has
+  claimed. That last one is genuine mutual exclusion, not advisory.
+- **Cloud agents (claude.ai, ChatGPT, hosted): probabilistic.** Reads *and*
+  writes both work — they are tool calls, and the proactive-write instruction at
+  `mcp_app.py:141` gets the agent writing unprompted. What is impossible is
+  server-initiated push: the MCP spec leaves delivery to the client
+  ("application-driven"), Claude Code's experimental `notifications/claude/channel`
+  does not reach model context ([claude-code#45563](https://github.com/anthropics/claude-code/issues/45563)),
+  and the Messages API connector supports **tool calls only**.
+
+So: Klio works everywhere, and can only *guarantee* it locally. Say exactly
+that. The honest line is **"both directions work in both places; only the
+certainty differs."**
+
+**Distribution follows from this.** The local injection ladder, strongest first:
+hooks where the harness has them → enriched tool responses everywhere else
+(every Klio call returns its answer *plus* what changed) → a local proxy as the
+ceiling. Static rule files carry an instruction but cannot carry fresh data, so
+they buy almost nothing for us. Caveman proves the shape works across 30+ agents
+with a one-command install.
+
 ## The core objection and its answer (decided 2026-08-13)
 
 Every technical buyer asks the same question, and it is the only one that
