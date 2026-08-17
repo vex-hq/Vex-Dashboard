@@ -13,7 +13,10 @@ import { FeaturebaseMessenger } from '~/components/featurebase-messenger';
 // import { LiveSupportButton } from '~/components/live-support-button';
 import featureFlagsConfig from '~/config/feature-flags.config';
 import pathsConfig from '~/config/paths.config';
-import { getTeamAccountSidebarConfig } from '~/config/team-account-navigation.config';
+import {
+  type SidebarCounts,
+  getTeamAccountSidebarConfig,
+} from '~/config/team-account-navigation.config';
 
 import { TeamAccountAccountsSelector } from '../_components/team-account-accounts-selector';
 import { TeamAccountLayoutSidebarNavigation } from './team-account-layout-sidebar-navigation';
@@ -29,6 +32,7 @@ export function TeamAccountLayoutSidebar(props: {
   accountId: string;
   accounts: AccountModel[];
   user: JWTUserData;
+  counts?: SidebarCounts;
 }) {
   return (
     <SidebarContainer
@@ -36,6 +40,7 @@ export function TeamAccountLayoutSidebar(props: {
       accountId={props.accountId}
       accounts={props.accounts}
       user={props.user}
+      counts={props.counts}
     />
   );
 }
@@ -75,11 +80,12 @@ function SidebarContainer(props: {
   accountId: string;
   accounts: AccountModel[];
   user: JWTUserData;
+  counts?: SidebarCounts;
 }) {
   const { account, accounts, user } = props;
   const userId = user.id;
 
-  const config = getTeamAccountSidebarConfig(account);
+  const config = getTeamAccountSidebarConfig(account, props.counts);
   const collapsible = config.sidebarCollapsedStyle;
   const dropdownLinks = getDropdownLinks(account);
 

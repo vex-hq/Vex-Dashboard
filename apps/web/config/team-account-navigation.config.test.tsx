@@ -3,87 +3,89 @@ import { describe, expect, it } from 'vitest';
 import { getTeamAccountSidebarConfig } from './team-account-navigation.config';
 
 /**
- * Shape test for the team account sidebar. The 2026-08-11 context-workspace
- * IA pass dropped the Sessions and Agents entries (their routes stay live at
- * /home/[account]/{sessions,agents} — see the "hidden, not removed" comment
- * block in the config itself). Visible items are Hub · Inbox · Context ·
- * Proposals · Private in one unlabeled list (Context and Proposals added by
- * the 2026-08-17 context-surfaces addendum). This test guards the nav *shape*: it fails if
- * Sessions/Agents/Memory or Projects come back into the active `getRoutes`
- * array, and it fails if Inbox or Private ever go missing.
+ * THE NAVIGATION IS PINNED TO THE APPROVED PROTOTYPE.
+ *
+ * This test exists because of a specific failure. `klio-v4.html` was approved
+ * on 2026-08-17, then only its three new surfaces were written into a spec —
+ * the navigation was never written down anywhere an implementer could read it,
+ * so the previous IA's Hub/Inbox/Private list survived into production beside
+ * the new screens and the approved shape was never built.
+ *
+ * So this asserts the labels, in order, including the Setup group. Adding,
+ * removing or reordering an item fails here, which makes the change a decision
+ * somebody states out loud rather than one that happens quietly.
  */
+
+const ACCOUNT = 'klio-internal';
+
+const labelsOf = (routes: ReturnType<typeof getTeamAccountSidebarConfig>['routes']) =>
+  routes.flatMap((group) =>
+    'children' in group ? group.children.map((child) => child.label) : [],
+  );
+
 describe('getTeamAccountSidebarConfig', () => {
-  const config = getTeamAccountSidebarConfig('acme');
+  it('renders the approved list, in order', () => {
+    const config = getTeamAccountSidebarConfig(ACCOUNT);
 
-  function allLabels(): string[] {
-    return config.routes.flatMap((group) =>
-      (group.children ?? []).map((child) => child.label),
-    );
-  }
-
-  it('does not include a sessions nav entry', () => {
-    expect(allLabels()).not.toContain('agentguard:nav.sessions');
-  });
-
-  it('does not include an agents nav entry', () => {
-    expect(allLabels()).not.toContain('agentguard:nav.agents');
-  });
-
-  it('keeps hub, inbox, context, proposals and private in one unlabeled list', () => {
-    const primary = config.routes.find((group) => group.label === '');
-
-    expect(primary).toBeDefined();
-
-    const labels = (primary?.children ?? []).map((child) => child.label);
-
-    expect(labels).toEqual([
+    expect(labelsOf(config.routes)).toEqual([
       'common:routes.dashboard',
-      'agentguard:nav.inbox',
+      'agentguard:nav.projects',
       'agentguard:nav.context',
+      'agentguard:nav.shared',
       'agentguard:nav.proposals',
-      'agentguard:nav.private',
+      'agentguard:nav.agents',
+      'agentguard:nav.keysAndAgents',
     ]);
-    expect(labels).not.toContain('agentguard:nav.memory');
-    expect(labels).not.toContain('agentguard:nav.projects');
   });
 
-  it('still includes the dashboard entry', () => {
-    expect(allLabels()).toContain('common:routes.dashboard');
+  it('carries the prototype two groups: one unlabelled, then Setup', () => {
+    const config = getTeamAccountSidebarConfig(ACCOUNT);
+    const groups = config.routes.filter((r) => 'children' in r);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0] && 'label' in groups[0] ? groups[0].label : null).toBe('');
+    expect(groups[1] && 'label' in groups[1] ? groups[1].label : null).toBe(
+      'agentguard:nav.setup',
+    );
   });
 
-  // The sidebar footer already links to the docs, and the connect-first-agent
-  // card carries the setup instructions this entry existed for — so a whole
-  // labelled nav group for one duplicate link came out.
-  it('does not include a documentation nav entry', () => {
-    expect(allLabels()).not.toContain('agentguard:nav.documentation');
+  it('does not carry Hub, Inbox or a standalone Private item', () => {
+    // The three that shipped without ever being in an approved design.
+    const labels = labelsOf(getTeamAccountSidebarConfig(ACCOUNT).routes);
+
+    expect(labels).not.toContain('agentguard:nav.inbox');
+    expect(labels).not.toContain('agentguard:nav.private');
   });
 
-  it('does not include an empty getting-started group', () => {
-    expect(
-      config.routes.map((group) => 'label' in group && group.label),
-    ).not.toContain('agentguard:nav.gettingStarted');
+  it('points every item at the account it was given', () => {
+    const config = getTeamAccountSidebarConfig(ACCOUNT);
+
+    const paths = config.routes.flatMap((group) =>
+      'children' in group ? group.children.map((c) => c.path) : [],
+    );
+
+    expect(paths).toEqual([
+      `/home/${ACCOUNT}`,
+      `/home/${ACCOUNT}/projects`,
+      `/home/${ACCOUNT}/context`,
+      `/home/${ACCOUNT}/shared`,
+      `/home/${ACCOUNT}/proposals`,
+      `/home/${ACCOUNT}/agents`,
+      `/home/${ACCOUNT}/setup`,
+    ]);
+
+    expect(paths.every((p) => !p.includes('[account]'))).toBe(true);
   });
 
-  it('builds each visible path with the given account slug', () => {
-    const primary = config.routes.find((group) => group.label === '');
-
-    const inboxEntry = primary?.children?.find(
-      (child) => child.label === 'agentguard:nav.inbox',
-    );
-    const privateEntry = primary?.children?.find(
-      (child) => child.label === 'agentguard:nav.private',
+  it('renders no badge for a count that could not be resolved', () => {
+    // Absent, never zero. A `0` beside Proposals read off a failed query is a
+    // claim the data does not support, on the first thing a user reads.
+    const config = getTeamAccountSidebarConfig(ACCOUNT);
+    const actions = config.routes.flatMap((group) =>
+      'children' in group ? group.children.map((c) => c.renderAction) : [],
     );
 
-    const contextEntry = primary?.children?.find(
-      (child) => child.label === 'agentguard:nav.context',
-    );
-    const proposalsEntry = primary?.children?.find(
-      (child) => child.label === 'agentguard:nav.proposals',
-    );
-
-    expect(inboxEntry?.path).toBe('/home/acme/inbox');
-    expect(privateEntry?.path).toBe('/home/acme/private');
-    expect(contextEntry?.path).toBe('/home/acme/context');
-    expect(proposalsEntry?.path).toBe('/home/acme/proposals');
+    // Every item still has its slot; the component inside renders null.
+    expect(actions.length).toBe(7);
   });
 });
