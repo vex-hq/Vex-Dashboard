@@ -2,61 +2,46 @@ import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
-import { ConnectFirstAgent } from './_components/connect-first-agent';
-import { ConnectYourAgent } from './_components/connect-your-agent';
-import { HubProjects } from './_components/hub-projects';
-import { LinearPanel } from './_components/linear-panel';
-import { buildHubProjectRows } from './_lib/hub-projects-model';
+import { ShellNote, StatCards } from './_components/shell/shell-chrome';
+import { ShellList } from './_components/shell/shell-list';
+import { ShellPage } from './_components/shell/shell-page';
 import { loadAccountViewer } from './_lib/server/account-viewer';
-import { loadProjectPulse } from './_lib/server/context-stream.loader';
-import { loadContextUsage } from './_lib/server/context-usage.loader';
-import { loadHubSummary } from './_lib/server/hub-summary.loader';
-import {
-  loadHasAnyMemory,
-  loadViewerHasWritten,
-} from './_lib/server/workspace-activity.loader';
-import { loadWorkspacePeople } from './_lib/server/workspace-people.loader';
+import { orFallback, loadShellContextData } from './_lib/server/shell-data';
+import { loadShellHomeStats } from './_lib/server/shell-stats.loader';
+import { SHELL_COPY } from './_lib/shell/shell-copy';
 
 interface TeamAccountHomePageProps {
   params: Promise<{ account: string }>;
 }
 
-/**
- * Run one dashboard loader, degrading to `fallback` if it fails.
- *
- * The homepage fans out to several loaders against the engine database. They
- * used to share fate through Promise.all: one cold Neon resume blowing the
- * connect budget threw an AggregateError(ETIMEDOUT) out of the server
- * component and the whole page became an error screen (seen in production,
- * digests 1176364607 / 1376536570). A dashboard tile with no data is worth
- * strictly more than a crash page, so each loader now fails alone: the error
- * is logged with its label and the tile renders its empty state.
- */
-async function orFallback<T>(
-  label: string,
-  fallback: T,
-  run: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    console.error(`[homepage] loader "${label}" failed; rendering fallback`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    return fallback;
-  }
-}
-
 export const generateMetadata = async () => {
   const i18n = await createI18nServerInstance();
-  const title = i18n.t('agentguard:homepage.pageTitle');
 
-  return {
-    title,
-  };
+  return { title: i18n.t('common:routes.dashboard') };
 };
 
+const ZERO_STATS = {
+  contextItems: 0,
+  projects: 0,
+  recallsServed: 0,
+  privateActive: 0,
+  orgActive: 0,
+};
+
+/**
+ * Home — "what your agents are working from".
+ *
+ * Four numbers, one uncomfortable fact, then the context itself.
+ *
+ * This replaces the Hub's projects table. That table was styled after Linear's
+ * Projects page and carried its column set — Health, Priority, Lead, Target
+ * date, Issues, Status — of which two had no backing field at all and one
+ * ("Issues") labelled the memory count. None of it is in the approved
+ * prototype; the projects list lives at /projects now, with three columns.
+ *
+ * `recallsAcrossLoaded` is summed from the rows actually loaded because the
+ * card says "recalls across top N" and must agree with the list beneath it.
+ */
 async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
   const { account } = await params;
 
@@ -64,77 +49,63 @@ async function TeamAccountHomePage({ params }: TeamAccountHomePageProps) {
     resolveOrgId(account),
     loadAccountViewer(account),
   ]);
-  const viewerUserId = viewer.userId;
 
-  const [hubSummary, usage, pulses, hasAnyMemory, viewerHasWritten, people] =
-    await Promise.all([
-      orFallback(
-        'hubSummary',
-        {
-          decisions7d: 0,
-          plans7d: 0,
-          facts7d: 0,
-          notes7d: 0,
-          projectsActive7d: 0,
-          agentsActive7d: [],
-          lastActivityAt: null,
-          volume30d: [],
-          projectSparks: [],
-        },
-        () => loadHubSummary(orgId, viewerUserId),
-      ),
-      orFallback('contextUsage', [], () => loadContextUsage(orgId)),
-      orFallback('projectPulse', [], () =>
-        loadProjectPulse(orgId, viewerUserId),
-      ),
-      // Fallback is `true` (assume connected), the INVERSE of every other
-      // loader's fallback on this page. This is deliberate: the second
-      // production fault here was that a FAILED probe used to fall back to
-      // `[]`, and `[].every(...)` is vacuously true, so a query failure and a
-      // genuinely empty workspace were indistinguishable and both nagged the
-      // user with the connect card. Assuming "connected" on failure means a
-      // transient DB error never shows the card to an active user — the worst
-      // case is a truly new workspace briefly not seeing the card, which is
-      // far cheaper than nagging someone mid-incident.
-      orFallback('hasAnyMemory', true, () => loadHasAnyMemory(orgId)),
-      orFallback('viewerHasWritten', true, () =>
-        loadViewerHasWritten(orgId, viewerUserId),
-      ),
-      orFallback('workspacePeople', new Map(), () =>
-        loadWorkspacePeople(account),
-      ),
-    ]);
-
-  // Usage is org-wide. Pulse and sparks are visibility-gated. Only count
-  // usage for projects the viewer can already see.
-  const visibleProjectIds = new Set<string>([
-    ...hubSummary.projectSparks.map((spark) => spark.projectId),
-    ...pulses.map((pulse) => pulse.projectId),
+  const [data, stats] = await Promise.all([
+    loadShellContextData(account),
+    orFallback('homeStats', ZERO_STATS, () =>
+      loadShellHomeStats(orgId, viewer.userId),
+    ),
   ]);
-  const visibleUsage = usage.filter(
-    (row) => row.projectId !== null && visibleProjectIds.has(row.projectId),
-  );
-  const projectRows = buildHubProjectRows(
-    visibleUsage,
-    pulses,
-    hubSummary.projectSparks,
-    new Date(),
-    people,
+
+  const recallsAcrossLoaded = data.items.reduce(
+    (total, item) => total + item.recalls,
+    0,
   );
 
   return (
-    <LinearPanel>
-      {hasAnyMemory === false ? (
-        <div className="px-4 pt-4">
-          <ConnectFirstAgent accountSlug={account} />
-        </div>
-      ) : viewerHasWritten === false ? (
-        <div className="px-4 pt-4">
-          <ConnectYourAgent accountSlug={account} />
-        </div>
-      ) : null}
-      <HubProjects rows={projectRows} accountSlug={account} />
-    </LinearPanel>
+    <ShellPage
+      title={SHELL_COPY.home.title}
+      subtitle={SHELL_COPY.home.subtitle}
+    >
+      <ShellList
+        items={data.items}
+        kinds={data.kinds}
+        projects={data.projects.map((p) => ({ name: p.name, count: p.items }))}
+        accountSlug={account}
+        above={
+          <div className="flex flex-col gap-3">
+            <StatCards
+              stats={[
+                {
+                  value: stats.contextItems.toLocaleString(),
+                  label: 'context items',
+                },
+                {
+                  value: recallsAcrossLoaded.toLocaleString(),
+                  label: `recalls across top ${data.items.length}`,
+                },
+                {
+                  value: stats.recallsServed.toLocaleString(),
+                  label: 'recalls served',
+                },
+                {
+                  value: stats.projects.toLocaleString(),
+                  label: 'projects',
+                },
+              ]}
+            />
+
+            <ShellNote>
+              Scope reality: {stats.privateActive.toLocaleString()} private ·{' '}
+              {stats.orgActive.toLocaleString()} org-scoped.{' '}
+              {stats.orgActive === 0
+                ? 'Nothing has been shared yet — a team stream would be empty.'
+                : 'Sharing is what makes this a team brain.'}
+            </ShellNote>
+          </div>
+        }
+      />
+    </ShellPage>
   );
 }
 

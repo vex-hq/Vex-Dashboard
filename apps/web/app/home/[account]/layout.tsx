@@ -17,7 +17,10 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 import { PersistLastAccount } from './_components/persist-last-account';
 // local imports
 import { TeamAccountLayoutMobileNavigation } from './_components/team-account-layout-mobile-navigation';
+import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
+
 import { TeamAccountLayoutSidebar } from './_components/team-account-layout-sidebar';
+import { loadShellNavCounts } from './_lib/server/shell-stats.loader';
 import { TeamAccountNavigationMenu } from './_components/team-account-navigation-menu';
 import { loadTeamWorkspace } from './_lib/server/team-account-workspace.loader';
 
@@ -88,6 +91,7 @@ async function SidebarLayout({
               accountId={data.account.id}
               accounts={accounts}
               user={data.user}
+              counts={await loadSidebarCounts(account, data.user.id)}
             />
           </PageNavigation>
 
@@ -147,6 +151,28 @@ function HeaderLayout({
       </Page>
     </TeamAccountWorkspaceContextProvider>
   );
+}
+
+/**
+ * The nav counts, resolved once per request.
+ *
+ * Wrapped so a failure degrades to a nav with no badges rather than an error
+ * boundary swallowing every page in the account — the sidebar renders on all
+ * of them. `loadShellNavCounts` already catches its own query errors; this
+ * catches everything upstream of them, org resolution included.
+ */
+async function loadSidebarCounts(account: string, userId: string) {
+  try {
+    const orgId = await resolveOrgId(account);
+
+    return await loadShellNavCounts(orgId, userId);
+  } catch (error) {
+    console.error('[shell] sidebar counts failed; rendering without badges', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return undefined;
+  }
 }
 
 async function getLayoutState(account: string) {

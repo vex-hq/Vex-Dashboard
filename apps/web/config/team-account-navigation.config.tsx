@@ -1,4 +1,12 @@
-import { Hexagon, Inbox, Layers, Lightbulb, Lock } from 'lucide-react';
+import {
+  BookOpen,
+  FolderGit2,
+  Hexagon,
+  Layers,
+  Lightbulb,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -42,7 +50,58 @@ const iconClasses = 'w-4';
  * when that org has data behind it. That needs this config to become
  * data-aware, which is a bigger change than the pruning it would justify today.
  */
-const getRoutes = (account: string) => [
+/**
+ * The nav counts. Absent means "not resolved" and renders no badge — see
+ * `shell-stats.loader`, which returns nulls rather than zeros on failure,
+ * because a `0` beside Proposals is a claim and this nav is the first thing a
+ * user reads.
+ */
+export interface SidebarCounts {
+  projects: number | null;
+  context: number | null;
+  shared: number | null;
+  proposals: number | null;
+  agents: number | null;
+}
+
+const NO_COUNTS: SidebarCounts = {
+  projects: null,
+  context: null,
+  shared: null,
+  proposals: null,
+  agents: null,
+};
+
+function Count({ value }: { value: number | null }) {
+  if (value === null) return null;
+
+  return (
+    <span className="text-[11px] tabular-nums text-muted-foreground">
+      {value.toLocaleString()}
+    </span>
+  );
+}
+
+/**
+ * THE SIDEBAR IS THE APPROVED PROTOTYPE'S, ITEM FOR ITEM.
+ *
+ * Home · Projects · Context · Shared · Proposals · Agents, each with a live
+ * count, then a Setup group holding "Keys & agents". That list is transcribed
+ * from `klio-v4.html` and is fixed by `team-account-navigation.config.test.tsx`,
+ * which asserts the labels in order and fails if an item is added, removed or
+ * reordered.
+ *
+ * The test exists because of what happened without it. The prototype was
+ * approved on 2026-08-17 and then only its three new surfaces were specced;
+ * the navigation was never written down, so the Hub/Inbox/Private list from
+ * the previous IA survived into production beside them and the approved shape
+ * was never built. A nav that nobody wrote down is a nav that drifts.
+ *
+ * Adding an item here is therefore a decision to be made out loud: change the
+ * test in the same commit, and say which approved design the new item comes
+ * from.
+ */
+const getRoutes = (account: string, counts: SidebarCounts) => [
   {
     label: '',
     children: [
@@ -53,156 +112,61 @@ const getRoutes = (account: string) => [
         end: true,
       },
       {
-        label: 'agentguard:nav.inbox',
-        path: createPath(pathsConfig.app.accountInbox, account),
-        Icon: <Inbox className={iconClasses} />,
+        label: 'agentguard:nav.projects',
+        path: createPath(pathsConfig.app.accountProjects, account),
+        Icon: <FolderGit2 className={iconClasses} />,
         end: true,
+        renderAction: <Count value={counts.projects} />,
       },
-      // ── Context surfaces (2026-08-17 addendum) ───────────────────────────
-      // Context is the shared/private split: the two groups are the security
-      // boundary made visible, and they are the only place a human turns
-      // private context into team context. Proposals is the dreamer's review
-      // queue — it will usually be empty, and that is the normal state, not a
-      // reason to hide the entry: a queue nobody can find is a queue nobody
-      // works.
       {
         label: 'agentguard:nav.context',
         path: createPath(pathsConfig.app.accountContext, account),
         Icon: <Layers className={iconClasses} />,
         end: true,
+        renderAction: <Count value={counts.context} />,
+      },
+      {
+        label: 'agentguard:nav.shared',
+        path: createPath(pathsConfig.app.accountShared, account),
+        Icon: <Users className={iconClasses} />,
+        end: true,
+        renderAction: <Count value={counts.shared} />,
       },
       {
         label: 'agentguard:nav.proposals',
         path: createPath(pathsConfig.app.accountProposals, account),
         Icon: <Lightbulb className={iconClasses} />,
         end: true,
+        renderAction: <Count value={counts.proposals} />,
       },
       {
-        label: 'agentguard:nav.private',
-        path: createPath(pathsConfig.app.accountPrivate, account),
-        Icon: <Lock className={iconClasses} />,
+        label: 'agentguard:nav.agents',
+        path: createPath(pathsConfig.app.accountAgents, account),
+        Icon: <Sparkles className={iconClasses} />,
         end: true,
+        renderAction: <Count value={counts.agents} />,
       },
-      // Memory and Projects stay live at /home/[account]/{memory,projects}.
-      // They left the sidebar so the pane is one product: Hub · Inbox · Private.
     ],
   },
-  // ── Getting Started / Documentation — hidden, not removed ─────────────────
-  // A whole labelled nav group for one link that the sidebar footer already
-  // carries as "Docs". The connection instructions it was surfaced for now
-  // live on the home screen itself (the connect-first-agent card), so this
-  // was the third route to the same place. Route remains live at
-  // /home/[account]/docs. To restore, uncomment.
-  //
-  // {
-  //   label: 'agentguard:nav.gettingStarted',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.documentation',
-  //       path: createPath(pathsConfig.app.accountDocs, account),
-  //       Icon: <BookOpen className={iconClasses} />,
-  //     },
-  //   ],
-  // },
-
-  // ── Sessions / Agents — hidden, not removed ───────────────────────────────
-  // Both are real, populated pages (session_memories: 37k rows / 272 sessions).
-  // Dropped from the target IA (Home · Projects · Memory · Docs) by the
-  // 2026-08-11 context-workspace pass, not because the data is dead — Memory
-  // and Projects now carry that surface area. Routes remain live at
-  // /home/[account]/{sessions,agents}. To restore an item, uncomment it.
-  //
-  // {
-  //   label: 'agentguard:nav.workspace',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.sessions',
-  //       path: createPath(pathsConfig.app.accountSessions, account),
-  //       Icon: <Activity className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.agents',
-  //       path: createPath(pathsConfig.app.accountAgents, account),
-  //       Icon: <Sparkles className={iconClasses} />,
-  //     },
-  //   ],
-  // },
-
-  // ── Vex reliability console — hidden, not removed ──────────────────────────
-  // Fed only via the Vex SDK; empty for every memory-only org.
-  // Routes remain live at
-  // /home/[account]/{execution-sessions,agents/failures,alerts,tools}.
-  //
-  // {
-  //   label: 'agentguard:nav.monitoring',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.executionSessions',
-  //       path: createPath(pathsConfig.app.accountExecutionSessions, account),
-  //       Icon: <Activity className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.failures',
-  //       path: createPath(pathsConfig.app.accountFailures, account),
-  //       Icon: <ShieldAlert className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.alerts',
-  //       path: createPath(pathsConfig.app.accountAlerts, account),
-  //       Icon: <AlertTriangle className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.toolUsage',
-  //       path: createPath(pathsConfig.app.accountToolUsage, account),
-  //       Icon: <Wrench className={iconClasses} />,
-  //     },
-  //   ],
-  // },
-
-  // ── Evals — hidden, not removed ───────────────────────────────────────────
-  // `datasets` has never held a row; `experiments` holds two. Dead for all orgs.
-  //
-  // {
-  //   label: 'agentguard:nav.evals',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.experiments',
-  //       path: createPath(pathsConfig.app.accountExperiments, account),
-  //       Icon: <FlaskConical className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.datasets',
-  //       path: createPath(pathsConfig.app.accountDatasets, account),
-  //       Icon: <Database className={iconClasses} />,
-  //     },
-  //   ],
-  // },
-
-  // ── Configuration — hidden, not removed ───────────────────────────────────
-  // `guardrails` has never held a row. Integrations is alert-rule plumbing
-  // (Slack for outbound alerts), so it follows Alerts out of the sidebar.
-  // API keys and members still live under the account settings menu.
-  //
-  // {
-  //   label: 'agentguard:nav.configuration',
-  //   children: [
-  //     {
-  //       label: 'agentguard:nav.guardrails',
-  //       path: createPath(pathsConfig.app.accountGuardrails, account),
-  //       Icon: <Shield className={iconClasses} />,
-  //     },
-  //     {
-  //       label: 'agentguard:nav.integrations',
-  //       path: createPath(pathsConfig.app.accountIntegrations, account),
-  //       Icon: <Plug className={iconClasses} />,
-  //     },
-  //   ],
-  // },
+  {
+    label: 'agentguard:nav.setup',
+    children: [
+      {
+        label: 'agentguard:nav.keysAndAgents',
+        path: createPath(pathsConfig.app.accountSetup, account),
+        Icon: <BookOpen className={iconClasses} />,
+        end: true,
+      },
+    ],
+  },
 ];
 
-export function getTeamAccountSidebarConfig(account: string) {
+export function getTeamAccountSidebarConfig(
+  account: string,
+  counts: SidebarCounts = NO_COUNTS,
+) {
   return NavigationConfigSchema.parse({
-    routes: getRoutes(account),
+    routes: getRoutes(account, counts),
     style: process.env.NEXT_PUBLIC_TEAM_NAVIGATION_STYLE,
     sidebarCollapsed: process.env.NEXT_PUBLIC_TEAM_SIDEBAR_COLLAPSED,
     sidebarCollapsedStyle: process.env.NEXT_PUBLIC_SIDEBAR_COLLAPSIBLE_STYLE,

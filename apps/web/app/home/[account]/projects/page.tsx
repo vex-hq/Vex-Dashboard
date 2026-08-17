@@ -1,37 +1,14 @@
 import Link from 'next/link';
 
-import { AppBreadcrumbs } from '@kit/ui/app-breadcrumbs';
-import { Badge } from '@kit/ui/badge';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@kit/ui/card';
-import { PageBody } from '@kit/ui/page';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@kit/ui/table';
-import { Trans } from '@kit/ui/trans';
-
-import { resolveOrgId } from '~/lib/agentguard/resolve-org-id';
 import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
-import { TeamAccountLayoutPageHeader } from '../_components/team-account-layout-page-header';
-import { loadAccountViewer } from '../_lib/server/account-viewer';
-import { loadVisibleProjects } from '../memory/_lib/server/project-memory.loader';
-import { CreateProjectDialog } from './_components/create-project-dialog';
-
-interface ProjectsPageProps {
-  params: Promise<{ account: string }>;
-}
+import { EmptyState } from '../_components/shell/context-table';
+import { ShellPage } from '../_components/shell/shell-page';
+import { L } from '../_components/shell/shell-tokens';
+import { loadShellContextData } from '../_lib/server/shell-data';
+import { SHELL_COPY } from '../_lib/shell/shell-copy';
+import { relativeAge } from '../_lib/shell/relative-age';
 
 export const generateMetadata = async () => {
   const i18n = await createI18nServerInstance();
@@ -40,113 +17,86 @@ export const generateMetadata = async () => {
 };
 
 /**
- * `/home/[account]/projects` — the projects the caller may open.
+ * Projects — "context by project".
  *
- * MEMBERSHIP-ONLY, NO ADMIN BYPASS (2026-08-12 ruling): everyone, org admins
- * included, sees only the projects they hold a `project_members` row for.
- * `loadVisibleProjects` no longer has an admin predicate to switch to.
+ * Three columns: Project · Items · Last. That is the whole screen.
+ *
+ * What is deliberately NOT here: Health, Priority, Lead, Target date, Issues
+ * and Status. The page this replaces carried all six because it was styled
+ * after Linear's Projects table — `Priority` rendered a literal `---` for every
+ * row and `Target date` rendered an empty cell, neither having any backing
+ * field. Columns that cannot hold data are not columns.
+ *
+ * Selecting a project filters Context by it, which is the prototype's
+ * behaviour: `if(p2){fProj=p2.dataset.p2;view='context';paint();return;}`
  */
-async function ProjectsPage({ params }: ProjectsPageProps) {
+async function ProjectsPage({
+  params,
+}: {
+  params: Promise<{ account: string }>;
+}) {
   const { account } = await params;
-
-  const [orgId, viewer] = await Promise.all([
-    resolveOrgId(account),
-    loadAccountViewer(account),
-  ]);
-
-  const projects = await loadVisibleProjects(orgId, viewer.userId);
+  const { projects } = await loadShellContextData(account);
 
   return (
-    <>
-      <TeamAccountLayoutPageHeader
-        account={account}
-        title={<Trans i18nKey={'agentguard:projects.pageTitle'} />}
-        description={<AppBreadcrumbs />}
-      />
-
-      <PageBody>
-        <div className="animate-in fade-in flex flex-col gap-4 pb-36 duration-500">
-          <div className="flex items-center justify-between">
-            <p className="text-muted-foreground text-sm">
-              <Trans i18nKey="agentguard:projects.pageDescription" />
-            </p>
-
-            <CreateProjectDialog accountSlug={account} />
+    <ShellPage
+      title={SHELL_COPY.projects.title}
+      subtitle={SHELL_COPY.projects.subtitle}
+    >
+      {projects.length === 0 ? (
+        <EmptyState
+          title="No projects yet"
+          body="Context arrives filed under the project an agent was working in. Connect an agent and its first capture creates one."
+        />
+      ) : (
+        <div
+          className="overflow-hidden rounded-[6px] border"
+          style={{ borderColor: L.line }}
+        >
+          <div
+            className="grid h-8 items-center gap-3 border-b px-3 text-[11px] tracking-wide uppercase"
+            style={{
+              borderColor: L.line,
+              color: L.muted,
+              gridTemplateColumns: '1fr 120px 80px',
+            }}
+          >
+            <span>Project</span>
+            <span className="text-right">Items</span>
+            <span className="text-right">Last</span>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                <Trans i18nKey="agentguard:projects.listTitle" />
-              </CardTitle>
-              <CardDescription>
-                <Trans i18nKey="agentguard:projects.listDescription" />
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              {projects.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  <Trans i18nKey="agentguard:projects.empty" />
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>
-                        <Trans i18nKey="agentguard:projects.colName" />
-                      </TableHead>
-                      <TableHead>
-                        <Trans i18nKey="agentguard:projects.colOrigin" />
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <Trans i18nKey="agentguard:projects.colMembers" />
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <Trans i18nKey="agentguard:projects.colMemories" />
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-
-                  <TableBody>
-                    {projects.map((project) => (
-                      <TableRow key={project.id}>
-                        <TableCell>
-                          <Link
-                            href={`/home/${account}/projects/${project.id}`}
-                            className="hover:text-primary font-medium"
-                          >
-                            {project.display_name}
-                          </Link>
-                        </TableCell>
-                        <TableCell
-                          className="text-muted-foreground max-w-md truncate font-mono text-xs"
-                          title={
-                            project.git_remote ??
-                            project.repo_root_path ??
-                            undefined
-                          }
-                        >
-                          {project.git_remote ?? project.repo_root_path ?? '—'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary" className="font-normal">
-                            {project.member_count}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {project.memory_count.toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <ul className="divide-y" style={{ borderColor: L.line }}>
+            {projects.map((project) => (
+              <li key={project.id ?? 'unfiled'} style={{ borderColor: L.line }}>
+                <Link
+                  href={`/home/${account}/context?project=${encodeURIComponent(project.name)}`}
+                  className="klio-soft grid h-9 items-center gap-3 px-3 text-[13px]"
+                  style={{
+                    gridTemplateColumns: '1fr 120px 80px',
+                    color: L.ink,
+                  }}
+                >
+                  <span className="truncate">{project.name}</span>
+                  <span
+                    className="text-right tabular-nums"
+                    style={{ color: L.muted }}
+                  >
+                    {project.items.toLocaleString()} items
+                  </span>
+                  <span
+                    className="text-right tabular-nums"
+                    style={{ color: L.muted }}
+                  >
+                    {project.last ? relativeAge(project.last) : '—'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
-      </PageBody>
-    </>
+      )}
+    </ShellPage>
   );
 }
 
