@@ -95,7 +95,7 @@ export default function HomepageCharts({
   memoryActivity,
   memoryVolume,
 }: HomepageChartsProps) {
-  useAgentGuardUpdates();
+  useAgentGuardUpdates({ accountSlug });
 
   const planLimits = getPlanLimits(planUsage.plan, planUsage.planOverrides);
 
