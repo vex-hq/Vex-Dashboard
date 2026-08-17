@@ -119,7 +119,7 @@ export default function AgentDetailCharts({
   accountSlug,
   agentId,
 }: AgentDetailChartsProps) {
-  useAgentGuardUpdates({ agentId });
+  useAgentGuardUpdates({ accountSlug, agentId });
 
   const confidenceData = confidenceOverTime.map((row) => ({
     bucket: format(new Date(row.bucket), 'MMM d HH:mm'),

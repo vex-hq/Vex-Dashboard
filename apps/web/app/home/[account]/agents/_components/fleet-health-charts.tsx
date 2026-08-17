@@ -75,7 +75,7 @@ export default function FleetHealthCharts({
   page,
   pageCount,
 }: FleetHealthChartsProps) {
-  useAgentGuardUpdates();
+  useAgentGuardUpdates({ accountSlug });
 
   const chartData = executionsOverTime.map((row) => ({
     bucket: format(new Date(row.bucket), 'MMM d HH:mm'),
