@@ -550,7 +550,7 @@ export function getUseCase(slug: string): UseCase | undefined {
   return USE_CASES.find((u) => u.slug === slug);
 }
 
-export function useCasesByGroup(group: UseCaseGroup): UseCase[] {
+export function getUseCasesByGroup(group: UseCaseGroup): UseCase[] {
   return USE_CASES.filter((u) => u.group === group);
 }
 

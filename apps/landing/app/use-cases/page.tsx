@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { CLOUD_SIGNUP_URL } from '~/_components/nav/nav-config';
-import { GROUP_ORDER, GROUPS, useCasesByGroup } from '~/lib/use-cases';
+import { GROUP_ORDER, GROUPS, getUseCasesByGroup } from '~/lib/use-cases';
 
 import { HandoverStrip } from './_components/handover-strip';
 
@@ -34,7 +34,7 @@ export default function UseCasesPage() {
       {/* Groups */}
       <div className="space-y-20">
         {GROUP_ORDER.map((group) => {
-          const cases = useCasesByGroup(group);
+          const cases = getUseCasesByGroup(group);
           const meta = GROUPS[group];
           return (
             <section key={group} aria-labelledby={`group-${group}`}>
