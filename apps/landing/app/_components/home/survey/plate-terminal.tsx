@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { prefersReducedMotion } from './motion';
+import { useReducedMotion } from './motion';
 
 /**
  * Plate I·B — the instrument, running.
@@ -62,16 +62,18 @@ const LINE_MS = 620;
 const HOLD_MS = 4200;
 
 export function PlateTerminal() {
-  const [shown, setShown] = useState(0);
+  const reduced = useReducedMotion();
+  const [revealed, setRevealed] = useState(0);
   const [copied, setCopied] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
   const started = useRef(false);
 
+  // Under a reduced-motion preference the finished transcript is the render,
+  // not a state the effect has to drive it to.
+  const shown = reduced ? SCRIPT.length : revealed;
+
   useEffect(() => {
-    if (prefersReducedMotion()) {
-      setShown(SCRIPT.length);
-      return;
-    }
+    if (reduced) return;
     const root = rootRef.current;
     if (!root) return;
 
@@ -79,11 +81,11 @@ export function PlateTerminal() {
     let hold: ReturnType<typeof setTimeout> | undefined;
 
     const play = () => {
-      setShown(0);
+      setRevealed(0);
       let i = 0;
       interval = setInterval(() => {
         i += 1;
-        setShown(i);
+        setRevealed(i);
         if (i >= SCRIPT.length && interval) {
           clearInterval(interval);
           hold = setTimeout(play, HOLD_MS);
@@ -108,7 +110,7 @@ export function PlateTerminal() {
       if (interval) clearInterval(interval);
       if (hold) clearTimeout(hold);
     };
-  }, []);
+  }, [reduced]);
 
   const copyConnect = async () => {
     try {
@@ -121,7 +123,11 @@ export function PlateTerminal() {
   };
 
   return (
-    <section className="k-plate" ref={rootRef} aria-label="The instrument, running">
+    <section
+      className="k-plate"
+      ref={rootRef}
+      aria-label="The instrument, running"
+    >
       <div className="k-pnum">
         <b>Plate I·B</b>&ensp;The instrument, running
       </div>
@@ -134,9 +140,18 @@ export function PlateTerminal() {
           aria-label="A terminal transcript: Cursor records a decision with Klio's decide tool; the session ends; Claude Code recalls the same decision the next morning and continues from it."
         >
           <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5">
-            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-white/20" />
-            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-white/20" />
-            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-white/20" />
+            <span
+              aria-hidden
+              className="h-2.5 w-2.5 rounded-full bg-white/20"
+            />
+            <span
+              aria-hidden
+              className="h-2.5 w-2.5 rounded-full bg-white/20"
+            />
+            <span
+              aria-hidden
+              className="h-2.5 w-2.5 rounded-full bg-white/20"
+            />
             <span className="ml-3 font-mono text-[11px] tracking-widest text-white/40 uppercase">
               two agents, one memory
             </span>
@@ -168,9 +183,9 @@ export function PlateTerminal() {
         </div>
 
         {/* The connect command */}
-        <div className="mt-6 rounded-xl border border-border bg-card p-4 sm:p-5">
+        <div className="border-border bg-card mt-6 rounded-xl border p-4 sm:p-5">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="font-mono text-[11px] tracking-widest text-muted-foreground uppercase">
+            <span className="text-muted-foreground font-mono text-[11px] tracking-widest uppercase">
               connect an agent
             </span>
             <button
@@ -182,10 +197,10 @@ export function PlateTerminal() {
               {copied ? 'copied' : 'copy'}
             </button>
           </div>
-          <pre className="overflow-x-auto font-mono text-[12px] leading-relaxed text-foreground sm:text-[12.5px]">
+          <pre className="text-foreground overflow-x-auto font-mono text-[12px] leading-relaxed sm:text-[12.5px]">
             <code>{CONNECT_CMD}</code>
           </pre>
-          <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">
+          <p className="text-muted-foreground mt-3 text-[13px] leading-relaxed">
             Works with Claude Code, Cursor, Codex and any MCP client. Free for
             one person — unlimited memories, kept forever.
           </p>
