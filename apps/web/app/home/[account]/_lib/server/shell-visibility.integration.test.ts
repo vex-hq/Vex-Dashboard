@@ -101,7 +101,6 @@ let loadShellContext: typeof import('./shell-context.loader').loadShellContext;
 let loadShellProjects: typeof import('./shell-projects.loader').loadShellProjects;
 let loadShellHomeStats: typeof import('./shell-stats.loader').loadShellHomeStats;
 let loadShellNavCounts: typeof import('./shell-stats.loader').loadShellNavCounts;
-let loadShellRecallSources: typeof import('./shell-agents.loader').loadShellRecallSources;
 
 let memoryCounter = 0;
 
@@ -215,7 +214,6 @@ beforeAll(async () => {
   ({ loadShellProjects } = await import('./shell-projects.loader'));
   ({ loadShellHomeStats, loadShellNavCounts } =
     await import('./shell-stats.loader'));
-  ({ loadShellRecallSources } = await import('./shell-agents.loader'));
 });
 
 const contentsFor = async (user: string) =>

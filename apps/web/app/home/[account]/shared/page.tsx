@@ -5,7 +5,10 @@ import { withI18n } from '~/lib/i18n/with-i18n';
 import { SharedView } from '../_components/shell/shared-view';
 import { ShellPage } from '../_components/shell/shell-page';
 import { loadAccountViewer } from '../_lib/server/account-viewer';
-import { loadShellContext } from '../_lib/server/shell-context.loader';
+import {
+  loadShellPrivateGroup,
+  loadShellSharedGroup,
+} from '../_lib/server/shell-groups.loader';
 import type { ShellContextItem } from '../_lib/server/shell-context.types';
 import { orFallback } from '../_lib/server/shell-data';
 import { SHELL_COPY } from '../_lib/shell/shell-copy';
@@ -34,20 +37,25 @@ async function SharedPage({ params }: { params: Promise<{ account: string }> }) 
     loadAccountViewer(account),
   ]);
 
-  const items = await orFallback('shared', [] as ShellContextItem[], () =>
-    loadShellContext(orgId, viewer.userId),
-  );
+  // TWO LOADERS, NOT ONE FILTERED LIST. Partitioning a capped "newest N" list
+  // on scope loses a shared row that is older than the cap — which is this
+  // org's exact shape (5,196 private, 1 shared, the shared one old), and would
+  // render "Nothing shared yet" when something is. See shell-groups.loader.
+  const [shared, mine] = await Promise.all([
+    orFallback('sharedGroup', [] as ShellContextItem[], () =>
+      loadShellSharedGroup(orgId),
+    ),
+    orFallback('privateGroup', [] as ShellContextItem[], () =>
+      loadShellPrivateGroup(orgId, viewer.userId),
+    ),
+  ]);
 
   return (
     <ShellPage
       title={SHELL_COPY.shared.title}
       subtitle={SHELL_COPY.shared.subtitle}
     >
-      <SharedView
-        shared={items.filter((i) => i.scope === 'org')}
-        mine={items.filter((i) => i.scope !== 'org')}
-        accountSlug={account}
-      />
+      <SharedView shared={shared} mine={mine} accountSlug={account} />
     </ShellPage>
   );
 }
