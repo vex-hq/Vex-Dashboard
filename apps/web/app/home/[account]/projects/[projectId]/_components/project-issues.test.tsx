@@ -220,3 +220,68 @@ describe('<ProjectIssues />', () => {
     expect(screen.queryByTestId('project-settings')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * PROJECT SECTIONS — Decisions / Plans / Constraints (2026-08-17 addendum).
+ *
+ * The `decision → Decisions`, `plan → Plans`, `fact → Constraints` mapping
+ * lives in `context-view.loader.ts` and is unchanged. What the addendum adds
+ * here is honesty about WHY those look thin: `capture.py` hardcoded
+ * `memory_type="fact"` and `/capture/event` defaulted to `observation`, so
+ * production held zero decisions and zero plans. The extraction fix (vex_engine
+ * PR #35) classifies into the taxonomy going forward, but EXISTING ROWS ARE NOT
+ * RECLASSIFIED. The empty state has to say that rather than implying the
+ * project never decided anything.
+ */
+describe('<ProjectIssues /> — the not-reclassified empty state', () => {
+  beforeEach(() => {
+    currentSearchParams = new URLSearchParams();
+  });
+
+  it('explains that older captures were filed as facts, not that there are no decisions', () => {
+    render(
+      <ProjectIssues
+        view={view({
+          decisions: [],
+          plans: [],
+          constraints: [],
+          recent: [
+            {
+              id: 'r1',
+              kind: 'fact',
+              content: 'the repo uses pnpm',
+              scope: 'project',
+              projectId: 'hirly',
+              projectName: 'hirly',
+              agentId: 'curator',
+              userId: 'u1',
+              createdAt: '2026-08-12T12:00:00.000Z',
+              supersededBy: null,
+            },
+          ],
+        })}
+        projectName="hirly"
+        accountSlug="acme"
+        projectId="hirly"
+      />,
+    );
+
+    const note = screen.getByTestId('project-not-reclassified');
+
+    expect(note).toHaveTextContent(/not reclassified/i);
+    expect(note).toHaveTextContent(/filed as a fact/i);
+  });
+
+  it('does not nag about reclassification once decisions exist', () => {
+    render(
+      <ProjectIssues
+        view={view()}
+        projectName="hirly"
+        accountSlug="acme"
+        projectId="hirly"
+      />,
+    );
+
+    expect(screen.queryByTestId('project-not-reclassified')).toBeNull();
+  });
+});

@@ -1,4 +1,4 @@
-import { Hexagon, Inbox, Lock } from 'lucide-react';
+import { Hexagon, Inbox, Layers, Lightbulb, Lock } from 'lucide-react';
 
 import { NavigationConfigSchema } from '@kit/ui/navigation-schema';
 
@@ -56,6 +56,25 @@ const getRoutes = (account: string) => [
         label: 'agentguard:nav.inbox',
         path: createPath(pathsConfig.app.accountInbox, account),
         Icon: <Inbox className={iconClasses} />,
+        end: true,
+      },
+      // ── Context surfaces (2026-08-17 addendum) ───────────────────────────
+      // Context is the shared/private split: the two groups are the security
+      // boundary made visible, and they are the only place a human turns
+      // private context into team context. Proposals is the dreamer's review
+      // queue — it will usually be empty, and that is the normal state, not a
+      // reason to hide the entry: a queue nobody can find is a queue nobody
+      // works.
+      {
+        label: 'agentguard:nav.context',
+        path: createPath(pathsConfig.app.accountContext, account),
+        Icon: <Layers className={iconClasses} />,
+        end: true,
+      },
+      {
+        label: 'agentguard:nav.proposals',
+        path: createPath(pathsConfig.app.accountProposals, account),
+        Icon: <Lightbulb className={iconClasses} />,
         end: true,
       },
       {
