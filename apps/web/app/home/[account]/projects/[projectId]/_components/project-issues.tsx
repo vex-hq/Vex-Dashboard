@@ -312,6 +312,23 @@ function EmptyIssues({
             defaultValue: `${activityCount} captures are in Activity. They are not issues.`,
           })}
         </p>
+        {/*
+          The addendum's rule for these sections: say plainly that older rows
+          are not reclassified, rather than implying the project never decided
+          anything. `capture.py` hardcoded `memory_type="fact"` and
+          `/capture/event` defaulted to `observation`, so every capture before
+          the extraction fix (vex_engine PR #35) landed as a fact. Those rows
+          stay facts; only new captures classify.
+        */}
+        <p
+          data-testid="project-not-reclassified"
+          className="mt-2 max-w-[56ch] text-[13px] leading-relaxed"
+        >
+          {t(
+            'projects.issues.notReclassified',
+            'Decisions and plans only appear for captures made since agents started classifying them. Everything captured before that was filed as a fact and is not reclassified.',
+          )}
+        </p>
         <button
           type="button"
           onClick={onOpenActivity}

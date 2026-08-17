@@ -50,7 +50,7 @@ function PageWithSidebar(props: PageProps) {
 
         <div
           className={
-            'bg-background flex min-w-0 flex-1 flex-col rounded-l-2xl px-4 lg:px-0'
+            'flex min-w-0 flex-1 flex-col bg-[#09090a] px-4 lg:px-0'
           }
         >
           {Children}

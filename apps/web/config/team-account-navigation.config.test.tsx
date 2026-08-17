@@ -4,12 +4,13 @@ import { getTeamAccountSidebarConfig } from './team-account-navigation.config';
 
 /**
  * Shape test for the team account sidebar. The 2026-08-11 context-workspace
- * IA pass dropped the Sessions and Agents entries from the Workspace group
- * (their routes stay live at /home/[account]/{sessions,agents} — see the
- * "hidden, not removed" comment block in the config itself). This test
- * guards the nav *shape*, not the routes: it fails if Sessions/Agents/Memory
- * or Projects come back into the active `getRoutes` array, and it fails if
- * Inbox or Private (which are supposed to still be there) ever go missing.
+ * IA pass dropped the Sessions and Agents entries (their routes stay live at
+ * /home/[account]/{sessions,agents} — see the "hidden, not removed" comment
+ * block in the config itself). Visible items are Hub · Inbox · Context ·
+ * Proposals · Private in one unlabeled list (Context and Proposals added by
+ * the 2026-08-17 context-surfaces addendum). This test guards the nav *shape*: it fails if
+ * Sessions/Agents/Memory or Projects come back into the active `getRoutes`
+ * array, and it fails if Inbox or Private ever go missing.
  */
 describe('getTeamAccountSidebarConfig', () => {
   const config = getTeamAccountSidebarConfig('acme');
@@ -28,21 +29,22 @@ describe('getTeamAccountSidebarConfig', () => {
     expect(allLabels()).not.toContain('agentguard:nav.agents');
   });
 
-  it('keeps inbox and private in the workspace group', () => {
-    const workspaceGroup = config.routes.find(
-      (group) => group.label === 'agentguard:nav.workspace',
-    );
+  it('keeps hub, inbox, context, proposals and private in one unlabeled list', () => {
+    const primary = config.routes.find((group) => group.label === '');
 
-    expect(workspaceGroup).toBeDefined();
+    expect(primary).toBeDefined();
 
-    const workspaceLabels = (workspaceGroup?.children ?? []).map(
-      (child) => child.label,
-    );
+    const labels = (primary?.children ?? []).map((child) => child.label);
 
-    expect(workspaceLabels).toContain('agentguard:nav.inbox');
-    expect(workspaceLabels).toContain('agentguard:nav.private');
-    expect(workspaceLabels).not.toContain('agentguard:nav.memory');
-    expect(workspaceLabels).not.toContain('agentguard:nav.projects');
+    expect(labels).toEqual([
+      'common:routes.dashboard',
+      'agentguard:nav.inbox',
+      'agentguard:nav.context',
+      'agentguard:nav.proposals',
+      'agentguard:nav.private',
+    ]);
+    expect(labels).not.toContain('agentguard:nav.memory');
+    expect(labels).not.toContain('agentguard:nav.projects');
   });
 
   it('still includes the dashboard entry', () => {
@@ -63,18 +65,25 @@ describe('getTeamAccountSidebarConfig', () => {
   });
 
   it('builds each visible path with the given account slug', () => {
-    const workspaceGroup = config.routes.find(
-      (group) => group.label === 'agentguard:nav.workspace',
-    );
+    const primary = config.routes.find((group) => group.label === '');
 
-    const inboxEntry = workspaceGroup?.children?.find(
+    const inboxEntry = primary?.children?.find(
       (child) => child.label === 'agentguard:nav.inbox',
     );
-    const privateEntry = workspaceGroup?.children?.find(
+    const privateEntry = primary?.children?.find(
       (child) => child.label === 'agentguard:nav.private',
+    );
+
+    const contextEntry = primary?.children?.find(
+      (child) => child.label === 'agentguard:nav.context',
+    );
+    const proposalsEntry = primary?.children?.find(
+      (child) => child.label === 'agentguard:nav.proposals',
     );
 
     expect(inboxEntry?.path).toBe('/home/acme/inbox');
     expect(privateEntry?.path).toBe('/home/acme/private');
+    expect(contextEntry?.path).toBe('/home/acme/context');
+    expect(proposalsEntry?.path).toBe('/home/acme/proposals');
   });
 });
