@@ -124,3 +124,19 @@ describe('ContextTable', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('the nav label', () => {
+  it('says Home, as the approved prototype does — not Hub', async () => {
+    // The shell shipped with `common:routes.dashboard`, whose value was "Hub"
+    // from the previous IA. The prototype's first item is Home, and the nav
+    // test pins the KEY, not the rendered word — so the wrong label survived
+    // a green suite. This pins the word.
+    const common = await import('~/../public/locales/en/common.json');
+
+    expect(
+      (common as unknown as { routes: { dashboard: string } }).routes.dashboard,
+    ).toBe('Home');
+  });
+});
