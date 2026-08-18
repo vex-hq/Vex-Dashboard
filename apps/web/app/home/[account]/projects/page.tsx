@@ -68,7 +68,11 @@ async function ProjectsPage({
 
           <ul className="divide-y" style={{ borderColor: L.line }}>
             {projects.map((project) => (
-              <li key={project.id ?? 'unfiled'} style={{ borderColor: L.line }}>
+              <li
+                key={project.id ?? 'unfiled'}
+                className="group relative"
+                style={{ borderColor: L.line }}
+              >
                 <Link
                   href={`/home/${account}/context?project=${encodeURIComponent(project.name)}`}
                   className="klio-soft grid h-9 items-center gap-3 px-3 text-[13px]"
@@ -91,6 +95,21 @@ async function ProjectsPage({
                     {project.last ? relativeAge(project.last) : '—'}
                   </span>
                 </Link>
+
+                {/* The row opens Context filtered by this project, per the
+                    approved prototype. Access and sharing live on the project
+                    itself, so that needs its own way in — without it the
+                    access dialog is reachable only by typing a URL, which is
+                    what happened when this screen was rebuilt. */}
+                {project.id ? (
+                  <Link
+                    href={`/home/${account}/projects/${project.id}`}
+                    className="absolute top-1/2 right-2 -translate-y-1/2 rounded-[4px] border px-2 py-0.5 text-[11px] opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                    style={{ borderColor: L.line, color: L.muted }}
+                  >
+                    Manage
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>
