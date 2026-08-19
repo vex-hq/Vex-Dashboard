@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 
+import { usePathname, useRouter } from 'next/navigation';
+
 import type { ShellContextItem } from '../../_lib/server/shell-context.types';
 import {
   type ContextFilters,
@@ -41,6 +43,33 @@ export function ShellList({
     initialProject ? { ...NO_FILTERS, project: initialProject } : NO_FILTERS,
   );
   const [openId, setOpenId] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+
+  /**
+   * Mirror the project filter into the URL.
+   *
+   * The project strip is rendered by the SERVER, from `?project=`. Filters are
+   * client state, so a chip that only set state left the strip invisible for
+   * the way people actually filter — click the chip, not arrive from Projects.
+   * Reflecting the choice into the URL gives both paths one source of truth,
+   * and makes a filtered view linkable, which it was not before.
+   *
+   * `replace`, not `push`: toggling a chip is refining a view, not navigating,
+   * and it should not take a Back press per chip to leave the screen.
+   */
+  const syncProjectToUrl = (project: string | null) => {
+    const params = new URLSearchParams(window.location.search);
+
+    if (project) params.set('project', project);
+    else params.delete('project');
+
+    const query = params.toString();
+
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  };
 
   const visible = useMemo(
     () => applyFilters(items, filters),
@@ -65,9 +94,17 @@ export function ShellList({
         filters={filters}
         onToggleKind={(kind) => setFilters((f) => toggleKind(f, kind))}
         onToggleProject={(project) =>
-          setFilters((f) => toggleProject(f, project))
+          setFilters((f) => {
+            const next = toggleProject(f, project);
+            syncProjectToUrl(next.project);
+
+            return next;
+          })
         }
-        onClear={() => setFilters(NO_FILTERS)}
+        onClear={() => {
+          setFilters(NO_FILTERS);
+          syncProjectToUrl(null);
+        }}
       />
 
       <ContextTable
