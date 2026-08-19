@@ -3,6 +3,7 @@ import { createI18nServerInstance } from '~/lib/i18n/i18n.server';
 import { withI18n } from '~/lib/i18n/with-i18n';
 
 import { EmptyState } from '../_components/shell/context-table';
+import { MemberCaptureTable } from '../_components/shell/member-capture-table';
 import { ShellPage } from '../_components/shell/shell-page';
 import { L } from '../_components/shell/shell-tokens';
 import {
@@ -10,6 +11,9 @@ import {
   loadShellRecallSources,
 } from '../_lib/server/shell-agents.loader';
 import type { ShellRecallSource } from '../_lib/server/shell-context.types';
+import { loadMemberCapture } from '../_lib/server/member-capture.loader';
+import type { MemberCapture } from '../_lib/server/member-capture.loader';
+import { loadWorkspacePeople } from '../_lib/server/workspace-people.loader';
 import { orFallback } from '../_lib/server/shell-data';
 import { SHELL_COPY } from '../_lib/shell/shell-copy';
 import { relativeAge } from '../_lib/shell/relative-age';
@@ -38,9 +42,17 @@ async function AgentsPage({
   const { account } = await params;
   const orgId = await resolveOrgId(account);
 
-  const sources = await orFallback('agents', [] as ShellRecallSource[], () =>
-    loadShellRecallSources(orgId),
-  );
+  const [sources, people, capture] = await Promise.all([
+    orFallback('agents', [] as ShellRecallSource[], () =>
+      loadShellRecallSources(orgId),
+    ),
+    // People come from Supabase and capture stats from the engine, so this is
+    // joined in app code rather than SQL — two stores, one question.
+    orFallback('people', new Map(), () => loadWorkspacePeople(account)),
+    orFallback('memberCapture', new Map<string, MemberCapture>(), () =>
+      loadMemberCapture(orgId),
+    ),
+  ]);
 
   return (
     <ShellPage
@@ -48,6 +60,11 @@ async function AgentsPage({
       subtitle={SHELL_COPY.agents.subtitle}
     >
       <div className="flex flex-col gap-4">
+        <MemberCaptureTable
+          people={[...people.values()]}
+          capture={capture}
+        />
+
         {sources.length === 0 ? (
           <EmptyState
             title="No agent has recalled yet"
