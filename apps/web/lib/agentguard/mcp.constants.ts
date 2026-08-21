@@ -65,3 +65,58 @@ export function buildKlioMcpConfig(apiKey: string | null | undefined): string {
 
   return JSON.stringify(config, null, 2);
 }
+
+/**
+ * Environment variable the CLI reads a Klio Cloud key from.
+ *
+ * Preferred over the `--key` flag when a coding agent runs init on the user's
+ * behalf: argv is world-readable via `ps` on most systems, an environment
+ * assignment prefixed to the command is not.
+ */
+export const KLIO_CLI_KEY_ENV = 'KLIO_API_KEY';
+
+/**
+ * The instruction a user pastes into their own coding agent so the AGENT wires
+ * Klio up, instead of the user opening a terminal.
+ *
+ * WHY THIS DELEGATES TO THE CLI RATHER THAN DESCRIBING THE CONFIG.
+ * Wiring Claude Code correctly is three things, not one: the MCP server (which
+ * provides `remember`/`recall`), four lifecycle capture hooks (which provide
+ * passive capture), and a tool allow-list. A prompt that told an agent to
+ * write an `mcpServers` block would produce an install that looks connected
+ * and captures nothing — the exact failure that left four members of the
+ * reference workspace holding verified keys and zero memories. So the prompt
+ * hands the agent the one tested code path and asks it to report the result.
+ *
+ * The three rules at the end exist because an agent's default instinct on a
+ * failing command is to improvise a fix. Here, improvising produces the silent
+ * install. It must stop and say so instead.
+ *
+ * Requires CLI >= 0.10.0, which added non-interactive key supply. Earlier
+ * versions ignore the variable and block on the masked prompt, which is why
+ * the command pins `@latest` rather than a floating major.
+ */
+export function buildKlioAgentPrompt(apiKey: string | null | undefined): string {
+  const key = apiKey || KLIO_MCP_KEY_PLACEHOLDER;
+
+  return [
+    'Set up Klio — shared memory for AI coding agents — on this machine.',
+    '',
+    'Run this exact command. It is non-interactive and takes about a minute:',
+    '',
+    `  ${KLIO_CLI_KEY_ENV}=${key} npx -y @klio-tech/klio@latest init --cloud`,
+    '',
+    'Then, in order:',
+    '',
+    '1. If it exits non-zero, or prints "Phase 2 incomplete", STOP and show me',
+    '   exactly what it printed. Do not hand-write MCP config as a workaround —',
+    '   correct wiring is an MCP server AND four capture hooks, and a partial',
+    '   setup looks connected while capturing nothing.',
+    '2. If it succeeded, tell me to restart you, so the new MCP server and',
+    '   hooks load.',
+    '3. After the restart, confirm the Klio tools are available and tell me',
+    '   which agents the command reported wiring.',
+    '',
+    'Do not write this key anywhere except that command.',
+  ].join('\n');
+}
