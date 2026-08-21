@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
+
 import Link from 'next/link';
 
-import { ArrowRight, KeyRound, Plug } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, Copy } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,6 +20,20 @@ import {
 
 import { CodeBlock } from './code-block';
 
+/**
+ * Connect the agents that are NOT on this machine — ChatGPT, Claude.ai, and
+ * anything else that speaks MCP.
+ *
+ * Same shape as the previous screen, and for the same reason: this was three
+ * stacked code blocks (connector URL, endpoint, auth header, and a JSON config
+ * that repeats both) before the reader had decided whether the screen even
+ * applied to them.
+ *
+ * The OAuth route needs one value, so it is one button. Everything the
+ * key-based route needs — endpoint, header, config — is redundant with it and
+ * only matters to clients that cannot do the sign-in flow, so it sits behind a
+ * disclosure. The key appears only there, never on the default view.
+ */
 interface StepConnectCloudProps {
   accountSlug: string;
   apiKey: string | null;
@@ -32,10 +48,18 @@ export function StepConnectCloud({
   onBack,
 }: StepConnectCloudProps) {
   const { t } = useTranslation('agentguard');
+  const [copied, setCopied] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const keyValue = apiKey ?? KLIO_MCP_KEY_PLACEHOLDER;
 
+  const copyUrl = async () => {
+    await navigator.clipboard.writeText(KLIO_MCP_URL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 4000);
+  };
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -44,105 +68,109 @@ export function StepConnectCloud({
         <h1 className="text-center text-3xl font-bold tracking-tight">
           {t('onboarding.cloudTitle')}
         </h1>
-        <p className="text-muted-foreground mx-auto mt-2 max-w-md text-center">
+        <p className="text-muted-foreground mx-auto mt-3 max-w-sm text-center">
           {t('onboarding.cloudDescription')}
         </p>
       </motion.div>
 
-      {/* OAuth first: the endpoint advertises
-          /.well-known/oauth-protected-resource, so any MCP client implementing
-          the authorization spec joins with no key at all. */}
       <motion.div
-        className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
+        className="flex flex-col items-center gap-3"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        <div className="flex items-center gap-2">
-          <Plug className="text-muted-foreground h-4 w-4 shrink-0" />
-          <h2 className="text-sm font-semibold">
-            {t('onboarding.cloudOauthLabel')}
-          </h2>
-        </div>
+        <Button
+          type="button"
+          size="lg"
+          onClick={copyUrl}
+          className="w-full max-w-sm rounded-lg"
+          data-testid="copy-connector-url"
+        >
+          {copied ? (
+            <Check className="mr-2 h-4 w-4" />
+          ) : (
+            <Copy className="mr-2 h-4 w-4" />
+          )}
+          {copied
+            ? t('onboarding.cloudCopied')
+            : t('onboarding.cloudCopyConnector')}
+        </Button>
 
-        <div className="space-y-1.5">
-          <p className="text-muted-foreground text-xs font-medium">
-            {t('onboarding.cloudOauthUrlLabel')}
-          </p>
-          <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy connector URL" />
-        </div>
-
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.cloudOauthSteps')}
+        <p
+          aria-live="polite"
+          className="text-muted-foreground max-w-sm text-center text-sm"
+        >
+          {copied
+            ? t('onboarding.cloudPasteHint')
+            : t('onboarding.cloudOauthSteps')}
         </p>
       </motion.div>
 
-      {/* Secondary: clients without the OAuth flow */}
+      {/* Clients that cannot do the sign-in flow. A minority, and everything
+          here repeats the URL above, so it stays folded. */}
       <motion.div
-        className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
+        className="flex flex-col items-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.35 }}
       >
-        <div className="flex items-center gap-2">
-          <KeyRound className="text-muted-foreground h-4 w-4 shrink-0" />
-          <h2 className="text-sm font-semibold">
-            {t('onboarding.cloudManualLabel')}
-          </h2>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowManual((open) => !open)}
+          aria-expanded={showManual}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm transition-colors"
+        >
+          {t('onboarding.cloudManualLabel')}
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${
+              showManual ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
 
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.cloudManualDescription')}
-        </p>
+        {showManual ? (
+          <div className="mt-4 w-full space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-muted-foreground text-xs font-medium">
+                {t('onboarding.cloudHeaderLabel')}
+              </p>
+              <CodeBlock
+                code={`${KLIO_MCP_KEY_HEADER}: ${keyValue}`}
+                ariaLabel="Copy auth header"
+              />
+            </div>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.cloudEndpointLabel')}
-            </p>
-            <CodeBlock code={KLIO_MCP_URL} ariaLabel="Copy MCP endpoint" />
+            <div className="space-y-1.5">
+              <p className="text-muted-foreground text-xs font-medium">
+                {t('onboarding.cloudConfigLabel')}
+              </p>
+              <CodeBlock
+                code={buildKlioMcpConfig(apiKey)}
+                ariaLabel="Copy MCP client config"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {!apiKey ? (
+                <Link
+                  href={`/home/${accountSlug}/settings/api-keys`}
+                  className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
+                >
+                  {t('onboarding.cloudKeyMissing')}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              ) : null}
+
+              <Link
+                href={`/home/${accountSlug}/docs#${KLIO_DOCS_MCP_ANCHOR}`}
+                className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
+              >
+                {t('onboarding.cloudGuide')}
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
           </div>
-
-          <div className="space-y-1.5">
-            <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.cloudHeaderLabel')}
-            </p>
-            <CodeBlock
-              code={`${KLIO_MCP_KEY_HEADER}: ${keyValue}`}
-              ariaLabel="Copy auth header"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <p className="text-muted-foreground text-xs font-medium">
-              {t('onboarding.cloudConfigLabel')}
-            </p>
-            <CodeBlock
-              code={buildKlioMcpConfig(apiKey)}
-              ariaLabel="Copy MCP client config"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {!apiKey ? (
-            <Link
-              href={`/home/${accountSlug}/settings/api-keys`}
-              className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
-            >
-              {t('onboarding.cloudKeyMissing')}
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          ) : null}
-
-          <Link
-            href={`/home/${accountSlug}/docs#${KLIO_DOCS_MCP_ANCHOR}`}
-            className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
-          >
-            {t('onboarding.cloudGuide')}
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
+        ) : null}
       </motion.div>
 
       <motion.div
@@ -151,7 +179,12 @@ export function StepConnectCloud({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
       >
-        <Button onClick={onNext} className="rounded-lg px-8" size="lg">
+        <Button
+          onClick={onNext}
+          variant="outline"
+          className="rounded-lg px-8"
+          size="lg"
+        >
           {t('onboarding.next')}
         </Button>
 
