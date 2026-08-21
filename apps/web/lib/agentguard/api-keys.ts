@@ -7,7 +7,29 @@ import type { ApiKeyDisplay, ApiKeyEntry } from '~/lib/agentguard/types';
 
 const KEY_PREFIX = 'ag_live_';
 const RANDOM_LENGTH = 32;
-const MAX_KEYS_PER_ORG = 10;
+/**
+ * How many LIVE keys an org may hold. Revoked keys do not count: a revoked
+ * key grants nothing, so letting it hold a slot only means an org that
+ * rotates keys eventually cannot mint at all.
+ *
+ * That is not hypothetical. The cap was previously compared against the whole
+ * array, tombstones included, and onboarding is the biggest producer of
+ * tombstones — the connect screen revokes the caller's previous key and mints
+ * a fresh one on every visit. Ten visits across a workspace's life and nobody
+ * in that org could ever mint again; the screen said only "Couldn't create a
+ * key."
+ */
+export const MAX_KEYS_PER_ORG = 10;
+
+/**
+ * How many revoked keys are retained for audit before the oldest are dropped.
+ *
+ * Something has to bound the array or the revoke/mint cycle above grows it
+ * without limit, and every auth lookup reads the whole row. Recent revocations
+ * are the ones anyone actually asks about ("what did I just rotate?"), so the
+ * newest are kept.
+ */
+export const MAX_REVOKED_KEYS_KEPT = 10;
 const DISPLAY_PREFIX_LENGTH = 12; // "ag_live_k7xR"
 const ALLOWED_SCOPES = new Set(['ingest', 'verify', 'read', 'memory']);
 
@@ -87,22 +109,13 @@ export async function createKey(
   const pool = getAgentGuardPool();
 
   // Check current key count
-  const countResult = await pool.query<{ key_count: string }>(
-    `SELECT COALESCE(jsonb_array_length(api_keys), 0) AS key_count
-     FROM organizations WHERE org_id = $1`,
+  const orgExists = await pool.query(
+    `SELECT 1 FROM organizations WHERE org_id = $1`,
     [orgId],
   );
 
-  if (!countResult.rows.length) {
+  if (!orgExists.rows.length) {
     throw new Error('Organization not found');
-  }
-
-  const currentCount = parseInt(countResult.rows[0]!.key_count, 10);
-
-  if (currentCount >= MAX_KEYS_PER_ORG) {
-    throw new Error(
-      `Maximum ${MAX_KEYS_PER_ORG} API keys per organization reached`,
-    );
   }
 
   // --- Generate key ---
@@ -125,13 +138,55 @@ export async function createKey(
     revoked: false,
   };
 
-  // Append to JSONB array
-  await pool.query(
-    `UPDATE organizations
-     SET api_keys = COALESCE(api_keys, '[]'::jsonb) || $2::jsonb
-     WHERE org_id = $1`,
-    [orgId, JSON.stringify([entry])],
+  // Prune, check the cap and append in ONE statement.
+  //
+  // The cap lives in the WHERE clause rather than in a preceding SELECT so two
+  // concurrent creates cannot both read "9 live keys" and both append. A read
+  // followed by a write is exactly the race the onboarding screen provokes,
+  // since it mints on mount and React can mount twice.
+  //
+  // `kept` rebuilds the array as: every live key, plus the newest
+  // MAX_REVOKED_KEYS_KEPT revoked ones. Order within the stored array does not
+  // matter — `listKeys` sorts by `created_at`.
+  const appended = await pool.query(
+    `WITH elems AS (
+       SELECT e,
+              COALESCE((e->>'revoked')::boolean, false) AS revoked,
+              e->>'created_at' AS created_at
+       FROM organizations o,
+            jsonb_array_elements(COALESCE(o.api_keys, '[]'::jsonb)) AS e
+       WHERE o.org_id = $1
+     ),
+     kept AS (
+       SELECT e FROM elems WHERE NOT revoked
+       UNION ALL
+       SELECT e FROM (
+         SELECT e FROM elems
+         WHERE revoked
+         ORDER BY created_at DESC
+         LIMIT $4
+       ) recent
+     )
+     UPDATE organizations
+     SET api_keys =
+       (SELECT COALESCE(jsonb_agg(e), '[]'::jsonb) FROM kept) || $2::jsonb
+     WHERE org_id = $1
+       AND (SELECT count(*) FROM elems WHERE NOT revoked) < $3
+     RETURNING org_id`,
+    [orgId, JSON.stringify([entry]), MAX_KEYS_PER_ORG, MAX_REVOKED_KEYS_KEPT],
   );
+
+  // `rows.length`, not `rowCount`: the statement RETURNs a row when it fires,
+  // and row count is spelled differently by different drivers (node-pg
+  // `rowCount`, PGlite `affectedRows`). Reading the missing one yields
+  // `undefined`, which compares false against 0 and silently disables the
+  // guard — which is exactly what happened the first time this was written.
+  if (appended.rows.length === 0) {
+    // The org exists (checked above), so the cap is what rejected this.
+    throw new Error(
+      `Maximum ${MAX_KEYS_PER_ORG} API keys per organization reached`,
+    );
+  }
 
   // Return plaintext (show-once) and display-safe entry
   const { key_hash: _, ...displayEntry } = entry;
