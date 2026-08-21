@@ -46,7 +46,7 @@ vi.mock('motion/react', () => ({
   ),
 }));
 
-const writeText = vi.fn(async () => {});
+const writeText = vi.fn(async (_text: string) => {});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -78,53 +78,72 @@ describe('StepConnectAgent', () => {
     renderStep({ mintKey });
 
     await waitFor(() => expect(mintKey).toHaveBeenCalledTimes(1));
-    await screen.findByText('sk-test-key-9911');
+    await waitFor(() =>
+      expect(screen.getByTestId('copy-agent-prompt')).toBeEnabled(),
+    );
     expect(mintKey).toHaveBeenCalledTimes(1);
   });
 
-  it('leads with the agent door and offers the terminal as the alternative', async () => {
+  it('is one button, not a wall of text', async () => {
+    // The prompt is written for a machine — nobody reads it, they copy it.
+    // Rendering it in full buried the actual action under a screenful of
+    // monospace, so it must live in the clipboard and nowhere else.
     renderStep();
-
-    const agentTab = await screen.findByRole('tab', {
-      name: /connectAgentTab/,
-    });
-    const terminalTab = screen.getByRole('tab', {
-      name: /connectTerminalTab/,
-    });
-
-    expect(agentTab).toHaveAttribute('aria-selected', 'true');
-    expect(terminalTab).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('puts the minted key into the paste-to-your-agent prompt', async () => {
-    renderStep();
-
-    await screen.findByText('sk-test-key-9911');
-
-    expect(
-      screen.getByText(/KLIO_API_KEY=sk-test-key-9911/),
-    ).toBeInTheDocument();
-  });
-
-  it('shows the terminal command once that tab is chosen', async () => {
-    renderStep();
-
-    const terminalTab = await screen.findByRole('tab', {
-      name: /connectTerminalTab/,
-    });
-
-    // Radix's Tabs.Trigger changes value on MOUSEDOWN (or focus), not on
-    // click. `fireEvent.click` alone dispatches neither in jsdom and leaves
-    // the agent panel showing.
-    fireEvent.pointerDown(terminalTab, { button: 0, pointerType: 'mouse' });
-    fireEvent.mouseDown(terminalTab, { button: 0 });
-    fireEvent.click(terminalTab);
 
     await waitFor(() =>
-      expect(
-        screen.getByText('npx @klio-tech/klio@latest init'),
-      ).toBeInTheDocument(),
+      expect(screen.getByTestId('copy-agent-prompt')).toBeEnabled(),
     );
+
+    expect(screen.queryByText(/KLIO_API_KEY=/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Phase 2 incomplete/)).not.toBeInTheDocument();
+    // The key is inside the copied prompt; showing it here is one more
+    // thing to read that the agent path never needs.
+    expect(screen.queryByText('sk-test-key-9911')).not.toBeInTheDocument();
+  });
+
+  it('copies the full prompt, with the key, on one click', async () => {
+    renderStep();
+
+    const button = await screen.findByTestId('copy-agent-prompt');
+    await waitFor(() => expect(button).toBeEnabled());
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    const copied = writeText.mock.calls[0]![0];
+    expect(copied).toContain('KLIO_API_KEY=sk-test-key-9911');
+    expect(copied).toContain('init --cloud');
+  });
+
+  it('confirms the copy and says what to do next', async () => {
+    renderStep();
+
+    const button = await screen.findByTestId('copy-agent-prompt');
+    await waitFor(() => expect(button).toBeEnabled());
+
+    fireEvent.click(button);
+
+    await screen.findByText('onboarding.connectAgentPasteHint');
+  });
+
+  it('keeps the terminal route collapsed until asked for', async () => {
+    renderStep();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('copy-agent-prompt')).toBeEnabled(),
+    );
+
+    expect(
+      screen.queryByText('npx @klio-tech/klio@latest init'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('onboarding.connectTerminalToggle'));
+
+    await screen.findByText('npx @klio-tech/klio@latest init');
+    // The CLI really does stop and ask for the key on this path, so here it
+    // is shown — and only here.
+    expect(screen.getByText('sk-test-key-9911')).toBeInTheDocument();
   });
 
   it('offers a retry, and never traps the user, when minting fails', async () => {
@@ -145,13 +164,17 @@ describe('StepConnectAgent', () => {
     expect(props.onNext).toHaveBeenCalled();
   });
 
-  it('does not leak a real key into the prompt before one exists', async () => {
+  it('does not put a real key in the clipboard before one exists', async () => {
     const mintKey = vi.fn(async () => null);
 
     renderStep({ mintKey });
 
     await screen.findByText('onboarding.localKeyFailed');
+    fireEvent.click(screen.getByTestId('copy-agent-prompt'));
 
-    expect(screen.getByText(/KLIO_API_KEY=YOUR_API_KEY/)).toBeInTheDocument();
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toContain(
+      'KLIO_API_KEY=YOUR_API_KEY',
+    );
   });
 });
