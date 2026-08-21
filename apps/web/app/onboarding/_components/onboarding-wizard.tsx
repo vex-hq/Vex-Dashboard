@@ -9,11 +9,14 @@ import {
   TOTAL_ONBOARDING_STEPS,
 } from '~/lib/agentguard/onboarding.constants';
 
-import { updateOnboardingStepAction } from '../_lib/server-actions';
+import {
+  createOnboardingKeyAction,
+  updateOnboardingStepAction,
+} from '../_lib/server-actions';
 import { ProgressIndicator } from './progress-indicator';
+import { StepConnectAgent } from './step-connect-agent';
 import { StepConnectCloud } from './step-connect-cloud';
 import { StepDone } from './step-done';
-import { StepRunLocal } from './step-run-local';
 import { StepVerifyConnection } from './step-verify-connection';
 import { StepWelcome } from './step-welcome';
 
@@ -52,18 +55,32 @@ export function OnboardingWizard({
     setCurrentStep((s) => Math.max(0, s - 1));
   }, []);
 
+  /**
+   * Mint the workspace creator's key.
+   *
+   * Wrapped in `useCallback` because `StepConnectAgent` lists it in the
+   * dependency chain of the effect that mints on mount — an inline arrow
+   * would change identity every render and re-fire that effect, and each
+   * mint revokes the previous onboarding key.
+   */
+  const mintOwnerKey = useCallback(async () => {
+    const result = await createOnboardingKeyAction({ accountSlug });
+
+    return result.key ?? null;
+  }, [accountSlug]);
+
   const renderStep = () => {
     switch (currentStep) {
       case 0:
         return <StepWelcome key="step-0" onNext={goNext} />;
       case 1:
         return (
-          <StepRunLocal
+          <StepConnectAgent
             key="step-1"
-            accountSlug={accountSlug}
+            mintKey={mintOwnerKey}
             onNext={goNext}
             onBack={goBack}
-            // Pass the bare state setter: `StepRunLocal` lists this in a
+            // Pass the bare state setter: `StepConnectAgent` lists this in a
             // `useCallback`/`useEffect` dependency chain, and an inline arrow
             // would change identity every render, re-firing the mint effect —
             // which revokes the prior onboarding key each time.

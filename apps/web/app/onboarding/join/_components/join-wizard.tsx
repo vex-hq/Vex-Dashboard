@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { ProgressIndicator } from '../../_components/progress-indicator';
+import { StepConnectAgent } from '../../_components/step-connect-agent';
 import { StepConnectCloud } from '../../_components/step-connect-cloud';
 import { StepVerifyConnection } from '../../_components/step-verify-connection';
 import {
@@ -15,7 +16,16 @@ import {
 } from '../../_lib/server-actions';
 import { JoinWelcome } from './join-welcome';
 
-const JOIN_STEPS = 3;
+/**
+ * Welcome · ConnectAgent · ConnectCloud · Verify.
+ *
+ * ConnectAgent was missing here until now, and its absence is the reason an
+ * invitee could hold a valid key and capture nothing: they were shown a raw
+ * MCP config block and never told how to wire the agents on their own laptop.
+ * The creator had that screen from the start. An invitee's job on this
+ * machine is identical, so they get the identical screen.
+ */
+const JOIN_STEPS = 4;
 
 interface JoinWizardProps {
   accountSlug: string;
@@ -43,15 +53,17 @@ export function JoinWizard({ accountSlug, workspaceName }: JoinWizardProps) {
     }
   }, [accountSlug, finish, router]);
 
-  const goConnect = useCallback(async () => {
-    try {
-      const minted = await createJoinKeyAction({ accountSlug });
-      setApiKey(minted.key);
-    } catch {
-      setApiKey(null);
-    }
+  /**
+   * Mint THIS member's key — never the creator's.
+   *
+   * `useCallback` because `StepConnectAgent` mints from an effect keyed on
+   * this reference; an inline arrow would re-fire it every render, and each
+   * mint revokes this user's previous join key.
+   */
+  const mintJoinKey = useCallback(async () => {
+    const minted = await createJoinKeyAction({ accountSlug });
 
-    setStep(1);
+    return minted.key ?? null;
   }, [accountSlug]);
 
   const renderStep = () => {
@@ -60,28 +72,38 @@ export function JoinWizard({ accountSlug, workspaceName }: JoinWizardProps) {
         return (
           <JoinWelcome
             workspaceName={workspaceName}
-            onNext={goConnect}
+            onNext={() => setStep(1)}
             onSkip={skip}
             skipping={skipping}
           />
         );
       case 1:
         return (
-          <StepConnectCloud
-            accountSlug={accountSlug}
-            apiKey={apiKey}
+          <StepConnectAgent
+            mintKey={mintJoinKey}
             onNext={() => setStep(2)}
             onBack={() => setStep(0)}
+            // Bare setter, not an arrow — see `mintJoinKey`.
+            onKeyCreated={setApiKey}
           />
         );
       case 2:
+        return (
+          <StepConnectCloud
+            accountSlug={accountSlug}
+            apiKey={apiKey}
+            onNext={() => setStep(3)}
+            onBack={() => setStep(1)}
+          />
+        );
+      case 3:
         return (
           <StepVerifyConnection
             accountSlug={accountSlug}
             onNext={() => {
               void skip();
             }}
-            onBack={() => setStep(1)}
+            onBack={() => setStep(2)}
             finish={finish}
             skipTestId="join-onboarding-skip"
           />

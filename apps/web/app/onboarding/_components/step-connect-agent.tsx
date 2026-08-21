@@ -2,60 +2,90 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Check, Copy, Key, Terminal } from 'lucide-react';
+import { Bot, Check, Copy, Key, Terminal } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@kit/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kit/ui/tabs';
 
-import { KLIO_INIT_COMMAND } from '~/lib/agentguard/mcp.constants';
+import {
+  KLIO_INIT_COMMAND,
+  buildKlioAgentPrompt,
+} from '~/lib/agentguard/mcp.constants';
 
-import { createOnboardingKeyAction } from '../_lib/server-actions';
+import { CodeBlock } from './code-block';
 
-interface StepRunLocalProps {
-  accountSlug: string;
+/**
+ * Connect this person's own coding agents.
+ *
+ * TWO DOORS, ONE ENGINE. The agent tab hands over a prompt to paste into
+ * Claude Code / Cursor; the terminal tab hands over the same setup as a
+ * command. Both end in `klio init --cloud`, which is the only tested path
+ * that installs the MCP server, the four capture hooks and the tool
+ * allow-list together. Neither door describes the config, because a partial
+ * install looks connected and captures nothing.
+ *
+ * The agent tab leads because most people who reach this screen already have
+ * a coding agent open — that agent is the thing being connected, and it is
+ * better at running a command than they are at finding a terminal.
+ *
+ * Shared by BOTH wizards. The workspace creator and an invitee have the same
+ * job here (wire the agents on *this* laptop) and differ only in which key
+ * they hold, so they get the same screen rather than two that drift.
+ */
+interface StepConnectAgentProps {
+  /** Mints the key for whoever this is — onboarding key or join key. */
+  mintKey: () => Promise<string | null>;
   onNext: () => void;
   onBack: () => void;
+  /**
+   * Lifted so the wizard can pass the key to the next screen's manual MCP
+   * config. Must be a stable reference: it sits in the mint effect's
+   * dependency chain, and an inline arrow would re-fire it every render —
+   * which revokes the key just minted.
+   */
   onKeyCreated: (key: string) => void;
 }
 
-export function StepRunLocal({
-  accountSlug,
+export function StepConnectAgent({
+  mintKey,
   onNext,
   onBack,
   onKeyCreated,
-}: StepRunLocalProps) {
+}: StepConnectAgentProps) {
   const { t } = useTranslation('agentguard');
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState(false);
 
   const generateKey = useCallback(async () => {
     setLoading(true);
 
     try {
-      const result = await createOnboardingKeyAction({ accountSlug });
+      const key = await mintKey();
 
-      if (result.key) {
-        setApiKey(result.key);
-        onKeyCreated(result.key);
+      if (key) {
+        setApiKey(key);
+        onKeyCreated(key);
       }
     } catch {
       // Surfaced as the retry state below; never blocks Continue.
     } finally {
       setLoading(false);
     }
-  }, [accountSlug, onKeyCreated]);
+  }, [mintKey, onKeyCreated]);
 
   useEffect(() => {
     generateKey();
   }, [generateKey]);
 
-  const copy = async (value: string, mark: (v: boolean) => void) => {
-    await navigator.clipboard.writeText(value);
-    mark(true);
-    setTimeout(() => mark(false), 2000);
+  const copyKey = async () => {
+    if (!apiKey) return;
+
+    await navigator.clipboard.writeText(apiKey);
+    setCopiedKey(true);
+    setTimeout(() => setCopiedKey(false), 2000);
   };
 
   return (
@@ -66,15 +96,14 @@ export function StepRunLocal({
         transition={{ delay: 0.1 }}
       >
         <h1 className="text-center text-3xl font-bold tracking-tight">
-          {t('onboarding.localTitle')}
+          {t('onboarding.connectAgentTitle')}
         </h1>
         <p className="text-muted-foreground mx-auto mt-2 max-w-md text-center">
-          {t('onboarding.localDescription')}
+          {t('onboarding.connectAgentDescription')}
         </p>
       </motion.div>
 
-      {/* Key — the CLI's cloud mode prompts for this, so it sits beside the
-          command rather than on a screen of its own. */}
+      {/* The key. Both doors need it, so it sits above the choice. */}
       <motion.div
         className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
         initial={{ opacity: 0, y: 10 }}
@@ -89,7 +118,10 @@ export function StepRunLocal({
         </div>
 
         {loading ? (
-          <div className="bg-muted/50 flex h-14 items-center justify-center rounded-lg border">
+          <div
+            className="bg-muted/50 flex h-14 items-center justify-center rounded-lg border"
+            data-testid="connect-agent-key-loading"
+          >
             <motion.div
               className="border-primary h-5 w-5 rounded-full border-2 border-t-transparent"
               animate={{ rotate: 360 }}
@@ -103,7 +135,7 @@ export function StepRunLocal({
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => copy(apiKey, setCopiedKey)}
+              onClick={copyKey}
               className="shrink-0"
               aria-label={t('onboarding.copy')}
             >
@@ -134,43 +166,59 @@ export function StepRunLocal({
         </p>
       </motion.div>
 
-      {/* The one command */}
       <motion.div
-        className="border-border/50 bg-card/50 space-y-4 rounded-xl border p-6 md:p-8"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
       >
-        <div className="flex items-center gap-2">
-          <Terminal className="text-muted-foreground h-4 w-4 shrink-0" />
-          <h2 className="text-sm font-semibold">
-            {t('onboarding.localCommandLabel')}
-          </h2>
-        </div>
+        <Tabs defaultValue="agent" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="agent" className="gap-2">
+              <Bot className="h-3.5 w-3.5" />
+              {t('onboarding.connectAgentTab')}
+            </TabsTrigger>
+            <TabsTrigger value="terminal" className="gap-2">
+              <Terminal className="h-3.5 w-3.5" />
+              {t('onboarding.connectTerminalTab')}
+            </TabsTrigger>
+          </TabsList>
 
-        <div className="bg-muted/50 flex items-center gap-3 rounded-lg border p-4">
-          <code className="flex-1 truncate font-mono text-sm">
-            {KLIO_INIT_COMMAND}
-          </code>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => copy(KLIO_INIT_COMMAND, setCopiedCmd)}
-            className="shrink-0"
-            aria-label={t('onboarding.copy')}
+          <TabsContent
+            value="agent"
+            className="border-border/50 bg-card/50 mt-4 space-y-4 rounded-xl border p-6 md:p-8"
           >
-            {copiedCmd ? (
-              <Check className="h-4 w-4 text-green-500" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
+            <p className="text-muted-foreground text-sm">
+              {t('onboarding.connectAgentHint')}
+            </p>
 
-        <p className="text-muted-foreground text-sm">
-          {t('onboarding.localNote')}
-        </p>
+            <CodeBlock
+              code={buildKlioAgentPrompt(apiKey)}
+              ariaLabel={t('onboarding.connectAgentCopyLabel')}
+            />
+
+            <p className="text-muted-foreground text-sm">
+              {t('onboarding.connectAgentNote')}
+            </p>
+          </TabsContent>
+
+          <TabsContent
+            value="terminal"
+            className="border-border/50 bg-card/50 mt-4 space-y-4 rounded-xl border p-6 md:p-8"
+          >
+            <p className="text-muted-foreground text-sm">
+              {t('onboarding.connectTerminalHint')}
+            </p>
+
+            <CodeBlock
+              code={KLIO_INIT_COMMAND}
+              ariaLabel={t('onboarding.connectTerminalCopyLabel')}
+            />
+
+            <p className="text-muted-foreground text-sm">
+              {t('onboarding.localNote')}
+            </p>
+          </TabsContent>
+        </Tabs>
       </motion.div>
 
       <motion.div
